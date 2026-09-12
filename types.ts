@@ -2037,6 +2037,11 @@ export interface EngineStats {
   impactVelocityName?: string;
   // DBG "Crash energy" — the crash-coupling multiplier, as shown.
   crashEnergyName?: string;
+  // DBG "Hull density" — the ship's live hull density and the mass it
+  // derives, as shown.  Under the energy model the hull's mass is half of
+  // what its every ram spends as well as how little it is shoved, so this
+  // one figure is worth reading beside the material band the audit prints.
+  hullDensityName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.

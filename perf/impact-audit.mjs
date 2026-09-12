@@ -306,6 +306,35 @@ for (const m of MATERIALS) {
   crashCounts.push({ mat: m.mat, ...r });
 }
 
+
+// ── 7. THE MASS SCALE: gather ──────────────────────────────────────────────
+//  Read as the TABLES the sim reads (via the __omniMass seam) rather than as
+//  numbers recomputed here, so this cannot drift from what actually flies.
+const scale = await page.evaluate(() => {
+  const e = window.__omniEngine;
+  const C = window.__omniMass;               // the constants seam
+  const rows = [];
+  const push = (cls, name, size, mass) =>
+    rows.push({ cls, name, size, mass, dens: mass / (size * size) });
+
+  push('player', 'player (lean)', e.player.size.x, e.player.mass);
+
+  for (const [k, v] of Object.entries(C.ENEMY_VARIANTS))
+    push('enemy', k.toLowerCase(), v.size, v.mass);
+
+  for (const w of C.WEAPON_LIST) {
+    const cfg = C.WEAPONS[w];
+    push('projectile', String(w).toLowerCase(),
+         cfg.size ?? 6, C.projectileMassFor(cfg));
+  }
+
+  for (const v of ['rock-shard', 'glass-shard', 'plastic-shard', 'metal-shard']) {
+    const sp = C.SHARD_VARIANTS[v].spawn;
+    for (const d of [12, 36, 160]) push('shard', `${v} d=${d}`, d, sp.sizeToMass(d));
+  }
+  return rows;
+});
+
 await browser.close();
 
 // ── Report ────────────────────────────────────────────────────────────────
@@ -471,5 +500,36 @@ console.log('\n=== 6. HOW FAR APART THE TWO SIDES ARE ===\n');
   console.log(`  CRASH side, virgin tile, KE per derived HP:  ${f(Math.min(...virginK),0)} .. ${f(Math.max(...virginK),0)}  (${f(Math.max(...virginK)/Math.min(...virginK),1)}× spread)`);
   console.log(`  CRASH side, once shot:  a crash spends exactly 1 HP whatever it brings,`);
   console.log(`               so the constant is ${f(crashKe,0)} KE per HP for EVERY material.`);
+}
+console.log('');
+
+// ── 7. THE MASS SCALE ───────────────────────────────────────────────────────
+//  Every class of body that can collide, reported as size, mass and the
+//  IMPLIED AREAL DENSITY (mass / size²).  Under the energy model mass is no
+//  longer just an impulse term — it is half of what every impact SPENDS — so
+//  whether these classes are on one scale is now a balance question rather
+//  than a physics-solver detail.  Density is the honest comparison: a ship
+//  and a boulder differ in size by design, and only density says whether one
+//  of them is made of a fundamentally different substance.
+console.log('\n=== 7. THE MASS SCALE (mass / size², the implied areal density) ===\n');
+{
+  // (gathered above, before the browser closed)
+
+  const byCls = {};
+  for (const r of scale) (byCls[r.cls] ||= []).push(r);
+  console.log('class        body                        size     mass    mass/size²');
+  for (const cls of ['player', 'enemy', 'projectile', 'shard']) {
+    for (const r of byCls[cls] ?? [])
+      console.log(`${cls.padEnd(12)} ${r.name.padEnd(26)} ${f(r.size,1).padStart(5)} `
+        + `${f(r.mass,2).padStart(8)}   ${f(r.dens,4).padStart(9)}`);
+  }
+  const dens = c => (byCls[c] ?? []).map(r => r.dens);
+  const rng = c => { const d = dens(c); return `${f(Math.min(...d),4)} .. ${f(Math.max(...d),4)}`; };
+  console.log('\n  density range per class:');
+  for (const c of ['player', 'enemy', 'projectile', 'shard'])
+    console.log(`    ${c.padEnd(12)} ${rng(c)}`);
+  const all = scale.map(r => r.dens);
+  console.log(`\n  ACROSS ALL CLASSES: ${f(Math.min(...all),4)} .. ${f(Math.max(...all),4)}`
+    + `  (${f(Math.max(...all)/Math.min(...all),1)}× spread)`);
 }
 console.log('');

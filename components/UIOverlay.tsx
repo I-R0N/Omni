@@ -132,6 +132,7 @@ interface UIOverlayProps {
   onCycleShardCoat?: () => void;
   onCycleImpactVelocity?: () => void;
   onCycleCrashEnergy?: () => void;
+  onCycleHullDensity?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -466,6 +467,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleShardCoat,
   onCycleImpactVelocity,
   onCycleCrashEnergy,
+  onCycleHullDensity,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -1590,6 +1592,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Crash energy', onCycleCrashEnergy,
                   stats.crashEnergyName ?? '1x (def)',
                   'How much of a HULL\'s kinetic energy reaches the grain bonds it hits (1 / 0.5 / 0.25 / 2 / 4x over the calibrated coupling). A crash now spends ENERGY like a weapon hit does, so twice the closing speed is four times the bite, and the speed the impactor loses IS what it broke. The coupling is calibrated on ROCK, whose ram count is unchanged at 9; every other material then differs by its own derived toughness rather than by an authored HP (metal used to take 24 to 144 rams across six tiles of identical toughness, because a crash spent one authored HP and metal authors 24 x densityTier). This is the dial for how permeable terrain is; a material\'s own bondStrength is the same question asked of one material.')}
+                {ctrlRow('Hull density', onCycleHullDensity,
+                  stats.hullDensityName ?? '0.250 / m100 (def)',
+                  'How heavy the SHIP is, as a density (mass per unit of d\u00b2) and the mass it derives — a multiplier over IMPACT_DENSITY.HULL, index 0 what ships. Mass used to be an impulse term and nothing else; under the energy model it is half of what every impact SPENDS, so one number moves crash damage, knockback, the body-impact shake and the roll spring together. Read it against the MATERIAL band, which is the scale it is stated in: glass 0.010, plastic 0.013, rock 0.018, metal 0.030. The hull ships at 0.250 — 25x glass and 8x rock, deliberately, because a ship is a machine rather than a rock and should plow through gravel instead of being batted about by it. The steps walk DOWN toward that band (and one up), because the question worth judging in play is whether the hull should sit that far above it at all. Lower = you ram for less and get shoved more.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}

@@ -184,8 +184,8 @@ test.describe('a tile breaks the same way whatever killed it', () => {
 
 /** Load a single-variant showcase field and quiet everything that could
  *  touch a tile beside the measurement.  Same recipe as `glassField`, for a
- *  material whose damage layer meters crashes rather than taking the whole
- *  pane in one (the glass V9 rule). */
+ *  material with enough derived HP that a crush is measurable well short of
+ *  the break. */
 async function tileField(page: any, mapType: string) {
   await startRun(page, mapType);
   // The predicate is serialised by `toString()` and re-created in the page, so
@@ -210,8 +210,8 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
       const watch = await boot(page);
       // Metal: the derived HP is high enough that several crushes are nowhere
       // near lethal, so what is measured is unambiguously the spend and not
-      // the break.  (Glass is the wrong subject here — its V9 rule takes the
-      // whole pane on any qualifying smash, deliberately.)
+      // the break.  (Glass would work too now that its whole-pane rule is
+      // gone, but it dies in nine crashes, which leaves little room.)
       await tileField(page, 'METAL_FIELD');
 
       const r = await engine(page, (e, sp: any) => {
@@ -446,8 +446,25 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
             health: 50, maxHealth: 50,
           };
           ents.push(rock);
-          e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
-          const out = { alive: t.active === true, boundaryModel: t.fractureEdgeFill !== undefined };
+          // CRUSH UNTIL IT GOES.  The fallback spends ONE whole-body HP per
+          // crush, so a 20-HP authored glass tile takes twenty of them —
+          // where it used to die in ONE, because the glass whole-pane rule
+          // reached the fallback too.  That rule is gone (user call), so the
+          // claim here is only that the decrement is LIVE and still ends the
+          // body; the count is the authored HP and is not what is pinned.
+          let crushes = 0;
+          const hp0 = t.health;
+          while (t.active && crushes < 200) {
+            rock.position.x = t.position.x + t.size.x * 0.5 + 16;
+            rock.position.y = t.position.y;
+            rock.velocity.x = -600; rock.velocity.y = 0;
+            e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
+            crushes++;
+          }
+          const out = {
+            alive: t.active === true, crushes, hp0,
+            boundaryModel: t.fractureEdgeFill !== undefined,
+          };
           rock.active = false;
           return out;
         } finally {
@@ -456,7 +473,13 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
       });
 
       expect(r.boundaryModel, 'no boundary model was built under legacy').toBe(false);
-      expect(r.alive, 'and the crush still destroyed the pane').toBe(false);
+      expect(r.alive, 'and the crushes still destroyed the pane').toBe(false);
+      // The fallback is a per-crush decrement of ONE, so this must take
+      // roughly the body's own authored HP — the number that says the
+      // whole-body path really ran, rather than some other route to death.
+      expect(r.crushes, 'through the whole-body decrement, one HP a crush')
+        .toBeGreaterThan(1);
+      expect(r.crushes).toBeLessThanOrEqual(Math.ceil(r.hp0) + 1);
 
       watch.assertClean();
     });
@@ -731,6 +754,130 @@ test.describe('a ram that cannot break through BOUNCES', () => {
       expect(r.alive, 'a permanent wall is permanent').toBe(true);
       expect(r.dealt, 'and takes no damage at all').toBe(0);
       expect(r.vOut, 'but it still throws the ship back').toBeLessThan(-0.1);
+
+      watch.assertClean();
+    });
+});
+
+/** GLASS IS NOT A SPECIAL CASE ANY MORE (user call).
+ *
+ *  V9 gave a glass tile a whole-pane crash rule: any crash over the
+ *  threshold spent its ENTIRE remaining boundary budget, so a pane died in
+ *  ONE ram whatever the ship brought.  That pre-dated the energy model and
+ *  survived step 4 as the one material whose crash outcome was a THRESHOLD
+ *  rather than an amount — which is exactly the deviation the unified-impact
+ *  work exists to remove, and the user reported it as such.
+ *
+ *  Glass now cracks under a crush and shatters when enough energy has
+ *  arrived, like every other material.  Measured through the real collision
+ *  branch (`perf/impact-audit.mjs` §5): 1 ram -> 9, landing beside rock's 9
+ *  — which is the tell that the model is doing the talking, since the two
+ *  materials share `bondStrength` 0.4 and derive 50.0 and 54.7 HP.
+ *
+ *  The sharp form of the claim is that the outcome now depends on the
+ *  ENERGY: a slow qualifying crash must leave the pane standing, and it used
+ *  to destroy it.  A ram COUNT alone would not say that — it would pass
+ *  against a build that merely raised the threshold.
+ */
+test.describe('glass cracks under a crash like every other material', () => {
+  test('a slow crash over the gate damages a pane without destroying it',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await tileField(page, 'GLASS_FIELD');
+
+      const r = await engine(page, (e: any) => {
+        const P: any = e.physics, DT = 1 / 120;
+        const t = e.currentMap.entities.find((x: any) => x.active
+          && x.shardVariant === 'glass-tile' && x.mass === Infinity);
+        if (!t) throw new Error('no glass tile');
+        for (const x of e.currentMap.entities) if (x !== t) x.active = false;
+        t.position.x = 400; t.position.y = 0; t.active = true;
+        // Build the boundary model first so `health` is already the DERIVED
+        // total — otherwise the first contact's "damage" also contains the
+        // rewrite from the authored 20, which is not damage at all.
+        e.chipStructureAt(t, { x: t.position.x, y: t.position.y }, 0);
+        t.health = t.maxHealth;
+        P.initializeStaticGrid(e.currentMap.entities);
+        const p = e.player;
+        p.health = p.maxHealth = 1e9;
+        p.position.x = 0; p.position.y = 0;
+        // 6 u/step: 1.5x the crash gate, and the speed the impact audit
+        // reports its ram counts at.  Under the old rule this ONE contact
+        // destroyed the pane.
+        p.velocity.x = 6; p.velocity.y = 0;
+        const hp0 = t.health;
+        for (let i = 0; i < 2000; i++) {
+          e.prepareFrameEntities(); e.updatePhysics(DT); p.velocity.y = 0;
+          if (!t.active) break;
+          if (Math.abs(p.velocity.x) < 0.05) break;
+          if (p.position.x > t.position.x + 80) break;
+        }
+        return {
+          max: hp0, dealt: hp0 - Math.max(0, t.health), alive: t.active === true,
+          cracks: (t.fractureEdgeFill ?? []).filter((v: number) => v > 0).length,
+        };
+      });
+
+      // THE PANE SURVIVES.  This is the assertion the old rule fails: it
+      // spent `budget + 1` on any qualifying crash, so `alive` was false.
+      expect(r.alive, 'one slow crash no longer takes the whole pane').toBe(true);
+      // It is really damaged, and really cracked — glass breaks, it just
+      // does not break ALL AT ONCE any more.
+      expect(r.dealt, 'and it is damaged').toBeGreaterThan(0);
+      expect(r.dealt, 'but nothing like all of it').toBeLessThan(r.max * 0.5);
+      expect(r.cracks, 'with damage on its grain boundaries').toBeGreaterThan(0);
+
+      watch.assertClean();
+    });
+
+  test('enough crashes DO break it, and the count lands beside rock',
+    async ({ page }) => {
+      const watch = await boot(page);
+
+      // The two materials share `bondStrength` 0.4 and derive 50.0 and 54.7
+      // HP, so their ram counts must be near-identical.  That similarity is
+      // the claim: it can only hold if BOTH are priced by the same energy
+      // model, which is what the special case prevented.  Measured 9 and 9;
+      // asserted as a RATIO with room either side, since derived HP varies
+      // tile to tile by construction (a fixed count would flake).
+      const count = async (map: string, variant: string) => {
+        await tileField(page, map);
+        return engine(page, (e: any, a: any) => {
+          const P: any = e.physics, DT = 1 / 120;
+          const t = e.currentMap.entities.find((x: any) => x.active
+            && x.shardVariant === a.variant && x.mass === Infinity);
+          if (!t) throw new Error('no ' + a.variant);
+          for (const x of e.currentMap.entities) if (x !== t) x.active = false;
+          t.position.x = 400; t.position.y = 0; t.active = true;
+          e.chipStructureAt(t, { x: t.position.x, y: t.position.y }, 0);
+          t.health = t.maxHealth;
+          P.initializeStaticGrid(e.currentMap.entities);
+          const p = e.player;
+          p.health = p.maxHealth = 1e9;
+          let rams = 0;
+          while (t.active && rams < 200) {
+            p.position.x = 0; p.position.y = 0;
+            p.velocity.x = 6; p.velocity.y = 0;
+            rams++;
+            for (let i = 0; i < 400; i++) {
+              e.prepareFrameEntities(); e.updatePhysics(DT); p.velocity.y = 0;
+              if (!t.active) break;
+              if (Math.abs(p.velocity.x) < 0.05) break;
+              if (p.position.x > t.position.x + 80) break;
+            }
+          }
+          return rams;
+        }, { variant });
+      };
+
+      const glass = await count('GLASS_FIELD', 'glass-tile');
+      const rock = await count('ROCK_FIELD', 'rock-tile');
+
+      expect(glass, 'glass takes real punishment now, not one hit')
+        .toBeGreaterThan(3);
+      expect(glass / rock, 'and lands beside rock, which shares its bond strength')
+        .toBeGreaterThan(0.5);
+      expect(glass / rock, 'neither tougher nor softer by much').toBeLessThan(2);
 
       watch.assertClean();
     });

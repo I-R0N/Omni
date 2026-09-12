@@ -2795,3 +2795,96 @@ other half); v40 into metal deals 258.7 and throws the ship back at −12.9.
 That is the invariant to keep in mind if anything ever reintroduces a
 velocity tax on this path: a crash has exactly two sinks, the break and the
 rebound, and billing both is billing twice.
+
+---
+
+### 14. Glass loses its threshold, and mass becomes a stated scale (2026-09-12)
+
+Two follow-ups from the same play-test, both about the energy model being
+undermined by numbers that pre-dated it.
+
+#### 14a. The glass whole-pane crash rule
+
+**REPORTED**: "Ranking a glass plate over a threshold may be the error I'm
+experiencing — this deviated from the energy model and should be removed."
+
+Correct, and it is the clearest single example of what the unified-impact
+work exists to remove.  V9 gave a glass tile a whole-pane crash rule: any
+crash over `CRASH_VELOCITY_THRESHOLD` spent its ENTIRE remaining boundary
+budget.  So glass was the one material whose crash outcome was a **threshold
+question** — did you clear the gate, yes or no — while rock, plastic and
+metal had long since become **amount questions**.  A ship at 4.1 u/step and
+a ship at 40 destroyed a pane identically.
+
+It survived step 2 (which routed it through the grain model rather than
+around it) and step 4 (which made every other crash kinetic) because each of
+those steps preserved it *deliberately*, as "unchanged in meaning".  That is
+the lesson worth keeping: **a special case carried forward with a note
+saying it is unchanged will survive every refactor that is careful**, and
+the care is what hides it.  Only a play-test found it.
+
+**MEASURED**: 1 ram → 9, landing beside rock's 9 — which is the tell that
+the model is now doing the talking, since glass and rock share
+`bondStrength` 0.4 and derive 50.0 and 54.7 HP.  The audit's "KE per derived
+HP" column went FLAT across all four materials (296 / 324 / 286 / 299);
+glass was the one breaking it.
+
+**The sharp form of the regression** is not the ram count — a count would
+pass against a build that merely raised the threshold.  It is that a SLOW
+qualifying crash now leaves the pane standing, which only an amount model
+can produce.
+
+#### 14b. The mass scale
+
+**REPORTED**: "this energy transfer feels good overall but I think we need
+to scale mass for projectiles, the player and entities."
+
+The diagnosis was right and the measurement located it precisely.  Mass used
+to be an IMPULSE term and nothing else, so its numbers only had to be right
+relative to each other inside the solver.  The energy model made mass half
+of what every impact SPENDS — so four unrelated ladders silently became one
+balance surface, and nothing made it readable.
+
+**MEASURED** (`perf/impact-audit.mjs` §7, added for this), as mass per d²:
+
+| class | range | reading |
+|---|---|---|
+| shards | 0.0100 .. 0.0300 | coherent — material density, glass:rock:metal 1:1.8:3 |
+| enemies | 0.0102 .. 0.0400 | inside the material band |
+| projectiles | 0.0139 .. 0.0960 | wide, but authored as energy banks |
+| **player** | **0.2500** | **alone** — 25× glass, 8× rock, 2× the dragon |
+
+A 20-unit hull massing 100 was as dense as nothing else in the game.
+
+**FIXED** by stating the scale rather than by moving the ship (user call): a
+ship is a machine, not a rock, and should plow through gravel.  `PLAYER_MASS`
+is now `massFor(PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL)` — exactly 100, so
+nothing re-priced — and the four shard `sizeToMass` ladders read the same
+table, so the material ratio lives in one place.  `HULL_DENSITY_CYCLE` is
+the live A/B, because ONE number moves crash energy, knockback, the
+body-impact shake and the roll spring together and that is a play question.
+
+**Two classes deliberately do not derive**, and the reason generalises:
+**never couple a physical quantity to a visual one.**  A projectile's `mass`
+is its energy BANK; deriving it from the drawn `size` would make a bolt's
+damage a function of its sprite — and the Cannon proves the point, drawn at
+16 against the Blaster's 6 while massing 3.56 against 1.00, so its density
+is the *lowest* of any round and would have to be authored low anyway.  No
+information gained, one hazard introduced.
+
+**STILL OPEN**: whether the hull should sit that far above the material band
+at all is now a question someone can *ask*, which it was not before.  The
+ladder exists to answer it in play.  Two enemy densities are also flagged
+rather than fixed: the DRAGON at 0.1221 (a mini-boss, deliberately
+immovable) and the BUBBLE at 0.0400 — denser than metal, which reads
+backwards for a gas blob, but its mass 9 is load-bearing and the
+immovability fix rests on that exact impulse arithmetic.
+
+**A MEASUREMENT TRAP worth recording**, because it cost two wrong readings.
+Measuring "how much does one ram take" by running the ship to rest counts
+RAMS, not bite — a lighter ship comes off faster and comes back for more, so
+a half-mass hull read 1.5× the damage.  And resetting a tile's `health`
+between arms does NOT reset its `fractureEdgeFill`, so the second arm
+reports ACCUMULATED erosion (measured 21.3 / 31.9 / 37.2 as the hull got
+*lighter*, which is a running total, not a heavier bite).  One contact, one
+fresh tile.

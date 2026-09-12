@@ -7,7 +7,10 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          detectionAlpha,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
          grainSpecFor, grainLadder, grainTableValue, type GrainKnob,
-         nebulaSpriteSize } from './constants';
+         nebulaSpriteSize,
+         ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
+         projectileMassFor, PHYSICS_CONSTANTS,
+         IMPACT_DENSITY, massFor, hullDensity } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -145,6 +148,28 @@ const App: React.FC = () => {
     // ever carried, so every shard drew a full-tile sprite whatever its
     // size).  Nothing in the game reads this handle.
     (window as any).__omniNebula = { nebulaSpriteSize };
+
+    // Debug handle #9 — the MASS SCALE, on the __omniHid terms and with the
+    // sharpest motive of the set.  Under the energy model a body's mass is
+    // half of what its every impact SPENDS, so the masses authored across
+    // the player, the enemy roster, the gun roster and the shard spawn
+    // ladders are a balance surface rather than four unrelated impulse
+    // terms — and they are WRONG IN A WAY NOTHING REPORTS: a projectile a
+    // twentieth the density of the hull that fires it produces perfectly
+    // plausible play, throws no exception and logs nothing.  The only way
+    // to see it is to put all four ladders in one table, which is what
+    // `perf/impact-audit.mjs` §7 does with this.  Exposed as the TABLES
+    // rather than as computed numbers so the audit cannot drift from what
+    // the sim reads.  Nothing in the game reads this handle.
+    (window as any).__omniMass = {
+      ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
+      projectileMassFor, PHYSICS_CONSTANTS,
+      // The scale's own definitions, so a suite can pin that the shipped
+      // hull really is the table's number and that the shard ladders really
+      // read from it — the two claims that make this ONE scale rather than
+      // a comment beside five unrelated literals.
+      IMPACT_DENSITY, massFor, hullDensity,
+    };
 
     // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
     // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
@@ -323,6 +348,10 @@ const App: React.FC = () => {
 
   const handleCycleCrashEnergy = () => {
       if (engineRef.current) engineRef.current.dbg.cycleCrashEnergy();
+  };
+
+  const handleCycleHullDensity = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleHullDensity();
   };
 
   const handleToggleShardBlend = () => {
@@ -964,6 +993,7 @@ const App: React.FC = () => {
         onCycleShardCoat={handleCycleShardCoat}
         onCycleImpactVelocity={handleCycleImpactVelocity}
         onCycleCrashEnergy={handleCycleCrashEnergy}
+        onCycleHullDensity={handleCycleHullDensity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}

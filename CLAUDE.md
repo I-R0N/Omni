@@ -67,6 +67,8 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           shardblend, fracture, bubbles (the Phase-A
                           aggro timeout + the immovability fix, and
                           the mouth-size / bite eating rules) and
+                          mass (the impact density scale and the
+                          hull-density ladder),
                           modules (Gunnery, Scanner, hex slots, and
                           that the deleted Penetration family is gone
                           from every surface), weapons (what a SHOT
@@ -76,7 +78,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  398 tests.  All run at
+                          writing a DBG-knob test).  405 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -328,7 +330,9 @@ perf/                     Headless capture harness (gauntlet 5c) —
                           authored `damage` is worth in ENERGY and MOMENTUM
                           against each material's DERIVED HP, and what the
                           crash gates correspond to in the same units —
-                          step 1 of the unified-impact sequencing),
+                          step 1 of the unified-impact sequencing; §7 is
+                          the MASS SCALE, every class's mass as a density
+                          so the four ladders read against each other),
                           scenes.mjs, README.md.
                           Deliberately NOT part of `npm test`: runs take
                           minutes and are noise-prone; the test suite is a
@@ -851,7 +855,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   — the steel-blue that metal's density brightening interpolates
   TOWARD, replacing a per-channel scale that desaturated dense metal
   toward white.
-- `PHYSICS_CONSTANTS`, `SIMULATION_CONSTANTS`, `LOCAL_GRAVITY_CONSTANTS`
+- `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
+  see §8), `IMPACT_DENSITY` / `massFor` / `HULL_DENSITY_CYCLE` — the one
+  mass scale and its DBG ladder, `SIMULATION_CONSTANTS`,
+  `LOCAL_GRAVITY_CONSTANTS`
 - `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
 - `PLAYER_ROLL_CONSTANTS` — the DIRECTIONAL TILT: the player ship
@@ -1065,9 +1072,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   SHARD figure derived too (`estimateBoundaryHp`), so it scales with the
   fragment instead of being a constant the first hit contradicts — webbing with BRIGHT
   hairline cracks (`GLASS_CRACK_STYLE`, `MATERIAL_DAMAGE_CRACKS.glass`)
-  along the exact cells they break into; physical smashes (crash over
-  the momentum threshold, the pressure trigger) still take the whole
-  pane, because the layer meters weapons, not boulders.  A DAMAGED glass
+  along the exact cells they break into.  GLASS HAS NO WHOLE-PANE CRASH
+  RULE ANY MORE (user call): a physical smash used to take the entire pane
+  on any qualifying hit, which pre-dated the energy model and left glass
+  the one material whose crash outcome was a THRESHOLD rather than an
+  amount.  It now cracks under a crash and shatters when enough energy
+  arrives, like everything else — measured 1 ram to 9, landing beside
+  rock's 9, which is what it should be since the two share `bondStrength`
+  0.4 and derive 50.0 and 54.7 HP (see §8).  A DAMAGED glass
   tile leaves the static-tile cache and the hex-sprite fast path
   (`tileShowsDamage`) — neither can express cracks or a chipped polygon.
   CHIP DEPTH is three constants (V10): `ROCK_BREAK.MIN/MAX_HITS` (8/12
@@ -2839,11 +2851,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     whole-body decrement.  This is where the crash paths differ from
     `GameEngine.chipStructureAt`, which refuses such a body outright:
     that is the chip path and may do nothing, a crash may not.
-  The GLASS rule (V9) is unchanged in meaning and now runs THROUGH the
-  model rather than around it: a hull or a boulder over the crash
-  threshold spends the pane's entire remaining boundary budget, so it
-  still dies in one and still shatters along the cells its cracks were
-  drawn from.  Score attribution is untouched — `killedByPlayer` is still
+  THE GLASS RULE IS GONE (user call).  V9 gave a glass tile a whole-pane
+  crash rule — any crash over the threshold spent its ENTIRE remaining
+  boundary budget — so a pane died in ONE ram whatever the ship brought.
+  That pre-dated the energy model and survived step 4 as the one material
+  whose crash outcome was a THRESHOLD rather than an amount, which is
+  precisely the deviation this work exists to remove.  Glass now cracks and
+  shatters on energy like everything else: measured 1 ram to **9**, landing
+  beside rock's 9, and the audit's "KE per derived HP" column went FLAT
+  across all four materials (296 / 324 / 286 / 299) where glass had been
+  the one breaking it.  How tough glass is is now said ONLY by its
+  `grain.bondStrength` and its own derived boundary total.  Two things go
+  with it: the non-grain FALLBACK loses its glass branch too, so a body
+  under the legacy fracture A/B takes a plain 1 HP a crush (its regression
+  crushes until it dies rather than expecting one); and the
+  `budget <= unit` branch beside it is NOT this rule and must stay — that
+  is the clean-zero rule, and it fires for every material.
+  Score attribution is untouched — `killedByPlayer` is still
   set only by the player's own crash, so ambient destruction pays
   nothing.
 - **A CRASH SPENDS ITS KINETIC ENERGY, AND THE IMPACTOR PAYS FOR WHAT IT
@@ -2911,6 +2935,54 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   bounce.  DBG ▸ Player ▸ "Crash energy" is the permeability dial (a
   multiplier over the coupling, index 0 ships); a material's own
   `bondStrength` is the same question asked of one material.
+- **MASS IS STATED AS A DENSITY, ON ONE SCALE** (`IMPACT_DENSITY` /
+  `massFor` in `constants.ts`; user call).  Mass used to be an IMPULSE term
+  and nothing else, so its numbers only had to be right relative to each
+  other inside the solver.  The energy model changed that — mass is half of
+  what every impact SPENDS, so what a body weighs decides what it BREAKS —
+  and that made four unrelated ladders into one balance surface that
+  nothing made readable.
+  MEASURED (`perf/impact-audit.mjs` §7, the mass-scale section added for
+  this): in mass per d², the four shard ladders span 0.0100..0.0300 — a
+  coherent 3× band reading exactly as material density, and the natural
+  reference; ENEMIES sit inside it at 0.0102..0.0400; PROJECTILES run
+  0.0139..0.0960; and the PLAYER sat alone at **0.2500**, 25× glass, 8×
+  rock and twice the dragon.  A 20-unit hull massing 100 was as dense as
+  nothing else in the game and nothing said so.
+  THE HULL IS DELIBERATELY THE DENSEST THING HERE (user call) — a ship is a
+  machine, not a rock, and should plow through gravel rather than be batted
+  about by it.  What changed is that 100 is now DERIVED
+  (`massFor(PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL)`, exactly 100, so nothing
+  re-priced) with the material band beside it, and the four shard
+  `sizeToMass` ladders read the same table, so glass : rock : metal is 1 :
+  1.8 : 3 in ONE place.  `HULL_DENSITY_CYCLE` (DBG ▸ Player ▸ "Hull
+  density", index 0 ships) is the live A/B, and it is a ladder rather than a
+  constant because ONE number moves the ship's crash energy (so ram counts),
+  how far every impact shoves it, the body-impact shake (which reads the
+  solver's own mass split) and the roll spring's frequency together.
+  THE LADDER RE-FOLDS THE OUTFIT rather than writing a mass:
+  `applyModuleEffects` is the one place `player.mass` is derived, so
+  `hullDensity()` is read THERE and the ship-weight curve rides the change
+  for free.  A ladder that wrote its own mass would read back correctly from
+  the panel and be overwritten by the next outfit change.
+  TWO CLASSES DELIBERATELY DO NOT DERIVE, both to avoid coupling a physical
+  quantity to a visual one.  PROJECTILES author `mass`, because it is the
+  ENERGY BANK (§5's "a round carries two numbers") and deriving it from the
+  drawn `size` would make a bolt's damage a function of its sprite — the
+  Cannon is the proof, drawn at 16 against the Blaster's 6 while massing
+  3.56 against 1.00, so its density is the LOWEST of any round and would
+  have to be authored low anyway.  ENEMIES author `mass` per archetype for
+  the reason a boss is bigger than a gnat without being proportionally
+  heavier; the audit REPORTS their densities so the scale stays visible.
+  Two enemy figures look wrong and are not: the DRAGON at 0.1221 is a
+  mini-boss meant to be immovable, and the BUBBLE at 0.0400 is denser than
+  metal but its mass 9 is load-bearing — the immovability fix in §5 rests on
+  that exact impulse arithmetic.
+  `window.__omniMass` is the debug handle (the tables plus `IMPACT_DENSITY`
+  / `massFor` / `hullDensity`), on the `__omniHid` terms: the scale is wrong
+  in a way nothing reports, since a hull density that quietly stopped
+  feeding `player.mass` leaves a perfectly playable ship at the old
+  constant.  `tests/mass.spec.ts` pins it.
 - **A BODY MAY NOT FLY THROUGH SOMETHING IT HIT** (user report: "the player
   now literally passes through tiles at high impact energy";
   `PhysicsSystem.sweepRewind`).  Every contact in this engine is tested at

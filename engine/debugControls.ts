@@ -31,7 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -48,6 +48,7 @@ import {
     cycleStarDensity, cycleStarSize, cycleStarBands, cycleCollapseMode,
     cycleStarParallax, cycleShardCoat,
 } from '../constants';
+import { applyModuleEffects } from './outfitting';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -1001,6 +1002,21 @@ export class DebugControls {
    *  `bondStrength` is the same question asked of one material. */
   cycleCrashEnergy() {
     cycleCrashEnergy();
+  }
+
+  /** Cycle the ship's HULL DENSITY (DBG "Hull density") — a multiplier over
+   *  `IMPACT_DENSITY.HULL`, index 0 what ships.  Under the energy model the
+   *  hull's mass is half of what its every ram SPENDS as well as how little
+   *  it is shoved, so this one number moves crash damage, knockback, the
+   *  body-impact shake and the roll spring together — which is exactly why
+   *  it is worth judging in play rather than picking here.
+   *
+   *  It re-folds the OUTFIT rather than writing a mass, because
+   *  `applyModuleEffects` is the one place `player.mass` is derived and the
+   *  ship-weight curve has to ride the change with it. */
+  cycleHullDensity() {
+    cycleHullDensity();
+    applyModuleEffects(this.g);
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────

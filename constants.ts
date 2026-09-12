@@ -1401,11 +1401,124 @@ export const INPUT_CONSTANTS = {
   },
 };
 
+/** THE IMPACT DENSITY SCALE — one statement of how heavy everything is,
+ *  in mass per unit of d² (user call, unified impact physics follow-up).
+ *
+ *  Mass used to be an IMPULSE term and nothing else, so the numbers only had
+ *  to be right relative to each other inside the collision solver.  The
+ *  energy model changed that: mass is now half of what every impact SPENDS,
+ *  so what a body weighs decides what it BREAKS.  That makes these numbers a
+ *  balance surface, and a balance surface has to be readable.
+ *
+ *  MEASURED before this existed (`perf/impact-audit.mjs` §7): the four shard
+ *  ladders spanned 0.0100..0.0300 — a coherent 3× band reading exactly as
+ *  material density — enemies sat inside it at 0.0102..0.0400, projectiles
+ *  ran 0.0139..0.0960, and the PLAYER sat alone at 0.2500: 25× glass, 8×
+ *  rock, twice the dragon.  A 20-unit hull massing 100 was as dense as
+ *  nothing else in the game, and nothing said so anywhere.
+ *
+ *  THE HULL IS DELIBERATELY THE DENSEST THING HERE (user call).  A ship is a
+ *  machine — armour, engines, reactor, ordnance — not a rock, and it should
+ *  plow through gravel rather than be batted about by it.  What changed is
+ *  that the figure is now a STATED density with the material band beside it
+ *  for comparison, instead of a bare `100` whose relationship to a boulder
+ *  nobody could see.  `HULL_DENSITY_CYCLE` is the live A/B on it.
+ *
+ *  Two classes deliberately do NOT derive their mass from this table, and
+ *  both exceptions are about not coupling a physical quantity to a visual
+ *  one:
+ *  - PROJECTILES author `mass` directly, because it is the ENERGY BANK the
+ *    round flies with (§5's "a round carries two numbers").  Deriving it
+ *    from the drawn `size` would make a bolt's damage a function of its
+ *    sprite: the Cannon is the proof, drawn at 16 against the Blaster's 6
+ *    while massing 3.56 against 1.00, so its density is the LOWEST of any
+ *    round (0.0139) and would have to be authored low anyway.  No
+ *    information is gained and a hazard is introduced.
+ *  - ENEMIES author `mass` per archetype for the same reason a boss is
+ *    bigger than a gnat without being proportionally heavier.  Their
+ *    densities are REPORTED by the audit so the scale stays visible; two
+ *    are worth knowing because they look wrong and are not: the DRAGON at
+ *    0.1221 is a mini-boss meant to be immovable, and the BUBBLE at 0.0400
+ *    is denser than metal but its mass 9 is load-bearing — the immovability
+ *    fix documented in CLAUDE.md §5 rests on that exact impulse arithmetic.
+ */
+export const IMPACT_DENSITY = {
+  // The MATERIAL reference, and the reason the scale has a unit at all: the
+  // four shard spawn ladders ARE these numbers, so glass : rock : metal
+  // stays 1 : 1.8 : 3 and every other class can be read against it.
+  GLASS:   0.010,
+  PLASTIC: 0.013,
+  ROCK:    0.018,
+  METAL:   0.030,
+  // The player's hull.  25x glass and 8x rock, on purpose — see above.
+  HULL:    0.25,
+} as const;
+
+/** Mass from a body's diameter and its density — the ONE derivation, so a
+ *  body that grows gets heavier without anyone editing a second number.
+ *  d² rather than area (πd²/4) because the shard ladders were authored that
+ *  way and the constant absorbs the 4/π; what matters is that everything
+ *  divides by the same thing. */
+export function massFor(d: number, density: number): number {
+  return d * d * density;
+}
+
+/** DBG Player ▸ "Hull density" — the live A/B on how heavy the ship is,
+ *  a MULTIPLIER over `IMPACT_DENSITY.HULL` with index 0 what ships, so the
+ *  first click is the comparison.  The steps walk DOWN toward the material
+ *  band (0.25 → 0.125 → 0.0625 → 0.03, the last being metal's own density)
+ *  and one step up, because the question the measurement raises is whether
+ *  the hull should be that far above the materials at all.
+ *
+ *  Applied at `applyModuleEffects`, which is where `player.mass` is
+ *  actually derived — so `GameEngine` re-folds the outfit when this cycles
+ *  rather than the ladder writing a mass of its own.  That keeps ONE
+ *  definition of the ship's mass and means the ship-weight curve rides the
+ *  change for free.
+ *
+ *  WHAT MOVES WITH IT, which is why this is a ladder and not a constant
+ *  someone edits: the ship's crash energy (so ram counts), how far it is
+ *  shoved by every impact, the body-impact shake (which reads the solver's
+ *  own mass split), and the roll spring's frequency (÷√(mass/PLAYER_MASS)).
+ *  At index 0 every one of those is exactly what it was. */
+export const HULL_DENSITY_CYCLE: ReadonlyArray<number> = [
+  1, 0.5, 0.25, 0.12, 2,
+] as const;
+const HULL_DENSITY_DEFAULT_INDEX = 0;
+let activeHullDensityIndex = HULL_DENSITY_DEFAULT_INDEX;
+
+export function getHullDensityMult(): number {
+  return HULL_DENSITY_CYCLE[activeHullDensityIndex];
+}
+/** The ship's live hull density, and so its mass: every read goes through
+ *  here rather than through `IMPACT_DENSITY.HULL`, or the ladder would be
+ *  honoured by one caller and ignored by another. */
+export function hullDensity(): number {
+  return IMPACT_DENSITY.HULL * getHullDensityMult();
+}
+export function getHullDensityName(): string {
+  const d = hullDensity();
+  const tag = activeHullDensityIndex === HULL_DENSITY_DEFAULT_INDEX ? ' (def)' : '';
+  // The DENSITY is the number that compares to the material band, and the
+  // MASS is the number the solver uses — the panel shows both, because the
+  // whole point of the ladder is reading one against the other.
+  return `${d.toFixed(3)} / m${massFor(SPRITE_CONSTANTS.PLAYER_BASE_SIZE, d).toFixed(0)}${tag}`;
+}
+export function cycleHullDensity(): number {
+  activeHullDensityIndex = (activeHullDensityIndex + 1) % HULL_DENSITY_CYCLE.length;
+  return activeHullDensityIndex;
+}
+
 export const PHYSICS_CONSTANTS = {
   FRICTION: 0.999, // Fallback default
   ACCELERATION: 0.02, // Fallback default (Reduced from 0.04)
+  // DERIVED, not authored: a 20-unit hull at `IMPACT_DENSITY.HULL` is
+  // exactly the 100 this was written as, so nothing re-prices — but the
+  // number now says WHY it is 100 and what it is 100 relative to.  This is
+  // the SHIPPED reference (the DBG ladder multiplies `hullDensity()` at the
+  // read); `SHIP_WEIGHT.MASS_REFERENCE` normalises the lean outfit onto it.
   MAX_SPEED: 15,
-  PLAYER_MASS: 100, // Heavier player = less recoil
+  PLAYER_MASS: massFor(SPRITE_CONSTANTS.PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL),
   RECOIL_FORCE: 0 // Legacy, unused now that mass is implemented
 };
 
@@ -9392,7 +9505,7 @@ const GLASS_SHARD_SPAWN_SHAPE = {
   // Weight ∝ area (d²) so small shards are trivially pushable and big
   // ones are heavy.  Material coefficient makes glass the LIGHTEST of
   // the solids (glass 0.010 : rock 0.018 : metal 0.030 ≈ 1 : 1.8 : 3).
-  sizeToMass: (d: number) => d * d * 0.010,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.GLASS),
 };
 
 // Base config shared by glass / plastic / metal STRUCTURE tiles.
@@ -9450,7 +9563,7 @@ const SHARD_SPAWN_SHAPE_ROCK = {
   polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
   // Weight ∝ area (d²); rock sits mid-weight between glass and metal.
-  sizeToMass: (d: number) => d * d * 0.018,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.ROCK),
 };
 
 const SHARD_SPAWN_SHAPE_NEBULA = {
@@ -9494,7 +9607,7 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   angleJitter: 0.25, radiusMin: 0.65, radiusRange: 0.45,
   // Weight ∝ area (d²); plastic sits between glass (0.010) and
   // rock (0.018), so it shoves glass and is shoved by rock.
-  sizeToMass: (d: number) => d * d * 0.013,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.PLASTIC),
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
@@ -9507,7 +9620,7 @@ const SHARD_SPAWN_SHAPE_METAL = {
   polyVerticesOptions: [6, 8, 10],
   angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
   // Weight ∝ area (d²); metal is the heaviest solid — hardest to shove.
-  sizeToMass: (d: number) => d * d * 0.030,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.METAL),
 };
 
 // ── Rock aggregation tint floor ─────────────────────────────────────

@@ -2609,14 +2609,20 @@ export class PhysicsSystem {
    * authored number, so that lottery is gone.  Rock is the calibration
    * anchor and is unchanged at 9; see CRASH_ENERGY_COUPLING for the rest.
    *
-   * `whole` is the glass rule (V9), unchanged in meaning: its damage layer
-   * meters WEAPON hits, and a hull or a boulder over the crash threshold
-   * takes the whole pane.  Here that is a spend of the entire remaining
-   * boundary budget rather than a bypass, so the pane still dies THROUGH the
-   * grain model and shatters along the cells its cracks were drawn from.
+   * GLASS HAS NO SPECIAL CASE (user call).  V9 gave a glass tile a
+   * whole-pane rule — any crash over the threshold spent its ENTIRE
+   * remaining boundary budget — which pre-dated the energy model and
+   * survived step 4 as the one material whose crash outcome was a
+   * THRESHOLD rather than an amount.  It is gone: glass cracks under a
+   * crash and shatters when enough energy arrives, exactly like rock,
+   * plastic and metal, and how tough it is is now said ONLY by its
+   * `grain.bondStrength` and its own derived boundary total.
+   *
+   * The `budget <= unit` branch below is NOT that rule and must stay: it
+   * is the clean-zero rule, and it fires for every material.
    */
   private static crashBoundaryDamage(
-      structure: GameEntity, contact: Vector2, whole: boolean, damage: number,
+      structure: GameEntity, contact: Vector2, damage: number,
   ): number | null {
       // Stamp BEFORE the model is built: the pattern's impact bias is read at
       // cell-build time (V12), so a stamp afterwards biases nothing.
@@ -2637,7 +2643,7 @@ export class PhysicsSystem {
       // exactly on the final boundary otherwise leaves a one-ULP residue
       // (measured 8.9e-16 on rock's ninth crash), and `health <= 0` then
       // reads false, costing one phantom extra ram.
-      const spend = (whole || budget <= unit * (1 + 1e-9)) ? budget + 1 : unit;
+      const spend = budget <= unit * (1 + 1e-9) ? budget + 1 : unit;
       applyBoundaryDamage(structure, spend);
       // What the body could actually TAKE, which is what the impactor pays
       // for.  The last spend deliberately overshoots to land on a clean zero
@@ -4619,14 +4625,12 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
               } else {
               // A CRASH SPENDS ON THE GRAIN BOUNDARIES, like every other
-              // damage path (unified impact physics, step 2).  Glass is
-              // BRITTLE to physical smashes (V9): its damage layer meters
-              // WEAPON hits, but a hull over the crash threshold takes the
-              // whole pane — the pre-damage-layer behaviour, kept on purpose,
-              // and now spent THROUGH the model rather than around it.  A
-              // body with no grain model falls back to the whole-body
-              // decrement this always was.
-              const crashWhole = structure.shardVariant === 'glass-tile';
+              // damage path (unified impact physics, step 2) — and for
+              // EVERY material alike: glass lost its whole-pane special
+              // case (user call), so what a crash is worth against it is
+              // said by its bond strength and nothing else.  A body with no
+              // grain model falls back to the whole-body decrement this
+              // always was.
               const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
               // THE HULL BRINGS ENERGY, AND PAYS FOR WHAT IT BREAKS (step 4).
               // The flat CRASH_VELOCITY_RETENTION above used to take 35% of
@@ -4636,9 +4640,9 @@ export class PhysicsSystem {
               // could not even scratch.  Now the spend and the speed loss are
               // the same number, so crossing metal costs what metal costs.
               const crashDmg = crashDamageFor(player.mass, structure.mass, impactSpeed);
-              let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole, crashDmg);
+              let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashDmg);
               if (absorbed === null) {
-                  const raw = crashWhole ? Math.max(1, structure.health) : 1;
+                  const raw = 1;
                   structure.health -= raw;
                   absorbed = raw;
               }
@@ -4763,14 +4767,13 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
-                  // Boundary spend + the glass whole-pane rule, exactly as
-                  // the player-crash site above — one mechanism, two callers.
-                  const crashWhole = structure.shardVariant === 'glass-tile';
+                  // Boundary spend, exactly as the player-crash site above
+                  // — one mechanism, two callers.
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
                   const crashDmg = crashDamageFor(asteroid.mass, structure.mass, impactSpeed);
-                  let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole, crashDmg);
+                  let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashDmg);
                   if (absorbed === null) {
-                      const raw = crashWhole ? Math.max(1, structure.health) : 1;
+                      const raw = 1;
                       structure.health -= raw;
                       absorbed = raw;
                   }
@@ -4812,7 +4815,6 @@ export class PhysicsSystem {
                   // down by repeated nudges should crack where it is being
                   // nudged, not lose an abstract point of health.  Glass
                   // still "dies in one" pressure trigger (V9).
-                  const crashWhole = structure.shardVariant === 'glass-tile';
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
                   // PRESSURE SPENDS WHAT THE WHOLE ACCUMULATOR BROUGHT, not
                   // what its last nudge did.  The trigger IS the sum of
@@ -4825,8 +4827,8 @@ export class PhysicsSystem {
                   // whose damage is an accumulation rather than an impact.
                   const crashDmg = crashDamageFor(asteroid.mass, structure.mass, impactSpeed)
                       * STRUCTURE_CONSTANTS.TILE_PRESSURE_HITS;
-                  if (PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole, crashDmg) === null) {
-                      structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+                  if (PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashDmg) === null) {
+                      structure.health -= 1;
                   }
                   // Pressure keeps its OWN damping rather than `payForCrash`:
                   // the nudges that built the accumulator already each paid

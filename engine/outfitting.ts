@@ -33,6 +33,7 @@ import {
     slotUnlockCost,
     HEX_ADJACENCY, WEAPONS, WEAPON_LIST, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
     SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
+  massFor, hullDensity, SPRITE_CONSTANTS,
 } from '../constants';
 
 /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
@@ -124,7 +125,12 @@ export function applyModuleEffects(g: GameEngine) {
     // shoves a heavy ship less and lets it plow through debris, while a
     // stripped hull gets knocked around.  Normalised so the LEAN loadout is
     // exactly the old constant — no change to the feel a run starts with.
-    g.player.mass = PHYSICS_CONSTANTS.PLAYER_MASS
+    // The hull's own mass comes from its DENSITY (`hullDensity()`, the DBG
+    // ladder's read) rather than the shipped constant, so cycling the ladder
+    // re-folds the outfit here instead of writing a mass of its own — one
+    // definition, and the ship-weight curve rides the change for free.  At
+    // index 0 this is exactly `PHYSICS_CONSTANTS.PLAYER_MASS`.
+    g.player.mass = massFor(SPRITE_CONSTANTS.PLAYER_BASE_SIZE, hullDensity())
         * ((SHIP_WEIGHT.MASS_BASE + shipWeight)
            / (SHIP_WEIGHT.MASS_BASE + SHIP_WEIGHT.MASS_REFERENCE));
     const newMaxHp = 100 + maxHp;
