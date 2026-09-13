@@ -3854,13 +3854,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     how the question is asked — "how often does a cloud leave the nebula
     family" — and `half (old)` is the pre-call literal, one click from the
     end.
-  - **ROCK-DERIVED DUST IS EXEMPT AND MUST STAY SO.**  `fromRock` dust
-    always returns to rock and is never eligible for a tile: that dust WAS
-    rock a moment ago (a chip thrown by `GRAIN_CHIP_DUST`), so returning it
-    is conservation, and routing it to a tile would MINT nebula out of
-    terrain.  It bypasses the roll entirely, which is why the effective
-    material rate on a natural map sits above the nominal share (measured
-    20% against 12.5% on UNIVERSE, with 3 of 45 pairs rock-derived).
+  - **THE ROLL IS ORIGIN-BLIND** (user call).  Rock-derived dust
+    (`fromRock`) was briefly EXEMPT — always condensing back to rock, never
+    eligible for a tile — on the argument that returning it to rock is
+    conservation rather than conversion.  That reads the timeline backwards:
+    by the time a puff is coalescing it IS nebula, and exempting it made
+    material-derived cloud a second class that could only ever leave the
+    family.  Every cloud now rolls the same share whatever its dust was made
+    of, and `fromRock` no longer reaches the adapter at all — what origin
+    still decides is WHICH material the OTHER branch picks (rock dust returns
+    to rock, everything else takes its own hue's material), which is the half
+    that really is conservation.  Measured through the real adapter at 800
+    pairs a side, rock-derived and virgin clouds roll the tile within a
+    fraction of a percent of each other.  IN PLAY the visible effect is
+    concentrated wherever rock is being BROKEN: a passive run generates very
+    little `fromRock` dust (2 of 113 and 0 of 258 crystallising pairs on
+    UNIVERSE, matching an earlier 3 of 45), so a probe that just watches an
+    idle map will barely see this rule at all.
   - **A FAILED TILE PLACEMENT NOW RETURNS THE MASS.**  `transmuteToTileAt`
     searches the origin hex plus its six neighbours and can find every one
     occupied; both source shards have already faded by then, so the bare

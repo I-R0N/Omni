@@ -3222,3 +3222,55 @@ behaviour, one click from the end.
 `tests/nebulacondense.spec.ts` pins all three claims, each verified red under
 its own targeted revert.  The no-op branch is FORCED rather than waited for:
 at ~9% of rolls a test that waited for it would be a flake generator.
+
+### 20. The tile roll is origin-blind (2026-09-13)
+
+**REPORTED**: "Tile or other material derived dust should also turn into
+nebula tiles at the same rate as regular virgin nebula shards."
+
+**THIS REVERSES ENTRY 19's ONE CARVE-OUT**, which that entry had argued was
+load-bearing ("rock-derived dust is exempt and must stay so").  The argument
+was that returning a rock chip's dust to rock is CONSERVATION and routing it
+to a nebula tile would mint nebula out of terrain.  That reads the timeline
+backwards: by the time a puff is coalescing with another puff it IS nebula,
+and exempting it made material-derived cloud a second class that could only
+ever leave the family.  Origin still decides WHICH material the other branch
+condenses into — rock dust returns to rock — and that is the half which really
+is conservation; the tile roll is not.
+
+`fromRock` therefore no longer reaches `onComposeNebulaShardPair` at all, and
+was removed from the `ShardAdapter` signature rather than left unread.  **A
+parameter nobody reads is worse than no parameter**: it says origin still
+matters at the adapter, which is exactly the thing that stopped being true.
+
+Only ROCK dust ever carried the flag, so glass / plastic / metal dust was
+already rolling the tile at the full rate — the ask was, precisely, the rock
+carve-out.
+
+**A PROXY THAT LOOKS LIKE THE PREDICATE IS NOT THE PREDICATE.**  The first
+in-play measurement keyed on `material === 'rock-shard'` — the committed
+target — because the adapter no longer sees `fromRock`.  That reads
+rock-committed pairs as the MAJORITY on UNIVERSE (88 of 128), which made the
+change look enormous.  It is wrong: a cloud whose blended HUE maps to rock
+commits to rock-shard without ever having been rock dust.  Hooking the
+ShardSystem seam that still holds the source shards gives the real figure, and
+it is the opposite shape — rock-DERIVED pairs are 2 of 113 and 0 of 258 in a
+passive run, matching entry 19's earlier 3 of 45.
+
+So the honest statement is two-part: the RATE claim is measured through the
+real adapter at 800 pairs a side (rock-derived and virgin roll the tile within
+a fraction of a percent), and the in-play effect is concentrated wherever rock
+is actually being BROKEN — a probe watching an idle map barely sees this rule
+at all.  An ablation run also has to put its flag in place with
+`page.evaluate`, not `addInitScript` after `goto`, which applies only to later
+navigations: the first ablated arm silently measured the unablated build, and
+the tell was that the "exempt" arm still produced tiles.
+
+**AND THE REGRESSION FLAKED FIRST TIME, for two compounding reasons** worth
+keeping: a sibling test walks the same DBG cycle and leaves it wherever it
+finished, so an undialled run measures whatever step ran last; and at the
+p = 0.5 that stale dial left behind, a 400-sample 5-point band is 1.4 s.d. —
+about one failure in six with the product perfectly correct.  Dialling
+explicitly and sizing N and the band off the binomial (800 a side, 6 points =
+~3.6 s.d. at the shipped p = 0.875) fixes both.  **A band nobody computed is a
+flake with a delay on it.**

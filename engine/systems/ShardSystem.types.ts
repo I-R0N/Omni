@@ -958,9 +958,13 @@ export interface ShardAdapter {
    * Pair-transmute hook fired after a nebula-shard ↔ nebula-shard
    * bond resolves.  ShardSystem has already faded both source shards
    * and computed the blended palette + midpoint; this hook spawns
-   * the output (50/50 nebula-tile at nearest free hex vs. glass-
-   * shard at the midpoint).  Lives in NebulaSystem because the tile
-   * path depends on hex coords + static-grid occupancy checks.
+   * the output (a `nebulaTileShare()` roll between a nebula-tile at
+   * the nearest free hex and the committed material shard at the
+   * midpoint).  Lives in NebulaSystem because the tile path depends
+   * on hex coords + static-grid occupancy checks.  The roll is
+   * ORIGIN-BLIND, which is why no `fromRock` is passed: what the dust
+   * was made of decides only which MATERIAL the other branch picks,
+   * and ShardSystem has already resolved that into `material`.
    */
   onComposeNebulaShardPair(
     composition: import('../../types').NebulaColorStop[] | undefined,
@@ -968,7 +972,6 @@ export interface ShardAdapter {
     velocity: import('../../types').Vector2,
     entities: import('../../types').GameEntity[],
     physics: import('./PhysicsSystem').PhysicsSystem,
-    fromRock: boolean,
     material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
     excessUnits: number,
   ): void;

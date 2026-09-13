@@ -3925,11 +3925,13 @@ export class ShardSystem {
     // at 0 when we force-crystallised under the target cost.
     const excessUnits = Math.max(0, combinedUnits - requiredUnits);
 
-    // Adapter hook routes the 50/50 tile-vs-material outcome.  Position is
-    // the pair's midpoint; velocity is the mass-weighted average so a
-    // resulting shard inherits the cloud's drift.  Material is the COMMITTED
-    // target (honouring fromRock).
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock, material, excessUnits);
+    // Adapter hook routes the tile-vs-material outcome.  Position is the
+    // pair's midpoint; velocity is the mass-weighted average so a resulting
+    // shard inherits the cloud's drift.  Material is the COMMITTED target
+    // (honouring fromRock) — which is the ONLY thing origin still decides:
+    // the tile ROLL is origin-blind (user call), so `fromRock` no longer
+    // reaches the adapter at all.
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, material, excessUnits);
   }
 
   /**

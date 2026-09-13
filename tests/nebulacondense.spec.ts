@@ -16,10 +16,12 @@
  *   1. THE SPLIT IS THE LADDER'S, read at the roll.  The knob has to reach
  *      the real outcome — a share that is declared and never consulted looks
  *      exactly like one that works, because the roll still produces tiles.
- *   2. ROCK-DERIVED DUST IS EXEMPT, and deliberately so: that dust was rock
- *      a moment ago (a chip thrown by GRAIN_CHIP_DUST), so returning it to
- *      rock is conservation.  Routing it to a tile would MINT nebula out of
- *      terrain — a silent economy leak with no visible symptom at all.
+ *   2. THE ROLL IS ORIGIN-BLIND.  Rock-derived dust was once exempt — it
+ *      always condensed back to rock and could never thicken into a tile —
+ *      and that is reversed (user call): dust that has already become nebula
+ *      is nebula, and exempting it made material-derived cloud a second
+ *      class.  What origin still decides is WHICH material the other branch
+ *      picks, which is the half that is really conservation.
  *   3. A FAILED TILE PLACEMENT RETURNS THE MASS.  The tile branch can find
  *      every candidate hex occupied; both source shards have already faded
  *      by then, so a bare no-op DESTROYS the pair.  That was tolerated at an
@@ -39,8 +41,13 @@ import { boot, dialByName, engine, startRun } from './helpers';
 /** Drive N crystallising pairs through the real adapter and report what came
  *  out.  Counts at the SOURCE (the tile placement and the shard spawn) rather
  *  than by differencing populations, because a tile can also be destroyed and
- *  a condensed shard can merge on — either would corrupt a population count. */
-function crystallise(page: any, o: { n: number; fromRock: boolean; blockHexes?: boolean }) {
+ *  a condensed shard can merge on — either would corrupt a population count.
+ *
+ *  `material` is the COMMITTED target ShardSystem resolved — rock for
+ *  rock-derived dust, the blended hue's material otherwise — and is the only
+ *  trace of a cloud's origin the adapter now sees. */
+function crystallise(page: any,
+  o: { n: number; material: 'rock-shard' | 'glass-shard'; blockHexes?: boolean }) {
   return engine(page, (e: any, opt: any) => {
     const neb = e.nebulas;
     const ents = e.currentMap.entities;
@@ -73,7 +80,7 @@ function crystallise(page: any, o: { n: number; fromRock: boolean; blockHexes?: 
         const pos = { x: 600 + (i % 40) * 260, y: 600 + Math.floor(i / 40) * 260 };
         neb.onComposeNebulaShardPair(
           comp, pos, { x: 0, y: 0 }, ents, e.physics,
-          opt.fromRock, 'glass-shard', 0);
+          opt.material, 0);
       }
     } finally {
       neb.transmuteToTileAt = origTile;
@@ -94,7 +101,7 @@ test.describe('what a condensed nebula cloud becomes', () => {
       const N = 400;
 
       // SHIPPED step — leaving the nebula family is rare.
-      const shipped = await crystallise(page, { n: N, fromRock: false });
+      const shipped = await crystallise(page, { n: N, material: 'glass-shard' });
       const shippedMat = shipped.materials / N;
 
       // The pre-call behaviour, one named step away.  A/B rather than an
@@ -103,7 +110,7 @@ test.describe('what a condensed nebula cloud becomes', () => {
       // often than the even split it replaced.
       await dialByName(page, 'nebulaTileShareName',
         v => v.startsWith('half'), e => (e as any).dbg.cycleNebulaTileShare(), 6);
-      const old = await crystallise(page, { n: N, fromRock: false });
+      const old = await crystallise(page, { n: N, material: 'glass-shard' });
       const oldMat = old.materials / N;
 
       // Sampling noise on 400 Bernoulli trials at p≈0.5 is ~2.5% (1 s.d.),
@@ -122,19 +129,63 @@ test.describe('what a condensed nebula cloud becomes', () => {
       watch.assertClean();
     });
 
-  test('rock-derived dust returns to rock and is never eligible for a tile',
+  test('material-derived dust rolls the tile at the SAME rate as virgin cloud',
     async ({ page }) => {
       const watch = await boot(page);
       await startRun(page, 'NEBULA_FIELD');
 
-      const N = 200;
-      const r = await crystallise(page, { n: N, fromRock: true });
+      /*  Rock-derived dust used to be EXEMPT — it always condensed back to
+       *  rock and could never thicken into a tile.  Reversed (user call): a
+       *  rock chip's dust has already become nebula by the time it is
+       *  coalescing, and gating its outcome on where it came from made
+       *  material-derived dust a second class of cloud.
+       *
+       *  The A/B is against a cloud committed to a DIFFERENT material, which
+       *  is the only thing origin still decides.  "Same rate" is the claim, so
+       *  this is a COMPARISON rather than an absolute — it survives the share
+       *  being re-tuned. */
 
-      // CONSERVATION, not conversion.  This dust was rock a moment ago, so a
-      // tile here would mint nebula out of terrain — and it would do it
-      // silently, which is why the claim is worth an assertion of its own.
-      expect(r.tiles, 'rock dust never thickens into a nebula tile').toBe(0);
-      expect(r.materials, 'it condenses back to a material every time').toBe(N);
+      /*  DIAL THE LADDER EXPLICITLY (harness rules 12/13).  Two reasons, and
+       *  the second is what made this flake: a sibling test walks this same
+       *  cycle and leaves it wherever it finished, so an undialled run here
+       *  measures whatever step ran last; and the shipped step is the one
+       *  whose sampling noise is smallest, since p far from 0.5 narrows the
+       *  binomial.  Reading the default instead would also compare a step
+       *  against itself the day that default moves. */
+      await dialByName(page, 'nebulaTileShareName',
+        v => v.startsWith('rare'), e => (e as any).dbg.cycleNebulaTileShare(), 6);
+
+      /*  N and the BAND are sized off the binomial rather than guessed.  At
+       *  the shipped p ≈ 0.875, one arm's s.d. is sqrt(p(1-p)/N) = 1.2% at
+       *  N = 800, so the DIFFERENCE of two arms carries ~1.65%.  A 6-point
+       *  band is therefore ~3.6 s.d. — the previous 400/5-point pairing was
+       *  1.4 s.d. at the p = 0.5 a stale dial left behind, which is a test
+       *  that fails roughly one run in six while the product is correct. */
+      const N = 800, BAND = 0.06;
+      const rock = await crystallise(page, { n: N, material: 'rock-shard' });
+      const virgin = await crystallise(page, { n: N, material: 'glass-shard' });
+
+      /*  COMPARE THE ROLL, NOT THE PLACEMENT.  `tiles` counts tiles that
+       *  actually landed, and the first arm's tiles OCCUPY the hexes the
+       *  second arm then rolls into — so the later arm's rolls fail to place
+       *  and are handed back as nebula shards instead.  Measured, that alone
+       *  separated the two arms far past any band: it is hex crowding, which
+       *  is the third test's subject, not the share.  `tiles + lost` is the
+       *  number of TILE ROLLS, which is exactly the quantity the share
+       *  governs and the quantity this test is about. */
+      const rockRolls = rock.tiles + rock.lost;
+      const virginRolls = virgin.tiles + virgin.lost;
+
+      expect(rockRolls, 'rock-derived dust DOES roll the tile branch')
+        .toBeGreaterThan(0);
+      expect(rock.tiles, 'and tiles actually land for it').toBeGreaterThan(0);
+      expect(Math.abs(rockRolls / N - virginRolls / N),
+        'at the same rate as a virgin cloud').toBeLessThan(BAND);
+      // And the committed MATERIAL is still origin's to decide: when the roll
+      // does not take the tile branch, rock dust returns to rock.  That half
+      // is conservation and is deliberately untouched.
+      expect(rock.materials + rockRolls, 'every pair still produces something')
+        .toBe(N);
 
       watch.assertClean();
     });
@@ -146,7 +197,7 @@ test.describe('what a condensed nebula cloud becomes', () => {
 
       const N = 200;
       // Every candidate hex occupied, so every TILE roll fails to place.
-      const r = await crystallise(page, { n: N, fromRock: false, blockHexes: true });
+      const r = await crystallise(page, { n: N, material: 'glass-shard', blockHexes: true });
 
       expect(r.tiles, 'no tile can be placed').toBe(0);
       expect(r.lost, 'so every tile roll hits the failure branch')

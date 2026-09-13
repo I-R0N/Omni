@@ -5163,16 +5163,17 @@ export function cycleNebulaBond(): number {
 // family"): 'half (old)' is the pre-call literal and is one click from the
 // end, so the A/B is cheap.  Index 0 ships.
 //
-// TWO THINGS DELIBERATELY NOT CHANGED BY THIS, because neither is a cloud
-// leaving the nebula family:
-//   - ROCK-DERIVED DUST (`fromRock`) still always returns to rock and is
-//     never eligible for a tile.  That dust was rock a moment ago — a chip
-//     thrown by GRAIN_CHIP_DUST — so returning it to rock is conservation,
-//     not conversion, and routing it to a tile would MINT nebula out of
-//     terrain.
-//   - The material a non-rock cloud commits to is still its own HUE's.  This
-//     knob changes how OFTEN a cloud crystallises into a solid, never which
-//     solid it picks.
+// THE ROLL IS ORIGIN-BLIND (user call): every cloud takes it at the same
+// rate, whatever the dust was made of.  Rock-derived dust (`fromRock`, a chip
+// thrown by GRAIN_CHIP_DUST) was briefly EXEMPT — always condensing back to
+// rock, never eligible for a tile — on the argument that returning it to rock
+// is conservation rather than conversion.  That reads the timeline backwards:
+// by the time a puff is coalescing it IS nebula, and exempting it made
+// material-derived cloud a second class that could only ever leave the family.
+// What origin still decides is WHICH material the other branch picks — rock
+// dust returns to rock, everything else takes its own HUE's material — and
+// that is the half which really is conservation.  So this knob changes how
+// OFTEN a cloud crystallises into a solid, never which solid it picks.
 export const NEBULA_TILE_SHARE_CYCLE: ReadonlyArray<{ name: string; tileShare: number }> = [
   { name: 'rare 1/8',  tileShare: 0.875 },
   { name: 'half (old)', tileShare: 0.5   },
@@ -9875,6 +9876,8 @@ export const ROCK_AGGREGATION_TINT_FLOOR = 0.55;
 // NOTE: rock-origin dust (the `fromRock` flag) bypasses this map and
 // always returns to rock — only ambient cloud / glass-dust / enemy-puff
 // nebula-shards (which carry real hues) get spread across materials.
+// That is now the ONLY thing origin decides: whether a cloud becomes a
+// nebula TILE instead is an origin-blind roll (`nebulaTileShare`).
 // The four solid materials a nebula cloud can crystallise into.
 export type NebulaCondenseMaterial = 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard';
 

@@ -824,10 +824,10 @@ export class NebulaSystem {
      * mass to crystallise (ShardSystem owns the commit/accumulate gate).
      * Rolls `nebulaTileShare()` (DBG ▸ Visual ▸ "Neb solid"; ships at 7/8
      * toward the tile) between:
-     *   - nebula-tile   at the nearest free hex cell (cloud thickening;
-     *                   skipped for rock-derived dust).  If no candidate hex
-     *                   is free the pair's mass is handed back as a nebula-
-     *                   shard rather than lost.
+     *   - nebula-tile   at the nearest free hex cell (cloud thickening), at
+     *                   the SAME rate for every cloud whatever its dust was
+     *                   made of.  If no candidate hex is free the pair's mass
+     *                   is handed back as a nebula-shard rather than lost.
      *   - the COMMITTED material shard at the midpoint, plus — when the
      *     cloud overshot the material's cost — a leftover nebula-shard
      *     carrying the off-target "remainder" colours (excess-split), so
@@ -839,19 +839,22 @@ export class NebulaSystem {
         velocity: Vector2,
         entities: GameEntity[],
         physics: PhysicsSystem,
-        fromRock: boolean,
         material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
         excessUnits: number,
     ): void {
         const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
 
-        // Tile outcome — the cloud thickens back into a nebula-tile.  Skipped
-        // for rock-derived dust (it returns to rock, never a nebula tile:
-        // that dust WAS rock a moment ago, so sending it to a tile would mint
-        // nebula out of terrain).  The share is `nebulaTileShare()` rather
-        // than a literal half — user call, see the ladder in constants.ts —
-        // and it is read AT THE ROLL so a DBG click re-tunes live clouds.
-        if (!fromRock && Math.random() < nebulaTileShare()) {
+        // Tile outcome — the cloud thickens back into a nebula-tile.  EVERY
+        // cloud rolls it at the same rate, whatever the dust was made of
+        // (user call): a rock chip's dust has already become nebula by the
+        // time it is coalescing, so gating its outcome on where it came from
+        // made material-derived dust a second class of cloud.  Origin still
+        // decides WHICH material the other branch condenses into — rock dust
+        // returns to rock — which is the part that is really conservation.
+        // The share is `nebulaTileShare()` rather than a literal half — see
+        // the ladder in constants.ts — and it is read AT THE ROLL so a DBG
+        // click re-tunes the clouds already in the world.
+        if (Math.random() < nebulaTileShare()) {
             if (this.transmuteToTileAt(entities, position, composition, blendHex, physics)) return;
             // NO FREE HEX.  Both source shards are already fading, so doing
             // nothing here DESTROYS the pair's mass — a silent loss that only
