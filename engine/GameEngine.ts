@@ -4439,7 +4439,8 @@ export class GameEngine {
     // `updateProjectileFuses` covers the shell that meets nothing.
     if (proj.explosionRadius && proj.explosionRadius > 0
         && (proj.detonateOn !== 'enemy' || target.type !== EntityType.STRUCTURE)) {
-        applyExplosionAoE(this, impactPos, proj, target, hitFalloff);
+        applyExplosionAoE(this, impactPos, proj, target);
+        proj.detonated = true;
     }
   };
 
@@ -6017,14 +6018,32 @@ export class GameEngine {
       const list = this.entityIndex.projectiles;
       for (let i = 0; i < list.length; i++) {
           const p = list[i];
-          if (p.fuseTimer === undefined || !p.active) continue;
-          p.fuseTimer -= dt;
-          if (p.fuseTimer > 0) continue;
+          // A shell detonates AT MOST ONCE.  A round that already went off on
+          // an actor is not blasted again by the stop rule below.
+          if (p.detonated) continue;
+          // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
+          // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
+          // wherever a round can go no further — its bank ran dry, the grain
+          // bore ended mid-body, or an indestructible wall took it — and
+          // leaves it ALIVE for us, because a projectile deactivated there is
+          // pooled and stripped of its charge before this pass runs.  Without
+          // the second criterion a Cannon fired into terrain simply vanished:
+          // the `detonateOn: 'enemy'` gate correctly refuses to let a tile
+          // trip the charge, and the fuse never reached the round.
+          if (!p.active) continue;
+          const stopped = p.blastPending === true;
+          if (!stopped) {
+              if (p.fuseTimer === undefined) continue;
+              p.fuseTimer -= dt;
+              if (p.fuseTimer > 0) continue;
+          }
           p.fuseTimer = undefined;
+          p.blastPending = false;
           // Detonate where it is.  `undefined` target: nothing was struck, so
           // there is no direct hit to exclude from the ring.
           if (p.explosionRadius && p.explosionRadius > 0) {
-              applyExplosionAoE(this, p.position, p, undefined, p.hitFalloff ?? 1);
+              applyExplosionAoE(this, p.position, p);
+              p.detonated = true;
           }
           p.active = false;
       }

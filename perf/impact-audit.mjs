@@ -415,13 +415,13 @@ const pen = await page.evaluate(() => {
     }
   }
 
-  // THE BLAST, ISOLATED.  A DIRECT hit at a known point rather than the fuse:
-  // the fuse detonates ~450 units downrange after a flight the shot's own
-  // spread randomises, which moves the detonation tens of units run to run.
+  // THE BLAST, ISOLATED — and its THREE TRIGGERS.
+  //
+  // A DIRECT hit at a known point rather than the fuse: the fuse detonates
+  // ~450 units downrange after a flight the shot's own spread randomises.
   // The direct-hit target is excluded from its own ring, so what the
   // BYSTANDER loses is purely the shockwave — and the sweep is over in
-  // ~0.35 s, so the run is too short for the two bodies to drift together
-  // (which is what contaminated the first attempt at this).
+  // ~0.35 s, so the run is too short for the two bodies to drift together.
   {
     const OFF = 55;
     const mk = (dx, dy) => {
@@ -431,6 +431,19 @@ const pen = await page.evaluate(() => {
       f.health = f.maxHealth = 1e6; f.shield = 0; f.maxShield = 0;
       return f;
     };
+    const mkAt = (x, y) => {
+      const f = e.waves.spawnAt('RAMMER_1', { x, y }, ctx, false);
+      f.maxSpeed = 0; f.velocity.x = 0; f.velocity.y = 0;
+      f.health = f.maxHealth = 1e6; f.shield = 0; f.maxShield = 0;
+      return f;
+    };
+    const sweep = (n) => {
+      for (let i = 0; i < n; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+      }
+    };
+
+    // (1) ACTOR CONTACT.
     const direct = mk(400, 0);
     const bystander = mk(400, OFF);
     const shot = shotOf('CANNON', 1);
@@ -443,25 +456,55 @@ const pen = await page.evaluate(() => {
       shot.hitEntityIds = [];
       e.physics.resolveCollision(shot, direct, { x: 0, y: 0 }, undefined,
         e.handleEntityDeath, undefined, e.handleProjectileHit);
-      shot.active = false;              // the charge is spent
-      // Just long enough for the ring to reach the rim (lifetime 0.35 s).
-      for (let i = 0; i < 50; i++) {
-        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+      shot.active = false;
+      sweep(50);
+    }
+    const onActor = 1e6 - bystander.health;
+    direct.active = false; bystander.active = false;
+
+    // (2) ENERGY DEPLETION, THROUGH THE REAL LOOP.  Terrain by design does
+    //     not trip the charge on contact, so before the stop rule a witness
+    //     beside the tile lost NOTHING.  Driven by the ordinary substep
+    //     rather than a direct `resolveCollision` call, because the hand-off
+    //     from the stop to the fuse pass is an ORDERING property of that
+    //     step — and the first attempt at this feature failed on exactly
+    //     that (a deactivated projectile is pooled, and pooling strips the
+    //     charge, mid-step, before the fuse pass can read it).
+    let onSpent = null, spentWhere = null;
+    {
+      const tile = e.currentMap.entities.find(x => x.active
+        && x.mass === Infinity && x.type === 'STRUCTURE'
+        && x.shardVariant && x.shardVariant !== 'nebula-tile');
+      if (tile) {
+        const witness = mkAt(tile.position.x, tile.position.y + OFF);
+        const sh = shotOf('CANNON', 1);
+        if (sh) {
+          // Park it beside the tile with a bank far below one grain, so the
+          // contact the real step finds is a STOP rather than a bore — which
+          // is what "ran out of mechanical travel energy" means.
+          sh.position.x = tile.position.x - 30;
+          sh.position.y = tile.position.y;
+          sh.velocity.x = 2; sh.velocity.y = 0;
+          sh.mass = 0.02;
+          sh.hitEntityIds = [];
+          for (let i = 0; i < 120; i++) {
+            e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+          }
+          spentWhere = { detonated: sh.detonated === true };
+        }
+        onSpent = 1e6 - witness.health;
+        witness.active = false;
       }
     }
+
     out.blast = {
       authoredInConfig: cfg.explosionDamage === undefined ? null : cfg.explosionDamage,
       shotBlast, shotMass, offset: OFF,
       radius: cfg.explosionRadius ?? null,
       muzzleSpeed: cfg.speed,
-      sentinelLost: 1e6 - bystander.health,
-      // What the model says it should be: peak x the ring's own linear
-      // distance falloff.  Printed beside the measurement so the two can be
-      // compared rather than the number being taken on trust.
-      predicted: shotBlast !== null && shotBlast !== undefined
-        ? shotBlast * (1 - OFF / (cfg.explosionRadius ?? 1)) : null,
+      sentinelLost: onActor,
+      onSpent, spentWhere,
     };
-    direct.active = false; bystander.active = false;
   }
   return out;
 });
@@ -688,8 +731,11 @@ console.log('\n=== 8. PENETRATION AND THE BLAST (fired, not derived) ===\n');
     console.log(`    shell mass ${f(b.shotMass, 2)}   muzzle ${f(b.muzzleSpeed, 1)} u/step   radius ${f(b.radius, 0)}`);
     console.log(`    explosionDamage authored in the config   ${b.authoredInConfig === null ? 'none — DERIVED' : f(b.authoredInConfig, 2)}`);
     console.log(`    explosionDamage the shell actually flew  ${f(b.shotBlast, 2)}`);
-    console.log(`    a bystander ${f(b.offset,0)} off the centre lost       ${f(b.sentinelLost, 2)}`);
-    console.log(`    the model predicts                      ${f(b.predicted, 2)}`);
+    console.log('    THREE TRIGGERS — what a BYSTANDER ${OFF} off the blast loses:'.replace('${OFF}', f(b.offset,0)));
+    console.log(`      on an ACTOR contact                   ${f(b.sentinelLost, 2)}`);
+    console.log(`      on ENERGY DEPLETION against terrain   ${f(b.onSpent, 2)}`);
+    console.log(`      (the FUSE covers a shell that meets nothing at all)`);
+    console.log(`    ENERGY-DEPLETION trigger: a witness beside the tile lost ${f(b.onSpent, 2)}`);
   }
 }
 console.log('');

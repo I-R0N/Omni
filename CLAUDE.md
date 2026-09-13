@@ -79,7 +79,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  412 tests.  All run at
+                          writing a DBG-knob test).  414 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1843,10 +1843,40 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   free (a mark buys a heavier round and the blast reads the round's mass);
   a CHARGED shell blasts harder by being heavier (the charge premium is
   `chargedMass(config, 1.5)` now, not a scalar on a field the Cannon no
-  longer authors); and a shell that spent its bank BORING blasts weaker,
-  because the `× hitFalloff` already at the AoE call site is exactly the
-  fraction of launch energy it has left — peak × (E/E₀) is the energy it
-  still carries, with no second curve anywhere.
+  longer authors).  A shell that spent its bank boring does NOT blast weaker —
+  see the payload rule below; that scaling was removed.
+  **THREE THINGS DETONATE IT, AND "IT STOPPED" IS THE THIRD** (user call).
+  `detonateOn: 'enemy'` is what stops a heavy round being a contact mine, and
+  the gap it left was that a Cannon fired into tiles or shards simply
+  VANISHED — the fuse could not reach the round either.  The criteria are now
+  an ACTOR contact, the FUSE, and **running out of mechanical travel energy**:
+  `PhysicsSystem` arms `GameEntity.blastPending` wherever an explosive round
+  can go no further (its bank ran dry, the grain bore ended mid-body, an
+  indestructible wall took it) and `GameEngine.updateProjectileFuses` — already
+  the "detonate where it is, with nothing to exclude" path — fires it.
+  TWO THINGS ARE LOAD-BEARING and both were learned by measuring:
+  - **The stop site leaves the round ALIVE.**  The entity-compaction pass at
+    the end of `updatePhysics` releases an INACTIVE projectile to the pool, and
+    `releaseToPool` clears `explosionRadius`/`explosionDamage` — so a round
+    deactivated at the stop is a BLANK by the time the fuse pass reads it,
+    mid-step.  The first version armed the flag, deactivated as before, and
+    still never blasted; the flag was set correctly the whole time.
+  - **A round detonates AT MOST ONCE** (`GameEntity.detonated`), because a
+    round drained to nothing on an ACTOR takes both paths at once.  The guard
+    sits in two places — the stop site refuses to arm, the fuse pass refuses
+    to fire — so it takes removing BOTH to see the double blast (measured: two
+    damaging rings).  Both flags are per-LIFE and MUST be cleared on the
+    pooled spawn path, or a recycled shell either never explodes again or
+    explodes on spawn.
+  **AND THE BLAST IS PAYLOAD, NOT TRAVEL ENERGY.**  `applyExplosionAoE` used
+  to scale by the round's `hitFalloff`; that DOUBLE-COUNTS, since
+  `explosionDamage` is already derived at spawn from the round's own muzzle
+  energy, and it makes the energy-depletion trigger inert by construction — a
+  shell detonating *because* it ran out of travel energy has ~none left, so
+  the blast fired at the exact moment the rule exists for would land ~zero.  A
+  warhead does not shrink because the shell flew through a wall: the round's
+  MASS sizes the charge (so Gunnery and the charge still buy a bigger one) and
+  travel energy only decides how far it gets.
   ABSENT MEANS DERIVED, a value means authored: `BOSS_WEAPONS.SIEGE` keeps
   its own `explosionDamage: 6`, because a designed encounter's splash is a
   number someone chose and deriving it would have tripled the Bastion's

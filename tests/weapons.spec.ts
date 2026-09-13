@@ -1012,3 +1012,150 @@ test.describe('the base bank, and the blast derived from it', () => {
       watch.assertClean();
     });
 });
+
+/** THE THIRD DETONATION CRITERION: a shell that STOPS, blasts.
+ *
+ *  `detonateOn: 'enemy'` is what stops a heavy round being a contact mine —
+ *  terrain does not trip the charge, the shell bores instead.  The gap that
+ *  left is what the user reported: a Cannon fired into tiles or shards simply
+ *  VANISHED.  The fuse could never reach it, because a projectile deactivated
+ *  where it stopped is pooled by the entity-compaction pass at the end of
+ *  `updatePhysics` — and `releaseToPool` strips `explosionRadius` and
+ *  `explosionDamage`, so by the time `updateProjectileFuses` ran there was
+ *  nothing left to detonate.  That mid-step pooling is the whole reason the
+ *  stop site leaves the round ALIVE and lets the fuse pass end it.
+ *
+ *  Two claims, and the second is the one that keeps the first honest:
+ *
+ *   1. A round whose BANK runs dry against terrain blasts where it stopped.
+ *   2. A round detonates AT MOST ONCE — an actor contact already fires the
+ *      charge, and the stop rule must not fire a second one on top.
+ */
+test.describe('a shell that runs out of travel energy blasts where it stops', () => {
+  test('terrain stops the round, and the charge goes off there', async ({ page }) => {
+    const watch = await boot(page);
+    await quietField(page);
+
+    const r = await engine(page, () => {
+      const e: any = (window as any).__omniEngine;
+      const p = e.player;
+      const ctx = e.waveContext();
+      const tile = e.currentMap.entities.find((x: any) => x.active
+        && x.mass === Infinity && x.type === 'STRUCTURE'
+        && x.shardVariant && x.shardVariant !== 'nebula-tile');
+      if (!tile) return { witnessLost: -1, detonated: false };
+
+      // A WITNESS inside the blast radius but not the thing struck, so what
+      // it loses is purely the shockwave.
+      const witness = e.waves.spawnAt('RAMMER_1',
+        { x: tile.position.x, y: tile.position.y + 55 }, ctx, false);
+      witness.maxSpeed = 0; witness.velocity.x = 0; witness.velocity.y = 0;
+      witness.health = witness.maxHealth = 1e6;
+      witness.shield = 0; witness.maxShield = 0;
+
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+        { x: p.position.x + 500, y: p.position.y });
+      const sh = e.currentMap.entities.find(
+        (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+      for (const x of e.currentMap.entities) {
+        if (!before.has(x.id) && x !== sh) x.active = false;
+      }
+      if (!sh) return { witnessLost: -1, detonated: false };
+
+      // Park it beside the tile with a bank far below ONE GRAIN of the
+      // material, so the contact the real step finds is a STOP rather than a
+      // bore.  That is what "ran out of mechanical travel energy" means, and
+      // it is reached long before the 0.42s fuse — so a blast here can only
+      // be the stop rule.
+      sh.position.x = tile.position.x - 30;
+      sh.position.y = tile.position.y;
+      sh.velocity.x = 2; sh.velocity.y = 0;
+      sh.mass = 0.02;
+      sh.hitEntityIds = [];
+
+      // The REAL substep, because the hand-off from the stop to the fuse pass
+      // is an ordering property of it: physics arms the round, the compaction
+      // would pool it, the fuse pass ends it.
+      let detonatedWhile = false;
+      for (let i = 0; i < 40; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        if (sh.detonated) detonatedWhile = true;
+      }
+      const witnessLost = 1e6 - witness.health;
+      witness.active = false;
+      // Well inside the 0.42s fuse (50 substeps), so nothing here is the fuse.
+      return { witnessLost, detonated: detonatedWhile, substeps: 40 };
+    });
+
+    expect(r.witnessLost, 'a tile was found to stop the round on').toBeGreaterThanOrEqual(0);
+    expect(r.detonated, 'the stopped round fired its charge').toBe(true);
+    expect(r.witnessLost, 'and a bystander in the radius actually took it')
+      .toBeGreaterThan(0);
+
+    watch.assertClean();
+  });
+
+  test('a round detonates at most once, however it ends', async ({ page }) => {
+    const watch = await boot(page);
+    await quietField(page);
+
+    /*  An ACTOR contact already fires the charge.  A round drained to nothing
+     *  then takes BOTH paths — it hit an actor AND it stopped — so a naive
+     *  "detonate wherever it is deactivated" blasts twice.  `detonated` is
+     *  checked in TWO places (the stop site refuses to arm, and the fuse pass
+     *  refuses to fire), so this goes red only when BOTH are removed —
+     *  measured: two damaging rings instead of one.  That is defence in
+     *  depth rather than a redundant check, and worth knowing before
+     *  "simplifying" either one away. */
+    const r = await engine(page, () => {
+      const e: any = (window as any).__omniEngine;
+      const p = e.player;
+      const ctx = e.waveContext();
+      const mk = (dx: number, dy: number) => {
+        const f = e.waves.spawnAt('RAMMER_1',
+          { x: p.position.x + dx, y: p.position.y + dy }, ctx, false);
+        f.maxSpeed = 0; f.velocity.x = 0; f.velocity.y = 0;
+        f.health = f.maxHealth = 1e6; f.shield = 0; f.maxShield = 0;
+        return f;
+      };
+      const direct = mk(400, 0);
+      const bystander = mk(400, 55);
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+        { x: p.position.x + 500, y: p.position.y });
+      const sh = e.currentMap.entities.find(
+        (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+      for (const x of e.currentMap.entities) {
+        if (!before.has(x.id) && x !== sh) x.active = false;
+      }
+      if (!sh) return { rings: -1, blast: 0, lost: 0 };
+      // Drain it so the SAME contact is both "hit an actor" and "stopped".
+      sh.position.x = direct.position.x; sh.position.y = direct.position.y;
+      sh.mass = 0.02; sh.velocity.x = 2; sh.velocity.y = 0;
+      sh.hitEntityIds = [];
+      const blast = sh.explosionDamage;
+      for (let i = 0; i < 40; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+      }
+      // Rings are the countable artefact: one detonation, one damaging ring.
+      const rings = e.currentMap.entities.filter(
+        (x: any) => x.isExplosionRing && (x.explosionDamage ?? 0) > 0).length;
+      const lost = 1e6 - bystander.health;
+      direct.active = false; bystander.active = false;
+      return { rings, blast, lost };
+    });
+
+    expect(r.rings, 'exactly one damaging ring, not two').toBe(1);
+    // And the bystander took at most ONE blast's worth — the ring's own
+    // distance falloff halves it at half the radius, so two would exceed it.
+    expect(r.lost, 'so the bystander cannot have taken two blasts')
+      .toBeLessThanOrEqual(r.blast);
+
+    watch.assertClean();
+  });
+});

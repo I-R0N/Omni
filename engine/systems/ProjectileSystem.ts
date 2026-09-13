@@ -222,6 +222,12 @@ export class ProjectileSystem {
         // a timer it never armed.
         pooled.detonateOn = config.detonateOn;
         pooled.fuseTimer = config.fuseSeconds;
+        // Unconditional like the fuse beside it, and for a sharper reason: a
+        // recycled shell that kept `detonated` from its last life would never
+        // explode again, and one that kept `blastPending` would explode on
+        // spawn.  Both are per-LIFE state on a pooled object.
+        pooled.blastPending = false;
+        pooled.detonated = false;
         pooled.explosionDamage = blastDamage;
         pooled.explosionKnockback = config.explosionKnockback;
         pooled.glow = config.glow;
@@ -271,6 +277,8 @@ export class ProjectileSystem {
           explosionKnockback: config.explosionKnockback,
           detonateOn: config.detonateOn,
           fuseTimer: config.fuseSeconds,
+          blastPending: false,
+          detonated: false,
           glow: config.glow,
           chainCount: config.chainCount,
           chainRange: config.chainRange,

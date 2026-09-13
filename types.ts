@@ -502,6 +502,19 @@ export interface GameEntity {
    *  by structures (`WeaponConfig.detonateOn: 'enemy'`).  Absent → the shot
    *  has no fuse and simply expires. */
   fuseTimer?: number;
+  /** A shell that STOPPED and owes a blast where it lies (user call): the
+   *  third detonation criterion beside an actor contact and the fuse.  Set by
+   *  PhysicsSystem wherever an explosive round can no longer carry itself
+   *  anywhere — its bank ran dry, the grain bore ended mid-body, or an
+   *  indestructible wall took it — and consumed by
+   *  `GameEngine.updateProjectileFuses`, which is already the "detonate where
+   *  it is, with nothing to exclude" path. */
+  blastPending?: boolean;
+  /** A shell detonates AT MOST ONCE.  Set at every site that fires the AoE,
+   *  read by the fuse pass so a round that already went off on an actor is
+   *  not blasted a second time by the stop rule above.  MUST be cleared when
+   *  a pooled projectile is recycled, or that round never explodes again. */
+  detonated?: boolean;
   /** Copied from the weapon at spawn so the on-hit path can ask what trips
    *  this shell without reaching back to its config. */
   detonateOn?: 'impact' | 'enemy';

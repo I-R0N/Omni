@@ -3042,3 +3042,55 @@ assertion written against it.
 **STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
 by this.
 
+### 17. A shell that stops, blasts (2026-09-13)
+
+**REPORTED**: "The cannon doesn't appear to blast when hitting tiles or
+shards.  If the cannon runs out of mechanical travel energy then it should
+also blast.  So the two criteria should be time out and energy depletion."
+
+**THE GAP WAS REAL AND STEP 5a PUT IT THERE.**  `detonateOn: 'enemy'` is what
+stops a heavy round being a contact mine — terrain does not trip the charge,
+the shell bores instead — and the fallback for a shell that meets nothing was
+the fuse.  But a shell that meets TERRAIN and stops meets neither: the gate
+refuses the tile, and the fuse never arrives.  It simply vanished.
+
+**THE CRITERIA ARE NOW THREE**, not two, and the third is the user's:
+an ACTOR contact, the FUSE, and RUNNING OUT OF TRAVEL ENERGY.  The actor
+contact is kept deliberately and it is not a quibble — a Cannon shell carries
+a bank of ~86 damage-equivalents against an 18 bite, so it does NOT stop on a
+real enemy; under "stop or fuse" alone the weapon would pass through its
+target and blast somewhere behind it.  Energy depletion is what covers
+terrain, where the shell genuinely stops.
+
+**THE BUG UNDER THE BUG**, and the reason the first attempt failed with the
+flag set correctly the whole time: `updatePhysics` ends with an
+entity-compaction pass that releases INACTIVE projectiles to the pool, and
+`releaseToPool` clears `explosionRadius` / `explosionDamage`.  So a round
+deactivated at the stop is a BLANK by the time `updateGameLogic` reaches the
+fuse pass — mid-step, in the same substep.  The fix is that the stop site
+leaves the round ALIVE and lets the fuse pass end it.  **The general lesson:
+when deferring work to a later phase of the same step, the question is not
+only "does the later phase run" but "does anything between them recycle what
+I am deferring".**  Object pools are exactly where that bites.
+
+**AND THE BLAST STOPPED READING TRAVEL ENERGY.**  Entry 16 derived
+`explosionDamage` at spawn from the round's muzzle energy and left the AoE's
+existing `× hitFalloff` in place, documented as "a shell that spent its bank
+boring blasts weaker".  That is wrong twice over.  It DOUBLE-COUNTS — the
+charge is already a function of the round's energy — and it makes this
+entry's whole trigger inert by construction: a shell detonating *because* it
+ran out of travel energy has ~none left, so the blast fired at the exact
+moment the rule exists for would land ~zero.  A warhead does not shrink
+because the shell flew through a wall.  Mass sizes the charge; travel energy
+only decides how far it gets.
+
+**AT MOST ONCE.**  A round drained to nothing on an ACTOR takes both paths at
+once, so `GameEntity.detonated` guards it — in TWO places, the stop site and
+the fuse pass, which is why the regression goes red only when both are
+removed (measured: two damaging rings instead of one).  Both flags are per
+LIFE and are cleared on the pooled spawn path; a recycled shell that kept
+`detonated` would never explode again, and one that kept `blastPending` would
+explode on spawn.
+
+MEASURED (`perf/impact-audit.mjs` §8, a bystander 55 off the blast centre):
+on an actor contact 6.4, on energy depletion against terrain **0 → 5.9**.

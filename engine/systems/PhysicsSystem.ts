@@ -4382,7 +4382,36 @@ export class PhysicsSystem {
                   target.velocity.y += proj.velocity.y * massRatio * 0.3;
               }
           } else if (!target.isExploding) {
-              proj.active = false;
+              // A SHELL THAT STOPS, BLASTS (user call).  Running out of
+              // mechanical travel energy is the third detonation criterion
+              // beside an actor contact and the fuse, and this branch is
+              // exactly "the round goes no further": its bank ran dry, the
+              // grain bore ended mid-body, or an indestructible wall took it.
+              // Without it a Cannon fired into terrain simply VANISHED — the
+              // `detonateOn: 'enemy'` gate correctly refuses to let a tile
+              // trip the charge, and the fuse could never reach the round
+              // because the fuse pass skips a dead projectile.
+              //
+              // DEFERRED rather than fired here: `updateProjectileFuses` is
+              // already the "detonate where it is, with nothing to exclude"
+              // path, and PhysicsSystem must not reach into the AoE.  It runs
+              // LATER IN THIS SAME SUBSTEP (updatePhysics then
+              // updateGameLogic, over the entity index built at the top of
+              // the step), so the round is still in the list it walks.
+              if (proj.explosionRadius && proj.explosionRadius > 0 && !proj.detonated) {
+                  // ARMED, AND DELIBERATELY LEFT ALIVE for the rest of this
+                  // substep.  The entity-compaction pass at the end of
+                  // `updatePhysics` releases an INACTIVE projectile straight
+                  // back to the pool, and `releaseToPool` clears
+                  // `explosionRadius` / `explosionDamage` — so a shell
+                  // deactivated here is a blank by the time `updateGameLogic`
+                  // reaches the fuse pass, which is exactly why the first
+                  // version of this armed the flag and still never blasted.
+                  // The fuse pass ends it moments later, in this same substep.
+                  proj.blastPending = true;
+              } else {
+                  proj.active = false;
+              }
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;
                   target.velocity.x += proj.velocity.x * massRatio;
