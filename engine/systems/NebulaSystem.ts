@@ -1,5 +1,5 @@
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
-import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, randomPlasticShardShade, nebulaHueToShardVariant, NEBULA_CONDENSE } from '../../constants';
+import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, randomPlasticShardShade, nebulaHueToShardVariant, NEBULA_CONDENSE, nebulaTileShare } from '../../constants';
 import {
     TileGenerator,
     HEX_SIZE,
@@ -563,10 +563,12 @@ export class NebulaSystem {
      * Tile-outcome of the nebula pair-transmute.  Looks for the
      * nearest free hex cell starting from `position` (the pair's
      * midpoint) — origin cell + 6 neighbours, sorted by distance.
-     * If every candidate is occupied the call no-ops: the two
-     * source shards have already faded, so net effect is "the pair
-     * dissolved without producing anything" — acceptable fallback
-     * for a 50/50 roll where the shard side always succeeds.
+     * Returns false if every candidate is occupied.  The CALLER must do
+     * something with that: the two source shards have already faded, so a
+     * bare no-op destroys the pair's mass.  It used to be treated as an
+     * acceptable loss at an even split; with the tile share now dominant it
+     * would be most of the loss in the game, so the caller re-emits the mass
+     * as a nebula-shard.
      */
     private transmuteToTileAt(
         entities: GameEntity[],
@@ -820,9 +822,12 @@ export class NebulaSystem {
      * ShardAdapter pair-transmute hook.  Called after a nebula-shard
      * ↔ nebula-shard bond resolves AND the cloud has accumulated enough
      * mass to crystallise (ShardSystem owns the commit/accumulate gate).
-     * Rolls 50/50 between:
+     * Rolls `nebulaTileShare()` (DBG ▸ Visual ▸ "Neb solid"; ships at 7/8
+     * toward the tile) between:
      *   - nebula-tile   at the nearest free hex cell (cloud thickening;
-     *                   skipped for rock-derived dust).
+     *                   skipped for rock-derived dust).  If no candidate hex
+     *                   is free the pair's mass is handed back as a nebula-
+     *                   shard rather than lost.
      *   - the COMMITTED material shard at the midpoint, plus — when the
      *     cloud overshot the material's cost — a leftover nebula-shard
      *     carrying the off-target "remainder" colours (excess-split), so
@@ -841,11 +846,23 @@ export class NebulaSystem {
         const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
 
         // Tile outcome — the cloud thickens back into a nebula-tile.  Skipped
-        // for rock-derived dust (it returns to rock, never a nebula tile).
-        // May no-op if every candidate hex is occupied; acceptable (both
-        // source shards are already fading).
-        if (!fromRock && Math.random() < 0.5) {
-            this.transmuteToTileAt(entities, position, composition, blendHex, physics);
+        // for rock-derived dust (it returns to rock, never a nebula tile:
+        // that dust WAS rock a moment ago, so sending it to a tile would mint
+        // nebula out of terrain).  The share is `nebulaTileShare()` rather
+        // than a literal half — user call, see the ladder in constants.ts —
+        // and it is read AT THE ROLL so a DBG click re-tunes live clouds.
+        if (!fromRock && Math.random() < nebulaTileShare()) {
+            if (this.transmuteToTileAt(entities, position, composition, blendHex, physics)) return;
+            // NO FREE HEX.  Both source shards are already fading, so doing
+            // nothing here DESTROYS the pair's mass — a silent loss that only
+            // the tile branch can suffer (the material branch always
+            // succeeds).  Measured at 9.1% of tile rolls on UNIVERSE while
+            // the split was even; with the tile share now dominant it would
+            // be most of the loss in the game.  Hand the mass back to the
+            // cloud instead, so it drifts and tries again: conserving, and in
+            // the direction the call asks for (the cloud stays nebula rather
+            // than falling through to a material it did not roll).
+            this.spawnLeftoverNebulaShard(entities, position, velocity, composition ?? [{ hex: blendHex, weight: 1 }], 1);
             return;
         }
 

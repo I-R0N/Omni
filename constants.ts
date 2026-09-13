@@ -5142,6 +5142,66 @@ export function cycleNebulaBond(): number {
   return activeNebulaBondIndex;
 }
 
+// ── WHAT A CONDENSED CLOUD BECOMES: A TILE, OR SOMETHING ELSE ────────────────
+//
+// A nebula pair that has accumulated enough mass CRYSTALLISES, and the outcome
+// was a bare `Math.random() < 0.5` inside NebulaSystem: half the time the
+// cloud thickened back into a nebula-TILE, half the time it condensed into a
+// solid shard of whatever MATERIAL its hue maps to (rock / glass / plastic /
+// metal).  Measured through the real sim, that ran at its nominal rate —
+// 53.9% tile on NEBULA_FIELD over 90 s, 61.1% on UNIVERSE — so nebula was
+// turning into other materials about as often as it was turning into more
+// nebula, which reads as the clouds leaking away into the terrain.
+//
+// USER CALL: condensation into other materials should be SIGNIFICANTLY rarer,
+// and the tile route correspondingly more common.  `TILE_SHARE` is that split,
+// named rather than inlined so there is one number to move and one place the
+// measurement attaches to.
+//
+// THE LADDER IS THE MATERIAL SIDE read as a rarity, which is the way the
+// question is actually asked ("how often does a cloud leave the nebula
+// family"): 'half (old)' is the pre-call literal and is one click from the
+// end, so the A/B is cheap.  Index 0 ships.
+//
+// TWO THINGS DELIBERATELY NOT CHANGED BY THIS, because neither is a cloud
+// leaving the nebula family:
+//   - ROCK-DERIVED DUST (`fromRock`) still always returns to rock and is
+//     never eligible for a tile.  That dust was rock a moment ago — a chip
+//     thrown by GRAIN_CHIP_DUST — so returning it to rock is conservation,
+//     not conversion, and routing it to a tile would MINT nebula out of
+//     terrain.
+//   - The material a non-rock cloud commits to is still its own HUE's.  This
+//     knob changes how OFTEN a cloud crystallises into a solid, never which
+//     solid it picks.
+export const NEBULA_TILE_SHARE_CYCLE: ReadonlyArray<{ name: string; tileShare: number }> = [
+  { name: 'rare 1/8',  tileShare: 0.875 },
+  { name: 'half (old)', tileShare: 0.5   },
+  { name: 'some 1/4',  tileShare: 0.75  },
+  { name: 'never',     tileShare: 1     },
+] as const;
+const NEBULA_TILE_SHARE_DEFAULT_INDEX = 0;
+let activeNebulaTileShareIndex = NEBULA_TILE_SHARE_DEFAULT_INDEX;
+
+/** The probability a crystallising cloud thickens into a nebula-TILE rather
+ *  than condensing into a solid material shard.  Read AT THE ROLL, so a DBG
+ *  click re-tunes the clouds already in the world. */
+export function nebulaTileShare(): number {
+  return NEBULA_TILE_SHARE_CYCLE[activeNebulaTileShareIndex].tileShare;
+}
+export function getActiveNebulaTileShareName(): string {
+  const step = NEBULA_TILE_SHARE_CYCLE[activeNebulaTileShareIndex];
+  // The "(def)" marker is DERIVED from the default index rather than written
+  // into a step's name, so it cannot end up on the wrong step the day the
+  // default moves (CLAUDE.md §8, the nebula-sprite lesson).
+  return activeNebulaTileShareIndex === NEBULA_TILE_SHARE_DEFAULT_INDEX
+    ? `${step.name} (def)` : step.name;
+}
+export function cycleNebulaTileShare(): number {
+  activeNebulaTileShareIndex =
+    (activeNebulaTileShareIndex + 1) % NEBULA_TILE_SHARE_CYCLE.length;
+  return activeNebulaTileShareIndex;
+}
+
 // ── DBG: SCANNING OFF, EVERYTHING REVEALED ─────────────────────────
 // A perf A/B, not a gameplay knob.  The scanner does a lot of continuous
 // work — `discoverStructures` walks a 900-unit radius of the static grid

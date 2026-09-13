@@ -2104,6 +2104,9 @@ export interface EngineStats {
   nebulaSpinDampName?: string;
   /** DBG readout: the nebula bonding step (NEBULA_BOND_CYCLE). */
   nebulaBondName?: string;
+  /** DBG readout: how rarely a condensing cloud leaves the nebula family
+   *  (NEBULA_TILE_SHARE_CYCLE). */
+  nebulaTileShareName?: string;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards
   // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
   shatterGraceName?: string;

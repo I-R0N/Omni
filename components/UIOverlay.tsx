@@ -148,6 +148,7 @@ interface UIOverlayProps {
   onCycleNebulaDamp?: () => void;
   onCycleNebulaSpinDamp?: () => void;
   onCycleNebulaBond?: () => void;
+  onCycleNebulaTileShare?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
@@ -484,6 +485,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaDamp,
   onCycleNebulaSpinDamp,
   onCycleNebulaBond,
+  onCycleNebulaTileShare,
   onCycleShatterGrace,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
@@ -1923,6 +1925,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Neb bond', onCycleNebulaBond,
                   stats.nebulaBondName ?? 'goo',
                   'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (off 1x / firm 2x / strong 5x / goo 12x). GOO ships; \u2018off (old)\u2019 is one click away because the cycle wraps, so the A/B against pre-feature nebula is still the first press. Stretching the timer is what makes the grip legible \u2014 at the base ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles. It COSTS entity count, which is frame time: live shard population measured 28 / 75 / 307 / 597 across the four steps.')}
+                {ctrlRow('Neb solid', onCycleNebulaTileShare,
+                  stats.nebulaTileShareName ?? 'rare 1/8',
+                  'How often a CRYSTALLISING nebula cloud condenses into a solid material shard (rock / glass / plastic / metal) instead of thickening back into a nebula TILE. It was an even 50/50 and measured that way in play (53.9% tile on NEBULA_FIELD, 61.1% on UNIVERSE over 90 s), so nebula leaked into the terrain about as fast as it rebuilt itself; the shipped step makes leaving the family rare. \u2018half (old)\u2019 is the pre-call behaviour. Rock-derived dust is unaffected \u2014 it always returns to rock, which is conservation rather than conversion \u2014 and this never changes WHICH material a cloud picks, only how often it picks one at all.')}
                 {ctrlRow('Neb stretch', onCycleNebulaStretch,
                   stats.nebulaStretchName ?? '0.10',
                   'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10 ships. The squash axis aligns to velocity while the sprite keeps its own rotation. The shipped step is the TOP of the ladder, so the cycle wraps to OFF on the first click \u2014 the A/B against no stretch at all is one press away.')}

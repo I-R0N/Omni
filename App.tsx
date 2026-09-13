@@ -673,6 +673,9 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaSpinDamp();
   };
 
+  const handleCycleNebulaTileShare = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaTileShare();
+  };
   const handleCycleNebulaBond = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaBond();
   };
@@ -1092,6 +1095,7 @@ const App: React.FC = () => {
         onCycleNebulaDamp={handleCycleNebulaDamp}
         onCycleNebulaSpinDamp={handleCycleNebulaSpinDamp}
         onCycleNebulaBond={handleCycleNebulaBond}
+        onCycleNebulaTileShare={handleCycleNebulaTileShare}
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlayerThrust={handleCyclePlayerThrust}
         onCyclePlayerSpeed={handleCyclePlayerSpeed}

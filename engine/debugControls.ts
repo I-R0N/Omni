@@ -30,7 +30,8 @@ import {
     STRUCTURE_CONSTANTS, LOCAL_MERGE_CONSTANTS, PERF_CONTROLLER_CONSTANTS,
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
-    cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
+    cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, cycleNebulaTileShare,
+    togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity, cycleBlastEnergy,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
@@ -849,6 +850,14 @@ export class DebugControls {
    *  and `perf/capture.mjs`'s `nebbondoff` ablation is what needs it. */
   cycleNebulaBond(): number {
     return cycleNebulaBond();
+  }
+
+  /** DBG: how often a crystallising nebula cloud thickens into a TILE rather
+   *  than condensing into a solid material shard.  Returns the index for the
+   *  same reason `cycleNebulaBond` does — a harness driving to a specific
+   *  step cannot read `__omniStats` in the same tick. */
+  cycleNebulaTileShare(): number {
+    return cycleNebulaTileShare();
   }
 
   /**

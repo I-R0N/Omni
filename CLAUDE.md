@@ -63,7 +63,8 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           lighting (the
                           PR #88 gauntlet) and the play-test follow-ups
                           terrain / shake / knockback / deflect /
-                          flashlight / nebulaspin / roll / shipsprites /
+                          flashlight / nebulaspin / nebulacondense /
+                          roll / shipsprites /
                           shardblend, fracture, bubbles (the Phase-A
                           aggro timeout + the immovability fix, and
                           the mouth-size / bite eating rules) and
@@ -79,7 +80,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  414 tests.  All run at
+                          writing a DBG-knob test).  417 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -3835,6 +3836,41 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   .TILE_REGEN_ENABLED` is `false`; shattered nebula tiles do not respawn
   on a timer. New tiles only appear via shard→tile transmutation when
   shards merge past the area threshold.
+- **A CONDENSING CLOUD MOSTLY STAYS NEBULA** (user call).  A nebula pair
+  that has accumulated enough mass CRYSTALLISES, and the outcome was a bare
+  `Math.random() < 0.5` inside `NebulaSystem.onComposeNebulaShardPair`: half
+  the time the cloud thickened back into a nebula-TILE, half the time it
+  condensed into a solid shard of whatever MATERIAL its hue maps to.
+  Measured through the real sim it ran at exactly that — 53.9% tile on
+  NEBULA_FIELD and 61.1% on UNIVERSE over 90 s — so nebula leaked into the
+  terrain about as fast as it rebuilt itself, and the clouds visibly thinned.
+  `nebulaTileShare()` (`NEBULA_TILE_SHARE_CYCLE`, DBG ▸ Visual ▸ **"Neb
+  solid"**, index 0 ships at 7/8 toward the tile) is that split, named rather
+  than inlined so there is one number to move.  Read AT THE ROLL, so a click
+  re-tunes the clouds already in the world.  Measured after: material
+  outcomes 29 → 6 per 90 s on NEBULA_FIELD, with tile placements flat
+  (41 → 39).  Three things go with it:
+  - **THE LADDER IS THE MATERIAL SIDE read as a rarity**, because that is
+    how the question is asked — "how often does a cloud leave the nebula
+    family" — and `half (old)` is the pre-call literal, one click from the
+    end.
+  - **ROCK-DERIVED DUST IS EXEMPT AND MUST STAY SO.**  `fromRock` dust
+    always returns to rock and is never eligible for a tile: that dust WAS
+    rock a moment ago (a chip thrown by `GRAIN_CHIP_DUST`), so returning it
+    is conservation, and routing it to a tile would MINT nebula out of
+    terrain.  It bypasses the roll entirely, which is why the effective
+    material rate on a natural map sits above the nominal share (measured
+    20% against 12.5% on UNIVERSE, with 3 of 45 pairs rock-derived).
+  - **A FAILED TILE PLACEMENT NOW RETURNS THE MASS.**  `transmuteToTileAt`
+    searches the origin hex plus its six neighbours and can find every one
+    occupied; both source shards have already faded by then, so the bare
+    no-op it used to take DESTROYED the pair (measured 9.1% of tile rolls on
+    UNIVERSE at the even split — and with the tile share now dominant that
+    would be most of the loss in the game).  The caller re-emits the mass as
+    a nebula-shard, which conserves AND moves in the direction the call asks
+    for: the cloud stays nebula and drifts to try again, rather than falling
+    through to a material it did not roll.  `tests/nebulacondense.spec.ts`
+    pins all three.
 - **The station POI is a non-drop INTERACTABLE.** Like the snitch:
   `EntityType.INTERACTABLE` + no `dropType` means the physics broadphase
   skips every pair it's in; `mass: Infinity` + INTERACTABLE keeps it out

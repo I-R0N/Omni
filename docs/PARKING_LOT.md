@@ -3162,3 +3162,63 @@ the pre-trim peak.
 
 **STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
 by this.
+
+### 19. A condensing nebula cloud mostly stays nebula (2026-09-13)
+
+**REPORTED**: "reduce the frequency of nebula shards merging into other
+materials significantly while [increasing] the frequency (or reallowing) of
+nebula shards converting into nebula tiles."
+
+**TWO ASKS THAT TURN OUT TO BE ONE NUMBER.**  Both outcomes are the two arms
+of a single roll inside `NebulaSystem.onComposeNebulaShardPair`, which was a
+bare `Math.random() < 0.5`.  So the change is one named share, not two knobs
+that could be set to contradict each other.
+
+MEASURED FIRST (a probe over the real sim, instrumenting the adapter rather
+than differencing populations — a tile can also be destroyed and a condensed
+shard can merge on, so a population count measures the wrong thing):
+
+| | pairs | tile rolls | placed | lost | material |
+|---|---|---|---|---|---|
+| NEBULA_FIELD 90 s | 76 | 41 (53.9%) | 41 | 0 | 35 |
+| UNIVERSE 90 s | 18 | 11 (61.1%) | 10 | 1 | 7 |
+
+So the split really was running at its nominal rate, and nebula was leaving
+the family about as often as it rebuilt itself.  After the change, material
+outcomes fell 29 → 6 per 90 s on NEBULA_FIELD with tile placements flat
+(41 → 39).
+
+**THE MEASUREMENT FOUND A SECOND THING NOBODY WAS LOOKING FOR**, which is the
+argument for measuring before tuning.  `transmuteToTileAt` searches the origin
+hex plus its six neighbours and returns false when all seven are occupied —
+and the caller did nothing with that.  Both source shards have already faded
+by then, so the pair's mass was simply DESTROYED: 9.1% of tile rolls on
+UNIVERSE, a loss only the tile arm could suffer.  It was documented as an
+"acceptable fallback for a 50/50 roll where the shard side always succeeds",
+which was defensible at an even split and stops being defensible the moment
+the tile arm carries 7/8 of the traffic.  **A tolerance written against a
+ratio expires when the ratio moves** — and nothing announces that, because a
+silent loss has no symptom at all.
+
+The fix hands the mass back as a nebula-shard.  Falling through to the
+material arm would have been the other obvious option and is exactly wrong:
+it would turn a crowded neighbourhood into the conversion this entry exists
+to make rare.
+
+**WHAT IS DELIBERATELY UNCHANGED.**  Rock-derived dust (`fromRock`) still
+always returns to rock and is never eligible for a tile.  That dust was rock
+a moment ago — a chip thrown by `GRAIN_CHIP_DUST` — so returning it is
+CONSERVATION, not conversion, and a tile there would mint nebula out of
+terrain.  It bypasses the roll entirely, which is why the effective material
+rate on a natural map sits above the nominal share (20% against 12.5% on
+UNIVERSE, with 3 of 45 pairs rock-derived).  The knob also never changes
+WHICH material a cloud picks — only how often it picks one at all.
+
+Shipped behind `NEBULA_TILE_SHARE_CYCLE` (DBG ▸ Visual ▸ "Neb solid", index 0
+ships) because the direction was the user's and the exact share is a feel
+call they should be able to judge in play; `half (old)` is the pre-call
+behaviour, one click from the end.
+
+`tests/nebulacondense.spec.ts` pins all three claims, each verified red under
+its own targeted revert.  The no-op branch is FORCED rather than waited for:
+at ~9% of rolls a test that waited for it would be a flake generator.
