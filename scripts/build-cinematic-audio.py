@@ -11,6 +11,7 @@ from scipy import signal
 ROOT=Path(sys.argv[1]); OUT=Path('public/assets/audio'); OUT.mkdir(parents=True,exist_ok=True)
 SR=44100; cache={}
 GUN_CUES={'weapon.blaster.fire','weapon.burst.fire','weapon.burst.sub'}
+ELECTRIC_CUES={'weapon.lightning.fire','impact.lightning.arc'}
 
 def sample(pack,name,v,rate=1):
     files=sorted((ROOT/pack/'Audio').glob(name+'*.ogg'))
@@ -46,7 +47,7 @@ def recipe(id):
         if 'shotgun' in id:
             return [f('explosionCrunch',1.2,.55),i('impactMetal_heavy',.8,.6),f('thrusterFire',1.4,.15)],1.1,.10
         if 'lightning' in id:
-            return [f('forceField',.72,.7),i('impactGlass_heavy',1,.15,.02),f('thrusterFire',1.1,.17)],.9,.09
+            return [f('laserSmall',1.65,.42),f('forceField',1.3,.20)],.9,.045
         if any(s in id for s in ['homing','missile']):
             return [f('thrusterFire',1.35,.7),i('impactPlate_medium',.8,.5),f('spaceEngineSmall',1,.1,.08)],1.25,.09
         if 'acid' in id: return [f('slime',.8,.8),f('thrusterFire',1.5,.12)],.8,.08
@@ -57,7 +58,7 @@ def recipe(id):
     if id.startswith(('impact.','crash.','destroy.','move.')):
         if 'shield' in id or 'nebula' in id:
             return [f('forceField',.65,.7),f('spaceEngineLow',1,.18)],.95 if 'break' in id else .65,.10
-        if 'lightning' in id: return [f('forceField',1.2,.7),i('impactGlass_medium',.7,.25)],.65,.09
+        if 'lightning' in id: return [f('laserSmall',1.9,.38),f('forceField',1.5,.12)],.65,.035
         if id.startswith('destroy.') or 'explosion' in id:
             if 'glass' in id: return [i('impactGlass_heavy',.75,.8),i('impactMining',.8,.3,.08)],1.2,.14
             if 'metal' in id: return [i('impactMetal_heavy',.65,.7),i('impactPlate_heavy',.8,.4,.1)],1.35,.16
@@ -99,8 +100,24 @@ for id in ids:
                 # from accumulating when the three burst rounds overlap.
                 decay=(.035 if name=='impactMetal_light' else .045 if 'burst' in id else .070)
                 x=x*np.exp(-np.arange(len(x))/(SR*decay))
+            if id in ELECTRIC_CUES:
+                x=x*np.exp(-np.arange(len(x))/(SR*.085))
             length=min(len(x),n-offset)
             if length>0: out[offset:offset+length]+=x[:length]*amp
+        if id in ELECTRIC_CUES:
+            # Irregular broadband sparks make a discharge, rather than a soft
+            # force-field swell. Grain timing/length varies reproducibly by take.
+            sparks=sample('scifi','thrusterFire',v,1.15)
+            sparks=signal.sosfilt(signal.butter(2,[1400,7200],fs=SR,btype='bandpass',output='sos'),sparks)
+            sparks=sparks/max(max(abs(sparks)),1e-6)
+            t=.003
+            while t<duration*.78:
+                length=round(rng.uniform(.004,.016)*SR)
+                start=int(rng.integers(0,max(1,len(sparks)-length)))
+                grain=sparks[start:start+length]*np.hanning(length)
+                offset=round(t*SR)
+                out[offset:offset+length]+=grain*.55*np.exp(-t/.20)
+                t+=rng.uniform(.012,.042)
         # Early reflections spread texture through the tail without a metallic
         # feedback comb; each tap has a different lowpass and delay.
         dry=out.copy()
@@ -110,7 +127,7 @@ for id in ids:
                 echo=signal.sosfilt(signal.butter(2,cut,fs=SR,output='sos'),dry[:-d])
                 out[d:]+=echo*wet*g
         # Body, not piercing digital fizz. Keep real transient texture.
-        cutoff=1800 if group=='impacts' else 5200
+        cutoff=7200 if id in ELECTRIC_CUES else 1800 if group=='impacts' else 5200
         out=signal.sosfilt(signal.butter(2,cutoff,fs=SR,output='sos'),out)
         out=signal.sosfilt(signal.butter(2,32,fs=SR,btype='highpass',output='sos'),out)
         out=out if id in GUN_CUES else np.tanh(out*1.2)
