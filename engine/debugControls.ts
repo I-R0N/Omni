@@ -31,6 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, cycleNebulaTileShare,
+    cycleNebulaDrain,
     togglePlasticAutomataBrighten,
     cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity, cycleBlastEnergy,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
@@ -858,6 +859,15 @@ export class DebugControls {
    *  step cannot read `__omniStats` in the same tick. */
   cycleNebulaTileShare(): number {
     return cycleNebulaTileShare();
+  }
+
+  /** DBG: how fast the nebula material ledger drains — the units a cloud must
+   *  hold to buy a TILE, and the fraction a coalescence sheds.  One row for
+   *  both because the two are coupled through the accumulation ceiling (see
+   *  the ledger note in constants.ts); splitting them would let a pair be set
+   *  that stops tiles forming entirely. */
+  cycleNebulaDrain(): number {
+    return cycleNebulaDrain();
   }
 
   /**

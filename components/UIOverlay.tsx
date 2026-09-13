@@ -149,6 +149,7 @@ interface UIOverlayProps {
   onCycleNebulaSpinDamp?: () => void;
   onCycleNebulaBond?: () => void;
   onCycleNebulaTileShare?: () => void;
+  onCycleNebulaDrain?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
@@ -486,6 +487,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaSpinDamp,
   onCycleNebulaBond,
   onCycleNebulaTileShare,
+  onCycleNebulaDrain,
   onCycleShatterGrace,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
@@ -1928,6 +1930,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Neb solid', onCycleNebulaTileShare,
                   stats.nebulaTileShareName ?? 'rare 1/8',
                   'How often a CRYSTALLISING nebula cloud condenses into a solid material shard (rock / glass / plastic / metal) instead of thickening back into a nebula TILE. It was an even 50/50 and measured that way in play (53.9% tile on NEBULA_FIELD, 61.1% on UNIVERSE over 90 s), so nebula leaked into the terrain about as fast as it rebuilt itself; the shipped step makes leaving the family rare. \u2018half (old)\u2019 is the pre-call behaviour. Rock-derived dust is unaffected \u2014 it always returns to rock, which is conservation rather than conversion \u2014 and this never changes WHICH material a cloud picks, only how often it picks one at all.')}
+                {ctrlRow('Neb drain', onCycleNebulaDrain,
+                  stats.nebulaDrainName ?? 'gentle 5u/-10%',
+                  'The nebula MATERIAL LEDGER: how many condense units a cloud must hold to buy a nebula TILE, and what fraction a coalescence sheds. A tile shatters into 3-4 shards of one unit each, and a tile used to cost only 2 \u2014 so the loop tile \u2192 shatter \u2192 coalesce \u2192 tile ran at ~2x and clouds grew without bound. Every step keeps the cost ABOVE the most a shatter can yield, so the ladder tunes how fast nebula recedes and cannot express growth. The two terms share one row because they are coupled: repeated merging converges on a ceiling of (1-loss)/loss, and a loss too large drops that ceiling under the cost, which reads as tiles never forming.')}
                 {ctrlRow('Neb stretch', onCycleNebulaStretch,
                   stats.nebulaStretchName ?? '0.10',
                   'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10 ships. The squash axis aligns to velocity while the sprite keeps its own rotation. The shipped step is the TOP of the ladder, so the cycle wraps to OFF on the first click \u2014 the A/B against no stretch at all is one press away.')}

@@ -8,6 +8,8 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
          grainSpecFor, grainLadder, grainTableValue, type GrainKnob,
          nebulaSpriteSize,
+         NEBULA_MATERIAL, NEBULA_TILE_SHATTER_YIELD_MAX, NEBULA_DRAIN_CYCLE,
+         nebulaTileCost, nebulaMergeLoss,
          ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
          projectileMassFor, PHYSICS_CONSTANTS,
          IMPACT_DENSITY, massFor, hullDensity,
@@ -153,7 +155,19 @@ const App: React.FC = () => {
     // rotted unnoticed (it keyed off `nebulaTileArea`, which no shard
     // ever carried, so every shard drew a full-tile sprite whatever its
     // size).  Nothing in the game reads this handle.
-    (window as any).__omniNebula = { nebulaSpriteSize };
+    // The nebula MATERIAL LEDGER joins it on the same terms, and with a
+    // motive of its own: a ledger that inverts does not throw, does not log
+    // and does not look wrong in any single frame — it just means the clouds
+    // creep outward over minutes, which is precisely how it shipped growing
+    // at ~2x a cycle without anyone seeing it.  The yield side is deliberately
+    // NOT exposed: a test has to MEASURE it off real shattered tiles, or the
+    // inequality is being checked against a second opinion rather than against
+    // what the fracture core actually produces.
+    (window as any).__omniNebula = {
+      nebulaSpriteSize,
+      NEBULA_MATERIAL, NEBULA_TILE_SHATTER_YIELD_MAX, NEBULA_DRAIN_CYCLE,
+      nebulaTileCost, nebulaMergeLoss,
+    };
 
     // Debug handle #9 — the MASS SCALE, on the __omniHid terms and with the
     // sharpest motive of the set.  Under the energy model a body's mass is
@@ -676,6 +690,9 @@ const App: React.FC = () => {
   const handleCycleNebulaTileShare = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaTileShare();
   };
+  const handleCycleNebulaDrain = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaDrain();
+  };
   const handleCycleNebulaBond = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaBond();
   };
@@ -1096,6 +1113,7 @@ const App: React.FC = () => {
         onCycleNebulaSpinDamp={handleCycleNebulaSpinDamp}
         onCycleNebulaBond={handleCycleNebulaBond}
         onCycleNebulaTileShare={handleCycleNebulaTileShare}
+        onCycleNebulaDrain={handleCycleNebulaDrain}
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlayerThrust={handleCyclePlayerThrust}
         onCyclePlayerSpeed={handleCyclePlayerSpeed}

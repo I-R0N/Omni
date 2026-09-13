@@ -2107,6 +2107,9 @@ export interface EngineStats {
   /** DBG readout: how rarely a condensing cloud leaves the nebula family
    *  (NEBULA_TILE_SHARE_CYCLE). */
   nebulaTileShareName?: string;
+  /** DBG readout: how fast the nebula material ledger drains
+   *  (NEBULA_DRAIN_CYCLE — tile cost + merge loss). */
+  nebulaDrainName?: string;
   // DBG hot-spot-collapse grace delay for freshly-shattered shards
   // (SHATTER_GRACE_CYCLE, "0.6s" … "3.6s").
   shatterGraceName?: string;

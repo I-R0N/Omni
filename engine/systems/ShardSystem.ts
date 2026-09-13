@@ -40,6 +40,8 @@ import {
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
   NEBULA_CONDENSE_STALL_BONDS,
+  nebulaTileCost,
+  nebulaMergeLoss,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
@@ -3875,7 +3877,14 @@ export class ShardSystem {
     const material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard' =
       committed ?? (fromRock ? 'rock-shard' : nebulaHueToShardVariant(hexToHueDeg(tint)));
     const combinedUnits = (a.nebulaCondenseUnits ?? 1) + (b.nebulaCondenseUnits ?? 1);
-    const requiredUnits = NEBULA_CONDENSE[material].units;
+    // THE GATE FUNDS THE DEARER OUTCOME, because it cannot know which one the
+    // roll will take — `onComposeNebulaShardPair` picks tile-vs-material AFTER
+    // this, so demanding only the material's cost is what let a tile be bought
+    // for 2 units while its own shatter hands back 4 (the ledger note in
+    // constants.ts).  Read live so the DBG drain step re-prices clouds already
+    // accumulating.
+    const tileCost = nebulaTileCost();
+    const requiredUnits = Math.max(tileCost, NEBULA_CONDENSE[material].units);
 
     // ANTI-STUCK: count coalescences spent waiting on this target; past the
     // patience cap, force-crystallise with whatever mass we have so an
@@ -3894,7 +3903,14 @@ export class ShardSystem {
         lifetimeMin: 0.4, lifetimeMax: 0.8,
         positionJitter: Math.max(a.size.x, b.size.x) * 0.5,
       });
-      this.growNebulaShard(a, b, composition, combinedUnits, material, stall, midpoint, { x: nvx, y: nvy });
+      // A COALESCENCE SHEDS MATERIAL (user call: the ledger applies to shards
+      // merging into larger shards too).  This used to be exactly conserving,
+      // so a cloud could circle the merge loop for free.  The loss is bounded
+      // by the fixed point documented beside the constant — too large and the
+      // accumulation ceiling falls below the tile cost, which reads as "tiles
+      // stopped forming" with nothing in the code saying why.
+      const keptUnits = combinedUnits * (1 - nebulaMergeLoss());
+      this.growNebulaShard(a, b, composition, keptUnits, material, stall, midpoint, { x: nvx, y: nvy });
       return;
     }
 
@@ -3931,7 +3947,12 @@ export class ShardSystem {
     // (honouring fromRock) — which is the ONLY thing origin still decides:
     // the tile ROLL is origin-blind (user call), so `fromRock` no longer
     // reaches the adapter at all.
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, material, excessUnits);
+    // `canAffordTile` is the LEDGER, and it is a separate answer from the gate
+    // above because the STALL path force-crystallises a cloud that never
+    // reached its cost — without this a stalled 2-unit cloud could still roll
+    // a tile and re-open the growth loop the cost exists to close.
+    const canAffordTile = combinedUnits >= tileCost;
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, material, excessUnits, canAffordTile);
   }
 
   /**

@@ -974,6 +974,10 @@ export interface ShardAdapter {
     physics: import('./PhysicsSystem').PhysicsSystem,
     material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
     excessUnits: number,
+    /** Whether the cloud holds enough condense units to be ALLOWED a tile.
+     *  False on the stall path, which force-crystallises below cost — a tile
+     *  bought under its price is exactly the growth loop the cost closes. */
+    canAffordTile: boolean,
   ): void;
 }
 

@@ -822,7 +822,10 @@ export class NebulaSystem {
      * ShardAdapter pair-transmute hook.  Called after a nebula-shard
      * ↔ nebula-shard bond resolves AND the cloud has accumulated enough
      * mass to crystallise (ShardSystem owns the commit/accumulate gate).
-     * Rolls `nebulaTileShare()` (DBG ▸ Visual ▸ "Neb solid"; ships at 7/8
+     * A tile is only on the table when the cloud can AFFORD one
+     * (`canAffordTile` — see the ledger in constants.ts: a tile must cost more
+     * than a tile's own shatter yields, or nebula grows without bound).  Given
+     * that, rolls `nebulaTileShare()` (DBG ▸ Visual ▸ "Neb solid"; ships at 7/8
      * toward the tile) between:
      *   - nebula-tile   at the nearest free hex cell (cloud thickening), at
      *                   the SAME rate for every cloud whatever its dust was
@@ -841,6 +844,7 @@ export class NebulaSystem {
         physics: PhysicsSystem,
         material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard',
         excessUnits: number,
+        canAffordTile: boolean,
     ): void {
         const blendHex = composition ? blendCompositionToHex(composition) : NEBULA_CONSTANTS.DEFAULT_HEX;
 
@@ -854,7 +858,7 @@ export class NebulaSystem {
         // The share is `nebulaTileShare()` rather than a literal half — see
         // the ladder in constants.ts — and it is read AT THE ROLL so a DBG
         // click re-tunes the clouds already in the world.
-        if (Math.random() < nebulaTileShare()) {
+        if (canAffordTile && Math.random() < nebulaTileShare()) {
             if (this.transmuteToTileAt(entities, position, composition, blendHex, physics)) return;
             // NO FREE HEX.  Both source shards are already fading, so doing
             // nothing here DESTROYS the pair's mass — a silent loss that only

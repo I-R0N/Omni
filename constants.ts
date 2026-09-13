@@ -9933,6 +9933,99 @@ export const NEBULA_CONDENSE: Record<
 // materials), so mass and colour are conserved.
 export const NEBULA_CONDENSE_STALL_BONDS = 6;
 
+// ── THE NEBULA LEDGER: a cloud may never pay for itself ──────────────────────
+//
+// User call: "the amount of nebula shard material required to create a nebula
+// tile [must be] greater than the amount of nebula shard material created by
+// shattering a nebula tile.  This prevents nebula clouds from growing."
+//
+// IT WAS THE OTHER WAY ROUND, and by a factor of two.  A nebula tile shatters
+// into its own Voronoi cells — measured on real tiles, 3 to 4 children, each
+// carrying the default ONE condense unit, so a tile YIELDS 3-4 units.  What a
+// tile COST was `NEBULA_CONDENSE[committed material].units`, which is 2 for
+// glass and rock: the tile branch of the crystallise roll had no price of its
+// own and free-rode on the gate for a material it was not becoming.  So the
+// loop tile → shatter → coalesce → tile ran at ~2x per cycle and the clouds
+// grew without bound.
+//
+// TWO NUMBERS CLOSE IT, and they are coupled — see the fixed point below.
+//
+//  TILE_COST is compared against the MAXIMUM yield, not the mean.  4 is what a
+//  tile can produce at its luckiest, so a cost of 5 makes "a tile can never
+//  fund its own replacement" true of EVERY tile rather than true on average —
+//  an average-only bound still lets a lucky run ratchet upward.
+//
+//  MERGE_LOSS is the same principle applied to the other path (user call: "this
+//  should apply to nebula shards that merge together to form larger nebula
+//  shards as well").  Coalescence used to be exactly conserving, so a cloud
+//  could circle the merge loop for free; it now sheds this fraction each time.
+//
+// THE FIXED POINT IS THE CONSTRAINT THAT TIES THEM TOGETHER, and it is easy to
+// set these two to numbers that quietly mean "tiles never form again".  A cloud
+// repeatedly eating 1-unit debris follows `u' = (u + 1)(1 - MERGE_LOSS)`, which
+// converges on `u* = (1 - MERGE_LOSS) / MERGE_LOSS` — a CEILING no amount of
+// merging passes.  So the rule is `u* > TILE_COST`, i.e.
+// `MERGE_LOSS < 1 / (TILE_COST + 1)`.  At the shipped 5 / 0.1 the ceiling is 9
+// against a cost of 5, which is real headroom; at MERGE_LOSS 0.167 the ceiling
+// would land exactly on 5 and tiles would stop existing with nothing in the
+// code to say why.  `tests/nebulacondense.spec.ts` pins both the ledger
+// inequality and this fixed point.
+export const NEBULA_MATERIAL = {
+  /** Condense units a crystallising cloud must hold before it may become a
+   *  nebula TILE.  Strictly above the most a tile's own shatter can yield. */
+  TILE_COST: 5,
+  /** Fraction of the combined units a coalescence sheds.  Must stay under
+   *  `1 / (TILE_COST + 1)` or the accumulation ceiling drops below the cost. */
+  MERGE_LOSS: 0.1,
+} as const;
+
+/** The most condense units one nebula tile's shatter can hand back — the bar
+ *  `TILE_COST` has to clear.  MEASURED (40 real tiles on NEBULA_FIELD: 3-4
+ *  children, avg 3.92, one unit each) rather than derived, because the child
+ *  count comes out of the grain spec's site placement, its count clamps AND
+ *  the sliver-retirement pass, so a formula here would be a second opinion
+ *  about a number the fracture core already owns.  The regression MEASURES it
+ *  live and fails if it ever reaches `TILE_COST`, which is what keeps a grain
+ *  retune from silently re-opening the loop. */
+export const NEBULA_TILE_SHATTER_YIELD_MAX = 4;
+
+// How hard the cloud economy drains.  Every step keeps the ledger inequality
+// TRUE by construction — the ladder tunes how fast nebula recedes, and cannot
+// express a setting that lets it grow again, because that is the rule the
+// whole block exists to state rather than a preference.  Index 0 ships.
+export const NEBULA_DRAIN_CYCLE: ReadonlyArray<
+  { name: string; tileCost: number; mergeLoss: number }
+> = [
+  { name: 'gentle',  tileCost: 5,  mergeLoss: 0.10 },
+  { name: 'steady',  tileCost: 6,  mergeLoss: 0.12 },
+  { name: 'brisk',   tileCost: 8,  mergeLoss: 0.10 },
+  { name: 'severe',  tileCost: 12, mergeLoss: 0.07 },
+] as const;
+const NEBULA_DRAIN_DEFAULT_INDEX = 0;
+let activeNebulaDrainIndex = NEBULA_DRAIN_DEFAULT_INDEX;
+
+/** Units a cloud must hold to be allowed to become a TILE.  Read AT THE GATE,
+ *  so a DBG click re-prices the clouds already accumulating. */
+export function nebulaTileCost(): number {
+  return NEBULA_DRAIN_CYCLE[activeNebulaDrainIndex].tileCost;
+}
+/** Fraction of the combined units a coalescence sheds. */
+export function nebulaMergeLoss(): number {
+  return NEBULA_DRAIN_CYCLE[activeNebulaDrainIndex].mergeLoss;
+}
+export function getActiveNebulaDrainName(): string {
+  const step = NEBULA_DRAIN_CYCLE[activeNebulaDrainIndex];
+  // The "(def)" marker is DERIVED from the default index rather than written
+  // into a step's name, so it cannot end up on the wrong step the day the
+  // default moves (CLAUDE.md §8, the nebula-sprite lesson).
+  const label = `${step.name} ${step.tileCost}u/-${Math.round(step.mergeLoss * 100)}%`;
+  return activeNebulaDrainIndex === NEBULA_DRAIN_DEFAULT_INDEX ? `${label} (def)` : label;
+}
+export function cycleNebulaDrain(): number {
+  activeNebulaDrainIndex = (activeNebulaDrainIndex + 1) % NEBULA_DRAIN_CYCLE.length;
+  return activeNebulaDrainIndex;
+}
+
 // ── Nebula's grain (user call: voronoi fractures for the cloud) ────
 // ONE spec, shared by `nebula-tile` and `nebula-shard`, because a
 // material has ONE grain geometry (CLAUDE.md §8) and a shard is a

@@ -3274,3 +3274,61 @@ about one failure in six with the product perfectly correct.  Dialling
 explicitly and sizing N and the band off the binomial (800 a side, 6 points =
 ~3.6 s.d. at the shipped p = 0.875) fixes both.  **A band nobody computed is a
 flake with a delay on it.**
+
+### 21. The nebula material ledger (2026-09-13)
+
+**REPORTED**: "the amount of nebula shard material required to create a nebula
+tile [must be] greater than the amount of nebula shard material created by
+shattering a nebula tile.  This prevents nebula clouds from growing.  This
+should apply to nebula shards that merge together to form larger nebula shards
+as well."
+
+**THE LOOP WAS OPEN BY A FACTOR OF TWO, AND ENTRIES 19-20 WIDENED IT.**  A tile
+shatters into its own Voronoi cells, each worth the default ONE condense unit —
+measured on 40 real tiles, 3-4 children.  A tile COST
+`NEBULA_CONDENSE[committed material].units`, which is 2 for glass and rock.  So
+tile → shatter → coalesce → tile ran at ~2x.  The structural defect is precise
+and worth naming: **the tile branch of the crystallise roll had no price of its
+own**, because the roll happens in the adapter AFTER the accumulation gate, and
+the gate was keyed on a MATERIAL the cloud was not going to become.  Entry 19
+then pushed 7/8 of outcomes down exactly that unpriced branch.
+
+MEASURED on a passive NEBULA_FIELD (nothing shooting anything) over 150 s, by
+building the stashed tree rather than patching the current one in-page:
+
+| | nebula bodies | crystallising pairs | tiles made |
+|---|---|---|---|
+| before | 1152 → 1226 (**+6.4%**) | 128 | 112 |
+| after | 1128 → 1116 (**-1.1%**) | 8 | 7 |
+
+**THE TWO NUMBERS ARE COUPLED, AND THAT IS THE TRAP.**  `TILE_COST` and
+`MERGE_LOSS` look independent and are not: a cloud repeatedly eating 1-unit
+debris follows `u' = (u + 1)(1 - MERGE_LOSS)`, which converges on a CEILING of
+`(1 - MERGE_LOSS) / MERGE_LOSS`.  If that ceiling sits below `TILE_COST`, no
+cloud ever affords a tile again — a dead feature that throws nothing, logs
+nothing and simply looks like tiles having stopped.  The rule is
+`MERGE_LOSS < 1 / (TILE_COST + 1)`; at the shipped 5 / 0.1 the ceiling is 9.
+**Two knobs that each look reasonable alone can compose into a setting nobody
+chose** — so they share one DBG row and the fixed point is asserted per step.
+
+**COMPARE AGAINST THE MAX, NOT THE MEAN.**  The yield is 3.92 on average and 4
+at its luckiest.  A cost of 5 makes the inequality true of EVERY tile; a bound
+set on the mean would still let a lucky run ratchet upward, which is the shape
+of bug that takes minutes of play to become visible and is then hard to
+attribute.
+
+**THE YIELD SIDE IS MEASURED, NEVER DECLARED.**  The regression breaks real
+tiles through the real death path and counts the units that come back, because
+the child count falls out of the grain spec's site placement, its count clamps
+AND the sliver-retirement pass.  A test that read `NEBULA_TILE_SHATTER_YIELD_MAX`
+on both sides of the inequality would check a constant against itself and pass
+for ever while a `grainSize` retune re-opened the loop — the exact failure mode
+CLAUDE.md §8 already records for nebula's grain size moving two test margins.
+
+**AND THE STALL PATH NEEDED ITS OWN ANSWER.**  The accumulation gate is not
+sufficient: `NEBULA_CONDENSE_STALL_BONDS` force-crystallises a cloud that never
+reached its cost, so `canAffordTile` is passed to the adapter separately.
+Without it a stalled under-price cloud still buys a tile, which is the whole
+loop again through a side door.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).

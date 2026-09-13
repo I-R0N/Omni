@@ -80,7 +80,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  417 tests.  All run at
+                          writing a DBG-knob test).  421 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -3871,6 +3871,47 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     little `fromRock` dust (2 of 113 and 0 of 258 crystallising pairs on
     UNIVERSE, matching an earlier 3 of 45), so a probe that just watches an
     idle map will barely see this rule at all.
+  - **A CLOUD MAY NEVER PAY FOR ITSELF — THE MATERIAL LEDGER** (user call).
+    A nebula tile shatters into its own Voronoi cells, each entering the
+    coalescence cycle worth the default ONE condense unit — measured on 40 real
+    tiles, 3-4 children, so a tile YIELDS 3-4 units.  What a tile COST was
+    `NEBULA_CONDENSE[committed material].units`, which is 2 for glass and rock:
+    the tile branch of the roll had no price of its own and free-rode on the
+    gate for a material it was not becoming.  So tile → shatter → coalesce →
+    tile ran at ~2x per cycle and the clouds grew without bound (measured on a
+    PASSIVE NEBULA_FIELD over 150 s: total nebula bodies 1152 → 1226, **+6.4%**,
+    with nothing shooting anything).  `NEBULA_MATERIAL` closes it with two
+    numbers, and `nebulaTileCost()` / `nebulaMergeLoss()` are read AT THE GATE
+    so a DBG click re-prices clouds already accumulating.  Measured after:
+    1128 → 1116, **-1.1%**.  Four things are load-bearing:
+    - **`TILE_COST` (5) is compared against the MAXIMUM yield (4), not the
+      mean (3.92).**  An average-only bound still lets a lucky tile fund its
+      own replacement; against the max, "a tile cannot pay for itself" is true
+      of EVERY tile.
+    - **THE GATE FUNDS THE DEARER OUTCOME.**  The tile-vs-material roll happens
+      in the adapter, AFTER the accumulation gate, so the gate cannot know
+      which outcome it is paying for and demands
+      `max(TILE_COST, material cost)`.  That is also why `canAffordTile` is a
+      SEPARATE answer passed to the adapter: the STALL path force-crystallises
+      a cloud that never reached its cost, and without the flag a stalled
+      2-unit cloud could still buy a tile and re-open the loop.
+    - **`MERGE_LOSS` (0.1) applies the same rule to the other path** (user
+      call: it applies to shards merging into larger shards too).  Coalescence
+      was exactly conserving, so a cloud could circle the merge loop for free.
+    - **THE TWO ARE COUPLED THROUGH A FIXED POINT, and that is the easy way to
+      break this.**  A cloud repeatedly eating 1-unit debris follows
+      `u' = (u + 1)(1 - MERGE_LOSS)`, which converges on a CEILING of
+      `(1 - MERGE_LOSS) / MERGE_LOSS` — so the rule is
+      `MERGE_LOSS < 1 / (TILE_COST + 1)`.  At 5 / 0.1 the ceiling is 9 against
+      a cost of 5; at a loss of 0.167 it would land exactly on the cost and
+      tiles would stop existing with nothing in the code to say why.
+    `NEBULA_DRAIN_CYCLE` (DBG ▸ Visual ▸ **"Neb drain"**, index 0 ships) tunes
+    how fast nebula recedes and CANNOT express growth — every step clears both
+    the yield bar and the fixed point, which is what makes the inequality a
+    rule rather than a preference.  `tests/nebulacondense.spec.ts` measures the
+    yield off real shattered tiles rather than reading the constant, so a
+    GRAIN retune that raises the child count fails there instead of quietly
+    re-opening the loop.
   - **A FAILED TILE PLACEMENT NOW RETURNS THE MASS.**  `transmuteToTileAt`
     searches the origin hex plus its six neighbours and can find every one
     occupied; both source shards have already faded by then, so the bare
