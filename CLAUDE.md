@@ -858,8 +858,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   — the steel-blue that metal's density brightening interpolates
   TOWARD, replacing a per-channel scale that desaturated dense metal
   toward white.
-- `BASE_BANK_DIVISOR` / `GUNNERY_MK3_DAMAGE_FRAC` — the base shot BANK is
-  today's divided by what three Gunnery Mk III grant (see WEAPONS below);
+- `BASE_BANK_DIVISOR` = `GUNNERY_MK3_TRIPLE_MULT` / `BASE_BANK_TRIM` —
+  the base shot BANK is the shipped round's divided by what three Gunnery
+  Mk III grant, and then trimmed a further 40% (see WEAPONS below); the two
+  halves stay separate because only the Gunnery anchor is pinned to
+  `MODULE_DEFS`;
   `BLAST_ENERGY_COUPLING` / `blastDamageFor` — a shell's blast is a
   fraction of its own kinetic energy, not an authored scalar
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
@@ -1701,26 +1704,46 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   spreading a player gun must RESTATE the mass when it overrides `damage` or
   `speed`, or it inherits a bank sized for numbers it no longer has (measured:
   the Reaver's scattergun would have flown with a third of one bite).
-  **THE BASE BANK IS A THIRD OF A FULLY-GUNNED ONE** (user call): the reach
-  the shipped round had is what three Gunnery Mk III should buy, not what a
-  starter Blaster carries.  `MASS_SCALE` multiplied every bank by ten along
-  with every mass and penetration is bank-shaped, so a base bolt punched
+  **THE BASE BANK IS A FRACTION OF A FULLY-GUNNED ONE** (user call): the
+  reach the shipped round had is what three Gunnery Mk III should buy, not
+  what a starter Blaster carries.  `MASS_SCALE` multiplied every bank by ten
+  along with every mass and penetration is bank-shaped, so a base bolt punched
   THIRTY-ONE one-HP gnats where the pre-scale round managed four (measured,
   `perf/impact-audit.mjs` §8).  Every player gun's authored `mass` is now
-  divided by `BASE_BANK_DIVISOR` — `1 + 3 × GUNNERY_MK3_DAMAGE_FRAC` = 2.08,
-  written as `3.5556 / BASE_BANK_DIVISOR` in the table so the original solve
-  stays readable — and `withGunnery` multiplies the bank straight back, so
-  the two ends meet by construction.  Measured base → 3× Mk III: Blaster
-  31 → 15 → 36, Burst 121 → 58 → 136, Laser 201 → 97 → 226, Cannon
-  171 → 82 → 176; every weapon's before/after ratio lands on 2.05..2.09.
+  divided by `BASE_BANK_DIVISOR`, written as `3.5556 / BASE_BANK_DIVISOR` in
+  the table so the original solve stays readable.  THE DIVISOR IS TWO
+  FACTORS, deliberately kept apart because only ONE of them is a claim about
+  another table:
+  - `GUNNERY_MK3_TRIPLE_MULT` = `1 + 3 × GUNNERY_MK3_DAMAGE_FRAC` = 2.08 —
+    the PROGRESSION anchor, exactly what `withGunnery` multiplies the bank
+    back by across three marks.  `tests/weapons.spec.ts` pins it against the
+    real `MODULE_DEFS` catalog, which is what stops a Gunnery retune drifting
+    the base round.
+  - `BASE_BANK_TRIM` = 0.6 — a further 40% off the base bank (user call:
+    "weapons are still a little too powerful"), a play-tested feel number
+    sitting OVER the anchor.  It is pinned only as a composition, so it can
+    be re-tuned without touching the catalog claim above.
+
+  So three marks still MULTIPLY the base bank by 2.08 — the ladder is the
+  anchor's — but they no longer restore the pre-rebase round; they land at
+  0.6 of it, and reaching the old figure would take ~7 marks, which the
+  hex-slot count puts out of range.  That is what the call asks for.
+  Measured base → 3× Mk III: Blaster 9 → 22, Burst 35 → 82, Laser 58 → 136,
+  Cannon 50 → 106 (against 15 → 36 / 58 → 136 / 97 → 226 / 82 → 176 before
+  the trim, and 31 / 121 / 201 / 171 before the re-base); every weapon's
+  base → gunned ratio lands on 2.12..2.58.
+  ONE COUPLED CONSEQUENCE is worth knowing because it is the model working
+  rather than a side effect: the Cannon's BLAST derives from the shell's own
+  mass, so it rode the trim down with the bank (17.3 → 10.4 peak, against an
+  unchanged 18 direct bite).  A lighter shell carries a smaller charge.  The
+  dial for the charge alone is `BLAST_ENERGY_COUPLING`, never the trim.
   TWO things make this the right lever and both are easy to get backwards.
   **Only the BANK moves** — `damage`, the BITE, is untouched at every mark,
   so no enemy takes longer to kill and no §7 trait threshold shifts.  And
   **scaling both would have been a NO-OP**: the falloff is `1 - bite/energy`,
   so halving bite and bank together leaves the ratio, and the count, exactly
   where they were.  The 0.36 is a literal because `MODULE_DEFS` is declared
-  AFTER the weapon table; `tests/weapons.spec.ts` pins it against the real
-  catalog, which is what stops a Gunnery retune drifting the base round.
+  AFTER the weapon table, which is why the catalog pin lives in the tests.
 
   **AND A CHARGED SHOT WAS FLYING TEN TIMES TOO HEAVY.**
   `chargedConfigOf` wrote `projectileMassFor(config) * K` back into
@@ -1836,9 +1859,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   flown mass, times `BLAST_ENERGY_COUPLING` (0.2), which is the sibling of
   `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
   work, a shaped charge couples a fifth of its remaining energy into the
-  blast.  At the shipped numbers the peak is ~17.3 against the Cannon's 18
-  direct bite — "the charge is worth about one more hit" is the statement
-  that picks the coupling.  Measured bystander 5.2 → 10.4.
+  blast.  The coupling was picked when the peak measured ~17.3 against the
+  Cannon's 18 direct bite — "the charge is worth about one more hit" is the
+  statement behind the 0.2 (measured bystander 5.2 → 10.4 when it landed).
+  `BASE_BANK_TRIM` has since taken 40% off every base round, so the peak is
+  ~10.4 against the same 18 bite: WHAT THE CHARGE IS WORTH RIDES THE BANK,
+  which is what deriving it means.  The BITE never moved, so what changed is
+  the ratio rather than the gun — and the dial for the charge alone is this
+  coupling (DBG ▸ Player ▸ "Blast energy", step 2×), never the trim.
   THREE properties FALL OUT rather than being written: it rides GUNNERY for
   free (a mark buys a heavier round and the blast reads the round's mass);
   a CHARGED shell blasts harder by being heavier (the charge premium is

@@ -3094,3 +3094,71 @@ explode on spawn.
 
 MEASURED (`perf/impact-audit.mjs` §8, a bystander 55 off the blast centre):
 on an actor contact 6.4, on energy depletion against terrain **0 → 5.9**.
+
+### 18. A further 40% off the base bank (2026-09-13)
+
+**REPORTED**: "Weapons are still a little too powerful.  Let's reduce down
+another 40% ish."
+
+**ONE LINE, AND THE REASON IT IS ONE LINE IS ENTRY 16.**  Penetration is
+bank-shaped — the falloff is `1 - bite/energy`, so only `mass` can move it —
+and entry 16 put every player gun's authored mass behind a single divisor for
+exactly this.  So the change is a factor over that divisor and nothing else:
+no weapon row moved, no bite moved, no §7 threshold moved.
+
+**THE DIVISOR IS TWO FACTORS NOW, AND THEY ARE KEPT APART ON PURPOSE.**
+
+- `GUNNERY_MK3_TRIPLE_MULT` = `1 + 3 × 0.36` = 2.08 — the PROGRESSION anchor.
+  It is a claim about ANOTHER TABLE (what `MODULE_DEFS` grants) and is pinned
+  against the live catalog in `tests/weapons.spec.ts`.
+- `BASE_BANK_TRIM` = 0.6 — this entry.  A play-tested feel number over the
+  anchor, pinned only as a composition.
+
+Folding them into one literal would have been shorter and would have lost
+which half a future Gunnery retune is allowed to move.  The rule
+generalises: **when a constant is the product of a pinned relationship and a
+free one, write it as the product** — the alternative is a number that half a
+test suite is entitled to change.
+
+**THE HONEST CONSEQUENCE, stated because it is easy to read as a bug.**
+Three Mk III still multiply the base bank by exactly 2.08 — the LADDER is the
+anchor's and is untouched — but they now land at 0.6 of the pre-rebase round
+rather than on it.  Restoring the old reach would take ~7 marks, which the
+hex-slot count puts out of range.  That is what the call asks for; what moved
+is where the ladder starts, not its shape.
+
+MEASURED through the real resolver (`perf/impact-audit.mjs` §8):
+
+| weapon | before trim | after trim | 3× Mk III after |
+|---|---|---|---|
+| Blaster | 15 | 9 | 22 |
+| Burst | 58 | 35 | 82 |
+| Shotgun | 20 | 12 | 31 |
+| Laser | 97 | 58 | 136 |
+| Lightning | 39 | 24 | 52 |
+| Seeker | 34 | 21 | 46 |
+| Cannon | 82 | 50 | 106 |
+
+Every base lands on 0.60..0.62 of its previous value — the 40% asked for.
+
+**AND A COUPLED CONSEQUENCE THAT IS THE MODEL WORKING.**  Entry 16 derived
+the Cannon's blast from the shell's OWN mass, so the trim rode straight
+through it: peak 17.3 → 10.4 against an unchanged 18 direct bite.  A lighter
+shell carries a smaller charge — that is what deriving it means, and undoing
+it by re-authoring `explosionDamage` would put back the flat scalar the whole
+step removed.  The dial for the charge ALONE is `BLAST_ENERGY_COUPLING` (DBG
+▸ Player ▸ "Blast energy", step 2× is that A/B), never the trim, which is
+about penetration.  This is worth writing down because the coupling's own
+calibration sentence — "the charge is worth about one more hit" — was
+measured at the old bank and is now a ratio of ~0.6, so the comment beside
+the constant had to be corrected rather than left claiming a number it no
+longer produces.  **A calibration sentence is a measurement with a date on
+it**; anything that moves one of its inputs has to re-read it.
+
+Two stale claims were swept out in the same pass, both left by entry 17:
+the `BLAST_ENERGY_COUPLING` comment still described the `× hitFalloff`
+scaling that entry 17 deleted, and `CLAUDE.md`'s blast block still quoted
+the pre-trim peak.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
+by this.

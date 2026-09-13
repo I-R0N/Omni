@@ -5860,19 +5860,27 @@ export function projectileBite(authored: number, speed: number, spawnSpeed: numb
 // properties fall out rather than being written:
 //   - it scales with GUNNERY for free, because a mark buys a heavier round
 //     and the blast reads the round's own mass;
-//   - a shell that has spent its bank boring through terrain blasts WEAKER,
-//     because the existing `× hitFalloff` at the AoE call site is exactly the
-//     fraction of launch energy it has left — peak × (E/E₀) is the energy it
-//     still carries, with no second curve anywhere;
 //   - a charged shell blasts harder by being heavier, which is the same
 //     repricing step 5 gave the Blaster's charge.
+// (It does NOT shrink when the shell has spent its bank boring: the blast is
+// PAYLOAD, sized from the round's mass at spawn, and travel energy only
+// decides how far the round gets — see `applyExplosionAoE`.)
 //
 // THE COUPLING IS AN EFFICIENCY, and it is the sibling of
 // `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
 // work, a shaped charge couples this much of its remaining energy into the
-// blast.  At 0.2 the shipped Cannon's peak blast is ~17 against its 18 direct
-// bite — "the charge is worth about one more hit" — which is the statement
-// that picks the number.  DBG ▸ Player ▸ "Blast energy" is the live A/B.
+// blast.
+//
+// WHAT IT IS WORTH RIDES THE BANK, and that is the model rather than a
+// setting.  At 0.2 the Cannon's peak blast measured ~17.3 against its 18
+// direct bite — "the charge is worth about one more hit" was the statement
+// that picked the number — and then `BASE_BANK_TRIM` took 40% off every base
+// round, so it is ~10.4 today: a lighter shell carries a smaller charge,
+// which is the whole point of deriving it.  The BITE is untouched (the trim
+// moves only the bank), so what changed is the RATIO, not the gun.  If the
+// charge is wanted back at its old worth the dial is this coupling — NOT the
+// trim, which is about penetration — and DBG ▸ Player ▸ "Blast energy" step
+// 2x is exactly that A/B.
 export const BLAST_ENERGY_COUPLING = 0.2;
 
 export const BLAST_ENERGY_CYCLE: ReadonlyArray<number> = [
@@ -5973,16 +5981,30 @@ export function cycleImpactVelocity(): number {
 // Blaster bolt punched THIRTY-ONE one-HP gnats (measured, audit §8) where the
 // pre-scale round managed four.
 //
-// THE USER'S CALIBRATION, and it is a statement about PROGRESSION rather than
-// a number picked here: *today's* penetration is what a fully-gunned ship
-// should have, so the BASE round is today's divided by what three Gunnery
-// Mk III modules multiply it by.  `withGunnery` scales the bank by
-// `1 + Σ damageFrac` and a Mk III contributes 0.36, so three of them are
-// x2.08 — and dividing the authored banks by that makes the two ends meet by
-// construction.  `tests/weapons.spec.ts` pins the round trip against the real
-// MODULE_DEFS catalog, which is what stops this drifting if Gunnery is
-// retuned; the 0.36 below is written out because MODULE_DEFS is declared
-// AFTER this table and cannot be read from here.
+// THE ANCHOR IS A STATEMENT ABOUT PROGRESSION rather than a number picked
+// here: the penetration the shipped round had is what a fully-gunned ship
+// should have, so the BASE round is that divided by what three Gunnery Mk III
+// modules multiply it by.  `withGunnery` scales the bank by `1 + Σ damageFrac`
+// and a Mk III contributes 0.36, so three of them are x2.08.
+// `tests/weapons.spec.ts` pins that factor against the real MODULE_DEFS
+// catalog, which is what stops it drifting if Gunnery is retuned; the 0.36
+// below is written out because MODULE_DEFS is declared AFTER this table and
+// cannot be read from here.
+//
+// AND THEN A FURTHER 40% CAME OFF THE BASE BANK (user call: "weapons are
+// still a little too powerful").  `BASE_BANK_TRIM` is that cut, kept as its
+// OWN factor rather than folded into the divisor, because the two numbers
+// answer different questions and only one of them is pinned to the catalog:
+// the 2.08 is the Gunnery relationship and has to keep tracking MODULE_DEFS,
+// the 0.6 is a play-tested feel call over it.  Rolling them into one literal
+// would lose which half a future Gunnery retune is allowed to move.
+//
+// THE HONEST CONSEQUENCE: three Mk III no longer restore the pre-rebase
+// round — they buy back the 2.08 and land at 0.6 of it.  That is what the
+// call asks for; a ship that wanted the old reach would need ~7 marks, which
+// the hex-slot count puts out of range.  Gunnery still MULTIPLIES the base by
+// exactly 2.08 across three marks, which is the progression the anchor is
+// about; what moved is where that ladder starts.
 //
 // ONLY THE BANK MOVES.  `damage` — the BITE one contact deposits — is
 // untouched at every Gunnery level, so no enemy takes longer to kill and no
@@ -5990,7 +6012,11 @@ export function cycleImpactVelocity(): number {
 // penetration anyway: the falloff is `1 - bite/energy`, so halving both ends
 // leaves the ratio, and the count, exactly where it was.
 export const GUNNERY_MK3_DAMAGE_FRAC = 0.36;   // statMks('gunnery', … 0.12 * mk)
-export const BASE_BANK_DIVISOR = 1 + 3 * GUNNERY_MK3_DAMAGE_FRAC;   // = 2.08
+/** Three Gunnery Mk III = x2.08 — the progression anchor, pinned to MODULE_DEFS. */
+export const GUNNERY_MK3_TRIPLE_MULT = 1 + 3 * GUNNERY_MK3_DAMAGE_FRAC;   // = 2.08
+/** A further 40% off the base bank, over the anchor (user call). */
+export const BASE_BANK_TRIM = 0.6;
+export const BASE_BANK_DIVISOR = GUNNERY_MK3_TRIPLE_MULT / BASE_BANK_TRIM;   // ≈ 3.467
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 //

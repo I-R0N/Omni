@@ -831,10 +831,14 @@ test.describe('how far a round gets is what it can afford', () => {
  *  Four claims, each independently checkable and each wrong in a way nothing
  *  else reports:
  *
- *   1. THE DIVISOR IS THE GUNNERY RELATIONSHIP, read off the real catalog —
- *      the whole calibration is a claim about two tables agreeing, and
- *      `BASE_BANK_DIVISOR` is a literal that cannot see MODULE_DEFS.
- *   2. THREE MARKS PUT THE BANK BACK, measured on the round the sim flies.
+ *   1. THE ANCHOR IS THE GUNNERY RELATIONSHIP, read off the real catalog —
+ *      that half of the calibration is a claim about two tables agreeing, and
+ *      `GUNNERY_MK3_TRIPLE_MULT` is a literal that cannot see MODULE_DEFS.
+ *      The feel TRIM over it is pinned only as a composition, so it can move
+ *      without the catalog claim moving with it.
+ *   2. THREE MARKS MULTIPLY THE BANK BY THAT ANCHOR, measured on the round
+ *      the sim flies.  They no longer restore the pre-rebase round — the trim
+ *      is what they land short by — but the LADDER is the anchor's.
  *   3. ONLY THE BANK MOVED — the BITE is untouched at every mark, so no
  *      enemy takes longer to kill and no §7 threshold shifted.
  *   4. THE BLAST IS DERIVED from the flown round, and rides the mark with it
@@ -842,35 +846,49 @@ test.describe('how far a round gets is what it can afford', () => {
  *      the authored-units bug this file already pins for `mass`).
  */
 test.describe('the base bank, and the blast derived from it', () => {
-  test('the divisor IS what three Gunnery Mk III grant', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
+  test('the anchor IS what three Gunnery Mk III grant, and the trim sits over it',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
 
-    const r = await engine(page, () => {
-      const M: any = (window as any).__omniMass;
-      // Read the GRANT off the real catalog rather than restating it: the
-      // constant is a literal (MODULE_DEFS is declared after the weapon
-      // table and cannot be read from there), so this is the only thing
-      // standing between a Gunnery retune and a silently wrong base round.
-      const mk3 = M.MODULE_DEFS.find((m: any) =>
-        m.family === 'gunnery' && m.mark === 3);
-      return {
-        catalogFrac: mk3 ? mk3.effect.damageFrac : null,
-        constFrac: M.GUNNERY_MK3_DAMAGE_FRAC,
-        divisor: M.BASE_BANK_DIVISOR,
-      };
+      const r = await engine(page, () => {
+        const M: any = (window as any).__omniMass;
+        // Read the GRANT off the real catalog rather than restating it: the
+        // constant is a literal (MODULE_DEFS is declared after the weapon
+        // table and cannot be read from there), so this is the only thing
+        // standing between a Gunnery retune and a silently wrong base round.
+        const mk3 = M.MODULE_DEFS.find((m: any) =>
+          m.family === 'gunnery' && m.mark === 3);
+        return {
+          catalogFrac: mk3 ? mk3.effect.damageFrac : null,
+          constFrac: M.GUNNERY_MK3_DAMAGE_FRAC,
+          anchor: M.GUNNERY_MK3_TRIPLE_MULT,
+          trim: M.BASE_BANK_TRIM,
+          divisor: M.BASE_BANK_DIVISOR,
+        };
+      });
+
+      expect(r.catalogFrac, 'a Gunnery Mk III is in the catalog').not.toBeNull();
+      expect(r.constFrac, 'and the constant matches what it actually grants')
+        .toBeCloseTo(r.catalogFrac as number, 9);
+      // THE HALF THAT IS PINNED: the progression anchor is three marks of
+      // whatever the catalog currently grants.  This is the assertion a
+      // Gunnery retune has to walk past.
+      expect(r.anchor, 'the anchor is three of them')
+        .toBeCloseTo(1 + 3 * (r.catalogFrac as number), 9);
+      // THE HALF THAT IS A FEEL CALL: a further cut over the anchor.  Pinned
+      // only as a composition, so the trim can be re-tuned without touching
+      // the catalog relationship above — which is the reason the two are
+      // separate constants at all.
+      expect(r.divisor, 'and the divisor is that anchor over the trim')
+        .toBeCloseTo(r.anchor / r.trim, 9);
+      expect(r.trim, 'which is a real cut, not an identity')
+        .toBeLessThan(1);
+
+      watch.assertClean();
     });
 
-    expect(r.catalogFrac, 'a Gunnery Mk III is in the catalog').not.toBeNull();
-    expect(r.constFrac, 'and the constant matches what it actually grants')
-      .toBeCloseTo(r.catalogFrac as number, 9);
-    expect(r.divisor, 'so the divisor is three of them')
-      .toBeCloseTo(1 + 3 * (r.catalogFrac as number), 9);
-
-    watch.assertClean();
-  });
-
-  test('three marks put the bank back, and move only the bank', async ({ page }) => {
+  test('three marks scale the bank by the anchor, and move only the bank', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
 
@@ -901,8 +919,8 @@ test.describe('the base bank, and the blast derived from it', () => {
     });
 
     for (const w of r) {
-      // (2) the bank comes back to exactly what the pre-rebase solve flew.
-      expect(w.gunned.mass! / w.base.mass!, `${w.type}: three marks restore the bank`)
+      // (2) three marks multiply the bank by exactly the anchor.
+      expect(w.gunned.mass! / w.base.mass!, `${w.type}: three marks scale the bank by the anchor`)
         .toBeCloseTo(w.g3, 6);
       // (3) and the BITE is the mark's ordinary effect, untouched by any of
       // this — the re-base must not have quietly nerfed damage.

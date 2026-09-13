@@ -14,7 +14,8 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          MASS_SCALE, scaledMass, IMPACT_ENERGY_PER_DAMAGE,
          STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
          PROJECTILE_CONSTANTS, HIT_FEEDBACK,
-         BASE_BANK_DIVISOR, GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
+         BASE_BANK_DIVISOR, BASE_BANK_TRIM, GUNNERY_MK3_TRIPLE_MULT,
+         GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
          blastDamageFor, BLAST_ENERGY_COUPLING } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
@@ -186,8 +187,12 @@ const App: React.FC = () => {
       // correct relative to what a Gunnery Mk III actually grants, so
       // MODULE_DEFS is here to be read rather than restated; `blastDamageFor`
       // is here because a blast that silently stopped deriving still draws a
-      // perfectly good explosion.
-      BASE_BANK_DIVISOR, GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
+      // perfectly good explosion.  The divisor's two HALVES are published
+      // separately because only one of them is pinned to the catalog: the
+      // Gunnery anchor must keep tracking MODULE_DEFS, the feel trim over it
+      // is free to move.
+      BASE_BANK_DIVISOR, BASE_BANK_TRIM, GUNNERY_MK3_TRIPLE_MULT,
+      GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
       blastDamageFor, BLAST_ENERGY_COUPLING,
     };
 
