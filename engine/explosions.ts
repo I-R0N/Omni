@@ -237,7 +237,27 @@ export function updateExplosionRings(g: GameEngine) {
  *  DIRECT damage (PhysicsSystem stashes it on the projectile).  Passing it in
  *  keeps every weapon affected equally by the falloff rate: a pierced shot's
  *  fourth blast is as weakened as its fourth bite.  1 when nothing pierced. */
-export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity, falloff: number = 1) {      if (!g.currentMap) return;
+/** `directTarget` is undefined for a FUSE detonation — the shell went off in
+ *  flight having struck nothing, so there is no direct hit to exclude from
+ *  the ring and nothing to compare the owner against. */
+/** Detonate `proj`'s charge at `impactPos`.
+ *
+ *  THE CHARGE IS PAYLOAD, NOT TRAVEL ENERGY (user call).  This used to scale
+ *  the blast by the round's `hitFalloff` — the fraction of launch energy it
+ *  still had — on the reasoning that a shell which spent its bank boring
+ *  should blast weaker.  Two things make that wrong.  It DOUBLE-COUNTS:
+ *  `explosionDamage` is already derived at spawn from the round's own muzzle
+ *  energy (`blastDamageFor`), so re-reading travel energy at detonation
+ *  charges the same quantity twice.  And it makes the ENERGY-DEPLETION
+ *  trigger inert by construction — a shell detonating because it ran out of
+ *  travel energy has, by definition, ~none left, so the blast it fires at the
+ *  exact moment the rule exists for would land ~zero.
+ *
+ *  A warhead does not shrink because the shell flew through a wall.  How big
+ *  the charge is, is the round's own mass (Gunnery and the charged shot both
+ *  buy a heavier one); how far it gets is its travel energy; the two are
+ *  separate quantities and only the first sizes this. */
+export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget?: GameEntity) {      if (!g.currentMap) return;
 // Compact splash blast — deliberately not the boss-death boom, since
 // a Cannon build fires this several times a fight.
 g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
@@ -261,12 +281,12 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
     // DIRECT path below exactly as the kamikaze blast is.
     spawnShockwave(g, impactPos, {
         radius: proj.explosionRadius!,
-        damage: (proj.explosionDamage ?? 0) * falloff,
+        damage: proj.explosionDamage ?? 0,
         knockback: proj.explosionKnockback ?? 0,
         color: WEAPONS[WeaponType.CANNON].color,
         ownerType: proj.ownerType,
         ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
-        excludeIds: [directTarget.id, 'player'],
+        excludeIds: directTarget ? [directTarget.id, 'player'] : ['player'],
     });
 
     // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
@@ -279,7 +299,7 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         applyBlastToPlayer(g, 
             impactPos,
             proj.explosionRadius!,
-            (proj.explosionDamage ?? 0) * falloff,
+            proj.explosionDamage ?? 0,
             proj.explosionKnockback ?? 0,
         );
     }

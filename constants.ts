@@ -470,6 +470,51 @@ export const PLASTIC_SHARD_AUTOMATA = {
 // catches them.  Rock / glass / metal / nebula stay on the baseline.
 export const PLASTIC_SHARD_FLOW_MULT = 5;
 
+/** THE MASS SCALE FACTOR (user call): every mass in the game is ten times
+ *  what it was, with every SIZE and AREA unchanged — so every body is ten
+ *  times denser, and **impacts hit ten times harder**.
+ *
+ *  THAT IS THE POINT, and it is worth saying plainly because the obvious
+ *  "safe" move is to undo it.  Every impact in this engine is worth
+ *  `mass / IMPACT_ENERGY_PER_DAMAGE`, so scaling that conversion alongside
+ *  the masses makes the whole change a no-op — bigger numbers, identical
+ *  game.  It was written that way once, and it was wrong: the mass scale
+ *  EXISTS to make collisions carry more energy.  `IMPACT_ENERGY_PER_DAMAGE`
+ *  stays at 32 and every impact is worth ten times what it was.
+ *
+ *  NOTHING ELSE IS COMPENSATED EITHER, and each of these is a consequence
+ *  rather than an oversight:
+ *  - `SHARD_CRASH_MOMENTUM` and `TILE_PRESSURE_MIN_MASS` are gates on
+ *    `mass x speed` and mass.  Left alone, ten times as many drifting
+ *    shards now clear them — heavier debris is destructive debris.
+ *  - `PLAYER_KICK_IMPULSE_PER_DMG` is an impulse over mass, so a hull ten
+ *    times heavier is shoved ten times less by the same bolt.
+ *  - `FLOW_VARIABILITY.MASS_REF` is the flow-drift reference, so heavier
+ *    shards ride the current more sluggishly.
+ *  - `AUDIO_CONSTANTS.IMPACT_PITCH_REF_MASS` pitches by mass, so heavier
+ *    bodies knock lower.
+ *
+ *  What IS invariant, for free, is every RATIO: the impulse solver's
+ *  inverse-mass split, the body-impact shake, the roll spring's
+ *  `player.mass / PLAYER_MASS`, the ship-weight normalisation.  A uniform
+ *  factor cancels in all of them, which is why the ship still handles like
+ *  itself while hitting far harder.
+ *
+ *  THE DIAL, if ten turns out to be too much, is `CRASH_ENERGY_COUPLING`
+ *  (DBG ▸ Player ▸ "Crash energy") or a material's own `bondStrength` —
+ *  never this constant, which is what "how heavy is everything" means.
+ */
+export const MASS_SCALE = 10;
+
+/** One mass, scaled.  The seam every AUTHORED mass passes through — enemies,
+ *  projectiles, the roamers, the POIs — so a table keeps stating the number
+ *  someone chose while the world runs on the scaled one.  Masses DERIVED
+ *  from `IMPACT_DENSITY` do NOT call this: the factor is already baked into
+ *  that table, which is what keeps its density column honest. */
+export function scaledMass(m: number): number {
+  return m * MASS_SCALE;
+}
+
 // ── Flow-field per-entity variability ──────────────────────────────
 // Inverse-mass scaling applied to BOTH the correction blend rate
 // (how fast an entity locks onto the flow direction) AND the
@@ -1401,11 +1446,124 @@ export const INPUT_CONSTANTS = {
   },
 };
 
+/** THE IMPACT DENSITY SCALE — one statement of how heavy everything is,
+ *  in mass per unit of d² (user call, unified impact physics follow-up).
+ *
+ *  Mass used to be an IMPULSE term and nothing else, so the numbers only had
+ *  to be right relative to each other inside the collision solver.  The
+ *  energy model changed that: mass is now half of what every impact SPENDS,
+ *  so what a body weighs decides what it BREAKS.  That makes these numbers a
+ *  balance surface, and a balance surface has to be readable.
+ *
+ *  MEASURED before this existed (`perf/impact-audit.mjs` §7): the four shard
+ *  ladders spanned 0.0100..0.0300 — a coherent 3× band reading exactly as
+ *  material density — enemies sat inside it at 0.0102..0.0400, projectiles
+ *  ran 0.0139..0.0960, and the PLAYER sat alone at 0.2500: 25× glass, 8×
+ *  rock, twice the dragon.  A 20-unit hull massing 100 was as dense as
+ *  nothing else in the game, and nothing said so anywhere.
+ *
+ *  THE HULL IS DELIBERATELY THE DENSEST THING HERE (user call).  A ship is a
+ *  machine — armour, engines, reactor, ordnance — not a rock, and it should
+ *  plow through gravel rather than be batted about by it.  What changed is
+ *  that the figure is now a STATED density with the material band beside it
+ *  for comparison, instead of a bare `100` whose relationship to a boulder
+ *  nobody could see.  `HULL_DENSITY_CYCLE` is the live A/B on it.
+ *
+ *  Two classes deliberately do NOT derive their mass from this table, and
+ *  both exceptions are about not coupling a physical quantity to a visual
+ *  one:
+ *  - PROJECTILES author `mass` directly, because it is the ENERGY BANK the
+ *    round flies with (§5's "a round carries two numbers").  Deriving it
+ *    from the drawn `size` would make a bolt's damage a function of its
+ *    sprite: the Cannon is the proof, drawn at 16 against the Blaster's 6
+ *    while massing 3.56 against 1.00, so its density is the LOWEST of any
+ *    round (0.0139) and would have to be authored low anyway.  No
+ *    information is gained and a hazard is introduced.
+ *  - ENEMIES author `mass` per archetype for the same reason a boss is
+ *    bigger than a gnat without being proportionally heavier.  Their
+ *    densities are REPORTED by the audit so the scale stays visible; two
+ *    are worth knowing because they look wrong and are not: the DRAGON at
+ *    0.1221 is a mini-boss meant to be immovable, and the BUBBLE at 0.0400
+ *    is denser than metal but its mass 9 is load-bearing — the immovability
+ *    fix documented in CLAUDE.md §5 rests on that exact impulse arithmetic.
+ */
+export const IMPACT_DENSITY = {
+  // The MATERIAL reference, and the reason the scale has a unit at all: the
+  // four shard spawn ladders ARE these numbers, so glass : rock : metal
+  // stays 1 : 1.8 : 3 and every other class can be read against it.
+  GLASS:   0.10,
+  PLASTIC: 0.13,
+  ROCK:    0.18,
+  METAL:   0.30,
+  // The player's hull.  25x glass and 8x rock, on purpose — see above.
+  HULL:    2.50,
+} as const;
+
+/** Mass from a body's diameter and its density — the ONE derivation, so a
+ *  body that grows gets heavier without anyone editing a second number.
+ *  d² rather than area (πd²/4) because the shard ladders were authored that
+ *  way and the constant absorbs the 4/π; what matters is that everything
+ *  divides by the same thing. */
+export function massFor(d: number, density: number): number {
+  return d * d * density;
+}
+
+/** DBG Player ▸ "Hull density" — the live A/B on how heavy the ship is,
+ *  a MULTIPLIER over `IMPACT_DENSITY.HULL` with index 0 what ships, so the
+ *  first click is the comparison.  The steps walk DOWN toward the material
+ *  band (0.25 → 0.125 → 0.0625 → 0.03, the last being metal's own density)
+ *  and one step up, because the question the measurement raises is whether
+ *  the hull should be that far above the materials at all.
+ *
+ *  Applied at `applyModuleEffects`, which is where `player.mass` is
+ *  actually derived — so `GameEngine` re-folds the outfit when this cycles
+ *  rather than the ladder writing a mass of its own.  That keeps ONE
+ *  definition of the ship's mass and means the ship-weight curve rides the
+ *  change for free.
+ *
+ *  WHAT MOVES WITH IT, which is why this is a ladder and not a constant
+ *  someone edits: the ship's crash energy (so ram counts), how far it is
+ *  shoved by every impact, the body-impact shake (which reads the solver's
+ *  own mass split), and the roll spring's frequency (÷√(mass/PLAYER_MASS)).
+ *  At index 0 every one of those is exactly what it was. */
+export const HULL_DENSITY_CYCLE: ReadonlyArray<number> = [
+  1, 0.5, 0.25, 0.12, 2,
+] as const;
+const HULL_DENSITY_DEFAULT_INDEX = 0;
+let activeHullDensityIndex = HULL_DENSITY_DEFAULT_INDEX;
+
+export function getHullDensityMult(): number {
+  return HULL_DENSITY_CYCLE[activeHullDensityIndex];
+}
+/** The ship's live hull density, and so its mass: every read goes through
+ *  here rather than through `IMPACT_DENSITY.HULL`, or the ladder would be
+ *  honoured by one caller and ignored by another. */
+export function hullDensity(): number {
+  return IMPACT_DENSITY.HULL * getHullDensityMult();
+}
+export function getHullDensityName(): string {
+  const d = hullDensity();
+  const tag = activeHullDensityIndex === HULL_DENSITY_DEFAULT_INDEX ? ' (def)' : '';
+  // The DENSITY is the number that compares to the material band, and the
+  // MASS is the number the solver uses — the panel shows both, because the
+  // whole point of the ladder is reading one against the other.
+  return `${d.toFixed(3)} / m${massFor(SPRITE_CONSTANTS.PLAYER_BASE_SIZE, d).toFixed(0)}${tag}`;
+}
+export function cycleHullDensity(): number {
+  activeHullDensityIndex = (activeHullDensityIndex + 1) % HULL_DENSITY_CYCLE.length;
+  return activeHullDensityIndex;
+}
+
 export const PHYSICS_CONSTANTS = {
   FRICTION: 0.999, // Fallback default
   ACCELERATION: 0.02, // Fallback default (Reduced from 0.04)
+  // DERIVED, not authored: a 20-unit hull at `IMPACT_DENSITY.HULL` is
+  // exactly the 100 this was written as, so nothing re-prices — but the
+  // number now says WHY it is 100 and what it is 100 relative to.  This is
+  // the SHIPPED reference (the DBG ladder multiplies `hullDensity()` at the
+  // read); `SHIP_WEIGHT.MASS_REFERENCE` normalises the lean outfit onto it.
   MAX_SPEED: 15,
-  PLAYER_MASS: 100, // Heavier player = less recoil
+  PLAYER_MASS: massFor(SPRITE_CONSTANTS.PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL),
   RECOIL_FORCE: 0 // Legacy, unused now that mass is implemented
 };
 
@@ -5192,7 +5350,7 @@ export const PROJECTILE_CONSTANTS = {
   SIZE: 8,
   COLOR: '#facc15', // Yellow
   LIFETIME: 1.5, // Seconds
-  MASS: 1, // Light projectile
+  MASS: 1 * MASS_SCALE, // Light projectile
   // Fraction of the shooter's velocity added to the muzzle velocity at
   // spawn (1.0 = full inheritance).  Keeps a moving shooter from
   // outrunning its own shots: forward shots lead the ship and strafing
@@ -5218,7 +5376,7 @@ export const ENEMY_CONSTANTS = {
   VISION_RANGE: 2500,
   ACCELERATION: 100,
   MAX_SPEED: 200,
-  MASS: 10
+  MASS: 10 * MASS_SCALE
 };
 
 // Enemy death dust: on death an enemy releases a handful of nebula-shards
@@ -5487,106 +5645,352 @@ export const DAMAGE_TEXT_CONSTANTS = {
   DAMAGE_FONT_SCALE: 0.8, // damage chips render small vs. points popups
 };
 
-// PIERCE CEILING (A3).  The Penetration module adds +1 pierce per mark to
-// EVERY gun uniformly (guidance call), and this clamps the sum.
+// ── KINETIC IMPACT DAMAGE (unified impact physics, step 3) ──────────────────
 //
-// It is a plain SANITY ceiling against an authoring mistake, and nothing
-// more — it is deliberately NOT anchored to any weapon.  It used to be, and
-// the anchor rotted: 99 was "the ceiling the Laser already defines", and the
-// Laser now ships `pierce: 4`.  The largest reachable stack today is that 4
-// plus Penetration Mk III's +3 = 7, so nothing comes near this and no
-// balance statement should be read into the number.
-export const MAX_PIERCE = 99;
+// ONE QUANTITY CROSSES EVERY IMPACT SEAM: ENERGY.  A projectile's damage is
+// no longer an authored scalar that travels unchanged from muzzle to target —
+// it is the kinetic energy the bolt is CARRYING at the moment it lands,
+// converted at a single documented rate.  That rate is this constant, and it
+// is the ONE conversion docs/PARKING_LOT.md §4 demands between the structural
+// world (where `grain.bondStrength` is already a specific fracture energy, so
+// HP is derived rather than authored) and the ACTOR world (where enemies,
+// bosses and the player keep authored HP pools that the counterplay layer in
+// docs/WEAPONS_AMMO_PLAN.md §7 is built on).  Two conversions in two places
+// is the failure mode; this is the one.
+//
+// WHY THE STEP-1 AUDIT SAID NO SINGLE CONSTANT FITS, AND WHY ONE DOES.
+// `perf/impact-audit.mjs` measured the implied constant at 9..90 KE per point
+// of damage across the roster — a 10x spread — and the parking lot recorded
+// that as the reason step 3 is a re-pricing rather than a refactor.  That
+// spread is real, but it is an ARTEFACT OF `PROJECTILE_CONSTANTS.MASS`: every
+// projectile in the game flew at mass 1, so all of the variation between a
+// Laser pulse and a Cannon shell had nowhere to live except in the constant.
+//
+// Free the mass and the constant IS constant: the spread moves into SECTIONAL
+// DENSITY — a physical property of the shot that was previously suppressed —
+// and every damage number is unchanged on day one.
+//
+// A ROUND CARRIES TWO NUMBERS, AND THEY ARE DIFFERENT QUESTIONS.  `damage` is
+// the BITE — what one contact deposits, at the muzzle.  `mass` is the BANK —
+// with `speed` it fixes the energy the round launches with, and therefore how
+// many bites it can pay for before it is spent.  Step 3 DERIVED the bank from
+// the bite times an authored `pierce` count; step 5 authors it directly and
+// deletes `pierce`, because a count of bodies is not a property a projectile
+// has.  A round has a mass; how far it gets is arithmetic.
+//
+// WHAT FALLS OUT, AND IT IS THE WHOLE POINT.  A bolt that has spent energy is
+// slower, and damage is measured from speed, so the next bite is smaller with
+// no curve authored anywhere.  The decay rate is not a knob and is not global:
+// it is `1 - bite/energy` at the muzzle, a consequence of the two numbers
+// above.  Measured over the shipped roster, successive bites are
+//
+//   Blaster       4.00                          stops dead (bank = 1 bite)
+//   Shotgun       3.00 1.50                     decay 0.50/hit
+//   Burst Rifle   5.00 3.33 2.22                decay 0.67/hit
+//   Laser         5.00 4.00 3.20 2.56 2.05      decay 0.80/hit
+//
+// so a beam built to rake a line gives up little per body and a pellet gives
+// up half.  That is why `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN` are
+// DELETED here rather than retuned: two knobs describing one phenomenon was
+// the clearest single symptom of the overlap this work exists to remove, and
+// it is also why the shipped falloff rate was 0 — nobody could say what the
+// right number was, because the number should not have existed.
+//
+// AND THE BODY COUNT IS NOT A BUDGET EITHER.  A round stops when it can no
+// longer afford what it is hitting: terrain charges per GRAIN
+// (`grainSize x bondStrength`) and an actor charges only what it could
+// actually absorb, so the same Blaster bolt that is stopped dead by one rock
+// tile punches through four one-HP gnats.  Depth is emergent on both sides of
+// the seam, which is what let the Penetration module be deleted rather than
+// replaced (step 5).
+export const IMPACT_ENERGY_PER_DAMAGE = 32;
 
-// PENETRATION FALLOFF — a RATE, not a table (user call, superseding the
-// authored curve).  Damage at hit ordinal `n` is `base x (1 - rate)^n`, so
-// ONE number describes the whole decay and the DBG cycle below can sweep it
-// live.  The authored table it replaces could express an irregular shape but
-// could not be tuned in play, which is what the tuning actually needs.
-//
-// RATE 0 IS A FIRST-CLASS SETTING (user call): every penetration hit then
-// deals full projectile damage, which is the control for judging whether the
-// decay is carrying its weight at all.
-//
-// SHIPPED OFF (user call).  The decay is a knob to be judged, not a balance
-// statement to inherit: at 0 every penetration hit lands FULL projectile
-// damage, so what ships is the honest ceiling and the rate is what a tuning
-// pass turns up.  The step below it in the cycle is 0.05, which is the value
-// the retired table's tail worked out to at depth — a sensible first click.
-//
-// The number matters more than it looks once turned on, because the
-// reachable stack is large: six Penetration Mk III in the weapon flower is
-// +18, and inside a grain material every GRAIN spends a charge.  A geometric
-// decay has no floor, so the rate mostly decides what a DEEP bore is worth —
-// at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.
-//
-// It applies to EVERY WEAPON EQUALLY (user call), and to every damage path a
-// hit produces: the direct bite, the Cannon's AoE splash and the Lightning
-// chain all take the same factor.  `WeaponConfig.pierceFalloffRate` is kept
-// as the per-weapon seam for when that changes; nothing overrides it today.
-export const PIERCE_FALLOFF_RATE = 0;
+/** The mass the sim flies for a shot from `cfg`.
+ *
+ *  AUTHORED where a round's density is a statement — every player gun states
+ *  one, and the numbers are exactly what step 3's `(1 + pierce)` solve
+ *  produced, so retiring the vocabulary rebalanced nothing.  The FALLBACK is
+ *  the bank that makes a round spend itself on one contact, which is what
+ *  every weapon with nothing to say about penetration means; the enemy guns
+ *  take it rather than carrying a second table.
+ *
+ *  Mass is NOT inert: `PhysicsSystem` reads it for the momentum a hit imparts
+ *  to a mobile target, so a Cannon shell (3.56) shoves a shard harder than a
+ *  Laser pulse (1.78) does.  That is the physical content of giving shots a
+ *  real mass, and it is the one balance change step 3 shipped. */
+export function projectileMassFor(cfg: { damage: number; speed: number; mass?: number }): number {
+  if (cfg.mass !== undefined) return scaledMass(cfg.mass);
+  const v = cfg.speed;
+  if (!(v > 0)) return PROJECTILE_CONSTANTS.MASS;
+  return (2 * IMPACT_ENERGY_PER_DAMAGE * cfg.damage) / (v * v);
+}
 
-/** DBG "Pierce falloff" — index 0 is what ships, so the first click is the
- *  A/B.  0 is the no-decay control; the top of the range is deliberately
- *  past useful, because a range whose top is not too far cannot show where
- *  too far is. */
-export const PIERCE_FALLOFF_CYCLE: ReadonlyArray<number> = [
-  PIERCE_FALLOFF_RATE, 0.05, 0.10, 0.20, 0.35, 0.50,
+/** Damage a body of `mass` carries at `speed`, in the authored-damage units
+ *  every consumer downstream already speaks (`bondStrength` per pixel, actor
+ *  HP pools, the §7 trait thresholds).  The projectile side reaches this
+ *  through `projectileBite`; the CRASH side calls it directly, which is the
+ *  whole of "weapons and collisions stop speaking two different physics". */
+export function kineticDamage(mass: number, speed: number): number {
+  return (0.5 * mass * speed * speed) / IMPACT_ENERGY_PER_DAMAGE;
+}
+
+// HOW MUCH OF A HULL'S ENERGY REACHES THE BONDS (unified impact physics,
+// step 4).  A collision is not a focused penetrator: most of the energy goes
+// into the rebound, and only a fraction is spent breaking the interfaces at
+// the contact.  That fraction is this constant, and it is the one number
+// step 4 adds.
+//
+// CALIBRATED ON ROCK, on purpose.  Rock's shipped ram count is the anchor —
+// 9 crashes at 6 u/step through a 54.4-HP tile, player mass 100, so 6.04
+// damage per crash out of 1800 KE — which fixes the coupling at 0.1075 and
+// leaves rock EXACTLY where it shipped.  Every other material then differs
+// by its own derived toughness rather than by an authored HP that meant
+// nothing to the grain model:
+//
+//   rock      54.4 derived ->  9 crashes (unchanged, the anchor)
+//   glass     49.4         ->  1         (the V9 whole-pane rule still wins)
+//   plastic  389.8         -> 65         (was 8 -- its authored HP was 8)
+//   metal    470.5         -> 78         (was 24..144, by DENSITY TIER)
+//
+// The metal line is the clearest statement of what this fixes: its ram count
+// used to be a tier lottery, because a crash spent one AUTHORED HP and
+// metal's authored HP is `24 x densityTier` while its derived HP is flat.
+// Six tiles of identical toughness took 24 to 144 rams.  Now they take 78.
+export const CRASH_ENERGY_COUPLING = 0.1075;
+
+/** DBG "Crash energy" — a MULTIPLIER over the calibrated coupling, applied
+ *  at the read so it re-tunes without a map reload, and index 0 is what
+ *  ships so the first click is the A/B.  This is the dial for how permeable
+ *  terrain is: the user's own lever for the same question is a material's
+ *  `bondStrength`, which moves one material where this moves all of them. */
+export const CRASH_ENERGY_CYCLE: ReadonlyArray<number> = [
+  1, 0.5, 0.25, 2, 4,
+] as const;
+const CRASH_ENERGY_DEFAULT_INDEX = 0;
+let activeCrashEnergyIndex = CRASH_ENERGY_DEFAULT_INDEX;
+
+export function getCrashEnergyMult(): number {
+  return CRASH_ENERGY_CYCLE[activeCrashEnergyIndex];
+}
+export function getCrashEnergyName(): string {
+  const v = CRASH_ENERGY_CYCLE[activeCrashEnergyIndex];
+  return activeCrashEnergyIndex === CRASH_ENERGY_DEFAULT_INDEX
+    ? `${v}x (def)` : `${v}x`;
+}
+export function cycleCrashEnergy(): number {
+  activeCrashEnergyIndex = (activeCrashEnergyIndex + 1) % CRASH_ENERGY_CYCLE.length;
+  return activeCrashEnergyIndex;
+}
+
+/** What a crash at `speed` between bodies of these masses is worth in
+ *  boundary damage.
+ *
+ *  REDUCED MASS (`reducedMass`, shared with `PhysicsSystem.payForCrash` so
+ *  the damage and the speed the impactor pays for it can never be computed
+ *  against different masses) is the right term, and the reason this is one
+ *  function rather than a player case and a shard case: `m1 m2 / (m1 + m2)` is the energy
+ *  actually available in a collision, and it degrades to the impactor's own
+ *  mass against a STATIC body (infinite mass) for free.  So a shard hitting a
+ *  wall spends all of its energy, and the same shard hitting a loose rock of
+ *  its own size spends half — which is what makes the two authored gates
+ *  (`CRASH_VELOCITY_THRESHOLD`, pure SPEED, and `SHARD_CRASH_MOMENTUM`, pure
+ *  MOMENTUM) collapse into one quantity. */
+export function getCrashCoupling(): number {
+  return CRASH_ENERGY_COUPLING * getCrashEnergyMult();
+}
+
+/** The energy a crash COSTS its impactor, in damage units, for `absorbed`
+ *  worth of bonds actually broken.
+ *
+ *  The inverse of the coupling, and the half of it that is easy to get wrong.
+ *  `CRASH_ENERGY_COUPLING` is an EFFICIENCY, not a tap: a hull that deposits
+ *  6 damage into a tile did not lose 6 damage worth of speed and keep the
+ *  rest — it lost all of what it spent, and only ~11% of that did useful
+ *  breaking work.  The remainder goes where a real collision puts it, into
+ *  rebound and deformation.
+ *
+ *  Charging only the absorbed part instead was measured and is badly wrong:
+ *  a ship at cruise then crossed FORTY-ONE rock tiles losing 3% a tile,
+ *  because a tile's whole bond budget is a rounding error against a hull's
+ *  kinetic energy.  With the efficiency paid, the same ship crosses ~3 and
+ *  is stopped outright by plastic or metal, which is the behaviour the step
+ *  exists to produce. */
+export function crashEnergyCost(absorbed: number): number {
+  const k = getCrashCoupling();
+  return k > 0 ? absorbed / k : absorbed;
+}
+
+export function reducedMass(massA: number, massB: number): number {
+  const a = massA === Infinity ? Infinity : Math.max(1e-6, massA);
+  const b = massB === Infinity ? Infinity : Math.max(1e-6, massB);
+  if (a === Infinity && b === Infinity) return 0;
+  if (a === Infinity) return b;
+  if (b === Infinity) return a;
+  return (a * b) / (a + b);
+}
+
+export function crashDamageFor(massA: number, massB: number, speed: number): number {
+  const mu = reducedMass(massA, massB);
+  if (!(mu > 0)) return 0;
+  return kineticDamage(mu, speed) * getCrashCoupling();
+}
+
+/** The damage one hit lands: the shot's authored figure scaled by the square
+ *  of the speed it is being measured at against the speed it launched with.
+ *  Quadratic because damage is kinetic — that IS the falloff, and there is no
+ *  second term anywhere.  A bolt still at its launch speed lands exactly its
+ *  authored damage, which is what makes the whole change day-one neutral. */
+export function projectileBite(authored: number, speed: number, spawnSpeed: number): number {
+  if (!(spawnSpeed > 0)) return authored;
+  const r = speed / spawnSpeed;
+  return authored * r * r;
+}
+
+// ── THE BLAST IS THE SHELL'S OWN ENERGY (user call) ──────────────────────────
+//
+// A shaped charge was the LAST damage number in the roster still authored as a
+// flat scalar.  The direct bite became kinetic in step 3, the crash in step 4
+// and the bore in step 5 — but `explosionDamage: 10` sat unchanged while every
+// round's bank went up tenfold and terrain started deriving ~50 HP a tile, so
+// the blast quietly shrank into a light show (measured: a bystander at half
+// the radius lost 2.7).
+//
+// So the blast is now a FRACTION OF THE SHELL'S KINETIC ENERGY, converted
+// through the same `IMPACT_ENERGY_PER_DAMAGE` everything else uses.  Three
+// properties fall out rather than being written:
+//   - it scales with GUNNERY for free, because a mark buys a heavier round
+//     and the blast reads the round's own mass;
+//   - a shell that has spent its bank boring through terrain blasts WEAKER,
+//     because the existing `× hitFalloff` at the AoE call site is exactly the
+//     fraction of launch energy it has left — peak × (E/E₀) is the energy it
+//     still carries, with no second curve anywhere;
+//   - a charged shell blasts harder by being heavier, which is the same
+//     repricing step 5 gave the Blaster's charge.
+//
+// THE COUPLING IS AN EFFICIENCY, and it is the sibling of
+// `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
+// work, a shaped charge couples this much of its remaining energy into the
+// blast.  At 0.2 the shipped Cannon's peak blast is ~17 against its 18 direct
+// bite — "the charge is worth about one more hit" — which is the statement
+// that picks the number.  DBG ▸ Player ▸ "Blast energy" is the live A/B.
+export const BLAST_ENERGY_COUPLING = 0.2;
+
+export const BLAST_ENERGY_CYCLE: ReadonlyArray<number> = [
+  1, 0.5, 2, 4,
+] as const;
+const BLAST_ENERGY_DEFAULT_INDEX = 0;
+let activeBlastEnergyIndex = BLAST_ENERGY_DEFAULT_INDEX;
+/** The live coupling: the constant above times the DBG multiplier.  Read at
+ *  the point a shell is spawned, so a click re-tunes the next shot rather
+ *  than needing a map reload. */
+export function getBlastCoupling(): number {
+  return BLAST_ENERGY_COUPLING * BLAST_ENERGY_CYCLE[activeBlastEnergyIndex];
+}
+export function getActiveBlastEnergyName(): string {
+  const m = BLAST_ENERGY_CYCLE[activeBlastEnergyIndex];
+  const label = `${m}×`;
+  // The "(def)" marker is DERIVED from the default index, never written into a
+  // step's name — the nebula-sprite lesson (CLAUDE.md §8).
+  return activeBlastEnergyIndex === BLAST_ENERGY_DEFAULT_INDEX ? `${label} (def)` : label;
+}
+export function cycleBlastEnergy(): number {
+  activeBlastEnergyIndex = (activeBlastEnergyIndex + 1) % BLAST_ENERGY_CYCLE.length;
+  return activeBlastEnergyIndex;
+}
+
+/** The PEAK damage a shell's charge deposits, from the round the sim actually
+ *  flies.  `mass` is the SCALED mass (what `projectileMassFor` returns), not
+ *  the authored figure — the authored-units rule that bit `withGunnery` and
+ *  `chargedConfigOf` cuts both ways, and this one wants the flown number. */
+export function blastDamageFor(mass: number, speed: number): number {
+  return kineticDamage(mass, speed) * getBlastCoupling();
+}
+
+/** The speed a body of `mass` is left with after spending `damage` worth of
+ *  energy — the whole of the penetration falloff, as arithmetic rather than
+ *  as a knob.  Clamped at rest: a bolt cannot be left with negative energy. */
+export function speedAfterSpending(mass: number, speed: number, damage: number): number {
+  if (!(mass > 0)) return speed;
+  const ke = 0.5 * mass * speed * speed - damage * IMPACT_ENERGY_PER_DAMAGE;
+  return ke <= 0 ? 0 : Math.sqrt((2 * ke) / mass);
+}
+
+// WHICH VELOCITY THE ENERGY IS MEASURED IN (user call, DBG "Impact vel").
+//
+// Energy is FRAME-DEPENDENT, and the two honest frames disagree by a lot,
+// because `PROJECTILE_CONSTANTS.INHERIT_SHOOTER_VELOCITY` is 1.0 — a forward
+// shot already carries the ship's velocity.  Measured on POCKET (cruise 15),
+// the energy a charging shot lands with against a still one: Laser 2.20x,
+// Lightning 2.48x, Cannon 3.22x, Blaster 3.73x, Seeker 5.04x — and cruise is
+// per-map, so on ASTEROID_FIELD (33.3) a Blaster reaches ~9.5x.  Retreating
+// costs nothing, because the per-weapon muzzle-speed floor clamps it.
+//
+//  'muzzle'   — the bolt's energy in its MUZZLE frame: damage is the authored
+//               figure, scaled by how much of its launch speed the bolt has
+//               since lost.  Neutral at spawn however the ship was moving, and
+//               it still carries the bore falloff, because that is a real loss
+//               of the bolt's own speed.  INDEX 0: what ships.
+//  'relative' — true closing energy, `1/2 m |v_proj - v_target|^2`.  The
+//               physically honest reading and the one that finishes the
+//               unification, since the crash paths already spend a RELATIVE
+//               velocity: under it a weapon hit and a hull hit are the same
+//               formula.  It also means a shot fired at a target fleeing at
+//               matched speed lands nothing, which is correct and is exactly
+//               why it is a step on a ladder rather than a default.
+export type ImpactVelocityMode = 'muzzle' | 'relative';
+
+export const IMPACT_VELOCITY_CYCLE: ReadonlyArray<ImpactVelocityMode> = [
+  'muzzle', 'relative',
 ] as const;
 
-let activePierceFalloffIndex = 0; // 0 — what ships: the decay is OFF
+/** Index 0 is what ships, so the first click is always the A/B. */
+const IMPACT_VELOCITY_DEFAULT_INDEX = 0;
+let activeImpactVelocityIndex = IMPACT_VELOCITY_DEFAULT_INDEX;
 
-export function getActivePierceFalloffRate(): number {
-  return PIERCE_FALLOFF_CYCLE[activePierceFalloffIndex];
+export function getActiveImpactVelocityMode(): ImpactVelocityMode {
+  return IMPACT_VELOCITY_CYCLE[activeImpactVelocityIndex];
 }
-export function getActivePierceFalloffName(): string {
-  const v = getActivePierceFalloffRate();
-  if (v === 0) return 'off (full dmg, def)';
-  return v.toFixed(2);
+export function getActiveImpactVelocityName(): string {
+  const v = IMPACT_VELOCITY_CYCLE[activeImpactVelocityIndex];
+  // The "(def)" marker is DERIVED from the default index rather than written
+  // into a step's name, so it cannot end up on the wrong step the day the
+  // default moves (CLAUDE.md §8, the nebula-sprite lesson).
+  return activeImpactVelocityIndex === IMPACT_VELOCITY_DEFAULT_INDEX ? `${v} (def)` : v;
 }
-export function cyclePierceFalloff(): number {
-  activePierceFalloffIndex =
-    (activePierceFalloffIndex + 1) % PIERCE_FALLOFF_CYCLE.length;
-  return activePierceFalloffIndex;
-}
-
-/** The damage multiplier for the `ordinal`-th hit of one bolt (0 = the
- *  first contact, always 1 — a bolt with no penetration is untouched by any
- *  of this).  `rate` is a weapon's own override (WeaponConfig
- *  .pierceFalloffRate, stamped onto the projectile at spawn); absent → the
- *  live DBG rate.  Rate 0 returns 1 at every depth. */
-export function pierceFalloffAt(ordinal: number, rate?: number): number {
-  if (ordinal <= 0) return 1;
-  const r = rate !== undefined ? rate : getActivePierceFalloffRate();
-  if (r <= 0) return 1;
-  return Math.pow(1 - r, ordinal);
+export function cycleImpactVelocity(): number {
+  activeImpactVelocityIndex =
+    (activeImpactVelocityIndex + 1) % IMPACT_VELOCITY_CYCLE.length;
+  return activeImpactVelocityIndex;
 }
 
-// PIERCE SPEED DECAY.  A per-hit multiplier on a piercing bolt's speed —
-// boring through matter should cost momentum as well as damage.  SHIPPED
-// AT 1.0, i.e. no behaviour change: the falloff table is the change the
-// user asked for, and this is the second axis they want to FEEL against
-// it before either is tuned.  The DBG cycle below is how.
-export const PIERCE_SPEED_RETAIN = 1.0;
-
-export const PIERCE_SPEED_RETAIN_CYCLE: ReadonlyArray<number> = [
-  PIERCE_SPEED_RETAIN, 0.95, 0.9, 0.8,
-] as const;
-
-let activePierceSpeedRetainIndex = 0; // 1.0 — what ships
-
-export function getActivePierceSpeedRetain(): number {
-  return PIERCE_SPEED_RETAIN_CYCLE[activePierceSpeedRetainIndex];
-}
-export function getActivePierceSpeedRetainName(): string {
-  const v = getActivePierceSpeedRetain();
-  return v === PIERCE_SPEED_RETAIN ? `${v.toFixed(2)}x (def)` : `${v.toFixed(2)}x`;
-}
-export function cyclePierceSpeedRetain(): number {
-  activePierceSpeedRetainIndex =
-    (activePierceSpeedRetainIndex + 1) % PIERCE_SPEED_RETAIN_CYCLE.length;
-  return activePierceSpeedRetainIndex;
-}
+// ── THE BASE SHOT BANK: what three Gunnery marks buy back ────────────────────
+//
+// A round's BANK (`mass`, with `speed`) is what decides how far it gets — how
+// many actors it punches through and how many grains it bores — because every
+// contact is charged out of it.  Step 5 authored those banks at exactly the
+// numbers its `(1 + pierce)` solve produced, and then MASS_SCALE multiplied
+// every mass by ten, which multiplied every bank by ten with it: a base
+// Blaster bolt punched THIRTY-ONE one-HP gnats (measured, audit §8) where the
+// pre-scale round managed four.
+//
+// THE USER'S CALIBRATION, and it is a statement about PROGRESSION rather than
+// a number picked here: *today's* penetration is what a fully-gunned ship
+// should have, so the BASE round is today's divided by what three Gunnery
+// Mk III modules multiply it by.  `withGunnery` scales the bank by
+// `1 + Σ damageFrac` and a Mk III contributes 0.36, so three of them are
+// x2.08 — and dividing the authored banks by that makes the two ends meet by
+// construction.  `tests/weapons.spec.ts` pins the round trip against the real
+// MODULE_DEFS catalog, which is what stops this drifting if Gunnery is
+// retuned; the 0.36 below is written out because MODULE_DEFS is declared
+// AFTER this table and cannot be read from here.
+//
+// ONLY THE BANK MOVES.  `damage` — the BITE one contact deposits — is
+// untouched at every Gunnery level, so no enemy takes longer to kill and no
+// §7 trait threshold shifts.  Scaling both would have been a NO-OP for
+// penetration anyway: the falloff is `1 - bite/energy`, so halving both ends
+// leaves the ratio, and the count, exactly where it was.
+export const GUNNERY_MK3_DAMAGE_FRAC = 0.36;   // statMks('gunnery', … 0.12 * mk)
+export const BASE_BANK_DIVISOR = 1 + 3 * GUNNERY_MK3_DAMAGE_FRAC;   // = 2.08
 
 // ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
 //
@@ -5594,7 +5998,7 @@ export function cyclePierceSpeedRetain(): number {
 //   Each weapon owns a distinct tactical niche.  ROF spans ~10× across the
 //   lineup (Blaster 7/s vs Cannon ~0.7/s); damage trades inversely with ROF
 //   so per-shot damage spans ~5× (Blaster 4 vs Cannon 18).  Each weapon
-//   composes existing primitives (homing / pierce / bounce / lightning /
+//   composes existing primitives (homing / mass / bounce / lightning /
 //   spread / burst) plus the new `explosionRadius` AoE primitive on the
 //   Cannon.  Charged-shot variants (held mouse for the full INPUT_CONSTANTS
 //   .CHARGE_FULL window then released) cost only the charge time — ammo was
@@ -5614,7 +6018,11 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 2,
     recoil: 0.5,
-    pierce: 0,
+    // BANK = one bite: the starter round spends itself on the first thing it
+    // can hurt.  Depth is still not zero — overkill carries through, so a
+    // bolt worth 4 punches four one-HP gnats (measured) and is stopped dead
+    // by one rock tile, which charges 5.6 a grain.
+    mass: 1 / BASE_BANK_DIVISOR,
   },
   [WeaponType.BURST]: {
     type: WeaponType.BURST,
@@ -5628,7 +6036,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 1,
     recoil: 0.3,
-    pierce: 2,
+    mass: 2.4 / BASE_BANK_DIVISOR,         // solve: 3 bites (decay 0.67/hit) before the
+                                           // divisor above and MASS_SCALE below it
     burstCount: 3,
     burstDelay: 0.04,
   },
@@ -5644,7 +6053,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 6,
     spread: 17.5,      // halved — tighter cone, more focused damage
     recoil: 3.0,
-    pierce: 1,
+    mass: 0.96 / BASE_BANK_DIVISOR,        // solve: 2 bites, decay 0.50/hit — a pellet gave up half
   },
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
@@ -5662,21 +6071,18 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 3,          // 3-beam forward fan
     spread: 30,        // ±15° cone
     recoil: 0.5,
-    // 99 → 4 (user call, penetration rework).  "Effectively infinite" was a
-    // number that pre-dated any cost to piercing: with the shared
-    // falloff rate in place a beam already gives up damage per body,
-    // so an unbounded budget just made the Laser the answer to every line of
-    // targets.  Four DAMAGE EVENTS is the budget for the whole flight —
-    // bounces do not refresh it (see the reflection branch in
-    // PhysicsSystem) — and it runs the SHARED falloff table: no
-    // `pierceFalloffRate` override here, deliberately.
-    pierce: 4,
+    // THE DENSEST ROUND IN THE ROSTER for its speed: 25 of energy against a
+    // 5 bite, so it rakes a line giving up only 0.80 a body.  This is the
+    // "effectively infinite pierce" the Laser used to carry, repriced — an
+    // unbounded budget made it the answer to every line of targets, and an
+    // energy bank spends down instead.
+    mass: 1.7778 / BASE_BANK_DIVISOR,      // solve: 5 bites, decay 0.80/hit
     bounceCount: 15,   // 3 -> 15 (user call): reflects up to 15 times off tiles
                        // before dissipating.  Bounces buy COVERAGE, never extra
-                       // damage — `pierce` above is a LIFETIME budget of damage
-                       // events that a reflection does not refresh — so a beam
-                       // that ricochets this much still lands at most 4 hits,
-                       // each further down the shared falloff curve.
+                       // damage — the energy above is a LIFETIME bank that a
+                       // reflection does not refill — so a beam that ricochets
+                       // this much still lands what it can afford, each bite
+                       // further down the curve its own mass sets.
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
@@ -5691,7 +6097,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 3,
     recoil: 0.3,
-    pierce: 0,         // stops on first hit, then chains
+    mass: 0.8521 / BASE_BANK_DIVISOR,      // solve: one bite — it stopped on first hit, then chains
   },
   [WeaponType.HOMING]: {
     type: WeaponType.HOMING,
@@ -5706,7 +6112,8 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 10,
     recoil: 0.5,
-    pierce: 0,
+    mass: 3.5556 / BASE_BANK_DIVISOR,      // one bite, but a HEAVY one: a slow 8-damage round is
+                       // dense, so a Seeker shoves a shard hard on contact
     homing: true,
   },
   [WeaponType.CANNON]: {
@@ -5721,10 +6128,32 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
     count: 1,
     spread: 0,
     recoil: 4.0,       // halved from 8.0 — a slower ROF + AoE makes huge recoil punitive
-    pierce: 0,
+    mass: 3.5556 / BASE_BANK_DIVISOR,      // the heaviest round in the game alongside the Seeker,
+                       // and with 18 of energy behind it: against rock (5.6 a
+                       // grain) the shell bores three grains deep rather than
+                       // being spent by the chip it clipped
     explosionRadius: 110,   // world units of radial AoE on impact
-    explosionDamage: 10,    // damage applied to every entity in radius (excluding the direct-hit target which already took config.damage)
+    // explosionDamage is DERIVED — see `blastDamageFor`.  Absent means "work
+    // it out from the shell's own energy"; a value here is an authored
+    // override, which is what BOSS_WEAPONS.SIEGE still carries so a designed
+    // encounter keeps the splash someone chose for it.
     explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
+    // A HEAVY SHELL IS NOT A CONTACT MINE (user call).  The Cannon was always
+    // meant to be a heavy round with ONE blast at the end of it, and the
+    // penetration system quietly made it something else: `applyExplosionAoE`
+    // fires on EVERY hit, so a shell carrying N pierce detonated N+1 times.
+    // Universal penetration (step 5) would have made that far worse — a full
+    // blast on every pebble it passed through.
+    //
+    // So only an ACTOR trips the charge.  Against STRUCTURES the shell stays a
+    // projectile and spends its energy boring, which is exactly what its mass
+    // is for: it should cross small and medium shards rather than being
+    // stopped and wasted by the first chip of gravel it clips.
+    detonateOn: 'enemy',
+    // ~0.42 s at muzzle speed is a little over 900 units of flight — well
+    // beyond the AoE radius, so a shell that meets nothing still ends in a
+    // blast instead of expiring silently, without becoming a delayed mine.
+    fuseSeconds: 0.42,
   },
 };
 
@@ -5856,7 +6285,11 @@ export const ENEMY_WEAPON: WeaponConfig = {
   count: 1,
   spread: 4,
   recoil: 0,
-  pierce: 0,
+  // No `mass`: the fallback in `projectileMassFor` gives an enemy bolt the
+  // bank that spends itself on one contact, which is what a weapon with
+  // nothing to say about penetration means.  Keeping enemy fire off the
+  // authored table is deliberate — one place states densities, and it is the
+  // player's roster.
 };
 
 // ── Boss weapons ((h)) ────────────────────────────────────────────────────────
@@ -5884,7 +6317,12 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
     speed: 15,
     lifetime: 0.95,
     recoil: 0,         // enemies take no recoil
-    pierce: 0,
+    // RE-SOLVED, not inherited.  The spread above copies the player Shotgun's
+    // `mass`, which was authored against the player's 3 damage at speed 20; at
+    // a boss's 5 at speed 15 that bank is a THIRD of one bite, and a round
+    // that cannot afford its own bite lands nothing.  Anything overriding
+    // `damage` or `speed` off a player gun has to restate the mass with it.
+    mass: 1.4222,      // one bite at damage 5, speed 15
   },
   // Bastion's siege battery — the player Plasma Cannon, AoE and all: the same
   // purple heavy slug that splashes on impact.  Halved damage and a much
@@ -5902,7 +6340,7 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
     explosionDamage: 6,     // splash (player: 10)
     explosionKnockback: 5,
     recoil: 0,
-    pierce: 0,
+    mass: 4.7603,      // one bite at damage 9, speed 11 — see SCATTER
   },
 };
 
@@ -6014,7 +6452,7 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'piercing' | 'overcharge'
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge'
   | 'utility' | 'scanner';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
@@ -6028,7 +6466,6 @@ export interface ModuleEffect {
   accelFrac?: number;       // thrusters
   damageFrac?: number;      // gunnery
   cooldownFrac?: number;    // autoloader
-  pierceBonus?: number;     // piercing — +N projectile penetrations (A3)
   // scanner — the MARK of one Scanner module (A4).  Summed nowhere: the
   // ship's scanner TIER is the highest active mark, so two Mk I do not add
   // up to a Mk II.  See applyModuleEffects.
@@ -6152,7 +6589,6 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   capacitor:  ['shield'],
   gunnery:    ['gun'],
   autoloader: ['gun'],
-  piercing:   ['gun'],
   overcharge: ['gun'],
   utility:    ['hull'],
   scanner:    ['hull'],
@@ -6399,9 +6835,14 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000, weight: 2.0 },
   { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000, weight: 2.5 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
-  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% weapon damage`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
+  // GUNNERY IS THE HEAVIER ROUND, and that is what absorbed the deleted
+  // Penetration module (step 5).  `damageFrac` scales the bite AND the bank
+  // together (WeaponSystem), so a mark buys a denser shot: it bites harder AND
+  // carries further, which under the energy model is the same statement.
+  // Penetration existed to sell depth separately; depth is no longer a
+  // separate thing to sell.
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% shot mass`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
   ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
-  ...statMks('piercing', 'weapon', 'weapon-mod', 'Penetration', mk => `+${mk} shot penetration`, [9000, 22500, 43000], mk => ({ pierceBonus: mk }), 0.2),
   { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 
@@ -6663,7 +7104,7 @@ export function cycleCollapseMode(): CollapseMode {
 // spawns a fresh one.
 export const SNITCH_CONSTANTS = {
   SIZE: 14,              // core diameter (world units)
-  MASS: 2,               // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
+  MASS: 2 * MASS_SCALE,  // finite → dynamic grid; broadphase still skips it (non-drop INTERACTABLE)
   // ── Burst/coast AI ────────────────────────────────────────────────────
   // The snitch alternates between two states instead of flying flat-out:
   //   coast — lazy drift along the flow at COAST_SPEED_FRACTION of the
@@ -8476,7 +8917,7 @@ export const DRAGON_CONSTANTS = {
   // segment, spaced SEGMENT_SPACING apart, up to MAX_SEGMENTS.
   SEGMENT_SPACING: 36,     // world units between body segments
   MAX_SEGMENTS: 28,        // body length cap (further tiles are just devoured)
-  SEGMENT_MASS: 6,         // finite mass so a segment is dynamic + shootable
+  SEGMENT_MASS: 6 * MASS_SCALE,  // finite mass so a segment is dynamic + shootable
   START_SEGMENTS: 10,      // body tiles it spawns with (a coherent random material)
   SEGMENTS: 16,            // body segments at base size (grows with size)
   SEG_PER_SIZE: 7,         // +1 segment per this many size-units grown
@@ -8516,7 +8957,7 @@ export const RIVAL_CONSTANTS = {
   // (rivals draw 1:1, so hull == hitbox).  Movement (thrust/friction/top speed)
   // is NOT tuned here — rivals fly with the player's map movement config, so
   // they handle like a baseline player ship.
-  HEALTH: 120, MASS: 11, SIZE: 38, MAX_SPEED: 5.4,
+  HEALTH: 120, MASS: 11 * MASS_SCALE, SIZE: 38, MAX_SPEED: 5.4,
   VISION: 760,               // target-acquisition range
   FIRE_RANGE: 520,           // opens fire within this of its target
   PREFERRED_DIST: 300,       // strafes to hold roughly this gap from its target
@@ -9202,7 +9643,7 @@ const GLASS_SHARD_SPAWN_SHAPE = {
   // Weight ∝ area (d²) so small shards are trivially pushable and big
   // ones are heavy.  Material coefficient makes glass the LIGHTEST of
   // the solids (glass 0.010 : rock 0.018 : metal 0.030 ≈ 1 : 1.8 : 3).
-  sizeToMass: (d: number) => d * d * 0.010,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.GLASS),
 };
 
 // Base config shared by glass / plastic / metal STRUCTURE tiles.
@@ -9260,7 +9701,7 @@ const SHARD_SPAWN_SHAPE_ROCK = {
   polyVerticesOptions: [5, 7, 9],
   angleJitter: 0.5, radiusMin: 0.60, radiusRange: 0.55,
   // Weight ∝ area (d²); rock sits mid-weight between glass and metal.
-  sizeToMass: (d: number) => d * d * 0.018,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.ROCK),
 };
 
 const SHARD_SPAWN_SHAPE_NEBULA = {
@@ -9271,7 +9712,7 @@ const SHARD_SPAWN_SHAPE_NEBULA = {
   // vs. today's `mass = size` (~8–44).  Combined with linearDamping /
   // angularDamping fields the shard reads as "cloud being shoved
   // aside" without slowing the striker.
-  sizeToMass: () => 0.01,
+  sizeToMass: () => 0.01 * MASS_SCALE,
   // NEBULA'S DRAG IS DECLARED HERE, and it has to be: the generic child
   // recipes (`shatterVoronoiStyle`, `spawnDetachedCell`,
   // `shatterPowerlawStyle`) all copy `childSpawn.linearDamping` onto the
@@ -9304,7 +9745,7 @@ const SHARD_SPAWN_SHAPE_PLASTIC = {
   angleJitter: 0.25, radiusMin: 0.65, radiusRange: 0.45,
   // Weight ∝ area (d²); plastic sits between glass (0.010) and
   // rock (0.018), so it shoves glass and is shoved by rock.
-  sizeToMass: (d: number) => d * d * 0.013,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.PLASTIC),
 };
 
 // Metal shards: 6, 8, or 10 vertices (even counts only).  Low
@@ -9317,7 +9758,7 @@ const SHARD_SPAWN_SHAPE_METAL = {
   polyVerticesOptions: [6, 8, 10],
   angleJitter: 0.20, radiusMin: 0.88, radiusRange: 0.18,
   // Weight ∝ area (d²); metal is the heaviest solid — hardest to shove.
-  sizeToMass: (d: number) => d * d * 0.030,
+  sizeToMass: (d: number) => massFor(d, IMPACT_DENSITY.METAL),
 };
 
 // ── Rock aggregation tint floor ─────────────────────────────────────

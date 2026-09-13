@@ -31,7 +31,7 @@ import {
     cyclePlasticPalette, cyclePlasticShardPalette, cyclePlasticGlowBrightness,
     cycleNebulaPalette, cycleNebulaStretch, cycleNebulaSpriteSize,
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cyclePierceSpeedRetain, cyclePierceFalloff,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity, cycleBlastEnergy,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -48,6 +48,7 @@ import {
     cycleStarDensity, cycleStarSize, cycleStarBands, cycleCollapseMode,
     cycleStarParallax, cycleShardCoat,
 } from '../constants';
+import { applyModuleEffects } from './outfitting';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
 
@@ -982,23 +983,49 @@ export class DebugControls {
     cycleSnitchSpeed();
   }
 
-  /** Cycle the PIERCE SPEED DECAY (DBG "Pierce spd") — the per-hit
-   *  multiplier a piercing bolt's speed keeps as it bores through.  Ships
-   *  at 1.00 (a no-op), so this is the only way to feel a decaying bolt
-   *  against the falloff table before either is tuned. */
-  cyclePierceSpeedRetain() {
-    cyclePierceSpeedRetain();
+  /** Cycle WHICH VELOCITY a hit's kinetic damage is measured in (DBG
+   *  "Impact vel").  Damage is energy now, and energy is frame-dependent:
+   *  'muzzle' (what ships) scores the bolt in its own launch frame, so a
+   *  shot lands its authored damage however the ship was moving; 'relative'
+   *  scores true CLOSING energy, which finishes the unification — the crash
+   *  paths already spend a relative velocity — at the price of a charging
+   *  ship hitting several times harder.  Index 0 ships, so the first click
+   *  is the A/B. */
+  cycleImpactVelocity() {
+    cycleImpactVelocity();
   }
 
-  /** Cycle the PENETRATION DAMAGE FALLOFF RATE (DBG "Pierce falloff") —
-   *  the per-hit decay every penetration hit after the first is scaled by,
-   *  as `(1 - rate)^ordinal`.  A RATE rather than the authored table it
-   *  replaced precisely so it can be swept from here (user call), and 0 is
-   *  a first-class step: every hit then lands full projectile damage,
-   *  which is the control for judging whether the decay earns its place.
-   *  Global — it applies to every weapon evenly for now. */
-  cyclePierceFalloff() {
-    cyclePierceFalloff();
+  /** Cycle how much of a hull's energy reaches the bonds (DBG "Crash
+   *  energy") — a MULTIPLIER over the calibrated `CRASH_ENERGY_COUPLING`,
+   *  applied at the read so it re-tunes the terrain already in the world.
+   *  This is the dial for how permeable terrain is; a material's own
+   *  `bondStrength` is the same question asked of one material. */
+  cycleCrashEnergy() {
+    cycleCrashEnergy();
+  }
+
+  /** Cycle how much of a shell's energy becomes its BLAST (DBG "Blast
+   *  energy") — a MULTIPLIER over `BLAST_ENERGY_COUPLING`, read when a shell
+   *  is spawned so a click re-tunes the next shot.  The blast is derived from
+   *  the round's own mass now, so this is the one number that moves it
+   *  without also moving how far the shell gets. */
+  cycleBlastEnergy() {
+    cycleBlastEnergy();
+  }
+
+  /** Cycle the ship's HULL DENSITY (DBG "Hull density") — a multiplier over
+   *  `IMPACT_DENSITY.HULL`, index 0 what ships.  Under the energy model the
+   *  hull's mass is half of what its every ram SPENDS as well as how little
+   *  it is shoved, so this one number moves crash damage, knockback, the
+   *  body-impact shake and the roll spring together — which is exactly why
+   *  it is worth judging in play rather than picking here.
+   *
+   *  It re-folds the OUTFIT rather than writing a mass, because
+   *  `applyModuleEffects` is the one place `player.mass` is derived and the
+   *  ship-weight curve has to ride the change with it. */
+  cycleHullDensity() {
+    cycleHullDensity();
+    applyModuleEffects(this.g);
   }
 
   // ── Portal tuning (user call: the rift reads as too POWERFUL) ─────────

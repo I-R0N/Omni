@@ -1,4 +1,5 @@
-/** PENETRATION (A3) and SCANNER (A4) — the two Phase-A module families.
+/** GUNNERY (step 5) and SCANNER (A4) — two module families, one of which is
+ *  now the grave of a third.
  *
  *  Both drop into the outfitting system as it ships: a `statMks` row in
  *  MODULE_DEFS, an effect summed by `applyModuleEffects`, and one consumer
@@ -8,26 +9,24 @@
  *  on screen and throws nothing.
  *
  *  What is pinned:
- *   1. PENETRATION RAISES EFFECTIVE PIERCE, through the real weapon path —
- *      the spawned projectile's `pierceCount`, not the module's effect field.
- *   2. THE LASER'S OWN BUDGET.  It ships `pierce: 4` (99 → 4 in the same
- *      rework), and the module's marks add on top of that.
- *   3. A BOLT ACTUALLY PASSES THROUGH.  A real Blaster shot, resolved through
- *      the real collision path, damages a second enemy with Mk I installed
- *      and stops on the first without it — for a FALLOFF-STEPPED bite, not
- *      the full one.
- *   3b. THE OPTION-C SEMANTICS, all four of them: the falloff curve read
- *      across successive hits; a bolt BORING several grains inside ONE tile
- *      and stopping there when its charges run out; a bolt leaving a body
- *      with charges left and striking the next; and an indestructible tile
- *      stopping a bolt dead while spending nothing.  Plus the two the same
- *      rework decided: the Laser's base pierce (99 → 4) and a RICOCHET
- *      re-hitting a body it had already struck.
+ *   1. THE PENETRATION FAMILY IS GONE, and gone from every surface a run can
+ *      reach: the catalog, the adjacency table, the Ship Status panel, and
+ *      the DBG grant path.  A deleted module that is still buyable somewhere
+ *      is the quiet failure this guards.
+ *   2. GUNNERY BUYS A HEAVIER ROUND — the bite AND the bank together, through
+ *      the real weapon path, read off the spawned projectile.  Scaling only
+ *      the bite would make a Gunnery shot hit harder and stop SOONER, which
+ *      is the opposite of a heavier shell, and nothing on screen would say so.
+ *   3. OFFLINE IS ZERO.  An adjacency-offline module contributes exactly
+ *      nothing — which for the scanner means the baseline, to the pixel.
  *   4. EACH SCANNER MARK REVEALS ITS OWN TIER, measured against the
  *      no-scanner baseline in the same scene.
- *   5. OFFLINE IS ZERO.  An adjacency-offline module of either family
- *      contributes exactly nothing — which for the scanner means the
- *      baseline, to the pixel.
+ *
+ *  The PHYSICS the deleted module used to sell — the falloff curve, the grain
+ *  bore, overkill carry-through, the far side — moved to
+ *  `tests/weapons.spec.ts`, which is where claims about what a shot does now
+ *  live.  They were never really module claims; they only lived here because
+ *  Penetration was the thing that made them reachable.
  *
  *  Every reveal assertion reads the BASELINE first and the scanner state
  *  second in the same scene, because "today's behaviour exactly" is the load-
@@ -36,20 +35,19 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, dialByName, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats, waitForStatsKeyChange } from './helpers';
+import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats, waitForStatsKeyChange } from './helpers';
 
-/** WEAPONS[BOUNCER].pierce and the falloff cycle, hard-coded (harness rule:
- *  a test that imports the constant it is checking pins nothing).
- *
- *  The falloff is a RATE, and it SHIPS OFF (user call): damage at hit ordinal
- *  n is `base x (1 - rate)^n`, and at the shipped rate of 0 every penetration
- *  hit lands full damage.  One click of DBG "Pierce falloff" reaches 0.05,
- *  which is where the decay can be observed. */
-const LASER_PIERCE = 4;
-const SHIPPED_RATE = 0;
-const FIRST_CLICK_RATE = 0.05;
-const falloffAt = (ordinal: number, rate = FIRST_CLICK_RATE) =>
-  ordinal <= 0 ? 1 : Math.pow(1 - rate, ordinal);
+/** The energy model, hard-coded (harness rule: a test that imports the
+ *  constant it is checking pins nothing).  A round's MASS and SPEED fix the
+ *  ENERGY it launches with; its authored `damage` is the BITE one contact
+ *  deposits.  Gunnery scales both, which is what "a heavier round" means. */
+// Written out rather than imported (the weapons.spec rule), and deliberately
+// NOT multiplied by MASS_SCALE: scaling the conversion alongside the masses
+// would cancel the 10x the scale exists to deliver.
+const ENERGY_PER_DAMAGE = 32;
+/** The bank, in bites of the authored damage. */
+const bankInBites = (damage: number, speed: number, mass: number) =>
+  (0.5 * mass * speed * speed) / ENERGY_PER_DAMAGE / damage;
 
 /** Park the player in empty space on a quiet showcase map. */
 async function quietField(page: any, map = 'GLASS_FIELD') {
@@ -85,7 +83,13 @@ function fireOne(page: any) {
     const spawned = e.currentMap.entities
       .slice(before)
       .filter((x: any) => x.type === 'PROJECTILE');
-    return { count: spawned.length, pierceCount: spawned[0]?.pierceCount ?? null };
+    const p: any = spawned[0];
+    return {
+      count: spawned.length,
+      damage: p?.damage ?? null,
+      mass: p?.mass ?? null,
+      speed: p ? Math.hypot(p.velocity.x, p.velocity.y) : null,
+    };
   });
 }
 
@@ -128,579 +132,163 @@ function isolate(page: any, group: 'ship' | 'weapon', rootId: string, modId: str
 }
 
 
-/** Turn the decay ON.  It SHIPS OFF, so a test about the curve has to click
- *  the DBG cycle once — index 0 is the shipped 0, index 1 is 0.05. */
-async function decayOn(page: any) {
-  // WAIT for the readout rather than reading it once.  `__omniStats` is
-  // republished by the rAF loop, so a read taken in the same breath as the
-  // click that changes it can still carry the pre-click payload — measured
-  // failing a full-suite run with "off (full dmg, def)", the value from
-  // BEFORE the click, while the cycle itself was fine.  That is a race in
-  // the harness, not a knob that did not move.
-  await dialByName(page, 'pierceFalloffName', FIRST_CLICK_RATE.toFixed(2),
-    e => e.dbg.cyclePierceFalloff(), 1);
-}
+// ── Step 5 — the Penetration family is deleted, and Gunnery absorbed it ─────
 
-// ── A3 — Penetration ────────────────────────────────────────────────────────
-
-test.describe('penetration module', () => {
-  test('the lean start pierces nothing; each mark adds one', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-
-    // BASELINE. The Blaster ships `pierce: 0` — it stops on what it hits.
-    expect(await engine(page, e => e.player.pierceBonus ?? 0),
-      'a lean outfit carries no penetration').toBe(0);
-    expect((await fireOne(page)).pierceCount,
-      'so a Blaster bolt spawns with the gun\'s own pierce').toBe(0);
-
-    const mk1 = await grant(page, 'piercing_mk1');
-    expect(mk1.active, 'granted beside the starter Blaster, it is connected').toBe(true);
-    expect(await engine(page, e => e.player.pierceBonus), 'Mk I = +1').toBe(1);
-    expect((await fireOne(page)).pierceCount, 'and the SHOT carries it').toBe(1);
-
-    // Marks are ordinary stat items: a second one stacks, the way two Hull
-    // modules stack.  (The scanner is the deliberate exception — see below.)
-    await grant(page, 'piercing_mk2');
-    expect(await engine(page, e => e.player.pierceBonus), 'Mk I + Mk II = +3').toBe(3);
-    expect((await fireOne(page)).pierceCount).toBe(3);
-
-    watch.assertClean();
-  });
-
-  test('offline contributes nothing', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-    await grant(page, 'piercing_mk3');
-    expect(await engine(page, e => e.player.pierceBonus), 'connected: +3').toBe(3);
-
-    // Same module, same flower, no gun contact.
-    const iso = await isolate(page, 'weapon', 'wpn_blaster', 'piercing_mk3');
-    expect(iso.rootActive, 'the gun is a root — always active').toBe(true);
-    expect(iso.modActive, 'the mod is not touching it').toBe(false);
-    expect(await engine(page, e => e.player.pierceBonus),
-      'an OFFLINE module contributes zero, not its effect').toBe(0);
-    expect((await fireOne(page)).pierceCount, 'and the shot is the bare gun again').toBe(0);
-
-    watch.assertClean();
-  });
-
-  test('the Laser flies with its own budget, and the module adds to it', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-    await engine(page, e => e.debugGrantWeapon('BOUNCER'));
-    // Select the Laser explicitly — the grant mounts it but the active gun
-    // is whatever the loadout sync landed on.
-    await engine(page, e => e.selectWeapon('BOUNCER'));
-    expect(await engine(page, e => e.player.currentWeapon)).toBe('BOUNCER');
-    expect((await fireOne(page)).pierceCount,
-      'the bare Laser carries its own authored budget').toBe(LASER_PIERCE);
-
-    await engine(page, e => e.debugGrantModule('piercing_mk3'));
-    expect(await engine(page, e => e.player.pierceBonus)).toBe(3);
-
-    const shot = await fireOne(page);
-    // 99 -> 4 (user call): "effectively infinite" pre-dated there being any
-    // COST to piercing.  With the falloff curve in place a beam already gives
-    // up damage per body, so an unbounded budget just made the Laser the
-    // answer to every line of targets.  Mk III's +3 lands on top, nowhere
-    // near the MAX_PIERCE sanity clamp.
-    expect(shot.pierceCount,
-      'the Laser\'s own 4 plus Mk III\'s +3').toBe(LASER_PIERCE + 3);
-
-    watch.assertClean();
-  });
-
-  test('a Blaster bolt with Mk I passes through the first enemy and hits a second',
+test.describe('the Penetration module is gone', () => {
+  test('no catalog entry, no adjacency rule, no stat line, no DBG grant',
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
 
-      /** Fire one real shot and walk it through TWO parked enemies with the
-       *  real collision resolver — the traits suite's rule: a shell whose
-       *  flight depends on the terrain layout tests the terrain. */
-      const run = async () => engine(page, e => {
-        const ctx = e.waveContext();
-        const a = e.waves.spawnAt('RAMMER_1',
-          { x: e.player.position.x + 300, y: e.player.position.y }, ctx, false);
-        const b = e.waves.spawnAt('RAMMER_1',
-          { x: e.player.position.x + 600, y: e.player.position.y }, ctx, false);
-        a.maxSpeed = 0; b.maxSpeed = 0;
-        a.health = a.maxHealth = 1e6;
-        b.health = b.maxHealth = 1e6;
-
-        e.player.weaponCooldown = 0;
-        const before = e.currentMap.entities.length;
-        e.weapons.firePlayerWeapon(
-          e.currentMap.entities, e.player,
-          { x: e.player.position.x + 500, y: e.player.position.y },
-          undefined, false,
-        );
-        const proj = e.currentMap.entities.slice(before)
-          .find((x: any) => x.type === 'PROJECTILE');
-
-        const aBefore = a.health;
-        e.physics.resolveCollision(proj, a, { x: 0, y: 0 });
-        const firstHit = aBefore - a.health;
-        const survived = proj.active === true;
-        let secondHit = 0;
-        if (survived) {
-          const bBefore = b.health;
-          e.physics.resolveCollision(proj, b, { x: 0, y: 0 });
-          secondHit = bBefore - b.health;
-        }
-        a.active = false; b.active = false;
-        proj.active = false;
-        return { firstHit, survived, secondHit };
-      });
-
-      const bare = await run();
-      expect(bare.firstHit, 'the bolt lands').toBeGreaterThan(0);
-      expect(bare.survived, 'and with no module it stops there').toBe(false);
-      expect(bare.secondHit).toBe(0);
-
-      await grant(page, 'piercing_mk1');
-      const pierced = await run();
-      expect(pierced.firstHit).toBeGreaterThan(0);
-      expect(pierced.survived, 'Mk I: the bolt carries on').toBe(true);
-      // The decay SHIPS OFF, so at the default the second body takes the
-      // same bite as the first.  Stated as the RATIO rather than an absolute
-      // so it tracks the Blaster's damage, not this tuning of it; the curve
-      // itself is pinned by the falloff tests below, which turn it on.
-      expect(pierced.secondHit / pierced.firstHit,
-        'and at the shipped rate the second enemy takes the SAME bite')
-        .toBeCloseTo(1, 5);
-
-      watch.assertClean();
-    });
-
-  // ── Option C: the falloff curve and the bore track ────────────────────────
-  //
-  // These read the DAMAGE the real collision path applies, not a flag: an
-  // effect that silently stops being folded, a curve read backwards off the
-  // count-DOWN charge counter, or a bore that spends its whole shot on the
-  // entry grain all leave the same shapes on screen.
-
-  test('the falloff RATE is a live knob, and 0 means full damage every hit',
-    async ({ page }) => {
-      const watch = await boot(page);
-      await quietField(page);
-
-      /*  The whole reason the authored table became a rate: it has to be
-       *  sweepable in play.  Two targets, one bolt, read the second bite —
-       *  once at the shipped rate and once with the cycle walked to `off`. */
-      const bite = () => engine(page, e => {
-        const ctx = e.waveContext();
-        const foes: any[] = [];
-        for (let i = 1; i <= 2; i++) {
-          const a = e.waves.spawnAt('RAMMER_1',
-            { x: e.player.position.x + i * 200, y: e.player.position.y }, ctx, false);
-          a.maxSpeed = 0; a.health = a.maxHealth = 1e6;
-          foes.push(a);
-        }
-        const proj: any = {
-          id: 'rate_' + Math.random(), type: 'PROJECTILE',
-          position: { x: e.player.position.x, y: e.player.position.y },
-          velocity: { x: 900, y: 0 }, rotation: 0,
-          size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-          damage: 10, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-          pierceCount: 1, pierceHits: 0,
+      const r = await engine(page, e => {
+        const snap = e.outfittingSnapshot();
+        const before = (snap.inventory ?? []).length;
+        // The DBG grant path is the widest door into the catalog — it takes a
+        // bare id — so it is the one worth trying.  A family that survived
+        // only here would still be reachable in play through the debug menu.
+        e.debugGrantModule('piercing_mk1');
+        e.debugGrantModule('piercing_mk3');
+        const after = e.outfittingSnapshot();
+        return {
+          catalog: (after.catalog ?? []).filter((c: any) =>
+            c.family === 'piercing' || /penetrat/i.test(c.label ?? '')).length,
+          statLine: (after.statLines ?? []).some((x: any) => x.id === 'pierce'),
+          granted: (after.inventory ?? []).length - before,
+          installed: [...e.shipSlots, ...e.weaponSlots]
+            .filter((id: any) => typeof id === 'string' && id.startsWith('piercing')).length,
         };
-        const bites: number[] = [];
-        for (const f of foes) {
-          if (!proj.active) break;
-          const before = f.health;
-          e.physics.resolveCollision(proj, f, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-          bites.push(before - f.health);
-        }
-        foes.forEach(f => { f.active = false; });
-        proj.active = false;
-        return bites;
       });
 
-      // SHIPPED: the decay is off, so a penetration hit lands full damage.
-      const s0 = await stats(page);
-      expect(s0.pierceFalloffName, 'the readout names the shipped control')
-        .toContain('off');
-      const shipped = await bite();
-      expect(shipped[0], 'contact hit, full').toBeCloseTo(10, 6);
-      expect(shipped[1], 'and at the shipped rate so is the penetration hit')
-        .toBeCloseTo(10, 6);
-
-      // One click turns it on — the knob is the whole point of the rate.
-      await decayOn(page);
-      const on = await bite();
-      expect(on[0], 'the contact hit is never scaled').toBeCloseTo(10, 6);
-      expect(on[1] / 10, 'and the penetration hit now decays')
-        .toBeCloseTo(falloffAt(1), 6);
+      expect(r.catalog, 'the shop offers nothing of the family').toBe(0);
+      expect(r.statLine, 'and the Ship Status panel has no Penetration row').toBe(false);
+      expect(r.granted, 'a grant for a deleted id is a no-op, not a phantom item').toBe(0);
+      expect(r.installed, 'and nothing of the family is aboard').toBe(0);
 
       watch.assertClean();
     });
 
-  test('successive bodies take the falloff rate, at every depth', async ({ page }) => {
+  test('the weapon flower still works without it — a mod can be offline, and it is the one that is',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+      // The adjacency machinery was shared with the deleted family, so prove
+      // it still refuses an isolated weapon-mod rather than silently
+      // defaulting everything to active once the piercing row left
+      // MODULE_REQUIREMENTS.
+      await grant(page, 'gunnery_mk3');
+      expect(await engine(page, e => e.player.damageMult), 'connected: Mk III').toBeCloseTo(1.36, 6);
+
+      const iso = await isolate(page, 'weapon', 'wpn_blaster', 'gunnery_mk3');
+      expect(iso.rootActive, 'the gun is a root — always active').toBe(true);
+      expect(iso.modActive, 'the mod is not touching it').toBe(false);
+      expect(await engine(page, e => e.player.damageMult),
+        'an OFFLINE module contributes zero, not its effect').toBe(1);
+
+      watch.assertClean();
+    });
+});
+
+test.describe('Gunnery buys a heavier round', () => {
+  test('a mark scales the BITE and the BANK together', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
-    await decayOn(page);   // the decay ships OFF; this test is about the curve
 
-    // SIX parked, effectively immortal targets on one line and one bolt with
-    // five charges.  A RATE has no tail to fall off — it just keeps decaying —
-    // so what this pins is that every depth reads (1 - rate)^n rather than
-    // flattening or stopping.  Synthesised projectile (the fracture suite's
-    // idiom) so the damage is a round number the ratios can be read off.
-    const r = await engine(page, e => {
+    // BASELINE — the starter Blaster, authored 4 damage in a round whose
+    // whole energy is one bite of it.
+    const bare = await fireOne(page);
+    expect(bare.count, 'one bolt').toBe(1);
+    expect(bare.damage, 'the authored bite').toBeCloseTo(4, 6);
+    // The bank is the authored ONE bite, times MASS_SCALE, over the base-bank
+    // divisor — a BASE round is deliberately a fraction of a fully-gunned
+    // one, which is the whole point of the re-base.  Read live rather than
+    // written as a product: it has already moved twice.
+    const k = await engine(page, () => {
+      const M: any = (window as any).__omniMass;
+      return { scale: M.MASS_SCALE, divisor: M.BASE_BANK_DIVISOR };
+    });
+    expect(bankInBites(bare.damage!, bare.speed!, bare.mass!),
+      'and a bank of one authored bite, scaled and re-based')
+      .toBeCloseTo(k.scale / k.divisor, 3);
+
+    await grant(page, 'gunnery_mk3');
+    const heavy = await fireOne(page);
+
+    // THE CLAIM, and the half that is easy to lose.  Both numbers move by the
+    // same factor, so the round is DENSER — it bites harder and it carries
+    // proportionally further.  Scaling `damage` alone (which is what the
+    // module did before the mass solve was authored rather than derived)
+    // would leave the bank fixed, so a Gunnery round would hit harder and
+    // stop SOONER: fewer, bigger contacts out of the same energy.
+    expect(heavy.damage! / bare.damage!, 'the bite scales with the mark')
+      .toBeCloseTo(1.36, 6);
+    expect(heavy.mass! / bare.mass!, 'and so does the mass behind it')
+      .toBeCloseTo(1.36, 6);
+    expect(bankInBites(heavy.damage!, heavy.speed!, heavy.mass!),
+      'so the bank measured in its OWN bites is unchanged')
+      .toBeCloseTo(bankInBites(bare.damage!, bare.speed!, bare.mass!), 4);
+
+    watch.assertClean();
+  });
+
+  test('and it therefore reaches further: more bodies per bolt', async ({ page }) => {
+    const watch = await boot(page);
+    await quietField(page);
+
+    /** Fire ONE real Blaster bolt down a line of 1-HP gnats through the REAL
+     *  collision resolver and count how many it kills before it is spent.
+     *
+     *  This is the emergent-penetration property in its plainest form: a body
+     *  can only absorb what it had, so the bolt is charged 1 for a 1-HP gnat
+     *  and flies on with the rest.  Nothing here authors a body count. */
+    const punch = () => engine(page, e => {
       const ctx = e.waveContext();
       const foes: any[] = [];
-      for (let i = 1; i <= 6; i++) {
-        const a = e.waves.spawnAt('RAMMER_1',
-          { x: e.player.position.x + i * 200, y: e.player.position.y }, ctx, false);
-        a.maxSpeed = 0; a.health = a.maxHealth = 1e6;
-        foes.push(a);
+      // 40 deep, not 12: at the 10x bank `MASS_SCALE` gives, a BARE bolt
+      // already punches twelve, so a twelve-gnat flock is saturated before
+      // the Gunnery arm gets a chance to reach further and the comparison
+      // measures the flock instead of the round.
+      for (let i = 0; i < 40; i++) {
+        const f = e.waves.spawnAt('SWARM',
+          { x: e.player.position.x + 400 + i * 30, y: e.player.position.y }, ctx, false);
+        f.maxSpeed = 0; f.velocity.x = 0; f.velocity.y = 0;
+        f.health = f.maxHealth = 1; f.shield = 0; f.maxShield = 0;
+        foes.push(f);
       }
-      const proj: any = {
-        id: 'falloff_' + Math.random(), type: 'PROJECTILE',
-        position: { x: e.player.position.x, y: e.player.position.y },
-        velocity: { x: 900, y: 0 }, rotation: 0,
-        size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-        damage: 10, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        pierceCount: 5, pierceHits: 0,
-      };
-      const bites: number[] = [];
+      e.player.velocity.x = 0; e.player.velocity.y = 0;
+      e.player.weaponCooldown = 0;
+      const before = e.currentMap.entities.length;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, e.player,
+        { x: e.player.position.x + 500, y: e.player.position.y }, undefined, false);
+      const proj = e.currentMap.entities.slice(before)
+        .find((x: any) => x.type === 'PROJECTILE');
+      let killed = 0;
       for (const f of foes) {
         if (!proj.active) break;
-        const before = f.health;
-        e.physics.resolveCollision(proj, f, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-        bites.push(before - f.health);
+        proj.position.x = f.position.x; proj.position.y = f.position.y;
+        e.physics.resolveCollision(proj, f, { x: 0, y: 0 },
+          undefined, e.handleEntityDeath);
+        if (!f.active || f.health <= 0) killed++;
       }
-      foes.forEach(f => { f.active = false; });
-      proj.active = false;
-      return { bites, left: proj.pierceCount };
+      for (const f of foes) f.active = false;
+      for (const x of e.currentMap.entities.slice(before)) x.active = false;
+      return killed;
     });
 
-    // Five charges buys SIX damage events — the contact plus five
-    // continuations — and every one of them is a real, scaled bite.
-    expect(r.bites.length, 'five charges = six damage events').toBe(6);
-    for (let i = 0; i < 6; i++) {
-      expect(r.bites[i] / 10, `hit ${i} decays to (1 - rate)^${i}`)
-        .toBeCloseTo(falloffAt(i), 6);
-    }
-    // The first contact is ALWAYS full: only penetration hits decay, so a
-    // bolt with no charges is untouched by any of this.
-    expect(r.bites[0], 'the contact hit is never scaled').toBeCloseTo(10, 6);
-    expect(r.left, 'and the budget is spent').toBe(0);
+    const bare = await punch();
+    // A bare Blaster bolt punches TWELVE gnats, not the four it used to: the
+    // round's BANK is 10x under `MASS_SCALE` while a gnat's 1 HP is not, so
+    // the same bolt pays for three times as many.  The claim is unchanged —
+    // a body is charged only what it could absorb and the bolt flies on with
+    // the rest — only the count it reaches moved.  A floor rather than an
+    // exact figure, because the Gunnery arm below has to out-reach it and a
+    // flock deep enough for that cannot also pin this to the gnat.
+    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so its 10x bank buys many')
+      .toBeGreaterThan(8);
 
-    watch.assertClean();
-  });
-
-  test('inside a grain body a charge buys a GRAIN, not the whole tile', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-    await decayOn(page);   // the decay ships OFF; these expectations are the curve
-
-    /** Fire one synthesised 4-damage bolt into a fresh glass tile from just
-     *  outside its left face, straight along +x, and report what the tile
-     *  and the bolt look like afterwards. */
-    const bore = (pierce: number) => engine(page, (e, p: number) => {
-      const ents = e.currentMap.entities;
-      const t = ents.find((x: any) => x.active && x.shardVariant === 'glass-tile'
-        && x.mass === Infinity && !x.__bored);
-      if (!t) throw new Error('no fresh glass tile');
-      t.__bored = true;
-      const proj: any = {
-        id: 'bore_' + Math.random(), type: 'PROJECTILE',
-        position: { x: t.position.x - t.size.x * 0.5 - 2, y: t.position.y },
-        velocity: { x: 900, y: 0 }, rotation: 0,
-        size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-        damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        pierceCount: p, pierceHits: 0,
-      };
-      e.physics.resolveCollision(proj, t, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-      // maxHealth is the DERIVED boundary total the first hit installs, and
-      // health mirrors the unbroken budget — so their difference IS the
-      // damage this bolt actually poured into the pattern.
-      return {
-        dealt: t.maxHealth - t.health,
-        steps: proj.pierceHits, left: proj.pierceCount, alive: proj.active === true,
-        grainSize: (window as any).__omniGrain?.grainSpecFor('glass-tile')?.grainSize,
-        halfExtent: t.size.x * 0.5,
-        partials: (t.fractureEdgeFill ?? []).filter((f: number) => f > 0).length,
-      };
-    }, pierce);
-
-    // No charges: the body-level rule, unchanged — one contact, one bite.
-    const none = await bore(0);
-    expect(none.steps, 'a bolt with no penetration does not bore').toBe(0);
-    expect(none.dealt).toBeCloseTo(4, 6);
-    expect(none.alive, 'and it stops on the tile').toBe(false);
-
-    // The step is a grain diameter, and the tile is several of them across —
-    // the property the whole model rests on.  Stated rather than assumed,
-    // because if it were false the bore below would be trivially one step.
-    expect(none.grainSize).toBeGreaterThan(0);
-    expect(none.halfExtent).toBeGreaterThan(none.grainSize);
-
-    // ONE charge: the bolt bores a SECOND grain and runs dry inside the pane.
-    // Under the old body-level rule this same charge carried it clean
-    // through the whole tile for one bite of 4.
-    const one = await bore(1);
-    expect(one.steps, 'one charge = one extra grain').toBe(2);
-    expect(one.dealt, 'each grain stepping down the curve')
-      .toBeCloseTo(4 * (falloffAt(0) + falloffAt(1)), 6);
-    expect(one.left, 'the charge is spent').toBe(0);
-    expect(one.alive, 'and out of charges INSIDE the body, the bolt stops there')
-      .toBe(false);
-    // Successive stamps erode successive grains rather than pouring the whole
-    // shot into the entry cell — with damageSpread 0 the spend runs
-    // sequentially, so more than one boundary is carrying damage.
-    expect(one.partials, 'the track is spread across the pattern')
-      .toBeGreaterThan(1);
-
-    watch.assertClean();
-  });
-
-  test('a bolt that reaches the far side keeps flying, and hits what is behind', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-    await decayOn(page);   // the decay ships OFF; these expectations are the curve
-
-    const r = await engine(page, e => {
-      const ents = e.currentMap.entities;
-      const t = ents.find((x: any) => x.active && x.shardVariant === 'glass-tile'
-        && x.mass === Infinity && !x.__bored);
-      t.__bored = true;
-      const ctx = e.waveContext();
-      const behind = e.waves.spawnAt('RAMMER_1',
-        { x: t.position.x + 400, y: t.position.y }, ctx, false);
-      behind.maxSpeed = 0; behind.health = behind.maxHealth = 1e6;
-
-      const proj: any = {
-        id: 'through_' + Math.random(), type: 'PROJECTILE',
-        position: { x: t.position.x - t.size.x * 0.5 - 2, y: t.position.y },
-        velocity: { x: 900, y: 0 }, rotation: 0,
-        size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-        damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        pierceCount: 8, pierceHits: 0,
-      };
-      e.physics.resolveCollision(proj, t, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-      const exited = {
-        alive: proj.active === true, steps: proj.pierceHits, left: proj.pierceCount,
-        tileTook: t.maxHealth - t.health,
-      };
-      let nextBite = 0;
-      if (proj.active) {
-        const before = behind.health;
-        e.physics.resolveCollision(proj, behind, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-        nextBite = before - behind.health;
-      }
-      behind.active = false; proj.active = false;
-      return { ...exited, nextBite };
-    });
-
-    expect(r.steps, 'the chord is more than one grain long').toBeGreaterThan(1);
-    expect(r.alive, 'charges left when the chord ran out: it comes out the far side')
-      .toBe(true);
-    expect(r.left, 'and it has not spent more than the track cost')
-      .toBe(8 - r.steps);
-    // Each grain took its own step of the curve, so the tile's total is the
-    // running sum — not `steps` full-damage hits.
-    let expected = 0;
-    for (let i = 0; i < r.steps; i++) expected += 4 * falloffAt(i);
-    expect(r.tileTook).toBeCloseTo(expected, 6);
-    // And the thing behind the tile is struck, further down the curve.
-    expect(r.nextBite / 4).toBeCloseTo(falloffAt(r.steps), 6);
-
-    watch.assertClean();
-  });
-
-  test('an indestructible tile stops the bolt dead and costs it nothing', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page, 'INDESTRUCTIBLE_FIELD');
-
-    const r = await engine(page, e => {
-      const t = e.currentMap.entities.find((x: any) => x.active
-        && x.shardVariant === 'indestructible-tile');
-      if (!t) throw new Error('no indestructible tile');
-      const hp = t.health;
-      const proj: any = {
-        id: 'wall_' + Math.random(), type: 'PROJECTILE',
-        position: { x: t.position.x - t.size.x * 0.5 - 2, y: t.position.y },
-        velocity: { x: 900, y: 0 }, rotation: 0,
-        size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-        damage: 4, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        pierceCount: 5, pierceHits: 0,
-      };
-      e.physics.resolveCollision(proj, t, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-      return {
-        alive: proj.active === true, left: proj.pierceCount, steps: proj.pierceHits,
-        tileAlive: t.active === true, hpMoved: t.health !== hp,
-      };
-    });
-
-    // The worst artifact of the shipped build: the tile took no damage and
-    // still let the bolt through, spending a charge on the way.
-    expect(r.alive, 'impenetrable: the bolt dies on contact').toBe(false);
-    expect(r.left, 'and spends nothing — it took no damage, so it costs none')
-      .toBe(5);
-    expect(r.steps, 'nor does it step the falloff curve').toBe(0);
-    expect(r.tileAlive).toBe(true);
-    expect(r.hpMoved, 'the tile is unmarked').toBe(false);
-
-    watch.assertClean();
-  });
-
-  test('a ricochet may re-hit what it already struck; sustained contact may not', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-    await decayOn(page);   // the decay ships OFF; these expectations are the curve
-
-    const r = await engine(page, e => {
-      const ctx = e.waveContext();
-      const foe = e.waves.spawnAt('RAMMER_1',
-        { x: e.player.position.x + 300, y: e.player.position.y }, ctx, false);
-      foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6;
-      const tile = e.currentMap.entities.find((x: any) => x.active
-        && x.shardVariant === 'glass-tile' && x.mass === Infinity);
-
-      const beam = () => ({
-        id: 'beam_' + Math.random(), type: 'PROJECTILE',
-        position: { x: foe.position.x, y: foe.position.y },
-        velocity: { x: 900, y: 0 }, rotation: 0,
-        size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-        damage: 5, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        pierceCount: 4, pierceHits: 0, isBouncer: true, bouncesRemaining: 3,
-      } as any);
-      const strike = (p: any) => {
-        const before = foe.health;
-        e.physics.resolveCollision(p, foe, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-        return before - foe.health;
-      };
-
-      // (a) SUSTAINED overlap — the same beam meeting the same body again
-      // with nothing in between.
-      const held = beam();
-      strike(held);
-      strike(held);
-      const sustained = { alive: held.active === true, steps: held.pierceHits,
-                          left: held.pierceCount };
-
-      // (b) The same two contacts with a REFLECTION between them.
-      const bounced = beam();
-      strike(bounced);
-      bounced.position.x = tile.position.x - tile.size.x * 0.5 - 2;
-      bounced.position.y = tile.position.y;
-      e.physics.resolveCollision(bounced, tile, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-      const reflected = { vx: bounced.velocity.x, ids: bounced.hitEntityIds.length,
-                          bounces: bounced.bouncesRemaining };
-      const secondBite = strike(bounced);
-
-      // Snapshot BEFORE tidying the scene up — reading `active` after
-      // clearing it is how a passing test lies.
-      const after = { alive: bounced.active === true, steps: bounced.pierceHits,
-                      left: bounced.pierceCount };
-      foe.active = false; bounced.active = false;
-      return { sustained, reflected, secondBite, after };
-    });
-
-    // The reflection happened, and it emptied the struck-ID list — which is
-    // where the re-hit is bought, NOT by weakening the `alreadyHit` guard
-    // (that guard is what stops a beam in sustained overlap grinding a body
-    // at 120Hz, and it is still doing that job below).
-    expect(r.reflected.vx, 'the beam turned around').toBeLessThan(0);
-    expect(r.reflected.bounces).toBe(2);
-    expect(r.reflected.ids, 'a bounce clears what it has struck').toBe(0);
-
-    // (a) Held against the body, the beam does NOT carry on: it stops on the
-    // re-contact and its budget freezes where it was.
-    expect(r.sustained.alive, 'sustained contact ends the beam').toBe(false);
-    expect(r.sustained.steps, 'and buys it no further step of the curve').toBe(1);
-    expect(r.sustained.left).toBe(3);
-
-    // (b) After a bounce the same beam strikes the same body again and
-    // survives to keep going.
-    expect(r.after.alive, 'a returning beam carries on').toBe(true);
-    expect(r.after.steps, 'and its second damage event is its second step').toBe(2);
-    expect(r.secondBite / 5, 'at the falloff curve\'s next entry')
-      .toBeCloseTo(falloffAt(1), 6);
-    // PIERCE IS A LIFETIME BUDGET: bounces buy COVERAGE, not extra damage
-    // events.  Four charges is four continuations however many times the
-    // beam turns around.
-    expect(r.after.left, 'the bounce did not refresh the budget').toBe(2);
-
-    watch.assertClean();
-  });
-
-  test('the speed-decay knob ships OFF and is reachable from the debug menu', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-
-    // A DBG cycle is three separate wirings (constants accessor, dbg method,
-    // stats field) and a break in any one of them is silent — the row just
-    // shows a stale string.  Drive the real method and read the real payload.
-    const shipped = await stats(page);
-    expect(shipped.pierceSpeedRetainName,
-      'shipped at 1.00 — the damage falloff is the change; this is the A/B')
-      .toContain('(def)');
-
-    /** Walk one bolt through two parked, immortal enemies and report the
-     *  speed it carries out of the first. */
-    const retained = () => engine(page, e => {
-      const ctx = e.waveContext();
-      const foe = e.waves.spawnAt('RAMMER_1',
-        { x: e.player.position.x + 300, y: e.player.position.y }, ctx, false);
-      foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6;
-      const proj: any = {
-        id: 'decay_' + Math.random(), type: 'PROJECTILE',
-        position: { x: foe.position.x, y: foe.position.y },
-        velocity: { x: 900, y: 0 }, rotation: 0,
-        size: { x: 6, y: 6 }, mass: 0.1, active: true, color: '#fff',
-        damage: 5, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-        pierceCount: 3, pierceHits: 0,
-      };
-      e.physics.resolveCollision(proj, foe, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-      const out = proj.velocity.x;
-      foe.active = false; proj.active = false;
-      return out;
-    });
-
-    expect(await retained(), 'at the shipped setting a pierced bolt keeps its speed')
-      .toBeCloseTo(900, 6);
-
-    await engine(page, e => e.dbg.cyclePierceSpeedRetain());
-    // Wait for the readout to move; reading it in the same breath as the
-    // click can still return the pre-click payload.  Compared in NODE, since
-    // a `waitForStats` predicate cannot close over `shipped`.
-    await waitForStatsKeyChange(page, 'pierceSpeedRetainName',
-      shipped.pierceSpeedRetainName, 'the retain cycle to move off the default');
-    const slowed = await retained();
-    expect(slowed, 'and the bolt now leaves the body slower').toBeLessThan(900);
-    expect(slowed, 'by exactly one step of the cycle').toBeCloseTo(900 * 0.95, 6);
-
-    watch.assertClean();
-  });
-
-  test('the Ship Status panel attributes it like every other stat', async ({ page }) => {
-    const watch = await boot(page);
-    await quietField(page);
-    await grant(page, 'piercing_mk2');
-
-    const online = await engine(page, e => {
-      const l = e.outfittingSnapshot().statLines ?? [];
-      return l.find((x: any) => x.id === 'pierce');
-    });
-    expect(online, 'the panel carries a Penetration line').toBeTruthy();
-    expect(online.display).toBe('+2');
-    expect(online.baseDisplay).toBe('+0');
-    expect(online.contributors.length).toBe(1);
-    expect(online.contributors[0].active).toBe(true);
-    expect(online.contributors[0].display).toBe('+2');
-
-    await isolate(page, 'weapon', 'wpn_blaster', 'piercing_mk2');
-    const offline = await engine(page, e => {
-      const l = e.outfittingSnapshot().statLines ?? [];
-      return l.find((x: any) => x.id === 'pierce');
-    });
-    expect(offline.display, 'offline: the headline drops to the base').toBe('+0');
-    expect(offline.contributors[0].active).toBe(false);
-    expect(offline.contributors[0].requires, 'and names the contact it wants').toBe('gun');
+    await grant(page, 'gunnery_mk3');
+    const heavy = await punch();
+    expect(heavy, 'a heavier round reaches further into the flock')
+      .toBeGreaterThan(bare);
 
     watch.assertClean();
   });

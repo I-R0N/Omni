@@ -26,7 +26,7 @@ import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, Pocket
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
-  getActiveNebulaSpinDampName, getActiveNebulaBondName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActivePierceSpeedRetainName, getActivePierceFalloffName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
+  getActiveNebulaSpinDampName, getActiveNebulaBondName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
@@ -1259,8 +1259,10 @@ export class GameEngine {
       shardBlendEnabled: this.renderer.shardBlendEnabled,
       shardBlendCount: this.renderer.lastShardBlendCount,
       shardCoatName: getActiveShardCoatName(),
-      pierceSpeedRetainName: getActivePierceSpeedRetainName(),
-      pierceFalloffName: getActivePierceFalloffName(),
+      impactVelocityName: getActiveImpactVelocityName(),
+      crashEnergyName: getCrashEnergyName(),
+      blastEnergyName: getActiveBlastEnergyName(),
+      hullDensityName: getHullDensityName(),
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -2398,8 +2400,10 @@ export class GameEngine {
       shardBlendEnabled: this.renderer.shardBlendEnabled,
       shardBlendCount: this.renderer.lastShardBlendCount,
       shardCoatName: getActiveShardCoatName(),
-      pierceSpeedRetainName: getActivePierceSpeedRetainName(),
-      pierceFalloffName: getActivePierceFalloffName(),
+      impactVelocityName: getActiveImpactVelocityName(),
+      crashEnergyName: getCrashEnergyName(),
+      blastEnergyName: getActiveBlastEnergyName(),
+      hullDensityName: getHullDensityName(),
       plasticAutomataEnabled: this.renderer.plasticAutomataEnabled,
       plasticAutomataBrighten: isPlasticAutomataBrighten(),
       materialAutomataEnabled: this.renderer.materialAutomataEnabled,
@@ -4157,6 +4161,7 @@ export class GameEngine {
 
     this.updateHomingProjectiles(dt);
     this.updateLightningGravity(dt);
+    this.updateProjectileFuses(dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup.  Expired texts return to the pool for reuse
@@ -4423,8 +4428,19 @@ export class GameEngine {
     // Cannon AoE: every entity within proj.explosionRadius takes
     // proj.explosionDamage and a knockback impulse.  Direct-hit target
     // is excluded (it already took config.damage in PhysicsSystem).
-    if (proj.explosionRadius && proj.explosionRadius > 0) {
-        applyExplosionAoE(this, impactPos, proj, target, hitFalloff);
+    //
+    // WHAT TRIPS THE CHARGE (user call).  A shell marked `detonateOn:
+    // 'enemy'` is not set off by terrain: it stays a projectile through
+    // structures and spends its energy boring them, which is the whole point
+    // of being heavy.  Before this, `applyExplosionAoE` fired on EVERY hit,
+    // so a shell carrying N penetration detonated N+1 times — and universal
+    // penetration would have made that a full blast per pebble.  An ACTOR
+    // (enemy, boss, fauna, the player) still trips it on contact, and
+    // `updateProjectileFuses` covers the shell that meets nothing.
+    if (proj.explosionRadius && proj.explosionRadius > 0
+        && (proj.detonateOn !== 'enemy' || target.type !== EntityType.STRUCTURE)) {
+        applyExplosionAoE(this, impactPos, proj, target);
+        proj.detonated = true;
     }
   };
 
@@ -5983,6 +5999,54 @@ export class GameEngine {
   spawnProjectileFromConfig(shooter: GameEntity, target: Vector2, config: WeaponConfig, ownerType: EntityType) {
       if (!this.currentMap) return;
       this.projectiles.spawn(this.currentMap.entities, shooter, target, config, ownerType);
+  }
+
+  /**
+   * THE FUSE — the fallback half of `detonateOn: 'enemy'`.
+   *
+   * A shell that is not tripped by terrain has to end somewhere, or a Cannon
+   * round fired into empty space would simply expire and the shot would be
+   * wasted with no blast at all.  So it carries a countdown and detonates in
+   * place when that runs out, wherever it has got to.
+   *
+   * TIME rather than distance, deliberately: the projectile is already ticked,
+   * so this is one subtraction and no new state, and at a fixed muzzle speed
+   * the two are the same quantity anyway.  Walks the projectile INDEX rather
+   * than the master list, like the homing and lightning passes beside it.
+   */
+  private updateProjectileFuses(dt: number) {
+      const list = this.entityIndex.projectiles;
+      for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          // A shell detonates AT MOST ONCE.  A round that already went off on
+          // an actor is not blasted again by the stop rule below.
+          if (p.detonated) continue;
+          // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
+          // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
+          // wherever a round can go no further — its bank ran dry, the grain
+          // bore ended mid-body, or an indestructible wall took it — and
+          // leaves it ALIVE for us, because a projectile deactivated there is
+          // pooled and stripped of its charge before this pass runs.  Without
+          // the second criterion a Cannon fired into terrain simply vanished:
+          // the `detonateOn: 'enemy'` gate correctly refuses to let a tile
+          // trip the charge, and the fuse never reached the round.
+          if (!p.active) continue;
+          const stopped = p.blastPending === true;
+          if (!stopped) {
+              if (p.fuseTimer === undefined) continue;
+              p.fuseTimer -= dt;
+              if (p.fuseTimer > 0) continue;
+          }
+          p.fuseTimer = undefined;
+          p.blastPending = false;
+          // Detonate where it is.  `undefined` target: nothing was struck, so
+          // there is no direct hit to exclude from the ring.
+          if (p.explosionRadius && p.explosionRadius > 0) {
+              applyExplosionAoE(this, p.position, p);
+              p.detonated = true;
+          }
+          p.active = false;
+      }
   }
 
   private updateHomingProjectiles(dt: number) {

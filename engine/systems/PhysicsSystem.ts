@@ -1,7 +1,7 @@
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
-import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, pierceFalloffAt, getActivePierceSpeedRetain, MAX_PIERCE } from '../../constants';
+import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
 import { nebulaDampingFor, nebulaSpinDampingFor } from '../../constants';
 import { pointInPolygon } from './fracture';
@@ -117,6 +117,35 @@ export class PhysicsSystem {
   // staticGrid stores immovable geometry (Tiles) and is calculated ONLY on map load.
   // dynamicGrid stores moving entities (Player, Enemies, Projectiles) and is cleared every frame.
   private staticGrid: Map<number, GameEntity[]> = new Map();
+  /** The `dt x 60` of the step in progress — see `update` and `sweepRewind`. */
+  private lastTimeScale = 1;
+  /** How far INSIDE the contact circle `sweepRewind` places a rewound body.
+   *  Entry alone leaves the hulls exactly touching, where SAT on the real
+   *  polygons can still read no overlap; a little depth makes the circle test
+   *  that found the contact and the SAT that resolves it agree. */
+  private static readonly SWEEP_ENTRY_DEPTH = 0.85;
+  /** How many contacts the swept rewind has recovered this run.  Diagnostic
+   *  only — nothing in the sim reads it — but it is the one way a test can
+   *  tell "the fast path never fired" from "it fired and did nothing". */
+  public sweptRewinds = 0;
+  /** The PATH each fast body took this step — where it started and how far it
+   *  went — recorded the first time a sweep looks at it and reused for every
+   *  later sweep in the same step.
+   *
+   *  This exists because a rewind INVALIDATES the obvious reconstruction.
+   *  `position - velocity x timeScale` gives the start of the step only while
+   *  the body is still at the end of it; once one contact has pulled it back,
+   *  a second sweep computing the same way solves its geometry against a path
+   *  the body never took.  Measured with that defect in place, a ship at 130
+   *  u/step crossed a rock wall keeping 107.9 of it.  Recording the path
+   *  instead makes repeated rewinds coherent — each one places the body at an
+   *  absolute point ALONG THE SAME path, and only ever further back.
+   *
+   *  The records are pooled and the map is cleared per step, so a steady state
+   *  allocates nothing; both stay empty on any step with no fast body in it. */
+  private sweepPaths: Map<GameEntity, { ox: number; oy: number; dx: number; dy: number }> = new Map();
+  private sweepPool: { ox: number; oy: number; dx: number; dy: number }[] = [];
+  private sweepPoolUsed = 0;
   // The two PER-SUBSTEP grids are CellBuckets, not plain Maps: they are
   // rebuilt at 120 Hz, and allocating a fresh array per occupied cell each
   // time was the engine's second-largest allocator (see CellBuckets' header).
@@ -395,6 +424,12 @@ export class PhysicsSystem {
     // Time-Corrected Friction: Ensure friction effect is consistent per SECOND, not per tick.
     // Normalized to 60Hz. If dt is 1/120, exponent is 0.5.
     const timeScale = dt * 60;
+    // REMEMBERED FOR THE NARROWPHASE.  `sweepRewind` reconstructs the step a
+    // body just took as `velocity x timeScale` rather than storing a previous
+    // position on every entity — one field on the system against two on every
+    // body, and no change to any entity's hidden class (CLAUDE.md section 4).
+    this.lastTimeScale = timeScale;
+    if (this.sweepPaths.size > 0) { this.sweepPaths.clear(); this.sweepPoolUsed = 0; }
     const friction = Math.pow(baseFriction, timeScale);
 
     // Apply Planetary/Stellar Gravity (Scaled by time).
@@ -1331,6 +1366,12 @@ export class PhysicsSystem {
   }
 
   // ── PENETRATION: THE BORE TRACK ─────────────────────────────────────
+  /** Below this a bolt has nothing left worth depositing and stops. */
+  private static readonly SPENT_EPSILON = 1e-6;
+  /** Belt-and-braces bound on the bore walk — the chord leaving the body and
+   *  the energy running out both bound it first. */
+  private static readonly MAX_BORE_STEPS = 128;
+
   // Scratch for `borePierceTrack`.  One reused point, never a fresh
   // {x,y} per step — the walk runs inside the collision path.
   private readonly _borePoint: Vector2 = { x: 0, y: 0 };
@@ -1341,32 +1382,112 @@ export class PhysicsSystem {
   private _boreExited = false;
 
   /**
-   * OPTION C — PENETRATION IS SPENT PER GRAIN, NOT PER BODY.
+   * THE SPEED A BOLT'S DAMAGE IS MEASURED AT (unified impact physics, step 3).
    *
-   * A tile is ONE entity, so the body-level rule ("one charge, one
-   * target") let a single pierce charge carry a bolt through a whole
-   * 36px pane.  For a body running the GRAIN-BOUNDARY model (a variant
-   * whose `grain` block carries `bondStrength` — rock, glass, plastic,
-   * metal today) the bolt instead BORES A TRACK: it walks its own chord
-   * through the body a grain diameter at a time, spending one charge and
-   * one falloff step per grain, and comes out the far side only if it
-   * still has charges when the chord runs out.
+   * Damage is kinetic, so this is the whole of the "how big is this hit"
+   * question, and the DBG "Impact vel" ladder is the one judgement call in
+   * it — energy is FRAME-DEPENDENT and the two honest frames disagree by a
+   * lot, because a forward shot already inherits the ship's velocity
+   * (`PROJECTILE_CONSTANTS.INHERIT_SHOOTER_VELOCITY` is 1.0).
+   *
+   *  'muzzle' (ships) — the weapon's OWN launch speed, scaled by the fraction
+   *      of its launch speed the bolt still carries.  Neutral at spawn however
+   *      the ship was moving, and it still falls off through a bore, because
+   *      that is a real loss of the bolt's own speed.  The muzzle speed is
+   *      RE-DERIVED from the authored damage and the flown mass rather than
+   *      stored: `projectileMassFor` solved one from the other, so inverting
+   *      it cannot disagree with the mass the bolt is actually flying.
+   *  'relative' — true closing speed against the target.  Finishes the
+   *      unification (the crash paths already spend a relative velocity), and
+   *      means a shot at a target fleeing at matched speed lands nothing.
+   */
+  private static projectileBiteOn(proj: GameEntity, target: GameEntity): number {
+      const authored = proj.damage || 1;
+      const v = proj.velocity;
+      if (v === undefined) return authored;
+      // A bolt with no launch reference (a synthesised one, as the suites
+      // build) ADOPTS its current speed as that reference on first read, so
+      // its first hit lands the authored figure and its later hits still
+      // decay.  Without this the fallback would be a constant and the bore
+      // would not fall off at all — the property this whole step buys.
+      if (proj.spawnSpeed === undefined) proj.spawnSpeed = Math.hypot(v.x, v.y);
+      const spawn = proj.spawnSpeed;
+      let speed: number;
+      if (getActiveImpactVelocityMode() === 'relative') {
+          const tv = target.velocity;
+          speed = Math.hypot(v.x - (tv?.x ?? 0), v.y - (tv?.y ?? 0));
+      } else {
+          speed = Math.hypot(v.x, v.y);
+      }
+      return projectileBite(authored, speed, spawn);
+  }
+
+  /**
+   * THE BOLT'S REMAINING ENERGY, in the damage units everything downstream
+   * spends in.
+   *
+   * NOT the same quantity as `projectileBiteOn`, and conflating the two is
+   * the mistake this exists to prevent: a BITE is what one hit lands
+   * (`authored x (v/v0)^2`), while the ENERGY is the whole bank the round's
+   * authored MASS bought it.  Capping a bore step at the bite instead of the
+   * energy let a bolt bore for ever without running out, so depth fell back
+   * to the CHORD (body width / grainSize) and finer-grained plastic measured
+   * DEEPER than pricier, coarser glass — exactly backwards.
+   */
+  private static projectileEnergyLeft(proj: GameEntity): number {
+      const v = proj.velocity;
+      if (v === undefined) return 0;
+      return kineticDamage(proj.mass ?? PROJECTILE_CONSTANTS.MASS, Math.hypot(v.x, v.y));
+  }
+
+  /**
+   * Take `damage` worth of energy out of the bolt, leaving it slower.
+   *
+   * The spend is against the bolt's WORLD kinetic energy, which is the
+   * energy it physically has; under 'muzzle' that can exceed the energy the
+   * hit was MEASURED in, and deliberately so — a shot fired from a charging
+   * ship really is carrying more, it is only being scored in its own frame.
+   * Monotone and clamped at rest either way, so a bolt can never be left
+   * with negative energy or turned around by a spend.
+   */
+  private static spendProjectileEnergy(proj: GameEntity, mass: number, damage: number): void {
+      const v = proj.velocity;
+      if (v === undefined || !(damage > 0)) return;
+      const s = Math.hypot(v.x, v.y);
+      if (!(s > 0)) return;
+      const k = speedAfterSpending(mass, s, damage) / s;
+      v.x *= k; v.y *= k;
+  }
+
+  /**
+   * A ROUND BORES A TRACK THROUGH A GRAIN BODY, AND ITS ENERGY DECIDES HOW FAR.
+   *
+   * A tile is ONE entity, so a body-level penetration rule carried a bolt
+   * through a whole 36px pane for the price of one body.  For a body running
+   * the GRAIN-BOUNDARY model (a variant whose `grain` block carries
+   * `bondStrength` — rock, glass, plastic, metal today) the bolt instead walks
+   * its own chord a grain diameter at a time, and each grain costs that
+   * material's own price: `grainSize x bondStrength`.  Glass charges 6.0 a
+   * grain, rock 5.6, plastic 10.8, metal 14.4, so the SAME round goes twice as
+   * deep into glass as into metal with nothing authored per weapon.
+   *
+   * The bolt slows by exactly what it deposited (`spendProjectileEnergy`), so
+   * the track decays on its own and ends when the bank is empty — or comes out
+   * the far side if the chord runs out first, which is the one thing that
+   * makes penetration read as DEPTH rather than as a pass.
    *
    * Each step stamps its own contact point and spends through
    * `applyBoundaryDamage`, which with every material's shipped
-   * `damageSpread: 0` fills boundaries sequentially outward from that
-   * point — so successive stamps erode successive grains rather than
-   * pouring the whole shot into the entry cell.
+   * `damageSpread: 0` fills boundaries sequentially outward from that point —
+   * so successive stamps erode successive grains rather than pouring the whole
+   * shot into the entry cell.  The bore is therefore a consequence of the
+   * damage-spread model, not a second mechanism beside it.
    *
-   * Returns the number of grain steps taken; 0 means this body is not
-   * running the model (or the bolt has no charges), and the caller
-   * applies the ordinary single-body spend it always did.  Bounded by
-   * the remaining pierce count, which strictly decreases, so the loop is
-   * as cheap as the charge the player bought.
+   * Returns the number of grain steps taken; 0 means this body is not running
+   * the model, and the caller applies the ordinary single-body spend.
    */
   private borePierceTrack(proj: GameEntity, target: GameEntity, baseDmg: number): number {
       this._boreExited = false;
-      if ((proj.pierceCount ?? 0) <= 0) return 0;
       if (target.shardVariant === undefined) return 0;
       // The one honest predicate for "this body runs the boundary model"
       // — the same one fractureCache derives its HP from.
@@ -1396,32 +1517,54 @@ export class PhysicsSystem {
       const cw = Math.cos(target.rotation), sw = Math.sin(target.rotation);
 
       const p = this._borePoint;
+      const mass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
+      // WHAT ONE GRAIN OF THIS MATERIAL COSTS TO GET THROUGH.  `bondStrength`
+      // is damage per PIXEL of boundary and `grainSize` is the grain's own
+      // diameter, so their product is what a grain-length of interface
+      // charges — the price the material sets, in the units the bolt pays in.
+      // Glass 15x0.4 = 6.0, rock 14x0.4 = 5.6, plastic 6x1.8 = 10.8,
+      // metal 8x1.8 = 14.4.  THAT ratio is the whole of step 5: depth becomes
+      // `energy / price`, so the same shell crosses glass and stops in metal
+      // without either being written down anywhere.
+      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0));
       let ordinal = proj.pierceHits ?? 0;
-      let charges = proj.pierceCount ?? 0;
       let steps = 0;
       for (;;) {
           p.x = target.position.x + (lx * cw - ly * sw);
           p.y = target.position.y + (lx * sw + ly * cw);
           stampLocalImpact(target, p);
-          if (!applyBoundaryDamage(target, baseDmg * pierceFalloffAt(ordinal, proj.pierceFalloffRate))) {
+          // THE BOLT PAYS THE MATERIAL'S PRICE, OR EVERYTHING IT HAS LEFT.
+          // `projectileBiteOn` reads the bolt's CURRENT speed, so this is its
+          // remaining energy in damage units; capping the offer at one
+          // grain's price is what makes the walk a TRACK rather than a
+          // crater, and what makes its length depend on the material.
+          const remaining = PhysicsSystem.projectileEnergyLeft(proj);
+          if (remaining <= PhysicsSystem.SPENT_EPSILON) break;  // spent; stops inside
+          const bite = Math.min(remaining, grainCost);
+          if (!applyBoundaryDamage(target, bite)) {
               // The model went away under us (an empty decomposition).
               // Nothing has been spent yet on the first step, so hand the
               // body back to the ordinary path rather than eating the hit.
               if (steps === 0) return 0;
               break;
           }
+          PhysicsSystem.spendProjectileEnergy(proj, mass, bite);
           ordinal++; steps++;
           // The body died under the drill — the bolt is through it.
           if ((target.health ?? 0) <= 0) { this._boreExited = true; break; }
-          // Out of charges: the bolt stops HERE, inside the body.
-          if (charges <= 0) break;
-          charges--;
           lx += ldx * grain; ly += ldy * grain;
           if (!pointInPolygon(lx, ly, poly)) { this._boreExited = true; break; }
-          if (steps > MAX_PIERCE) break; // belt and braces; charges already bound it
+          // Belt and braces only: the walk is already bounded twice over, by
+          // the chord leaving the polygon and by the energy running out.
+          if (steps > PhysicsSystem.MAX_BORE_STEPS) break;
       }
       proj.pierceHits = ordinal;
-      proj.pierceCount = charges;
+      // A bolt that walked out of the far side with nothing left has not
+      // exited in any sense that matters — it stops at the surface.
+      if (this._boreExited
+          && PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON) {
+          this._boreExited = false;
+      }
       return steps;
   }
 
@@ -2390,6 +2533,57 @@ export class PhysicsSystem {
   }
 
   /**
+   * THE IMPACTOR PAYS FOR WHAT IT BROKE (unified impact physics, step 4).
+   *
+   * Takes the energy that breaking `absorbed` worth of bonds COST out of the
+   * impactor's velocity ALONG THE CONTACT NORMAL — `crashEnergyCost`, i.e.
+   * the absorbed damage divided by the coupling EFFICIENCY, not the absorbed
+   * damage itself.  See that function for the measurement that settles it — the same `speedAfterSpending` a bolt uses, so a hull and
+   * a bolt give up speed by one rule.  Normal-only rather than a scale of the
+   * whole vector, because a glancing blow should keep its tangential speed:
+   * the energy went into the bonds it actually met.
+   *
+   * This REPLACES `STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION` on the
+   * destructive path.  The flat 0.65 took the same 35% whatever was struck,
+   * which is the defect step 4 exists to remove — measured, a ship from
+   * cruise crossed five tiles decaying 21.6 -> 14.1 -> 9.1 -> 5.9 -> 3.9
+   * IDENTICALLY for glass, rock and metal, destroying all five glass panes
+   * and not scratching the metal.
+   *
+   * STATIC bodies are not exempt: an infinite mass contributes nothing to the
+   * reduced mass, so the impactor simply brought all the energy and pays all
+   * of it.  What IS skipped is a body that absorbed nothing.
+   */
+  private static payForCrash(
+      impactor: GameEntity, target: GameEntity, nx: number, ny: number, absorbed: number,
+  ): void {
+      if (!(absorbed > 0)) return;
+      const v = impactor.velocity;
+      if (v === undefined) return;
+      const vn = v.x * nx + v.y * ny;
+      const speed = Math.abs(vn);
+      if (!(speed > 0)) return;
+      // The SAME reduced mass `crashDamageFor` priced the hit with — shared
+      // rather than re-derived, or the impactor could be charged against a
+      // different mass than the damage was computed from.  Exact in the
+      // dominant case (a static target, where it degrades to the impactor's
+      // own mass and `speed` is simply its speed); against a MOBILE target it
+      // applies the whole relative-velocity change to the impactor, with the
+      // struck body's share arriving separately as the momentum transfer the
+      // crash sites already do.
+      const mu = reducedMass(impactor.mass, target.mass);
+      if (!(mu > 0)) return;
+      const after = speedAfterSpending(mu, speed, crashEnergyCost(absorbed));
+      const dv = speed - after;
+      if (!(dv > 0)) return;
+      // vn < 0 means the impactor is closing along the normal, so shedding
+      // speed means moving its normal component toward zero from below.
+      const sign = vn < 0 ? 1 : -1;
+      v.x += nx * dv * sign;
+      v.y += ny * dv * sign;
+  }
+
+  /**
    * Spend a CRASH on the target's grain boundaries — the same mechanism a
    * weapon hit and the bubble's bite use, so a crushed tile cracks and sheds
    * grains the way a shot one does.
@@ -2400,33 +2594,47 @@ export class PhysicsSystem {
    * a body outright, because it is the chip path — the crash paths MUST still
    * destroy it, so every caller falls back to the whole-body decrement.
    *
-   * HOW MUCH a crash spends is deliberately NOT kinetic.  Making impact
-   * damage an energy is step 3 of the unified-impact sequencing
-   * (docs/PARKING_LOT.md) and re-prices the whole weapon roster; this step is
-   * routing only.  So a crash spends the SAME FRACTION OF THE BODY it always
-   * did — one authored HP, expressed in the derived boundary budget the model
-   * replaced it with (`derived / authored`).  That keeps "how many crashes
-   * break this tile" exactly what it shipped as, and removes the defect that
-   * motivated the change: because the crash paths decremented `health`
-   * directly while the first weapon hit rewrote `maxHealth` to the derived
-   * total, SHOOTING A TILE ONCE used to make it 4-50x harder to ram through
-   * (measured, `perf/impact-audit.mjs` §5: rock 9 -> 50 crashes, plastic
-   * 8 -> 400, metal 120 -> 468).  Nothing about the tile got tougher; the
-   * unit it was counted in changed.
+   * HOW MUCH a crash spends is KINETIC (step 4).  `crashDamageFor` converts
+   * the REDUCED-MASS kinetic energy of the contact through the same
+   * `IMPACT_ENERGY_PER_DAMAGE` a weapon hit uses, scaled by
+   * `CRASH_ENERGY_COUPLING` — a collision is not a focused penetrator, so
+   * only a fraction of a hull's energy reaches the bonds.
    *
-   * `whole` is the glass rule (V9), unchanged in meaning: its damage layer
-   * meters WEAPON hits, and a hull or a boulder over the crash threshold
-   * takes the whole pane.  Here that is a spend of the entire remaining
-   * boundary budget rather than a bypass, so the pane still dies THROUGH the
-   * grain model and shatters along the cells its cracks were drawn from.
+   * Step 2 deliberately spent one AUTHORED HP here instead, to keep every ram
+   * count exactly what it shipped as while the routing changed.  That was the
+   * documented seam this replaces, and it had a defect of its own: a crash
+   * spent `derived / authored`, so metal — whose authored HP is
+   * `24 x densityTier` while its derived HP is flat — took 24 to 144 rams
+   * across six tiles of IDENTICAL toughness.  Energy never consults an
+   * authored number, so that lottery is gone.  Rock is the calibration
+   * anchor and is unchanged at 9; see CRASH_ENERGY_COUPLING for the rest.
+   *
+   * GLASS HAS NO SPECIAL CASE (user call).  V9 gave a glass tile a
+   * whole-pane rule — any crash over the threshold spent its ENTIRE
+   * remaining boundary budget — which pre-dated the energy model and
+   * survived step 4 as the one material whose crash outcome was a
+   * THRESHOLD rather than an amount.  It is gone: glass cracks under a
+   * crash and shatters when enough energy arrives, exactly like rock,
+   * plastic and metal, and how tough it is is now said ONLY by its
+   * `grain.bondStrength` and its own derived boundary total.
+   *
+   * The `budget <= unit` branch below is NOT that rule and must stay: it
+   * is the clean-zero rule, and it fires for every material.
    */
-  private static crashBoundaryDamage(structure: GameEntity, contact: Vector2, whole: boolean): boolean {
+  private static crashBoundaryDamage(
+      structure: GameEntity, contact: Vector2, damage: number,
+  ): number | null {
       // Stamp BEFORE the model is built: the pattern's impact bias is read at
       // cell-build time (V12), so a stamp afterwards biases nothing.
       stampLocalImpact(structure, contact);
-      if (ensureBoundaryModel(structure) === null) return false;
-      const authored = Math.max(1, structure.authoredMaxHealth ?? structure.maxHealth ?? 1);
-      const unit = (structure.maxHealth ?? 0) / authored;
+      if (ensureBoundaryModel(structure) === null) return null;
+      const unit = Math.max(0, damage);
+      // READ THE BUDGET AFTER THE MODEL IS BUILT.  `ensureBoundaryModel`
+      // rewrites `health` from the authored spawn value to the DERIVED
+      // boundary total, so a budget read by the CALLER beforehand is the
+      // stale number — measured, that charged a hull against plastic's
+      // authored 8 instead of its derived 390 and let a ship at cruise grind
+      // through twenty-three plastic tiles without breaking one of them.
       const budget = structure.health ?? 0;
       // THE LAST CRASH OVERSPENDS, on purpose.  `spendOnBoundaries`
       // saturates each boundary exactly and returns only what it could
@@ -2435,9 +2643,13 @@ export class PhysicsSystem {
       // exactly on the final boundary otherwise leaves a one-ULP residue
       // (measured 8.9e-16 on rock's ninth crash), and `health <= 0` then
       // reads false, costing one phantom extra ram.
-      const spend = (whole || budget <= unit * (1 + 1e-9)) ? budget + 1 : unit;
+      const spend = budget <= unit * (1 + 1e-9) ? budget + 1 : unit;
       applyBoundaryDamage(structure, spend);
-      return true;
+      // What the body could actually TAKE, which is what the impactor pays
+      // for.  The last spend deliberately overshoots to land on a clean zero
+      // (see above), and a hull must not be charged for bonds that were not
+      // there to break.
+      return Math.min(spend, Math.max(0, budget));
   }
 
   /**
@@ -2896,6 +3108,160 @@ export class PhysicsSystem {
       return (aNeb ? bv : av) !== undefined;
   }
 
+  /**
+   * A BODY MAY NOT FLY THROUGH SOMETHING IT HIT (user report: "the player now
+   * literally passes through tiles at high impact energy").
+   *
+   * Every contact in this engine is tested at the END of a step, so a body
+   * that moves further in one step than the thing it is hitting is wide can
+   * be clear on both sides of it and never test as touching.  Measured on
+   * ROCK_FIELD through the real physics step, a ship's contact window against
+   * a 36-unit tile is +/-28 units, and at 140 u/step (70 units of travel per
+   * substep) it crossed a TEN-TILE WALL with `resolveCollision` never called
+   * once: ten tiles crossed alive and untouched, 137.9 of 140 speed kept.  At
+   * 80 it lost four of them the same way.  Step 4 is what made this visible
+   * rather than what caused it — the flat 35%-per-tile retention it replaced
+   * bled a ship below the tunnelling speed within a tile or two, so the hole
+   * was there all along and nothing could stay fast enough to fall in it.
+   *
+   * THE FIX IS TO PUT THE BODY BACK WHERE IT HIT, not to add a second contact
+   * rule.  If the body's PATH this step passed within the pair's combined
+   * reach, it is rewound along its own step to the moment of entry and the
+   * caller carries on into the ordinary broadphase, SAT, MTV, crash spend and
+   * `payForCrash`.  Nothing downstream learns a new case: a fast hit resolves
+   * through exactly the code a slow one does, which is the whole point of the
+   * user's "the same type of damage as any other collision".
+   *
+   * Four things are load-bearing:
+   *  - **ENTRY, never CLOSEST APPROACH.**  The deepest point of the path is
+   *    where the relative position is PERPENDICULAR to the relative velocity,
+   *    so `velAlongNormal` there is ~0 and `resolveCollision` would refuse the
+   *    contact as "moving away" — the same mis-read this exists to remove.
+   *    The first root of the entry quadratic is a closing contact by
+   *    construction, and `ENTRY_DEPTH` presses it slightly further in so SAT
+   *    on the real hulls agrees with the circle test that found it.
+   *  - **IT IS AN EARLY-OUT FIRST.**  A step shorter than the combined reach
+   *    cannot have skipped the contact, so the common case is one compare and
+   *    no work at all; a body at ordinary speed never reaches the quadratic.
+   *  - **ONLY THE MOVER IS REWOUND.**  With both bodies moving, the geometry
+   *    is solved in the RELATIVE step (which is exact) and the correction is
+   *    applied to the faster one (which is an approximation, and the honest
+   *    one: it is the body that outran the test).
+   *  - **NOT PROJECTILES.**  The fastest shot in the roster travels 15 units a
+   *    substep against that same +/-28 window, so no bolt can tunnel, and the
+   *    pierce bore already owns what a shot does inside a body.
+   *
+   * Returns true when it moved something, so the caller can re-read the pair.
+   */
+  private sweepRewind(a: GameEntity, b: GameEntity, reach: number): boolean {
+      // THE EARLY-OUT COMES FIRST, and it is the whole cost in normal play: a
+      // step no longer than the pair's own contact window cannot have stepped
+      // over it, so the end-position test the caller is about to do is already
+      // sound.  Measured, a ship at 60 u/step against 36-unit tiles never gets
+      // past this line.  Velocities rather than the recorded paths, because
+      // reaching for a path would mean recording one for every pair that ever
+      // comes close.
+      const ts = this.lastTimeScale;
+      const rsx = (a.velocity.x - b.velocity.x) * ts;
+      const rsy = (a.velocity.y - b.velocity.y) * ts;
+      if (rsx * rsx + rsy * rsy <= reach * reach) return false;
+
+      // WHO CAN OUTRUN THE TEST: a ship or a loose rock against terrain.
+      // Everything else either cannot move fast enough or has a deliberate
+      // pass-through rule this must not override.  No closures — this is a
+      // 120 Hz path, and a function built inside one is rebuilt 120x a second
+      // (CLAUDE.md section 8's refill rule, same reasoning).
+      if (a.phasesTerrain === true || b.phasesTerrain === true) return false;
+      if (a.shardVariant !== undefined && SHARD_VARIANTS[a.shardVariant].passThrough === true) return false;
+      if (b.shardVariant !== undefined && SHARD_VARIANTS[b.shardVariant].passThrough === true) return false;
+      // At least one side has to be terrain — this is about bodies crossing
+      // the world, not about two ships missing each other.
+      if (a.type !== EntityType.STRUCTURE && b.type !== EntityType.STRUCTURE) return false;
+      const aMoves = PhysicsSystem.sweepable(a), bMoves = PhysicsSystem.sweepable(b);
+      if (!aMoves && !bMoves) return false;
+
+      const pa = aMoves ? this.sweepPathOf(a) : null;
+      const pb = bMoves ? this.sweepPathOf(b) : null;
+      const adx = pa ? pa.dx : 0, ady = pa ? pa.dy : 0;
+      const bdx = pb ? pb.dx : 0, bdy = pb ? pb.dy : 0;
+      // The step the pair took RELATIVE to each other — the only quantity the
+      // geometry depends on.  Re-derived from the recorded paths rather than
+      // reusing the pre-check above, which reads live velocities that a
+      // resolve earlier this step may already have changed.
+      const sx = adx - bdx, sy = ady - bdy;
+      const stepSq = sx * sx + sy * sy;
+      if (stepSq <= reach * reach) return false;
+
+      // Offset from a to b at the START of the step; the offset at parameter
+      // t (0 = start, 1 = end) is `p0 - t*s`.
+      const p0x = wrapDeltaX(pa ? pa.ox : a.position.x, pb ? pb.ox : b.position.x);
+      const p0y = wrapDeltaY(pa ? pa.oy : a.position.y, pb ? pb.oy : b.position.y);
+
+      // First root of |p0 - t*s| = R — the moment the gap closed to R.
+      const R = reach * PhysicsSystem.SWEEP_ENTRY_DEPTH;
+      const pdots = p0x * sx + p0y * sy;
+      const disc = pdots * pdots - stepSq * (p0x * p0x + p0y * p0y - R * R);
+      if (disc < 0) return false;                 // the path never came close
+      const t = (pdots - Math.sqrt(disc)) / stepSq;
+      if (!(t > 0) || t >= 1) return false;       // entry is not inside this step
+
+      // The MOVER is the one that outran the test — with both moving, the
+      // faster one.
+      const mover = (pa && pb)
+          ? (adx * adx + ady * ady >= bdx * bdx + bdy * bdy ? a : b)
+          : (pa ? a : b);
+      const path = mover === a ? pa! : pb!;
+      const mSq = path.dx * path.dx + path.dy * path.dy;
+      if (!(mSq > 0)) return false;
+      // BACKWARD ONLY.  Where the body sits on its own path right now — a
+      // projection rather than an assumption, because an earlier sweep this
+      // step may already have pulled it back.  A later contact must never
+      // push it forward again.
+      const tNow = ((mover.position.x - path.ox) * path.dx
+                  + (mover.position.y - path.oy) * path.dy) / mSq;
+      if (t >= tNow) return false;
+      // ABSOLUTE placement along the recorded path, so repeated rewinds
+      // compose instead of stacking approximations.
+      mover.position.x = path.ox + path.dx * t;
+      mover.position.y = path.oy + path.dy * t;
+      wrapPosition(mover.position);
+      return true;
+  }
+
+  /** Can this body outrun the end-of-step contact test?  A ship, an enemy or
+   *  a loose shard — anything with finite mass that steers itself across the
+   *  world.  Deliberately NOT projectiles: the fastest shot in the roster
+   *  travels 15 units a substep against a 28-unit contact window, so no bolt
+   *  can tunnel, and the pierce bore already owns what a shot does inside a
+   *  body. */
+  private static sweepable(e: GameEntity): boolean {
+      return (e.type === EntityType.PLAYER || e.type === EntityType.ENEMY
+              || e.type === EntityType.STRUCTURE) && e.mass !== Infinity;
+  }
+
+  /** The step `e` took this substep, recorded once and reused — see
+   *  `sweepPaths` for why the obvious reconstruction cannot be redone. */
+  private sweepPathOf(e: GameEntity) {
+      let r = this.sweepPaths.get(e);
+      if (r === undefined) {
+          r = this.sweepPool[this.sweepPoolUsed];
+          if (r === undefined) {
+              r = { ox: 0, oy: 0, dx: 0, dy: 0 };
+              this.sweepPool[this.sweepPoolUsed] = r;
+          }
+          this.sweepPoolUsed++;
+          const ts = this.lastTimeScale;
+          r.dx = e.velocity.x * ts;
+          r.dy = e.velocity.y * ts;
+          // Valid precisely because nothing has rewound this body yet: the
+          // first sweep to ask is the only one that may reconstruct.
+          r.ox = e.position.x - r.dx;
+          r.oy = e.position.y - r.dy;
+          this.sweepPaths.set(e, r);
+      }
+      return r;
+  }
+
   private checkAndResolveCollision(
     a: GameEntity,
     b: GameEntity,
@@ -2946,6 +3312,16 @@ export class PhysicsSystem {
           if ((a.shield ?? 0) > 0 && (a.maxShield ?? 0) > 0) rA = Math.max(rA, PhysicsSystem.shieldReach(a));
           if ((b.shield ?? 0) > 0 && (b.maxShield ?? 0) > 0) rB = Math.max(rB, PhysicsSystem.shieldReach(b));
       }
+      // A FAST BODY IS PUT BACK WHERE IT HIT, before anything asks where it
+      // is.  This has to run AHEAD of the distance test below, because that
+      // test reads the END of the step too and so misses exactly the contacts
+      // the sweep exists to catch — a body that stepped clean over the other
+      // is far away at both ends of its step.  No-ops (one compare) for every
+      // body moving less than the pair's own contact window.
+      if (this.sweepRewind(a, b, rA + rB)) {
+          this.sweptRewinds++;
+      }
+
       const wdx = wrapDeltaX(a.position.x, b.position.x);
       const wdy = wrapDeltaY(a.position.y, b.position.y);
       const distSq = wdx*wdx + wdy*wdy;
@@ -3570,13 +3946,12 @@ export class PhysicsSystem {
                   // simply refills after the bounce, so same-contact dedup is
                   // preserved on both legs of the flight.
                   //
-                  // The semantics this produces are the intended reading:
-                  // pierce stays a LIFETIME budget, so a bouncing beam still
-                  // gets at most `pierceCount` damage events across its whole
-                  // flight however many times it reflects, each one stepping
-                  // further down the falloff curve.  Bounces buy COVERAGE,
-                  // not extra damage events — do not "fix" that by refreshing
-                  // pierce on bounce.
+                  // The semantics this produces are the intended reading: the
+                  // bolt's ENERGY is a lifetime bank, so a bouncing beam lands
+                  // only what it can still afford however many times it turns
+                  // around, each bite further down the curve its own mass
+                  // sets.  Bounces buy COVERAGE, not extra damage — do not
+                  // "fix" that by refilling the bank on a bounce.
                   //
                   // Length-reset, not a fresh array (CLAUDE.md §8's refill
                   // rule): this runs inside the collision path.
@@ -3590,12 +3965,12 @@ export class PhysicsSystem {
               }
           }
 
-          // PENETRATION FALLOFF (option C): the SECOND body a bolt passes
-          // through takes less than the first, the third less again.  The
-          // ordinal is a count UP (`pierceHits`), never the count-down
-          // `pierceCount`, so the curve is read forwards whatever the
-          // shot's capacity is.  Ordinal 0 is 1 by construction, so a
-          // non-piercing bolt is untouched by this.
+          // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
+          // less than the first, the third less again — and it is measured,
+          // never tabulated.  `projectileBiteOn` reads the bolt's CURRENT
+          // speed against its muzzle reference, so a shot that has spent
+          // nothing bites exactly its authored damage and one that has
+          // spent half its energy bites half.
           //
           // EVERY WEAPON IS AFFECTED EQUALLY (user call).  The falloff is
           // not direct-damage-only: the Cannon's AoE splash and the
@@ -3606,9 +3981,21 @@ export class PhysicsSystem {
           // and those consumers read it, rather than re-deriving an ordinal
           // that no longer means the same thing.  One number, one hit, three
           // damage paths.
-          const falloff = pierceFalloffAt(proj.pierceHits ?? 0, proj.pierceFalloffRate);
+          const projMass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
+          let projDmg = PhysicsSystem.projectileBiteOn(proj, target);
+          // `hitFalloff` keeps its meaning — this hit's size RELATIVE to the
+          // shot's authored damage — so the two consumers in GameEngine are
+          // untouched by damage becoming kinetic.
+          const falloff = (proj.damage || 1) > 0 ? projDmg / (proj.damage || 1) : 1;
           proj.hitFalloff = falloff;
-          let projDmg = (proj.damage || 1) * falloff;
+          // The bite as LAUNCHED at this body, kept because `projDmg` is
+          // whittled down below (a shield eats part of it, a plate scales it)
+          // while the energy the bolt is charged for is the whole of it.
+          const biteFull = projDmg;
+          // Set by the two reductions below.  A plate or armour that turns a
+          // shot aside has STOPPED it, so such a hit is never refunded — see
+          // the overkill rule at the spend site.
+          let reducedByPlate = false;
           // Hoisted: the bore below must respect it too, so a bolt that
           // re-contacts a body it already pierced does not drill it again.
           const alreadyHit = proj.hitEntityIds?.includes(target.id) ?? false;
@@ -3710,12 +4097,14 @@ export class PhysicsSystem {
           if (this.traitsEnabled && target.frontShield && projDmg > 0
               && PhysicsSystem.frontShieldCoversHit(target, proj)) {
               projDmg *= (1 - target.frontShield.reduction);
+              reducedByPlate = true;
               target.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
           }
           // Armored enemies shrug off small per-hit "chip" damage — demands
           // big-hit weapons (counterplay trait; AoE bypasses, see GameEngine).
           if (this.traitsEnabled && target.armor && projDmg > 0 && projDmg < target.armor.chipThreshold) {
               projDmg *= (1 - target.armor.reduction);
+              reducedByPlate = true;
               // A thick, dead clunk: the audible half of the reduced
               // damage number this path already shows.
               this.sfx?.('impact.armor.chip', target.position.x, target.position.y);
@@ -3754,12 +4143,12 @@ export class PhysicsSystem {
                   // FIRST so the pattern is biased by, and the damage poured
                   // from, where the shot actually landed.
                   //
-                  // OPTION C: with charges in hand and a grain body under
-                  // the muzzle, the bolt bores a TRACK — one charge and
-                  // one falloff step per grain — instead of spending the
-                  // whole shot on the entry cell for the price of one
-                  // charge.  It returns 0 for everything else (nebula,
-                  // metal-shard composites, enemies), which is the
+                  // THE BORE.  With energy in hand and a grain body under
+                  // the muzzle, the bolt walks its own chord — paying that
+                  // material's price per GRAIN and slowing by exactly what
+                  // it deposited — instead of spending the whole shot on
+                  // the entry cell.  It returns 0 for everything else
+                  // (nebula, metal-shard composites, enemies), which is the
                   // single-spend path this always was.
                   if (!alreadyHit) boredSteps = this.borePierceTrack(proj, target, projDmg);
                   if (boredSteps === 0) {
@@ -3794,6 +4183,18 @@ export class PhysicsSystem {
                   // are filtered out by the finite-mass check.
                   //
                   if (isDentEntity && target.mass !== Infinity && proj.velocity) {
+                      // THIS `/ 10` LOOKS LIKE A MASS THRESHOLD AND IS NOT, which
+                      // is why it does NOT carry MASS_SCALE.  Read it as
+                      // `min(0.20, 2 / mass)`: the division is an INVERSE-MASS
+                      // term, matching the enemy path's `projMass / targetMass`
+                      // exactly, and the `max(1, …)` is a cap on the RESULT
+                      // rather than a gate on the mass.  Scaling it was tried
+                      // and measured wrong — it put this path a full 10x below
+                      // the enemy path the suite requires it to agree with
+                      // (ratio 0.1125 against 1.125); left alone, the two agree
+                      // at every mass, which is scale-invariance by
+                      // construction.  The cap now binds only under mass 10,
+                      // i.e. a one-unit body, which is the honest cost.
                       const pushFactor = 0.20 / Math.max(1, target.mass / 10);
                       target.velocity.x += proj.velocity.x * pushFactor;
                       target.velocity.y += proj.velocity.y * pushFactor;
@@ -3910,7 +4311,7 @@ export class PhysicsSystem {
           // consecutive frames.
           //
           // (1) IMPENETRABLE.  An indestructible tile stops the bolt DEAD
-          //     however much penetration it carries, and spends nothing —
+          //     however much energy it carries, and spends nothing —
           //     it took no damage, so it may not cost a charge either.
           //     THIS IS THE SEAM a future ricochet would replace: the user
           //     may later have these turn EVERY projectile away, which is
@@ -3922,30 +4323,58 @@ export class PhysicsSystem {
           // (3) Everything else: one charge per body, as it always was.
           const impenetrable = target.type === EntityType.STRUCTURE
               && target.shardVariant === 'indestructible-tile';
-          const pierce = proj.pierceCount ?? 0;
+          // PENETRATION IS WHAT THE BOLT CAN STILL AFFORD (step 5b).  The
+          // single-spend path pays for the body it just struck HERE, and
+          // whether it carries on is then simply whether anything is left —
+          // no count, no budget.  It cannot pay any earlier than this: the
+          // knockback above reads `proj.velocity` for its DIRECTION, and a
+          // spend that zeroed it would deliver a shove of exactly nothing
+          // (step 3's lesson, and it took out the whole knockback suite).
+          // An IMPENETRABLE tile is the documented exception — it took no
+          // damage, so it may not take any energy either.
+          if (boredSteps === 0 && !alreadyHit && !impenetrable) {
+              // OVERKILL CARRIES THROUGH — the actor-side half of step 4's
+              // "pay for what you broke".  A body cannot absorb more than it
+              // had, so a 4-damage bolt through a 1-HP gnat is charged 1 and
+              // flies on with 3: penetration falls out of the arithmetic for
+              // ACTORS exactly as the bore makes it fall out for terrain, and
+              // a bolt through a swarm is the visible case.  The waste is
+              // read off the target's own overdrawn health, so it is zero by
+              // construction everywhere a body cannot go negative — a
+              // saturating boundary spend, a hit-counted tile, a rock break
+              // that zeroes health — and needs no branch per target kind.
+              // A PLATE IS NOT OVERKILL: armour and the front shield stop a
+              // round rather than run out of room, so a reduced hit pays in
+              // full however little reached the hull.
+              const wasted = reducedByPlate ? 0 : Math.max(0, -(target.health ?? 0));
+              PhysicsSystem.spendProjectileEnergy(proj, projMass,
+                  Math.max(0, biteFull - wasted));
+          }
+          const spentOut =
+              PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON;
           const carriesOn = impenetrable ? false
               : boredSteps > 0 ? this._boreExited
-              : (!alreadyHit && pierce > 0);
+              : (!alreadyHit && !spentOut);
 
           if (carriesOn && !target.isExploding) {
               if (boredSteps === 0) {
-                  proj.pierceCount = pierce - 1;
-                  // One body, one step down the falloff curve.  The bore
-                  // advances the ordinal itself, once per grain.
+                  // A plain count of what this bolt has struck — diagnostic
+                  // now rather than load-bearing, since the falloff comes
+                  // from speed.  The bore advances it once per grain.
                   proj.pierceHits = (proj.pierceHits ?? 0) + 1;
               }
               if (!proj.hitEntityIds) proj.hitEntityIds = [];
               proj.hitEntityIds.push(target.id);
-              // SPEED DECAY — boring through matter costs momentum as well
-              // as damage.  Ships at 1.0 (a no-op); the DBG "Pierce spd"
-              // cycle is what makes it felt against the falloff curve.
-              // One factor per charge actually spent, so a bolt that drilled
-              // four grains slows four times.
-              const retain = getActivePierceSpeedRetain();
-              if (retain !== 1 && proj.velocity) {
-                  const k = Math.pow(retain, boredSteps > 0 ? boredSteps : 1);
-                  proj.velocity.x *= k; proj.velocity.y *= k;
-              }
+              // THE FALLOFF, AS ARITHMETIC RATHER THAN AS A KNOB.  A bolt
+              // that carries on has spent real energy getting through, so
+              // it leaves SLOWER — and because damage is kinetic, its next
+              // bite is smaller automatically and with the right curve.
+              // This is what `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
+              // were each half-describing; both are deleted.  The bore has
+              // already paid per grain, so only the single-spend path pays
+              // here.
+              //
+
               // Still impart momentum impulse even when piercing
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;
@@ -3953,7 +4382,36 @@ export class PhysicsSystem {
                   target.velocity.y += proj.velocity.y * massRatio * 0.3;
               }
           } else if (!target.isExploding) {
-              proj.active = false;
+              // A SHELL THAT STOPS, BLASTS (user call).  Running out of
+              // mechanical travel energy is the third detonation criterion
+              // beside an actor contact and the fuse, and this branch is
+              // exactly "the round goes no further": its bank ran dry, the
+              // grain bore ended mid-body, or an indestructible wall took it.
+              // Without it a Cannon fired into terrain simply VANISHED — the
+              // `detonateOn: 'enemy'` gate correctly refuses to let a tile
+              // trip the charge, and the fuse could never reach the round
+              // because the fuse pass skips a dead projectile.
+              //
+              // DEFERRED rather than fired here: `updateProjectileFuses` is
+              // already the "detonate where it is, with nothing to exclude"
+              // path, and PhysicsSystem must not reach into the AoE.  It runs
+              // LATER IN THIS SAME SUBSTEP (updatePhysics then
+              // updateGameLogic, over the entity index built at the top of
+              // the step), so the round is still in the list it walks.
+              if (proj.explosionRadius && proj.explosionRadius > 0 && !proj.detonated) {
+                  // ARMED, AND DELIBERATELY LEFT ALIVE for the rest of this
+                  // substep.  The entity-compaction pass at the end of
+                  // `updatePhysics` releases an INACTIVE projectile straight
+                  // back to the pool, and `releaseToPool` clears
+                  // `explosionRadius` / `explosionDamage` — so a shell
+                  // deactivated here is a blank by the time `updateGameLogic`
+                  // reaches the fuse pass, which is exactly why the first
+                  // version of this armed the flag and still never blasted.
+                  // The fuse pass ends it moments later, in this same substep.
+                  proj.blastPending = true;
+              } else {
+                  proj.active = false;
+              }
               if (target.mass !== Infinity && proj.velocity) {
                   const massRatio = (proj.mass ?? 1) / target.mass;
                   target.velocity.x += proj.velocity.x * massRatio;
@@ -4181,6 +4639,11 @@ export class PhysicsSystem {
               // Δp lands on the shard — so a killed rock's fragments
               // inherit real forward velocity instead of scattering
               // from rest, and a survivor gets knocked downrange.
+              // MOMENTUM to the struck body is unchanged — that is a
+              // separate quantity from the energy spent on its bonds, and it
+              // is what gives a knocked shard its downrange velocity.  What
+              // the PLAYER loses is no longer this flat retention; see the
+              // energy spend below.
               let retention = STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION;
               if (structure.mass !== Infinity) {
                   const lossFrac = (1 - retention)
@@ -4190,29 +4653,39 @@ export class PhysicsSystem {
                   structure.velocity.x += player.velocity.x * dvFactor;
                   structure.velocity.y += player.velocity.y * dvFactor;
               }
-              player.velocity.x *= retention;
-              player.velocity.y *= retention;
               structure.hitFlash = 0.1;
               if (isIndestructible || structure.dragonSegment === true) {
                   // Permanent wall — OR a dragon body segment, which only breaks
-                  // when SHOT, not by crashing into it.  Signal the hit (flash /
-                  // shake / the player already shed velocity above) but leave its
-                  // health alone and queue no destruction.
+                  // when SHOT, not by crashing into it.  Signal the hit and leave
+                  // its health alone.  It does NOT return: a wall you cannot
+                  // break is a wall, and the ship has to BOUNCE off it, which is
+                  // the impulse at the bottom of this function.  It used to
+                  // return here on the strength of a comment saying "the player
+                  // already shed velocity above" — that was the flat retention,
+                  // which step 4 deleted, so the ship simply sailed on.
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, player.position);
-                  return;
-              }
+              } else {
               // A CRASH SPENDS ON THE GRAIN BOUNDARIES, like every other
-              // damage path (unified impact physics, step 2).  Glass is
-              // BRITTLE to physical smashes (V9): its damage layer meters
-              // WEAPON hits, but a hull over the crash threshold takes the
-              // whole pane — the pre-damage-layer behaviour, kept on purpose,
-              // and now spent THROUGH the model rather than around it.  A
-              // body with no grain model falls back to the whole-body
-              // decrement this always was.
-              const crashWhole = structure.shardVariant === 'glass-tile';
+              // damage path (unified impact physics, step 2) — and for
+              // EVERY material alike: glass lost its whole-pane special
+              // case (user call), so what a crash is worth against it is
+              // said by its bond strength and nothing else.  A body with no
+              // grain model falls back to the whole-body decrement this
+              // always was.
               const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
-              if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
-                  structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+              // THE HULL BRINGS ENERGY, AND PAYS FOR WHAT IT BREAKS (step 4).
+              // The flat CRASH_VELOCITY_RETENTION above used to take 35% of
+              // the ship's speed whatever it hit — measured, a ship from
+              // cruise crossed 5 tiles decaying through identical speeds
+              // whether they were glass, rock or metal, the last of which it
+              // could not even scratch.  Now the spend and the speed loss are
+              // the same number, so crossing metal costs what metal costs.
+              const crashDmg = crashDamageFor(player.mass, structure.mass, impactSpeed);
+              let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashDmg);
+              if (absorbed === null) {
+                  const raw = 1;
+                  structure.health -= raw;
+                  absorbed = raw;
               }
               PhysicsSystem.applyDentStep(structure, player.position);
               // A crash is a hit too — let rock break early on the same
@@ -4225,15 +4698,49 @@ export class PhysicsSystem {
               // harvest's candidates from a point outside the tile and
               // disagree with the spend above.
               if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
+              // DID THE WALL HOLD?  That is the whole question, and it decides
+              // both what the ship pays and whether it gets through — the two
+              // halves of a crash that step 4 left tangled together.
+              //
+              // BROKE THROUGH: the wall is gone, so the ship carries on and
+              // pays the ENERGY the break cost (`payForCrash`).  `absorbed` is
+              // the body's remaining budget here, not the whole swing, so a
+              // weak tile is cheap and a tough one is not.
+              //
+              // HELD: the ship pays nothing here and FALLS THROUGH to the
+              // impulse at the bottom of this function — it bounces off, like
+              // any other collision with something solid.  Charging it instead
+              // was the reported defect, and the arithmetic made it total: a
+              // surviving body absorbs exactly `crashDamageFor` = coupling x
+              // KE, and `crashEnergyCost` divides that coupling straight back
+              // out, so the bill was ALWAYS the ship's entire normal-direction
+              // energy.  Measured on a 55-HP rock tile at 12 u/step: 21 damage
+              // dealt and the ship stopped DEAD, embedded, with no bounce —
+              // three standing starts to break one rock, which is what "the
+              // ship colliding does not do damage" describes.  The energy is
+              // not lost by leaving it out: the bounce is where it goes, and
+              // the coupling was always the statement that only ~11% of a
+              // contact does breaking work.
               if (structure.health <= 0) {
+                  PhysicsSystem.payForCrash(player, structure, nx, ny, absorbed);
                   // Same helper as the two asteroid sites, so all three
                   // collision kills break identically; only the attribution
                   // differs (a crash IS the player's kill, and scores).
                   const over = impactSpeed / STRUCTURE_CONSTANTS.CRASH_VELOCITY_THRESHOLD - 1;
                   const impactDamage = 1 + 4 * Math.max(0, Math.min(1, over / 3));
                   this.killStructureByImpact(structure, player, impactDamage, true, onDeath);
+                  return;
               }
-              return;
+              // A MOBILE body that held is not a wall — it was shoved, and the
+              // momentum hand-off above already did that.  Letting the impulse
+              // run too would push it twice, so this path keeps the energy
+              // charge and the early return it always had.
+              if (structure.mass !== Infinity) {
+                  PhysicsSystem.payForCrash(player, structure, nx, ny, absorbed);
+                  return;
+              }
+              }
+              // STATIC and still standing: fall through and bounce.
           } else if (impactSpeed > COLLISION_CONFIG.ENV_DAMAGE.SPEED_THRESHOLD) {
               // Light bump — tile doesn't break, but the player takes
               // environmental damage proportional to the impact speed.
@@ -4301,13 +4808,17 @@ export class PhysicsSystem {
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, asteroid.position);
                   // Fall through to elastic bounce below.
               } else {
-                  // Boundary spend + the glass whole-pane rule, exactly as
-                  // the player-crash site above — one mechanism, two callers.
-                  const crashWhole = structure.shardVariant === 'glass-tile';
+                  // Boundary spend, exactly as the player-crash site above
+                  // — one mechanism, two callers.
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
-                  if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
-                      structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+                  const crashDmg = crashDamageFor(asteroid.mass, structure.mass, impactSpeed);
+                  let absorbed = PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashDmg);
+                  if (absorbed === null) {
+                      const raw = 1;
+                      structure.health -= raw;
+                      absorbed = raw;
                   }
+                  PhysicsSystem.payForCrash(asteroid, structure, nx, ny, absorbed);
                   PhysicsSystem.applyDentStep(structure, asteroid.position);
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);
                   if (structure.health <= 0) {
@@ -4345,11 +4856,25 @@ export class PhysicsSystem {
                   // down by repeated nudges should crack where it is being
                   // nudged, not lose an abstract point of health.  Glass
                   // still "dies in one" pressure trigger (V9).
-                  const crashWhole = structure.shardVariant === 'glass-tile';
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
-                  if (!PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashWhole)) {
-                      structure.health -= crashWhole ? Math.max(1, structure.health) : 1;
+                  // PRESSURE SPENDS WHAT THE WHOLE ACCUMULATOR BROUGHT, not
+                  // what its last nudge did.  The trigger IS the sum of
+                  // `TILE_PRESSURE_HITS` sub-threshold contacts, and charging
+                  // only the final one would make the mechanic nearly inert
+                  // under an energy spend: a 40-mass shard at half the old
+                  // gate carries ~0.4 damage against a 54-HP rock tile, so a
+                  // trigger that used to cost a full authored HP would need
+                  // well over a hundred of them.  This is the one crash site
+                  // whose damage is an accumulation rather than an impact.
+                  const crashDmg = crashDamageFor(asteroid.mass, structure.mass, impactSpeed)
+                      * STRUCTURE_CONSTANTS.TILE_PRESSURE_HITS;
+                  if (PhysicsSystem.crashBoundaryDamage(structure, crashAt, crashDmg) === null) {
+                      structure.health -= 1;
                   }
+                  // Pressure keeps its OWN damping rather than `payForCrash`:
+                  // the nudges that built the accumulator already each paid
+                  // through the ordinary bounce, so charging the energy again
+                  // at the trigger would bill the same contacts twice.
                   asteroid.velocity.x *= 0.85;
                   asteroid.velocity.y *= 0.85;
                   if (onDamage) onDamage(structure.position, COLLISION_CONFIG.DAMAGE.STRUCTURE_IMPACT, structure, crashAt);

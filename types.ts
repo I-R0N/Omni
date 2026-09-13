@@ -291,14 +291,14 @@ export interface WeaponConfig {
   count: number; // Number of projectiles per shot
   spread: number; // Angle spread in degrees
   recoil: number; // Mass multiplier for recoil
-  pierce: number; // How many entities the projectile passes through after the first hit
-  // Per-hit damage falloff for a PIERCING shot, indexed by hit ordinal
-  // (0 = the first contact, so entry 0 is 1 by construction).  Absent →
-  // the shared falloff RATE.  Sits beside `pierce` because it is the same
-  // seam: per-weapon, stamped onto the projectile at spawn.  Absent → the
-  // live global rate (DBG "Pierce falloff"), which is what every weapon
-  // uses today.
-  pierceFalloffRate?: number;
+  // SECTIONAL DENSITY — the mass the sim flies for this shot, and with `speed`
+  // the ENERGY it launches with: its BANK, against `damage` as the BITE one
+  // contact deposits.  How many bodies it gets through is therefore arithmetic
+  // rather than an authored count, which is why `pierce` is gone (step 5).
+  // Absent → `constants.projectileMassFor` derives the bank that spends itself
+  // on one contact; every player gun states one.  Mass also decides the
+  // momentum a hit imparts to a mobile target.
+  mass?: number;
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
   // commitment; charged shots cost only the charge-time hold.
@@ -312,6 +312,21 @@ export interface WeaponConfig {
   explosionRadius?: number;
   explosionDamage?: number;
   explosionKnockback?: number;
+  // WHAT SETS THE CHARGE OFF.  Absent / 'impact' → any contact detonates it,
+  // which is what every AoE shot did before penetration became universal.
+  // 'enemy' → only an ACTOR (enemy, boss, fauna, the player) trips it, and a
+  // STRUCTURE does not: the shell keeps flying, spending energy on the grains
+  // it bores exactly like any other round.  That is what lets a heavy shell
+  // BE heavy — it should punch through gravel, not be stopped and wasted by
+  // the first pebble in its path.
+  detonateOn?: 'impact' | 'enemy';
+  // Seconds of flight before the charge goes off on its own, so a shell that
+  // never meets an actor still ends as a blast rather than silently expiring.
+  // The FALLBACK half of `detonateOn: 'enemy'`; absent → no self-detonation.
+  // TIME rather than distance on purpose: the projectile already carries a
+  // ticked `lifetime`, so a fuse is one subtraction and no new state, and at
+  // a fixed muzzle speed the two are the same quantity anyway.
+  fuseSeconds?: number;
   // Render hint: when true the projectile draws a larger, brighter radial
   // bloom (used to telegraph heavy / status enemy shots — Tank, Orbiter,
   // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
@@ -479,21 +494,43 @@ export interface GameEntity {
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
   targetEntityId?: string; // For homing locking
-  pierceCount?: number;    // Remaining penetrations; decremented on each hit; 0 = stops on first hit
   // How many bodies (or GRAINS — see the bore track in PhysicsSystem) this
-  // bolt has already struck.  The index into the falloff table, so it is
-  // separate from `pierceCount`, which counts DOWN and would read the
-  // table backwards.
+  // bolt has already struck.  DIAGNOSTIC since step 5: the falloff comes from
+  // the bolt's remaining speed, so nothing reads this to decide anything.
   pierceHits?: number;
-  // The falloff table this shot flies with, copied from its WeaponConfig
-  // at spawn.  Absent → the shared curve.
-  /** The falloff factor actually applied to THIS hit, stashed by
-   *  PhysicsSystem so the on-hit consumers in GameEngine (the Cannon's AoE
-   *  splash, the Lightning chain) scale by the same number the direct
-   *  damage did.  They cannot re-derive it: the grain bore may have
-   *  advanced `pierceHits` before their callback runs. */
+  /** Counts DOWN to a self-detonation for a shell whose charge is not tripped
+   *  by structures (`WeaponConfig.detonateOn: 'enemy'`).  Absent → the shot
+   *  has no fuse and simply expires. */
+  fuseTimer?: number;
+  /** A shell that STOPPED and owes a blast where it lies (user call): the
+   *  third detonation criterion beside an actor contact and the fuse.  Set by
+   *  PhysicsSystem wherever an explosive round can no longer carry itself
+   *  anywhere — its bank ran dry, the grain bore ended mid-body, or an
+   *  indestructible wall took it — and consumed by
+   *  `GameEngine.updateProjectileFuses`, which is already the "detonate where
+   *  it is, with nothing to exclude" path. */
+  blastPending?: boolean;
+  /** A shell detonates AT MOST ONCE.  Set at every site that fires the AoE,
+   *  read by the fuse pass so a round that already went off on an actor is
+   *  not blasted a second time by the stop rule above.  MUST be cleared when
+   *  a pooled projectile is recycled, or that round never explodes again. */
+  detonated?: boolean;
+  /** Copied from the weapon at spawn so the on-hit path can ask what trips
+   *  this shell without reaching back to its config. */
+  detonateOn?: 'impact' | 'enemy';
+  /** The bolt's world speed at spawn — its MUZZLE energy reference.  Damage
+   *  is kinetic (constants.kineticDamage), so under the shipped 'muzzle'
+   *  impact-velocity mode the hit is the authored figure scaled by how much
+   *  of this launch speed the bolt still has.  Stamped at spawn INCLUDING
+   *  any inherited shooter velocity, which is what makes that mode neutral
+   *  however the ship was moving when it fired. */
+  spawnSpeed?: number;
+  /** The factor actually applied to THIS hit relative to the shot's authored
+   *  damage, stashed by PhysicsSystem so the on-hit consumers in GameEngine
+   *  (the Cannon's AoE splash, the Lightning chain) scale by the same number
+   *  the direct damage did.  They cannot re-derive it: the bolt has already
+   *  shed the energy this hit cost by the time their callback runs. */
   hitFalloff?: number;
-  pierceFalloffRate?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
   // Debug Visuals
@@ -506,7 +543,7 @@ export interface GameEntity {
   burstTimer?: number; // Timer for next burst shot
   // Set on the trigger pull that started the current burst — true if the
   // burst was a charged shot.  Read by tickPlayerBurst so sub-shots inherit
-  // the charged config (pierce 3 instead of 2, etc.).
+  // the charged config.
   burstCharged?: boolean;
 
   // Charge-shot progress: 0 (not charging) … 1 (full).  Updated each frame
@@ -530,10 +567,6 @@ export interface GameEntity {
   //  - shieldRechargeRate: shield regen/sec (PhysicsSystem; default SHIELD rate)
   damageMult?: number;
   cooldownMult?: number;
-  //  - pierceBonus: extra projectile penetrations from Penetration modules
-  //    (A3), added to the weapon's own `pierce` in WeaponSystem and clamped
-  //    to MAX_PIERCE; default 0.
-  pierceBonus?: number;
   shieldRechargeRate?: number;
   // Unlock + loadout gating (player only; set by GameEngine
   // .syncUnlocksToPlayer):
@@ -2013,9 +2046,17 @@ export interface EngineStats {
   shardBlendCount?: number;
   /** DBG "Goo coat" — multiplier over each variant's authored envelope. */
   shardCoatName?: string;
-  // DBG "Pierce spd" — the pierce speed-decay multiplier, as shown.
-  pierceSpeedRetainName?: string;
-  pierceFalloffName?: string;
+  // DBG "Impact vel" — which velocity a hit's energy is measured in, as shown.
+  impactVelocityName?: string;
+  // DBG "Crash energy" — the crash-coupling multiplier, as shown.
+  crashEnergyName?: string;
+  /** DBG "Blast energy" readout — the multiplier over BLAST_ENERGY_COUPLING. */
+  blastEnergyName?: string;
+  // DBG "Hull density" — the ship's live hull density and the mass it
+  // derives, as shown.  Under the energy model the hull's mass is half of
+  // what its every ram spends as well as how little it is shoved, so this
+  // one figure is worth reading beside the material band the audit prints.
+  hullDensityName?: string;
   plasticAutomataEnabled?: boolean;
   // PAuto direction: true = brighten dense interiors, false = darken
   // them (default).  Toggled via the PADIR button.

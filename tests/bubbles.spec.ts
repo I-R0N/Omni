@@ -318,8 +318,11 @@ test.describe('A2 — a bubble is a body, not a wall', () => {
     const calm: any = await hit(false);
     const sick: any = await hit(true);
 
-    expect(calm.playerMass, 'PHYSICS_CONSTANTS.PLAYER_MASS').toBe(100);
-    expect(calm.mass, 'the bubble is an ordinary finite-mass body').toBe(9);
+    // 100 x MASS_SCALE.  The bubble's own mass is authored at 9 and scales
+    // with it, so the IMPULSE SPLIT this test is really about — which
+    // divides by both — is untouched, which is the point being made here.
+    expect(calm.playerMass, 'PHYSICS_CONSTANTS.PLAYER_MASS').toBe(1000);
+    expect(calm.mass, 'the bubble is an ordinary finite-mass body').toBe(90);
     // A fresh bubble's collision response is EXACTLY what it always was — the
     // fix must not have made calm bubbles flimsy.
     expect(calm.player, 'the ship keeps most of its way through a 9-mass blob').toBeCloseTo(13.08, 1);

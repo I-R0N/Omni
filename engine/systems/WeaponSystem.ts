@@ -8,9 +8,9 @@ import {
   ENEMY_VARIANTS,
   ENEMY_ATTACK_EFFECTS,
   CORROSION,
-  MAX_PIERCE,
   COLLISION_CONFIG,
   LIGHTNING_CHAIN_BRANCHES,
+  projectileMassFor,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
@@ -20,15 +20,35 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
  * config is shallow-copied and the relevant fields are overridden.  Each
  * weapon owns its own thematic charge effect (see docs/GAME_FEEDBACK_PLAN.md
  * d2 design notes):
- *   - BLASTER: 5× damage slug, pierces 3, no recoil
- *   - BURST:   5-shot piercing burst (vs 3) with pierce 3
- *   - SHOTGUN: 12-pellet wide cone (50°), each pellet pierces 2
- *   - BOUNCER: 8-beam 360° nova — beams keep their per-shot pierce/bounce
+ *   - BLASTER: 5× damage slug in a 20× heavier round, no recoil
+ *   - BURST:   5-shot burst (vs 3), each sub-shot a third heavier
+ *   - SHOTGUN: 12-pellet wide cone (50°), each pellet half again as heavy
+ *   - BOUNCER: 8-beam 360° nova — beams keep their per-shot mass/bounce
  *   - LIGHTNING: chain doubles to 4 hops over 2× range (read on the projectile)
  *   - HOMING:  4-missile volley with weaker tracking (homingStrength 0.5),
- *              each missile pierces 1
+ *              each missile twice as heavy
  *   - CANNON:  2× explosion radius, 1.5× explosion damage + knockback
+ *
+ * THE MASS BUMPS ARE THE OLD `pierce` BUMPS, REPRICED (step 5).  A charge used
+ * to buy an authored count of extra bodies; it now buys a denser round, which
+ * is the same purchase expressed in the one quantity every impact spends.  The
+ * factors are exactly what the retired `(1 + pierce)` solve produced, so no
+ * charged shot changed: Blaster 5 damage-multiples × a 4-bite bank, Burst 4/3,
+ * Shotgun 3/2, Seeker 2/1.  Written as a multiple of the round's OWN resolved
+ * mass so a gun that authors none still gets a coherent number, and so Gunnery
+ * (applied after this) composes rather than overwrites.
  */
+/** Authored-units multiply for a charged shot's BANK.
+ *
+ *  `WeaponConfig.mass` is the AUTHORED figure and `projectileMassFor` is what
+ *  converts it, so writing that function's RESULT back into the field makes
+ *  the next conversion scale it again — MASS_SCALE twice over, a 10x heavier
+ *  charge than intended.  `withGunnery` carries the same note for the same
+ *  reason; this path had the identical bug and kept it. */
+function chargedMass(config: WeaponConfig, k: number): number | undefined {
+  return config.mass !== undefined ? config.mass * k : undefined;
+}
+
 function chargedConfigOf(config: WeaponConfig): WeaponConfig {
   switch (config.type) {
     case WeaponType.BLASTER:
@@ -37,15 +57,15 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
       return {
         ...config,
         damage: config.damage * 5,
-        pierce: 3,
+        mass: chargedMass(config, 20),          // 5 bite-multiples × 4 bites
         recoil: 0,
         size: config.size * 2.6,  // 6 → ~16
         isCharged: true,
       };
     case WeaponType.BURST:
-      return { ...config, pierce: 3, burstCount: 5 };
+      return { ...config, mass: chargedMass(config, 4 / 3), burstCount: 5 };
     case WeaponType.SHOTGUN:
-      return { ...config, count: 12, spread: 25, pierce: 2 };
+      return { ...config, count: 12, spread: 25, mass: chargedMass(config, 1.5) };
     case WeaponType.BOUNCER:
       // Omnidirectional nova — 8 beams equally spaced around 360°
       // (every 45°).  ProjectileSystem.spawn handles the equal-angle
@@ -64,35 +84,66 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
         chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2
       };
     case WeaponType.HOMING:
-      return { ...config, count: 4, spread: 30, pierce: 1, homingStrength: 0.5 };
+      return { ...config, count: 4, spread: 30, mass: chargedMass(config, 2), homingStrength: 0.5 };
     case WeaponType.CANNON:
+      // The charge premium is a HEAVIER SHELL, which under the energy model
+      // raises the blast (derived from the round's own mass) and its reach
+      // together — the same repricing the Blaster's charge took in step 5.
+      // Scaling `explosionDamage` here would have been scaling a field the
+      // player Cannon no longer authors.
       return {
         ...config,
+        mass:               chargedMass(config, 1.5),
         explosionRadius:    (config.explosionRadius    ?? 0) * 2,
-        explosionDamage:    (config.explosionDamage    ?? 0) * 1.5,
+        explosionDamage:    config.explosionDamage !== undefined
+                              ? config.explosionDamage * 1.5 : undefined,
         explosionKnockback: (config.explosionKnockback ?? 0) * 1.5,
       };
   }
   return config;
 }
 
-/** Apply the player's Penetration modules (A3) to one shot config.
+/** Apply the player's GUNNERY modules to one shot config.
  *
- *  The bonus is UNIFORM across guns by design (guidance call): the Cannon and
- *  Lightning are `pierce: 0` because their identity is splash and chain, and
- *  they take the bonus anyway with eyes open — the weapon x trait table in
- *  docs/WEAPONS_AMMO_PLAN.md §7 stays the balance reference.  The sum is
- *  clamped to MAX_PIERCE, which is a sanity ceiling against an authoring
- *  mistake rather than a balance statement — the largest reachable stack is
- *  the Laser's 4 plus Mk III's +3.
+ *  A mark buys a DENSER ROUND, which is one statement with two halves under
+ *  the energy model: the BITE (`damage`, what a contact deposits) and the BANK
+ *  (`mass`, with `speed` the energy the round launches with, and so how many
+ *  bites it can afford).  Scaling only the bite would make a Gunnery round hit
+ *  harder and stop SOONER — it would spend its fixed bank in fewer, bigger
+ *  contacts — which is the opposite of what a heavier shell does.
  *
- *  Applied to the COPY, never to the shared WEAPONS table — same rule the
- *  damage/cooldown folds above it follow. */
-function withPierceBonus(config: WeaponConfig, player: GameEntity): WeaponConfig {
-  const bonus = player.pierceBonus ?? 0;
-  if (bonus <= 0) return config;
-  const pierce = Math.min(MAX_PIERCE, config.pierce + bonus);
-  return pierce === config.pierce ? config : { ...config, pierce };
+ *  This is also where the deleted Penetration module went (step 5).  Depth was
+ *  worth selling separately only while it was an authored count; now that it
+ *  is energy divided by what the target charges, a heavier round is a deeper
+ *  one for free, and there was nothing left for a second module to sell.
+ *
+ *  `mass` is resolved through `projectileMassFor` FIRST so the scaling lands
+ *  on a real number either way — a gun that authors none would otherwise have
+ *  its bank derived from the already-scaled damage downstream, which double-
+ *  counts the mark.
+ *
+ *  Applied to the COPY, never to the shared WEAPONS table — the same rule the
+ *  cooldown fold follows. */
+function withGunnery(config: WeaponConfig, player: GameEntity): WeaponConfig {
+  const mult = player.damageMult ?? 1;
+  if (mult === 1) return config;
+  return {
+    ...config,
+    damage: config.damage * mult,
+    // AUTHORED UNITS, because that is what `WeaponConfig.mass` means and
+    // `projectileMassFor` is what converts it — writing its already-scaled
+    // RESULT back into this field made the round scale twice (measured: a
+    // Gunnery mark multiplied the mass by 13.6 against the bite's 1.36).
+    // Left undefined it stays undefined on purpose: the derived branch is
+    // proportional to `damage`, which is already multiplied above, so the
+    // bank follows the mark for free.
+    mass: config.mass !== undefined ? config.mass * mult : undefined,
+    // NOT scaled: a DERIVED blast reads the round's own mass, which the line
+    // above already multiplied, so touching it here would apply the mark
+    // twice.  An authored override (a boss shell) is a designed number and
+    // is deliberately left alone.
+    explosionDamage: config.explosionDamage,
+  };
 }
 
 /**
@@ -152,15 +203,7 @@ export class WeaponSystem {
     // Progression: Gunnery scales damage (incl. cannon AoE), Autoloader
     // scales fire cadence.  Copy the config before scaling so the shared
     // WEAPONS table is never mutated.
-    const dmgMult = player.damageMult ?? 1;
-    if (dmgMult !== 1) {
-      config = {
-        ...config,
-        damage: config.damage * dmgMult,
-        explosionDamage: config.explosionDamage !== undefined ? config.explosionDamage * dmgMult : config.explosionDamage,
-      };
-    }
-    config = withPierceBonus(config, player);
+    config = withGunnery(config, player);
     player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
 
     // Every player shot asks for the TRIGGER kind: on a pad with trigger
@@ -217,12 +260,8 @@ export class WeaponSystem {
     player.burstQueue--;
     const baseConfig = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
     let config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
-    const dmgMult = player.damageMult ?? 1;
-    if (dmgMult !== 1) {
-      config = { ...config, damage: config.damage * dmgMult };
-    }
-    // A burst sub-shot is a player shot like any other — same Penetration.
-    config = withPierceBonus(config, player);
+    // A burst sub-shot is a player shot like any other — same Gunnery.
+    config = withGunnery(config, player);
     player.burstTimer = config.burstDelay || 0.1;
     const targetX = player.position.x + Math.cos(player.rotation) * 100;
     const targetY = player.position.y + Math.sin(player.rotation) * 100;
