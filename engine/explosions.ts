@@ -171,7 +171,23 @@ export function updateExplosionRings(g: GameEngine) {
             const dist = Math.sqrt(d2);
             const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
 
-            if (dmg > 0) {
+            // A BLAST PUSHES CLOUD, IT DOES NOT BREAK IT (user call).  Nebula
+            // is the one family that takes the voronoi GEOMETRY without the
+            // grain damage model (CLAUDE.md §8), so it carries no boundaries
+            // for `applyBoundaryDamage` to spend on and falls through to the
+            // whole-body `health -=` below — which against a 1-HP tile is
+            // instant death for every cloud inside the ring, so one Cannon
+            // shell cleared a bank of them outright.  A shockwave has nothing
+            // solid to grip a gas with, and the knockback further down is the
+            // whole of what it does to one.  The FEEDBACK is skipped with the
+            // damage rather than beside it: a hit flash and a damage number on
+            // a body that lost nothing is the misreading this rule exists to
+            // remove.  This is the BLAST only — shooting a cloud still breaks
+            // it, and the shell's own direct hit is untouched.
+            const isCloud = e.type === EntityType.STRUCTURE
+                && (e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard');
+
+            if (dmg > 0 && !isCloud) {
                 let applied = dmg * falloff;
                 const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
                 // Player shield soaks the blast first (kamikaze AoE and any

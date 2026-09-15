@@ -5936,13 +5936,21 @@ export function projectileBite(authored: number, speed: number, spawnSpeed: numb
 // setting.  At 0.2 the Cannon's peak blast measured ~17.3 against its 18
 // direct bite — "the charge is worth about one more hit" was the statement
 // that picked the number — and then `BASE_BANK_TRIM` took 40% off every base
-// round, so it is ~10.4 today: a lighter shell carries a smaller charge,
-// which is the whole point of deriving it.  The BITE is untouched (the trim
-// moves only the bank), so what changed is the RATIO, not the gun.  If the
-// charge is wanted back at its old worth the dial is this coupling — NOT the
-// trim, which is about penetration — and DBG ▸ Player ▸ "Blast energy" step
-// 2x is exactly that A/B.
-export const BLAST_ENERGY_COUPLING = 0.2;
+// round, so the same coupling was worth only ~10.4: a lighter shell carries a
+// smaller charge, which is the whole point of deriving it.  The BITE never
+// moved (the trim moves only the bank), so what the trim changed was the
+// RATIO, not the gun.
+//
+// SO THE COUPLING IS DOUBLED, 0.2 -> 0.4 (user call, play-tested through the
+// DBG 2x step and then BAKED).  That restores the original statement — the
+// peak measures ~20.8 against the same 18 bite, so the charge is worth about
+// one more hit again — and it is the RIGHT dial for it: the trim is about
+// penetration and moving it back would have undone the weapon pass.  The DBG
+// ladder keeps 1x meaning WHAT SHIPS, so its 0.5x step is now the A/B against
+// the pre-call blast (§8's rule: a settled value is baked into the constant
+// and the knob returns to 1x, or every derivation written against the base
+// constants quietly goes wrong).
+export const BLAST_ENERGY_COUPLING = 0.4;
 
 export const BLAST_ENERGY_CYCLE: ReadonlyArray<number> = [
   1, 0.5, 2, 4,

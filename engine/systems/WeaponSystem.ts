@@ -117,6 +117,10 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
  *  is energy divided by what the target charges, a heavier round is a deeper
  *  one for free, and there was nothing left for a second module to sell.
  *
+ *  A mark therefore moves THREE things on an explosive round — bite, bank and
+ *  the blast's REACH — and only the first two are one statement.  See the
+ *  `explosionRadius` note below for why the reach had to be said out loud.
+ *
  *  `mass` is resolved through `projectileMassFor` FIRST so the scaling lands
  *  on a real number either way — a gun that authors none would otherwise have
  *  its bank derived from the already-scaled damage downstream, which double-
@@ -143,6 +147,24 @@ function withGunnery(config: WeaponConfig, player: GameEntity): WeaponConfig {
     // twice.  An authored override (a boss shell) is a designed number and
     // is deliberately left alone.
     explosionDamage: config.explosionDamage,
+    // ...BUT THE RING HAS TO GROW, OR THE MARK IS INVISIBLE (user report: "I
+    // can't clearly tell that the blast grows").  The arithmetic was never
+    // wrong — three Mk III measured the peak at exactly x2.08, 20.8 -> 43.2 —
+    // but `explosionRadius` was authored flat, so the ring the player watches
+    // was pixel-for-pixel identical at every mark and the only tell was a
+    // damage number on a bystander.  A bigger charge reaches further.
+    //
+    // SQUARE ROOT, because this is a 2D world: what the energy buys is the
+    // ring's AREA, so scaling the RADIUS linearly would count the mark twice
+    // over (x2.08 radius is x4.3 area).  At three Mk III that is 110 -> 159,
+    // which reads immediately beside the unchanged base.
+    //
+    // Gated on the blast being DERIVED, the same rule the line above follows:
+    // a weapon that authors its own `explosionDamage` (BOSS_WEAPONS.SIEGE) is
+    // a designed encounter's number and keeps its authored reach too.
+    explosionRadius: config.explosionDamage === undefined && config.explosionRadius
+      ? config.explosionRadius * Math.sqrt(mult)
+      : config.explosionRadius,
   };
 }
 

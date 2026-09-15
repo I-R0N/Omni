@@ -951,6 +951,7 @@ test.describe('the base bank, and the blast derived from it', () => {
           const out = {
             mass: shot ? shot.mass : null,
             blast: shot ? shot.explosionDamage : null,
+            radius: shot ? shot.explosionRadius : null,
             speed: shot ? Math.hypot(shot.velocity.x, shot.velocity.y) : null,
           };
           for (const x of e.currentMap.entities) if (!before.has(x.id)) x.active = false;
@@ -960,6 +961,8 @@ test.describe('the base bank, and the blast derived from it', () => {
         const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
         return {
           authored: M.WEAPONS.CANNON.explosionDamage ?? null,
+          authoredRadius: M.WEAPONS.CANNON.explosionRadius ?? null,
+          bite: M.WEAPONS.CANNON.damage,
           base: fire(1), gunned: fire(g3), g3,
           coupling: M.BLAST_ENERGY_COUPLING,
           perDamage: M.IMPACT_ENERGY_PER_DAMAGE,
@@ -980,6 +983,35 @@ test.describe('the base bank, and the blast derived from it', () => {
       // by g3 too — g3² would be `withGunnery` scaling it a second time.
       expect(r.gunned.blast! / r.base.blast!, 'a mark reaches the blast once')
         .toBeCloseTo(r.g3, 6);
+
+      /*  (4d) THE RING GROWS WITH IT, OR THE MARK IS INVISIBLE.  The peak was
+       *  always right — it is (4c) — but `explosionRadius` was authored flat,
+       *  so the ring the player watches was pixel-for-pixel identical at every
+       *  mark and the growth had no tell but a damage number on a bystander
+       *  (user report: "I can't clearly tell that the blast grows").
+       *
+       *  SQUARE ROOT, because this is a 2D world: the ring's AREA is what the
+       *  energy buys, so a linear radius would count the mark twice over.  The
+       *  second assertion is the one that says it in the units that matter —
+       *  area scales by exactly g3, the same factor the peak does. */
+      expect(r.base.radius!, 'the base ring is the authored reach, untouched')
+        .toBeCloseTo(r.authoredRadius!, 6);
+      expect(r.gunned.radius! / r.base.radius!, 'a mark grows the reach by sqrt')
+        .toBeCloseTo(Math.sqrt(r.g3), 6);
+      expect((r.gunned.radius! ** 2) / (r.base.radius! ** 2),
+        'the ring AREA is the energy the mark bought').toBeCloseTo(r.g3, 6);
+
+      /*  (4e) WHAT THE COUPLING IS FOR.  "The charge is worth about one more
+       *  hit" is the statement that picked it, and the trim taking 40% off
+       *  every base bank is what made it worth ~0.6 of one until the coupling
+       *  was doubled to match (user call).  A loose band on purpose: this
+       *  pins the CALIBRATION, not the number — it fails if the coupling
+       *  drifts by 2x in either direction, which is the mistake worth
+       *  catching, and stays quiet through ordinary retuning. */
+      expect(r.base.blast! / r.bite, 'the charge is worth about one more hit')
+        .toBeGreaterThan(0.8);
+      expect(r.base.blast! / r.bite, 'the charge is not worth two more hits')
+        .toBeLessThan(1.6);
 
       watch.assertClean();
     });
@@ -1176,4 +1208,121 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
 
     watch.assertClean();
   });
+});
+
+/** A BLAST PUSHES CLOUD, IT DOES NOT BREAK IT (user call).
+ *
+ *  Nebula is the one family that takes the voronoi GEOMETRY without the grain
+ *  damage model (CLAUDE.md §8), so it carries no boundaries for
+ *  `applyBoundaryDamage` to spend on and fell through to the whole-body
+ *  `health -=` in the ring sweep.  Against a 1-HP tile that is instant death
+ *  for every cloud inside the radius, so one Cannon shell cleared a bank of
+ *  them outright — measured 11 of 11 with the rule removed, 0 of 28 with it.
+ *
+ *  Three claims, and the third is what keeps the first two honest: "nothing
+ *  died" would also be true of a ring that never fired.
+ */
+test.describe('a blast pushes cloud, it does not break it', () => {
+  test('nebula survives the ring, is shoved by it, and the ring is live',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page, 'NEBULA_FIELD');
+
+      const r = await engine(page, (e: any) => {
+        const p = e.player;
+        const cloud = () => e.currentMap.entities.filter((x: any) => x.active
+          && (x.shardVariant === 'nebula-tile' || x.shardVariant === 'nebula-shard'));
+
+        // Break a few tiles first, so the sample carries SHARDS as well as
+        // tiles — a static tile can never be shoved (mass infinity is what
+        // bolts it to its hex), so the push half of the rule is only
+        // observable on the mobile half of the family.
+        const tiles = cloud().filter((x: any) => x.shardVariant === 'nebula-tile');
+        if (tiles.length === 0) return { error: 'no nebula on the map' };
+        const at = { x: tiles[(tiles.length / 2) | 0].position.x,
+                     y: tiles[(tiles.length / 2) | 0].position.y };
+        for (const x of tiles.filter((t: any) =>
+          Math.hypot(t.position.x - at.x, t.position.y - at.y) <= 90).slice(0, 5)) {
+          x.health = 0; e.physics.removeStaticEntity(x); e.handleEntityDeath(x); x.active = false;
+        }
+        for (let i = 0; i < 90; i++) {
+          e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        }
+
+        // The ring the CANNON actually spawns: read its real numbers off a
+        // fired shell rather than inventing them, then place it by hand so
+        // the sample is deterministic.
+        p.velocity.x = 0; p.velocity.y = 0;
+        p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+        const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p,
+          { x: p.position.x + 500, y: p.position.y });
+        const sh = e.currentMap.entities.find(
+          (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+        for (const x of e.currentMap.entities) if (!before.has(x.id)) x.active = false;
+        if (!sh) return { error: 'the Cannon did not fire' };
+        const radius = sh.explosionRadius, damage = sh.explosionDamage;
+
+        // THE CONTROL: an ordinary body in the same ring, so "nothing died"
+        // cannot be read as "the ring never fired".
+        const ctx = e.waveContext();
+        const witness = e.waves.spawnAt('RAMMER_1',
+          { x: at.x + radius * 0.4, y: at.y }, ctx, false);
+        witness.maxSpeed = 0; witness.velocity.x = 0; witness.velocity.y = 0;
+        witness.health = witness.maxHealth = 1e6;
+        witness.shield = 0; witness.maxShield = 0;
+
+        const sample = cloud().filter((x: any) =>
+          Math.hypot(x.position.x - at.x, x.position.y - at.y) <= radius);
+        const ids = sample.map((x: any) => x.id);
+        const shardIds = sample.filter((x: any) => x.shardVariant === 'nebula-shard')
+          .map((x: any) => x.id);
+        const speedBefore = new Map<string, number>(sample.map(
+          (x: any) => [x.id as string, Math.hypot(x.velocity.x, x.velocity.y)]));
+
+        e.spawnShockwave(at, {
+          radius, damage, knockback: 6, color: '#f97316',
+          ownerType: 'PLAYER', ownerId: 'player', excludeIds: ['player'],
+        });
+        for (let i = 0; i < 60; i++) {
+          e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        }
+
+        const live = new Map(e.currentMap.entities
+          .filter((x: any) => x.active).map((x: any) => [x.id, x]));
+        let shoved = 0;
+        for (const id of shardIds) {
+          const x: any = live.get(id);
+          if (!x) continue;
+          if (Math.hypot(x.velocity.x, x.velocity.y) > (speedBefore.get(id) ?? 0) + 0.05) shoved++;
+        }
+        const witnessLost = 1e6 - witness.health;
+        witness.active = false;
+        return {
+          error: null,
+          sampled: ids.length,
+          shards: shardIds.length,
+          dead: ids.filter((id: string) => !live.has(id)).length,
+          shoved,
+          witnessLost,
+          damage,
+        };
+      });
+
+      expect(r.error, 'the scene was set up').toBeNull();
+      expect(r.sampled, 'the ring covered some cloud').toBeGreaterThan(4);
+      expect(r.shards, 'and some of it was mobile').toBeGreaterThan(0);
+
+      // (1) the blast broke none of it.
+      expect(r.dead, 'a blast breaks no nebula at all').toBe(0);
+      // (2) but it shoved the half of the family that CAN be shoved.
+      expect(r.shoved, 'the mobile cloud was pushed by the ring')
+        .toBeGreaterThan(r.shards! / 2);
+      // (3) the control: the same ring hurt an ordinary body, so (1) is the
+      //     rule and not a ring that never went off.
+      expect(r.witnessLost, 'the same ring damaged an ordinary body')
+        .toBeGreaterThan(0);
+
+      watch.assertClean();
+    });
 });

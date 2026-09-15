@@ -3331,4 +3331,69 @@ reached its cost, so `canAffordTile` is passed to the adapter separately.
 Without it a stalled under-price cloud still buys a tile, which is the whole
 loop again through a side door.
 
+---
+
+### 22. What the play-test returned: the charge, its ring, and the cloud (2026-09-15)
+
+The session's checklist came back with A, C, D and E good, B2-B7 good, and
+three items to act on.  All three are recorded here because each is a
+different KIND of finding, and only one of them was a bug.
+
+**(1) The coupling doubles, 0.2 -> 0.4.**  A TUNING call, made through the
+dial the model already named.  "The charge is worth about one more hit" is
+the statement behind the coupling, and `BASE_BANK_TRIM` had quietly made it
+worth ~0.6 of one (10.4 against an unchanged 18 bite) by taking 40% off every
+base bank — the blast derives from the shell's mass, so it rode the bank
+down.  Play-tested through the DBG 2x step and then BAKED, per §8's rule
+that a settled value moves into the constant and the knob returns to 1x.
+Measured after: **peak 20.8 against the same 18 bite**; a bystander at half
+the radius loses 9.24.  The ladder's 0.5x step is now the A/B against the
+pre-call blast.
+
+**(2) The ring grows with the round.**  NOT a bug in the arithmetic, which is
+the part worth keeping: three Gunnery Mk III measured the blast at exactly
+x2.08 (20.8 -> 43.2) both before and after this change.  What was wrong is
+that `explosionRadius` was AUTHORED FLAT, so the ring the player watches was
+pixel-for-pixel identical at every mark and the only tell that the mark had
+landed was a damage number on a bystander — hence the report, "I can't
+clearly tell that the blast grows".  `withGunnery` now scales the reach by
+**sqrt(mult)** (110 -> 158.6), because in a 2D world the ring's AREA is what
+the energy buys and a linear radius would count the mark twice over.  Gated
+on the blast being DERIVED, so an authored `explosionDamage` (the Bastion's
+shells) keeps its authored reach too.
+
+> The general lesson, and the reason this is written down rather than just
+> fixed: **a derived quantity that only surfaces in a number nobody reads is
+> indistinguishable, in play, from one that does not move.**  Every other
+> derivation in this work bought a visible consequence for free — a heavier
+> shell bores further, a faster ram breaks more.  This one did not, and
+> nothing in the model said so.
+
+**(3) A blast pushes cloud, it does not break it.**  The only real defect of
+the three.  Nebula takes the voronoi GEOMETRY without the grain damage model
+(CLAUDE.md §8), so it carries no boundaries for `applyBoundaryDamage` to
+spend on and the ring sweep fell through to the whole-body `health -=`.
+Against a 1-HP tile that is instant death for everything inside the radius,
+so one Cannon shell cleared a bank outright — **measured 11 of 11 destroyed
+with the rule removed, 0 of 28 with it**.  A shockwave has nothing solid to
+grip a gas with; the knockback is the whole of what it does to one.
+
+Three things about the fix are deliberate.  The FEEDBACK is skipped with the
+damage rather than beside it — a hit flash and a damage number on a body that
+lost nothing is precisely the misreading the rule exists to remove.  It is the
+BLAST only: shooting a cloud still breaks it, and the shell's own direct hit
+is untouched.  And only the MOBILE half of the family can actually be shoved
+(measured: shard speeds 0.01-0.02 -> 0.24-0.85), because a static tile's
+infinite mass is what bolts it to its hex coordinate — pushing one would break
+the regen, neighbour-count and transmutation logic that all assume
+`position === hexCoord`.
+
+Its regression carries a CONTROL body in the same ring, for a reason that
+generalises to every "X is now immune" test: **"nothing died" is equally true
+of a ring that never fired.**
+
+**E3 was explicitly declined** (user call): the nebula crystallising loop is
+slower after entry 21 (128 -> 8 pairs per 150 s) and that is wanted as it is.
+`NEBULA_DRAIN_CYCLE` stays where it is.
+
 **STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).

@@ -80,7 +80,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  421 tests.  All run at
+                          writing a DBG-knob test).  422 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -865,7 +865,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   halves stay separate because only the Gunnery anchor is pinned to
   `MODULE_DEFS`;
   `BLAST_ENERGY_COUPLING` / `blastDamageFor` — a shell's blast is a
-  fraction of its own kinetic energy, not an authored scalar
+  fraction of its own kinetic energy, not an authored scalar, and its
+  RING grows with the round too (√mass, so the area is the energy)
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
   see §8), `MASS_SCALE` / `scaledMass` — every mass is 10x with sizes
   unchanged, and IMPACTS HIT 10x HARDER: the energy conversion is
@@ -1737,7 +1738,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   rather than a side effect: the Cannon's BLAST derives from the shell's own
   mass, so it rode the trim down with the bank (17.3 → 10.4 peak, against an
   unchanged 18 direct bite).  A lighter shell carries a smaller charge.  The
-  dial for the charge alone is `BLAST_ENERGY_COUPLING`, never the trim.
+  dial for the charge alone is `BLAST_ENERGY_COUPLING`, never the trim — and
+  that dial was then doubled to 0.4 (user call), putting the peak at 20.8
+  against the same unchanged bite.
   TWO things make this the right lever and both are easy to get backwards.
   **Only the BANK moves** — `damage`, the BITE, is untouched at every mark,
   so no enemy takes longer to kill and no §7 trait threshold shifts.  And
@@ -1857,23 +1860,43 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   terrain started deriving ~50 HP a tile — so the charge quietly shrank into
   a light show (measured: a bystander at half the radius lost 5.2).  It is
   now `blastDamageFor(mass, speed)` — `kineticDamage` over the shell's OWN
-  flown mass, times `BLAST_ENERGY_COUPLING` (0.2), which is the sibling of
+  flown mass, times `BLAST_ENERGY_COUPLING` (0.4), which is the sibling of
   `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
-  work, a shaped charge couples a fifth of its remaining energy into the
-  blast.  The coupling was picked when the peak measured ~17.3 against the
-  Cannon's 18 direct bite — "the charge is worth about one more hit" is the
-  statement behind the 0.2 (measured bystander 5.2 → 10.4 when it landed).
-  `BASE_BANK_TRIM` has since taken 40% off every base round, so the peak is
-  ~10.4 against the same 18 bite: WHAT THE CHARGE IS WORTH RIDES THE BANK,
-  which is what deriving it means.  The BITE never moved, so what changed is
-  the ratio rather than the gun — and the dial for the charge alone is this
-  coupling (DBG ▸ Player ▸ "Blast energy", step 2×), never the trim.
+  work, a shaped charge couples this much of its remaining energy into the
+  blast.  "The charge is worth about one more hit" is the statement behind
+  the number, and the coupling is what keeps that true as the bank moves.
+  IT HAS BEEN DOUBLED ONCE, 0.2 → 0.4 (user call, play-tested through the DBG
+  2× step and then BAKED).  At 0.2 the peak measured ~17.3 against the
+  Cannon's 18 direct bite; `BASE_BANK_TRIM` then took 40% off every base
+  round, and the same coupling was worth only ~10.4 — WHAT THE CHARGE IS
+  WORTH RIDES THE BANK, which is what deriving it means.  The BITE never
+  moved, so what the trim changed was the RATIO, not the gun, and the
+  coupling is the right dial for it (DBG ▸ Player ▸ "Blast energy") — never
+  the trim, which is about penetration.  Measured after: **20.8 against the
+  same 18 bite**, so the original statement holds again.  The ladder keeps 1×
+  meaning WHAT SHIPS, so its 0.5× step is now the A/B against the pre-call
+  blast.
   THREE properties FALL OUT rather than being written: it rides GUNNERY for
   free (a mark buys a heavier round and the blast reads the round's mass);
   a CHARGED shell blasts harder by being heavier (the charge premium is
   `chargedMass(config, 1.5)` now, not a scalar on a field the Cannon no
   longer authors).  A shell that spent its bank boring does NOT blast weaker —
   see the payload rule below; that scaling was removed.
+  **BUT THE RING HAD TO BE TOLD TO GROW** (user report: "I can't clearly tell
+  that the blast grows using 3x Mk III Gunnery modules on the cannon").  The
+  arithmetic was never wrong — three marks measured the peak at exactly
+  ×2.08, 20.8 → 43.2 — but `explosionRadius` was AUTHORED FLAT, so the ring
+  the player watches was pixel-for-pixel identical at every mark and the only
+  tell was a damage number on a bystander.  A bigger charge reaches further,
+  so `withGunnery` now scales the reach by **√mult** (110 → 158.6 at three Mk
+  III).  SQUARE ROOT because this is a 2D world: the ring's AREA is what the
+  energy buys, so a linear radius would count the mark twice over (×2.08
+  radius is ×4.3 area).  Stated in the units that matter, the ring's area
+  scales by exactly the same 2.08 the peak does.  Gated on the blast being
+  DERIVED, the same rule the damage line beside it follows — an authored
+  `explosionDamage` (BOSS_WEAPONS.SIEGE) keeps its authored reach too.  The
+  lesson generalises past this gun: a derived quantity that only shows up in
+  a number nobody reads is indistinguishable from one that does not move.
   **THREE THINGS DETONATE IT, AND "IT STOPPED" IS THE THIRD** (user call).
   `detonateOn: 'enemy'` is what stops a heavy round being a contact mine, and
   the gap it left was that a Cannon fired into tiles or shards simply
@@ -3759,6 +3782,23 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   budget that ignored the parent entirely, to 6-8 cells that tile the
   parent's own polygon (child area / parent area 0.85..1.05), with body
   sizes spanning 4.99..20.2 — a 4× range.
+- **AND A BLAST PUSHES CLOUD RATHER THAN BREAKING IT** (user call), which is
+  the sharpest consequence of the bullet above.  Carrying no boundaries means
+  `applyBoundaryDamage` refuses a nebula body, so the ring sweep in
+  `updateExplosionRings` fell through to the whole-body `health -=` — and
+  against a 1-HP tile that is instant death for every cloud inside the
+  radius, so ONE Cannon shell cleared a bank outright (measured 11 of 11
+  with the rule removed, 0 of 28 with it).  A shockwave has nothing solid to
+  grip a gas with; the knockback is the whole of what it does to one, and
+  since a static tile's infinite mass is what bolts it to its hex, the PUSH
+  half is only observable on the mobile half of the family (measured: shard
+  speeds 0.01-0.02 → 0.24-0.85).  Three things are deliberate: the FEEDBACK
+  is skipped with the damage rather than beside it (a hit flash and a damage
+  number on a body that lost nothing is exactly the misreading the rule
+  removes); this is the BLAST only, so SHOOTING a cloud still breaks it and
+  the shell's own direct hit is untouched; and the regression carries a
+  CONTROL body in the same ring, because "nothing died" is equally true of a
+  ring that never fired.
 - **A NEBULA FRAGMENT ROLLS ITS OWN SPRITE** (user call), and
   `randomNebulaSprite()` in `assets.ts` is the ONE definition three sites
   share: the map-load tile factory, the shatter dust, and every fragment a
