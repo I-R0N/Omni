@@ -72,7 +72,7 @@ graph; nothing in this plan's phases should couple them.
 |---|---|---|
 | Bubble aggro never times out | A1 | **A (pre-merge)** |
 | Post-attack "green" bubble is immovable; player slams to a stop | A2 | **A (pre-merge)** |
-| Penetration weapon module (+1 pierce per level) | A3 | **A (pre-merge)** |
+| Penetration weapon module (+1 pierce per level) | A3 | **A — landed, then RETIRED by PR #102's kinetic model** |
 | Scanner tool/module (materials / enemies / portals, per level) | A4 | **A (pre-merge)** |
 | Stations sell additional module slots, capped per ship | A5 | **A (pre-merge, stretch)** |
 | Base miner ship start; weak mining blaster; can't portal without engine; fuel | B1–B4 | B |
@@ -190,6 +190,20 @@ the player (the physics handles let a test call
 > the Laser's own pierce went 99 → 4 now that piercing can carry a cost;
 > and pierce is a lifetime budget — ricochets buy coverage, never extra
 > damage events.  Full detail in CLAUDE.md §5.
+>
+> **THEN SUPERSEDED — the module was DELETED by unified impact physics
+> step 5 (PR #102, user call).**  The `piercing` family, `pierceBonus`,
+> `WeaponConfig.pierce` and `GameEntity.pierceCount` are all gone.  Not
+> because penetration stopped mattering, but because it stopped being a
+> thing to SELL: damage is now KINETIC (every gun authors a round `mass`;
+> `IMPACT_ENERGY_PER_DAMAGE` is the one conversion), so how far a round
+> penetrates is EMERGENT from its energy against what it hits.  A "more
+> penetration" purchase is now a HEAVIER ROUND — Gunnery is redefined as
+> `+12% shot mass` per mark and buys damage and penetration together; a
+> charged shot is a 20× heavier round rather than "pierce 3".  The
+> original request item ("+1 pierce per level") is therefore RETIRED by
+> the physics model rather than unimplemented.  Consequence for **D1**
+> noted in Phase D.
 
 `pierce` already exists per-weapon (`WEAPONS[*].pierce`,
 `GameEntity.pierceCount` / `hitEntityIds` in ProjectileSystem).  **Change**:
@@ -381,12 +395,21 @@ present and kept**: `HEX_ADJACENCY` + `MODULE_REQUIREMENTS` +
 shield/plating⇢hull, capacitor⇢shield, weapon-mods⇢gun) — D builds on it,
 never replaces it.
 
-- **D1 — Minor/major module taxonomy.**  Minor: penetration (A3),
-  fire-rate, damage, burn/corrosion on-hit.  Major: burst, bounce, spread,
+- **D1 — Minor/major module taxonomy.**  Minor: fire-rate, damage,
+  burn/corrosion on-hit.  Major: burst, bounce, spread,
   electricity, homing, explosion — i.e. the current *gun identities*
   refactored into gun-modifying modules.  This is the big call: majors as
   gun-transformers vs. majors staying separate guns.  Guidance decision
-  required before D1 starts (§5).
+  required before D1 starts (§5).  **Reframed by unified impact physics
+  (PR #102):** damage is KINETIC now — a gun authors a round `mass` and
+  velocity, and damage, penetration and blast all derive from the round's
+  energy — so minor modules must be defined in those terms, not as flat
+  adders.  "Damage" already means "heavier round" (Gunnery = `+12% shot
+  mass`/mark, which buys penetration with it — the deleted A3 module's
+  role folded into it); "penetration" is no longer a separate sellable
+  axis; fire-rate (Autoloader) and on-hit effects (burn/corrosion) remain
+  genuinely independent axes.  D1's minor list is therefore roughly:
+  round mass, muzzle velocity, fire rate, on-hit effects.
 - **D2 — Per-ship slot counts + slot power-ups.**  Ship hulls define slot
   counts (module + weapon + inventory), purchasable slot expansion to a
   per-hull cap (A5's seam, finished), and per-slot natural multipliers
