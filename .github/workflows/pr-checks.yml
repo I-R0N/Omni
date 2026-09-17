@@ -1,0 +1,172 @@
+name: PR checks
+
+# The merge gate, in TWO SCOPES (user call, 2026-08-21: the full suite costs
+# ~12 minutes and was running on every push of every PR).
+#
+#   SMOKE — every PR push: typecheck + build + the boot/loop canary suites.
+#           A bundle that will not boot, a type error, or a broken core loop
+#           still fails in ~3 minutes; nothing merges without this green.
+#   FULL  — the entire Playwright suite, at the MAJOR SEAMS only:
+#           pushes to `main` and `claude/plan-completion` (i.e. immediately
+#           after a merge lands), PRs whose BASE is `main` (the
+#           plan-completion → main promotion), any PR carrying the
+#           `full-tests` label (the opt-in for pre-merge full validation),
+#           and manual dispatch.
+#
+# Both scopes are npm scripts (`test:smoke` / `test:full`), so the smoke set
+# is defined ONCE, in package.json, and a bare `npm test` on a contributor's
+# machine runs exactly what this gate runs per push.
+#
+# The check NAME stays `typecheck · build · test` in both scopes, so branch
+# protection keeps pointing at one required check.  The honest trade: a
+# regression OUTSIDE the smoke now surfaces at the merge point rather than
+# per push — the `full-tests` label is the escape hatch when a PR wants the
+# whole net before merging.  Deliberately secret-free so it also runs on
+# fork PRs (unlike pr-preview).
+
+on:
+  pull_request:
+    # `labeled` so dropping `full-tests` onto a PR re-runs at full scope.
+    types: [opened, synchronize, reopened, labeled]
+  # Also guard the long-lived branches themselves, so a bad merge is visible
+  # immediately rather than at the next PR opened against them.  `main` is the
+  # default branch; `claude/plan-completion` is the integration branch the
+  # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md).
+  push:
+    branches: [main, claude/plan-completion]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: typecheck · build · test
+    runs-on: ubuntu-latest
+    # The Playwright suites drive a real browser on a fixed-timestep sim with
+    # software canvas rendering; they are slow by nature.  Room, not a squeeze.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Gate 1 — `vite build` strips types without checking them, so the build
+      # being green says nothing about the types.  This is the only type gate.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Gate 2 — the bundle.  Also what `npm test`'s webServer will rebuild;
+      # running it standalone keeps a build break from reading as a test flake.
+      - name: Build
+        run: npm run build
+
+      # The browser download is the one step worth caching: `npm ci` costs ~2s
+      # behind setup-node's lockfile-keyed npm cache, while fetching Chromium
+      # costs ~25s every run.  Key on the RESOLVED Playwright version (read
+      # from the installed package, so it tracks the lockfile) plus the runner
+      # OS — a runner-image bump must not serve a browser built against a
+      # different libc.
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browser
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.pw.outputs.version }}
+
+      # A cache hit restores the browser but NOT the apt libraries it links
+      # against, so the two paths differ: on a hit install only the system
+      # deps, on a miss do the full download.  Guarding one `--with-deps` step
+      # on the cache would yield a cached browser that cannot launch.
+      # Both install steps carry their OWN short timeout, and it is not
+      # belt-and-braces: they shell out to apt, and a runner whose mirror is
+      # unreachable does not fail — it RETRIES, quietly, forever.  Seen on
+      # 2026-08-18, where `install-deps` sat on an unreachable
+      # azure.archive.ubuntu.com for 44 minutes, ate the job's whole 45-minute
+      # budget, and reported as `cancelled` (which is how GitHub renders a
+      # timed-out job) with typecheck, build and test never having run at all.
+      # A cancellation with no failing step is a genuinely hard thing to read
+      # backwards.  Six minutes is ~10x either step's normal cost, so this can
+      # only fire on a hang — and when it does, it fails FAST, names the step
+      # that broke, and leaves the 45 minutes for the suite it was sized for.
+      # ...and neither step is allowed to BE the verdict.  These prepare the
+      # browser; the three gates are typecheck, build and test, and a prepare
+      # step that cannot reach a mirror has not told us anything about the
+      # diff.  On 2026-08-18 the outage above ran for over an hour and turned
+      # the merge gate red twice without a single test having executed, which
+      # is a gate reporting on the weather.
+      #
+      # This cannot hide a real problem, which is the whole reason it is safe:
+      # if the libraries genuinely are missing, Chromium fails to launch and
+      # `npm test` says so in as many words — a far clearer signal than a
+      # timed-out apt call — and the suite still has to pass either way.
+      - name: Install Playwright browser
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 6
+        continue-on-error: true
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 6
+        continue-on-error: true
+        run: npx playwright install-deps chromium
+
+      # Which scope this run is (see the header): FULL at the merge seams,
+      # SMOKE on ordinary PR pushes.  The smoke set is the harness canary
+      # (boot — bundle parsed, engine constructed, handles live, console
+      # clean) plus the full-game loop (dock, outfit, portal, boss, home) —
+      # the two suites that prove the game IS a game before a merge-point
+      # run proves everything else.
+      #
+      # WHICH SUITES the smoke set contains is NOT decided here.  It is
+      # `test:smoke` in package.json, and this step only picks which npm
+      # script to run — so the scope a contributor gets from a bare
+      # `npm test` on their machine and the scope CI gates on are the SAME
+      # LIST, and cannot drift.  It used to be a literal file list in this
+      # file, which is exactly the drift that made local practice ("run the
+      # full suite before a PR") disagree with the gate it was supposed to
+      # anticipate.
+      - name: Decide test scope
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ] \
+             || [ "${{ github.base_ref }}" = "main" ] \
+             || [ "${{ contains(github.event.pull_request.labels.*.name, 'full-tests') }}" = "true" ]; then
+            echo "script=test:full" >> "$GITHUB_OUTPUT"
+            echo "label=full suite" >> "$GITHUB_OUTPUT"
+          else
+            echo "script=test:smoke" >> "$GITHUB_OUTPUT"
+            echo "label=smoke (boot + loop)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Gate 3 — Playwright at the decided scope.  playwright.config.ts's
+      # webServer builds and previews `dist/` itself, so this needs no
+      # separate serve step.
+      - name: Test (${{ steps.scope.outputs.label }})
+        run: npm run ${{ steps.scope.outputs.script }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
