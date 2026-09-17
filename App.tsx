@@ -6,7 +6,7 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
          detectionAlpha,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
-         grainSpecFor, grainLadder, grainTableValue, type GrainKnob,
+         grainSpecFor, grainLadder, grainTableValue, breakYieldsNothing, type GrainKnob,
          nebulaSpriteSize,
          NEBULA_MATERIAL, NEBULA_TILE_SHATTER_YIELD_MAX, NEBULA_DRAIN_CYCLE,
          nebulaTileCost, nebulaMergeLoss,
@@ -130,6 +130,13 @@ const App: React.FC = () => {
       // reaches this resolver reads back perfectly from the panel and
       // changes nothing on screen.
       grainSpecFor, grainLadder, grainTableValue,
+      // WHAT A BREAK LEAVES BEHIND — the predicate the blast ring reads to
+      // decide whether it may damage a body at all.  It belongs on the
+      // __omniFracture terms for a sharp reason: it is DERIVED from the
+      // variant table, so the way it goes wrong is a future variant
+      // silently joining or leaving the exempt set with nothing on screen
+      // to say so.  A table-walk test is the only thing that can see that.
+      breakYieldsNothing, SHARD_VARIANTS,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two

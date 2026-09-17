@@ -80,7 +80,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 13
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  422 tests.  All run at
+                          writing a DBG-knob test).  423 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -866,7 +866,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `MODULE_DEFS`;
   `BLAST_ENERGY_COUPLING` / `blastDamageFor` — a shell's blast is a
   fraction of its own kinetic energy, not an authored scalar, and its
-  RING grows with the round too (√mass, so the area is the energy)
+  RING grows with the round too (√mass, so the area is the energy);
+  `breakYieldsNothing` — the derived predicate saying a body's death
+  would hand back no children, which is what a blast may not damage
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
   see §8), `MASS_SCALE` / `scaledMass` — every mass is 10x with sizes
   unchanged, and IMPACTS HIT 10x HARDER: the energy conversion is
@@ -3782,23 +3784,61 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   budget that ignored the parent entirely, to 6-8 cells that tile the
   parent's own polygon (child area / parent area 0.85..1.05), with body
   sizes spanning 4.99..20.2 — a 4× range.
-- **AND A BLAST PUSHES CLOUD RATHER THAN BREAKING IT** (user call), which is
-  the sharpest consequence of the bullet above.  Carrying no boundaries means
-  `applyBoundaryDamage` refuses a nebula body, so the ring sweep in
-  `updateExplosionRings` fell through to the whole-body `health -=` — and
-  against a 1-HP tile that is instant death for every cloud inside the
-  radius, so ONE Cannon shell cleared a bank outright (measured 11 of 11
-  with the rule removed, 0 of 28 with it).  A shockwave has nothing solid to
-  grip a gas with; the knockback is the whole of what it does to one, and
-  since a static tile's infinite mass is what bolts it to its hex, the PUSH
-  half is only observable on the mobile half of the family (measured: shard
-  speeds 0.01-0.02 → 0.24-0.85).  Three things are deliberate: the FEEDBACK
-  is skipped with the damage rather than beside it (a hit flash and a damage
-  number on a body that lost nothing is exactly the misreading the rule
-  removes); this is the BLAST only, so SHOOTING a cloud still breaks it and
-  the shell's own direct hit is untouched; and the regression carries a
-  CONTROL body in the same ring, because "nothing died" is equally true of a
-  ring that never fired.
+- **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
+  the sharpest consequence of the bullet above — and the rule was drawn ONE
+  VARIANT TOO WIDE at first, which is the part worth keeping.  Measured, the
+  build before any of this did two different things to a nebula bank: it
+  broke the TILES into their Voronoi cells (4 in the ring became 14 drifting
+  shards — correct, and wanted) and it ANNIHILATED the shards (**0 of 15
+  survived**), because `nebula-shard` declares `shatter.kind: 'none'` and so
+  has nothing to hand back.  Only the second half was the regression; a guard
+  written against "nebula" stopped both and a Cannon then broke no cloud at
+  all.
+  THE RULE IS A PROPERTY, NOT TWO NAMES: `constants.breakYieldsNothing` is
+  true of a body whose death would yield NO children, and **a blast may not
+  damage a body that cannot express being broken** — a shockwave has nothing
+  to grip something that would simply vanish, so the knockback is the whole
+  of what it does.  That folds the ring's two hardcoded variant checks into
+  one derived predicate; today it selects exactly `nebula-shard` (`kind:
+  'none'`) and `indestructible-tile` (powerlaw, `countMax: 0`), which
+  `tests/weapons.spec.ts` pins by walking the WHOLE table, since the way a
+  derived rule fails is a future variant silently joining or leaving the set.
+  THE VORONOI CAVEAT is the trap: for a voronoi variant the `countMin`/
+  `countMax` fields are vestigial legacy-A/B values — the real fragment count
+  comes from the grain pattern — so reading a zero there would exempt a
+  material that breaks perfectly well.
+  MEASURED after: 12 of 12 and 11 of 11 tiles in the ring break, handing back
+  41 and 34 fragments, while every shard in the radius survives.
+  **AND THE PIECES CARRY THE SHOVE** (`GameEntity.blastImpulse`).  A ring
+  applies its knockback to SURVIVORS, and the fragments of a body it killed
+  are born after `validHitIds` was fixed — so a blast broke a bank up and
+  left every puff exactly where its tile had been, identically at every
+  charge size.  The ring now stamps the outward push the parent was about to
+  take, and `handleEntityDeath` adds it to every child at the ONE shatter
+  call site (children are always APPENDED, so the slice past the old length
+  is this break's output whichever style ran, and the rule cannot mean
+  different things under the fracture A/B) and clears it, since a STRUCTURE
+  object is reused by regen.  Measured: mean fragment speed 2.93 → **5.45**
+  for 4× the knockback.
+  IT IS NOT `lastImpactVelocity` SCALED UP, which is the obvious move and is
+  measurably a NO-OP: the shatter's own forward term is
+  `min(SHATTER_SCATTER_SPEED_CAP, impactSpeed × forwardDrag + …)` and the
+  ring's fixed stamp of 8 already saturates that 2.5 cap at every charge
+  size, so the cap — shared by every material's break — would have to move
+  before any of it could read.
+  Three things are deliberate.  The FEEDBACK is skipped with the damage
+  rather than beside it (a hit flash and a damage number on a body that lost
+  nothing is the misreading the rule removes) — including on the
+  indestructible wall, which used to flash, for the same reason.  This is the
+  BLAST only, so SHOOTING a cloud still breaks it and the shell's own direct
+  hit is untouched.  And the regression carries a CONTROL body in the same
+  ring, because every claim above is equally true of a ring that never fired.
+  Two test-shape lessons came out of its negative controls and generalise:
+  the shard sample has to be RADIUS-FILTERED (counting every shard on the map
+  made "all survived" true of shards nowhere near the blast, and the claim
+  passed against a build with the exemption removed), and each arm needs its
+  own seeded cluster plus the ring's WHOLE 0.35 s lifetime — a short run
+  measures a wavefront that never arrived (0 of 4 killed).
 - **A NEBULA FRAGMENT ROLLS ITS OWN SPRITE** (user call), and
   `randomNebulaSprite()` in `assets.ts` is the ONE definition three sites
   share: the map-load tile factory, the shatter dust, and every fragment a

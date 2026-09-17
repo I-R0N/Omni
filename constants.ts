@@ -11040,6 +11040,38 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
 };
 
+// ── WHAT A BREAK LEAVES BEHIND ──────────────────────────────────────
+//
+// TRUE when a body's death would yield NO children at all — destroying it
+// removes it from the world and puts nothing back.  Two variants qualify
+// today and they say it two different ways: `nebula-shard` declares
+// `shatter.kind: 'none'`, and `indestructible-tile` declares a powerlaw
+// with `countMax: 0`.  Every other variant hands back cells, chunks or a
+// cloud.
+//
+// A BLAST MAY NOT DAMAGE A BODY THAT CANNOT EXPRESS BEING BROKEN (user
+// call).  This replaces two hardcoded variant-name checks in
+// `updateExplosionRings` with the PROPERTY they were both standing in for,
+// which is what makes the rule native rather than a pair of special cases:
+// a shockwave has nothing to grip a body with that would simply vanish, so
+// it pushes instead.  Nebula TILES are deliberately NOT covered — they
+// decompose into their own Voronoi cells, so a blast breaks a cloud bank up
+// exactly as it always did, and the cloud survives as puffs.  Measured with
+// the rule mis-drawn one variant too wide: a blast broke nothing at all.
+//
+// THE VORONOI CAVEAT is the one thing to keep if this is ever edited.  For
+// a `kind: 'voronoi'` variant the `countMin`/`countMax` fields are vestigial
+// legacy-A/B values — the real fragment count comes from the grain pattern
+// — so a zero there says nothing about what a break yields, and reading it
+// would silently make a future voronoi variant blast-immune.
+export function breakYieldsNothing(variantId: ShardVariantId | undefined): boolean {
+  if (variantId === undefined) return false;
+  const shatter = SHARD_VARIANTS[variantId]?.shatter;
+  if (shatter === undefined) return false;
+  if (shatter.kind === 'none') return true;
+  return shatter.kind !== 'voronoi' && shatter.countMax === 0;
+}
+
 // ── Per-map entity-count table ──────────────────────────────────────
 // Source of truth for "how many of variant X spawn on map Y", see
 // docs/SHARD_SYSTEM.md §6.E.  Source of truth for rock-shard

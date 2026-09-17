@@ -1210,117 +1210,158 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
   });
 });
 
-/** A BLAST PUSHES CLOUD, IT DOES NOT BREAK IT (user call).
+/** A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT (user call).
  *
- *  Nebula is the one family that takes the voronoi GEOMETRY without the grain
- *  damage model (CLAUDE.md §8), so it carries no boundaries for
- *  `applyBoundaryDamage` to spend on and fell through to the whole-body
- *  `health -=` in the ring sweep.  Against a 1-HP tile that is instant death
- *  for every cloud inside the radius, so one Cannon shell cleared a bank of
- *  them outright — measured 11 of 11 with the rule removed, 0 of 28 with it.
+ *  The first cut of this rule was drawn one variant too wide.  Measured, the
+ *  build before it did two different things to a nebula bank: it broke the
+ *  TILES into their Voronoi cells (4 tiles in the ring became 14 drifting
+ *  shards — correct, and wanted), and it ANNIHILATED the shards (0 of 15
+ *  survived, because `nebula-shard` declares `shatter.kind: 'none'` and so
+ *  has nothing to hand back).  Only the second half was the regression; the
+ *  wide guard stopped both.
  *
- *  Three claims, and the third is what keeps the first two honest: "nothing
- *  died" would also be true of a ring that never fired.
+ *  So the rule is now a PROPERTY read off the variant table rather than two
+ *  hardcoded names: a blast may not damage a body whose break would yield
+ *  nothing.  Four claims, and the last two are what keep the first two from
+ *  being vacuous.
  */
-test.describe('a blast pushes cloud, it does not break it', () => {
-  test('nebula survives the ring, is shoved by it, and the ring is live',
+test.describe('a blast breaks cloud up; it does not delete it', () => {
+  test('exactly the bodies that would leave nothing are exempt', async ({ page }) => {
+    const watch = await boot(page);
+
+    /*  The TABLE-WALK claim.  `breakYieldsNothing` is derived, so the way it
+     *  fails is a variant silently joining or leaving the exempt set — which
+     *  no frame and no log would mention.  Pinning the whole table is the
+     *  only thing that can see that, and it is what would catch the
+     *  documented trap: for a `voronoi` variant the countMin/countMax fields
+     *  are vestigial legacy-A/B values, so reading a zero there would exempt
+     *  a material that breaks perfectly well. */
+    const r = await engine(page, () => {
+      const G: any = (window as any).__omniGrain;
+      const out: Record<string, boolean> = {};
+      for (const id of Object.keys(G.SHARD_VARIANTS)) out[id] = G.breakYieldsNothing(id);
+      return { map: out, undef: G.breakYieldsNothing(undefined) };
+    });
+
+    const exempt = Object.keys(r.map).filter(k => r.map[k]).sort();
+    expect(exempt, 'exactly the two bodies whose break yields nothing')
+      .toEqual(['indestructible-tile', 'nebula-shard']);
+    expect(r.map['nebula-tile'], 'a nebula TILE breaks into its cells, so it is NOT exempt')
+      .toBe(false);
+    expect(r.undef, 'a body with no variant is not exempt').toBe(false);
+
+    watch.assertClean();
+  });
+
+  test('tiles shatter, shards survive, and the pieces carry the blast',
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page, 'NEBULA_FIELD');
 
       const r = await engine(page, (e: any) => {
-        const p = e.player;
         const cloud = () => e.currentMap.entities.filter((x: any) => x.active
           && (x.shardVariant === 'nebula-tile' || x.shardVariant === 'nebula-shard'));
-
-        // Break a few tiles first, so the sample carries SHARDS as well as
-        // tiles — a static tile can never be shoved (mass infinity is what
-        // bolts it to its hex), so the push half of the rule is only
-        // observable on the mobile half of the family.
-        const tiles = cloud().filter((x: any) => x.shardVariant === 'nebula-tile');
-        if (tiles.length === 0) return { error: 'no nebula on the map' };
-        const at = { x: tiles[(tiles.length / 2) | 0].position.x,
-                     y: tiles[(tiles.length / 2) | 0].position.y };
-        for (const x of tiles.filter((t: any) =>
-          Math.hypot(t.position.x - at.x, t.position.y - at.y) <= 90).slice(0, 5)) {
-          x.health = 0; e.physics.removeStaticEntity(x); e.handleEntityDeath(x); x.active = false;
-        }
-        for (let i = 0; i < 90; i++) {
-          e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
-        }
-
-        // The ring the CANNON actually spawns: read its real numbers off a
-        // fired shell rather than inventing them, then place it by hand so
-        // the sample is deterministic.
-        p.velocity.x = 0; p.velocity.y = 0;
-        p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
-        const before = new Set(e.currentMap.entities.map((x: any) => x.id));
-        e.weapons.firePlayerWeapon(e.currentMap.entities, p,
-          { x: p.position.x + 500, y: p.position.y });
-        const sh = e.currentMap.entities.find(
-          (x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
-        for (const x of e.currentMap.entities) if (!before.has(x.id)) x.active = false;
-        if (!sh) return { error: 'the Cannon did not fire' };
-        const radius = sh.explosionRadius, damage = sh.explosionDamage;
-
-        // THE CONTROL: an ordinary body in the same ring, so "nothing died"
-        // cannot be read as "the ring never fired".
-        const ctx = e.waveContext();
-        const witness = e.waves.spawnAt('RAMMER_1',
-          { x: at.x + radius * 0.4, y: at.y }, ctx, false);
-        witness.maxSpeed = 0; witness.velocity.x = 0; witness.velocity.y = 0;
-        witness.health = witness.maxHealth = 1e6;
-        witness.shield = 0; witness.maxShield = 0;
-
-        const sample = cloud().filter((x: any) =>
-          Math.hypot(x.position.x - at.x, x.position.y - at.y) <= radius);
-        const ids = sample.map((x: any) => x.id);
-        const shardIds = sample.filter((x: any) => x.shardVariant === 'nebula-shard')
-          .map((x: any) => x.id);
-        const speedBefore = new Map<string, number>(sample.map(
-          (x: any) => [x.id as string, Math.hypot(x.velocity.x, x.velocity.y)]));
-
-        e.spawnShockwave(at, {
-          radius, damage, knockback: 6, color: '#f97316',
-          ownerType: 'PLAYER', ownerId: 'player', excludeIds: ['player'],
-        });
-        for (let i = 0; i < 60; i++) {
-          e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
-        }
-
-        const live = new Map(e.currentMap.entities
-          .filter((x: any) => x.active).map((x: any) => [x.id, x]));
-        let shoved = 0;
-        for (const id of shardIds) {
-          const x: any = live.get(id);
-          if (!x) continue;
-          if (Math.hypot(x.velocity.x, x.velocity.y) > (speedBefore.get(id) ?? 0) + 0.05) shoved++;
-        }
-        const witnessLost = 1e6 - witness.health;
-        witness.active = false;
-        return {
-          error: null,
-          sampled: ids.length,
-          shards: shardIds.length,
-          dead: ids.filter((id: string) => !live.has(id)).length,
-          shoved,
-          witnessLost,
-          damage,
+        const step = (n: number) => {
+          for (let i = 0; i < n; i++) {
+            e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+          }
         };
+        if (cloud().length === 0) return { error: 'no nebula on the map' };
+
+        /*  Each arm takes a FRESH cluster: the first destroys the tiles it
+         *  tested, so a second ring on the same centre measures an empty
+         *  bank — which reads as the rule working when it is the scene that
+         *  is gone.  And each arm runs the ring's WHOLE 0.35s lifetime: the
+         *  wavefront expands over that window, so a short run measures a
+         *  ring that never reached the tiles (it read 0 of 4 killed). */
+        const run = (knock: number, pick: number) => {
+          const tiles = cloud().filter((x: any) => x.shardVariant === 'nebula-tile');
+          const c = tiles[(tiles.length * pick) | 0];
+          const at = { x: c.position.x, y: c.position.y };
+
+          /*  Seed SHARDS at THIS arm's centre, not once for the scene.  The
+           *  shard sample must also be radius-filtered: counting every
+           *  nebula-shard on the map made "all of them survived" true of
+           *  shards nowhere near the blast, and the claim passed against a
+           *  build with the exemption removed. */
+          for (const x of tiles.filter((q: any) =>
+            Math.hypot(q.position.x - at.x, q.position.y - at.y) <= 70).slice(0, 3)) {
+            x.health = 0; e.physics.removeStaticEntity(x); e.handleEntityDeath(x); x.active = false;
+          }
+          step(60);
+
+          const pre = cloud();
+          const inRing = (x: any) =>
+            Math.hypot(x.position.x - at.x, x.position.y - at.y) <= 110;
+          const idsBefore = new Set(pre.map((x: any) => x.id));
+          const shardIds = pre.filter((x: any) => x.shardVariant === 'nebula-shard' && inRing(x))
+            .map((x: any) => x.id as string);
+          const tileIds = pre.filter((x: any) => x.shardVariant === 'nebula-tile' && inRing(x))
+            .map((x: any) => x.id as string);
+
+          const ctx = e.waveContext();
+          const witness = e.waves.spawnAt('RAMMER_1', { x: at.x + 44, y: at.y }, ctx, false);
+          witness.maxSpeed = 0; witness.velocity.x = 0; witness.velocity.y = 0;
+          witness.health = witness.maxHealth = 1e6; witness.shield = 0; witness.maxShield = 0;
+
+          e.spawnShockwave(at, {
+            radius: 110, damage: 30, knockback: knock, color: '#f97316',
+            ownerType: 'PLAYER', ownerId: 'player', excludeIds: ['player'],
+          });
+          step(48);
+
+          const live = cloud();
+          const liveIds = new Set(live.map((x: any) => x.id));
+          const born = live.filter((x: any) => !idsBefore.has(x.id));
+          const speeds = born.map((x: any) => Math.hypot(x.velocity.x, x.velocity.y));
+          const witnessLost = 1e6 - witness.health;
+          witness.active = false;
+          return {
+            tilesInRing: tileIds.length,
+            tilesKilled: tileIds.filter(id => !liveIds.has(id)).length,
+            shards: shardIds.length,
+            shardsSurviving: shardIds.filter(id => liveIds.has(id)).length,
+            born: born.length,
+            meanSpeed: speeds.length
+              ? speeds.reduce((a: number, b: number) => a + b, 0) / speeds.length : 0,
+            witnessLost,
+          };
+        };
+        return { error: null, soft: run(6, 0.25), hard: run(24, 0.7) };
       });
 
       expect(r.error, 'the scene was set up').toBeNull();
-      expect(r.sampled, 'the ring covered some cloud').toBeGreaterThan(4);
-      expect(r.shards, 'and some of it was mobile').toBeGreaterThan(0);
+      const soft = r.soft!, hard = r.hard!;
 
-      // (1) the blast broke none of it.
-      expect(r.dead, 'a blast breaks no nebula at all').toBe(0);
-      // (2) but it shoved the half of the family that CAN be shoved.
-      expect(r.shoved, 'the mobile cloud was pushed by the ring')
-        .toBeGreaterThan(r.shards! / 2);
-      // (3) the control: the same ring hurt an ordinary body, so (1) is the
-      //     rule and not a ring that never went off.
-      expect(r.witnessLost, 'the same ring damaged an ordinary body')
+      // (1) TILES STILL SHATTER — the half that was never broken, and the
+      //     half the wide guard took away.  Every tile the ring reached dies
+      //     and hands back cells.
+      expect(soft.tilesInRing, 'the ring covered some tiles').toBeGreaterThan(2);
+      expect(soft.tilesKilled, 'a blast breaks every tile it reaches')
+        .toBe(soft.tilesInRing);
+      expect(soft.born, 'and the break hands back fragments')
+        .toBeGreaterThan(soft.tilesInRing);
+
+      // (2) SHARDS SURVIVE — the actual regression.  `shatter.kind: 'none'`
+      //     means a damaged shard leaves nothing, so the blast must not
+      //     damage it at all.
+      expect(soft.shards, 'the sample carried mobile cloud').toBeGreaterThan(4);
+      expect(soft.shardsSurviving, 'a blast annihilates no nebula shard')
+        .toBe(soft.shards);
+      expect(hard.shardsSurviving, 'at any charge size').toBe(hard.shards);
+
+      // (3) THE PIECES CARRY THE BLAST.  A ring's knockback reaches
+      //     survivors only, so without the impulse hand-off a blast broke a
+      //     bank up and left every puff where its tile had been — identical
+      //     at every charge size.  4x the knockback, and the fragments are
+      //     measurably faster even after damping has had 48 substeps at them.
+      expect(hard.born, 'the harder arm also broke tiles').toBeGreaterThan(2);
+      expect(hard.meanSpeed, 'a bigger charge scatters the cloud harder')
+        .toBeGreaterThan(soft.meanSpeed * 1.4);
+
+      // (4) THE CONTROL.  Every claim above is equally true of a ring that
+      //     never fired, so an ordinary body in the same blast must lose HP.
+      expect(soft.witnessLost, 'the same ring damaged an ordinary body')
         .toBeGreaterThan(0);
 
       watch.assertClean();

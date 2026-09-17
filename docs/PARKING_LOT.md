@@ -3397,3 +3397,68 @@ slower after entry 21 (128 -> 8 pairs per 150 s) and that is wanted as it is.
 `NEBULA_DRAIN_CYCLE` stays where it is.
 
 **STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).
+
+---
+
+### 23. The cloud rule was one variant too wide (2026-09-17)
+
+Entry 22's third finding shipped a guard written against "nebula", and the
+follow-up play-test caught what that cost: **blasts stopped shattering nebula
+tiles**, which is not what was asked for and is its own regression.
+
+MEASURING BOTH ARMS is what reframed it.  The build before entry 22 did TWO
+different things to a nebula bank, and only one of them was wrong:
+
+| | before entry 22 | after entry 22 | now |
+|---|---|---|---|
+| tiles in the ring | shatter into cells | untouched | shatter into cells |
+| shards in the ring | **0 of 15 survive** | untouched | all survive |
+
+So the tiles were always correct — a tile decomposes into its Voronoi cells,
+which is a cloud being broken UP.  What was wrong was the shards, which
+declare `shatter.kind: 'none'` and so hand back nothing when they die.  A
+guard naming "nebula" stopped the good half with the bad.
+
+**THE RULE IS NOW A PROPERTY** (user call: option B).
+`constants.breakYieldsNothing` is true of a body whose death would yield no
+children, and the ring's two hardcoded variant-name checks collapse into it:
+*a blast may not damage a body that cannot express being broken.*  Today it
+selects exactly `nebula-shard` (`kind: 'none'`) and `indestructible-tile`
+(powerlaw, `countMax: 0`).  The caveat worth keeping is the VORONOI one: for
+a voronoi variant the count fields are vestigial legacy-A/B values, so
+reading a zero there would exempt a material that breaks perfectly well.
+
+One consequence is deliberate and is a small behaviour change beyond the
+ask: the indestructible wall no longer flashes under a blast either.  Damage
+feedback follows damage, and a number on a body that lost nothing was always
+the misreading this rule removes.
+
+**THE PIECES NOW CARRY THE SHOVE**, and the obvious way to do it is dead.
+Scaling the stamped `lastImpactVelocity` with the charge is measurably a
+NO-OP: the shatter's forward term is
+`min(SHATTER_SCATTER_SPEED_CAP, impactSpeed × forwardDrag + …)` and the ring's
+fixed stamp of 8 already saturates that 2.5 cap at every charge size, so the
+cap — shared by every material's break — would have to move first.  The live
+lever is a separate `GameEntity.blastImpulse`: the ring stamps the outward
+push the parent was about to take, and `handleEntityDeath` adds it to every
+child at the single shatter call site.  Measured: mean fragment speed
+2.93 → **5.45** for 4× the knockback.
+
+> The reason this is at the call site rather than in the three per-style
+> child recipes: children are always APPENDED, so the slice past the old
+> length is exactly this break's output whichever style ran — which is also
+> what stops the rule meaning two different things under the fracture A/B.
+
+**TWO TEST-SHAPE LESSONS**, both found by negative controls rather than by
+review, and both general:
+
+- **A sample that is not filtered to the thing under test passes for the
+  wrong reason.**  The shard-survival claim counted every nebula shard on the
+  map, so "all of them survived" was true of shards nowhere near the blast —
+  and it passed against a build with the exemption deliberately removed.
+- **A sabotage that does not change behaviour is not a control.**  The first
+  attempt at that revert fell through to a second arm of the predicate and
+  still returned true, so the "failing" run was measuring the shipped rule.
+  A control has to be checked for having actually landed.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).

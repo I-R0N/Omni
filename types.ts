@@ -468,6 +468,21 @@ export interface GameEntity {
   shieldHitFlash?: number; // Visual timer for shield ring visibility
   sprite?: string; // URL or DataURI for image rendering
   lastImpactVelocity?: Vector2; // Velocity of the entity that destroyed this one (used to bias shard scatter)
+  /** The outward shove a BLAST would have given this body, handed to
+   *  whatever it breaks into.  A shockwave ring computes its knockback per
+   *  target and applies it to survivors, but the fragments of a body it
+   *  KILLED are born after the ring's eligibility set was fixed, so they
+   *  would otherwise inherit nothing — the blast broke the cloud and then
+   *  left the pieces where they were.  Stamped by `updateExplosionRings`
+   *  just before the death, added to every child by `handleEntityDeath`,
+   *  and cleared there so a regenerated body cannot re-spend it.
+   *
+   *  It is a SEPARATE field from `lastImpactVelocity` because the two feed
+   *  different terms and only one of them is capped: the shatter's own
+   *  forward scatter is `min(SHATTER_SCATTER_SPEED_CAP, impactSpeed × drag)`,
+   *  which the ring's stamp already saturates, so scaling that stamp with
+   *  the charge is measurably a no-op. */
+  blastImpulse?: Vector2;
   lastImpactDamage?: number;   // Damage of the killing blow (used to scale shard count/size)
   trail?: TrailPoint[]; // Path history with lifetime
   

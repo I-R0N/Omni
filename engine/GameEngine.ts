@@ -3415,8 +3415,36 @@ export class GameEngine {
           // DropSystem.spawnDrops).
           if (this.currentMap && (variant !== 'glass-tile' || voronoiShatter)
               && !isDentSpawn) {
+              // THE FRAGMENTS CARRY THE BLAST'S SHOVE.  A shockwave applies
+              // its knockback to SURVIVORS; the pieces of a body it killed
+              // are born after the ring's eligibility set was fixed, so they
+              // inherit nothing and a blast broke a cloud bank up without
+              // dispersing it.  `blastImpulse` is the exact outward push the
+              // parent was about to take, stamped by `updateExplosionRings`.
+              //
+              // Applied HERE, at the one shatter call site, rather than in
+              // each of the three per-style child recipes — children are
+              // always APPENDED, so the slice past the old length is exactly
+              // this break's output whichever style ran, and the rule cannot
+              // come to mean different things under the fracture A/B.
+              const bi = entity.blastImpulse;
+              const before = bi !== undefined ? this.currentMap.entities.length : 0;
               this.shards.shatter(entity, this.currentMap.entities);
+              if (bi !== undefined) {
+                  const ents = this.currentMap.entities;
+                  for (let i = before; i < ents.length; i++) {
+                      ents[i].velocity.x += bi.x;
+                      ents[i].velocity.y += bi.y;
+                  }
+              }
           }
+          // CLEARED UNCONDITIONALLY, outside the branch above: it is per-LIFE
+          // state on an object regen reuses, and several deaths never reach
+          // that shatter at all (a glass tile under the legacy A/B, a
+          // dent-spawn variant).  Clearing it only where it was spent would
+          // leave those bodies holding a stale blast and launch their NEXT
+          // break for free.
+          entity.blastImpulse = undefined;
 
           // Rock-shard death also releases 1 colour-matched nebula-
           // shard (cloud-style fragment) alongside the solid shatter
