@@ -20,6 +20,7 @@
  */
 
 import { GameEntity, Vector2 } from '../../types';
+import { ShardVariantId } from './ShardSystem.types';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 import {
   SHARD_VARIANTS, FRACTURE_DETACH,
@@ -298,6 +299,47 @@ export function bondStrengthFor(e: GameEntity): number | null {
   const s = f?.bondStrength;
   if (s === undefined) return null;
   return s * getBoundaryStrengthScale();
+}
+
+/** MEASURED: the interior boundary a decomposition puts inside a body, per
+ *  cell, per unit of body diameter.  Fitted across all four grain materials
+ *  on the real patterns (n=120 shards each, `perf/impact-audit.mjs` terms):
+ *  edge-length-per-size came out 1.53 at 3 cells, 2.92 at 6 and 3.65/3.62 at
+ *  8, i.e. very near linear in the cell count at 0.51 / 0.487 / 0.456 /
+ *  0.4525 per cell.  0.48 is that fit, and it lands every material inside
+ *  +-6%.  It is a SHAPE factor of Voronoi decomposition, not a tunable: the
+ *  thing it estimates is measured exactly a moment later, the first time the
+ *  body is damaged. */
+const BOUNDARY_EDGE_PER_CELL = 0.48;
+
+/** What `ensureBoundaryModel` WILL derive for a body of this variant and
+ *  diameter, without paying to decompose it.
+ *
+ *  Exists because a grain material has no business authoring a spawn HP that
+ *  its own model contradicts: measured before this, the spawn ladder's
+ *  numbers were out by up to 3.7x (plastic 24 against a derived 59, metal 16
+ *  against 50), and since a CRASH spends `derived / authored` of the budget,
+ *  that ratio was silently deciding how many rams a body took.
+ *
+ *  It shares the model's OWN site-count rule rather than restating it — same
+ *  area-proportional count, same floor and ceiling, same `grainSpecFor` seam
+ *  (never `SHARD_VARIANTS[..].grain`, per CLAUDE.md §8) — so a grain change
+ *  moves the estimate and the thing it estimates together.  `size` is the
+ *  area-equivalent diameter every other system means, so the body's area is
+ *  `PI (size/2)^2` and the count reduces to `(size / grainSize)^2`.
+ *
+ *  Null for anything not running the boundary model, which is the caller's
+ *  signal to keep whatever it authored. */
+export function estimateBoundaryHp(variantId: ShardVariantId, size: number, mergeCount?: number): number | null {
+  if (!isProgressiveFracture(variantId)) return null;
+  const f = grainSpecFor(variantId);
+  const bond = f?.bondStrength;
+  if (f === undefined || bond === undefined || !(size > 0)) return null;
+  let sites = Math.round(((size / Math.max(1e-6, f.grainSize)) ** 2) * getFractureSiteScale());
+  const merges = mergeCount ?? 1;
+  if (merges > 1) sites = Math.max(sites, merges);
+  sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
+  return bond * getBoundaryStrengthScale() * BOUNDARY_EDGE_PER_CELL * sites * size;
 }
 
 /** Build (or return) the entity's boundary model, converting its HP to

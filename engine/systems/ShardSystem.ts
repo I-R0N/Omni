@@ -40,6 +40,8 @@ import {
   nebulaHueToShardVariant,
   NEBULA_CONDENSE,
   NEBULA_CONDENSE_STALL_BONDS,
+  nebulaTileCost,
+  nebulaMergeLoss,
 } from '../../constants';
 import { EntityIndex } from './EntityIndex';
 import type { PerfController } from './PerfController';
@@ -58,7 +60,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
-import { ensureFractureCells } from './fractureCache';
+import { ensureFractureCells, estimateBoundaryHp } from './fractureCache';
 import {
   ShardVariantId,
   ShardVariantDef,
@@ -905,6 +907,29 @@ export class ShardSystem {
     dentOverride?: number,
   ): number {
     if (childVariantId === 'rock-shard') return rockHitCeiling(newSize, densityTier);
+    // A GRAIN MATERIAL DOES NOT AUTHOR AN HP ITS OWN MODEL CONTRADICTS
+    // (unified impact physics, step 3).  The boundary model rewrites
+    // `maxHealth` to Σ(edge length × bondStrength) at first damage, so a
+    // fixed spawn constant was a placeholder the first hit disagreed with —
+    // measured out by up to 3.7× (plastic 24 against a derived 59, metal 16
+    // against 50; only rock agreed, because `rockHitCeiling` already scales
+    // with size).  That gap was not cosmetic: a CRASH spends
+    // `derived / authored` of the budget, so the ratio was quietly setting
+    // how many rams a body took.
+    //
+    // `estimateBoundaryHp` predicts the same number from the same site-count
+    // rule, so the two cannot drift; null means this variant is not running
+    // the model and the authored value below stands.
+    //
+    // IT RUNS AHEAD OF THE DENT OVERRIDE, and that is the one judgement call
+    // here.  `dent.shardHealth` (plastic's 24) exists to decouple a released
+    // shard's life from the tile's brittle face — but a grain material gets
+    // that decoupling for free, since the shard derives its HP from its OWN
+    // pattern.  Left in front, the override was simply the stalest of the
+    // three figures: 24 against a measured 58.  It still stands for anything
+    // NOT running the model, which is what it was written for.
+    const derived = estimateBoundaryHp(childVariantId, newSize);
+    if (derived !== null) return Math.max(1, Math.round(derived));
     if (dentOverride !== undefined) return dentOverride;
     if (childVariantId === 'glass-shard') return GLASS_SHARD_HP;
     if (childVariantId === 'metal-shard') return METAL_SHARD_HP;
@@ -3852,7 +3877,14 @@ export class ShardSystem {
     const material: 'rock-shard' | 'glass-shard' | 'plastic-shard' | 'metal-shard' =
       committed ?? (fromRock ? 'rock-shard' : nebulaHueToShardVariant(hexToHueDeg(tint)));
     const combinedUnits = (a.nebulaCondenseUnits ?? 1) + (b.nebulaCondenseUnits ?? 1);
-    const requiredUnits = NEBULA_CONDENSE[material].units;
+    // THE GATE FUNDS THE DEARER OUTCOME, because it cannot know which one the
+    // roll will take — `onComposeNebulaShardPair` picks tile-vs-material AFTER
+    // this, so demanding only the material's cost is what let a tile be bought
+    // for 2 units while its own shatter hands back 4 (the ledger note in
+    // constants.ts).  Read live so the DBG drain step re-prices clouds already
+    // accumulating.
+    const tileCost = nebulaTileCost();
+    const requiredUnits = Math.max(tileCost, NEBULA_CONDENSE[material].units);
 
     // ANTI-STUCK: count coalescences spent waiting on this target; past the
     // patience cap, force-crystallise with whatever mass we have so an
@@ -3871,7 +3903,14 @@ export class ShardSystem {
         lifetimeMin: 0.4, lifetimeMax: 0.8,
         positionJitter: Math.max(a.size.x, b.size.x) * 0.5,
       });
-      this.growNebulaShard(a, b, composition, combinedUnits, material, stall, midpoint, { x: nvx, y: nvy });
+      // A COALESCENCE SHEDS MATERIAL (user call: the ledger applies to shards
+      // merging into larger shards too).  This used to be exactly conserving,
+      // so a cloud could circle the merge loop for free.  The loss is bounded
+      // by the fixed point documented beside the constant — too large and the
+      // accumulation ceiling falls below the tile cost, which reads as "tiles
+      // stopped forming" with nothing in the code saying why.
+      const keptUnits = combinedUnits * (1 - nebulaMergeLoss());
+      this.growNebulaShard(a, b, composition, keptUnits, material, stall, midpoint, { x: nvx, y: nvy });
       return;
     }
 
@@ -3902,11 +3941,18 @@ export class ShardSystem {
     // at 0 when we force-crystallised under the target cost.
     const excessUnits = Math.max(0, combinedUnits - requiredUnits);
 
-    // Adapter hook routes the 50/50 tile-vs-material outcome.  Position is
-    // the pair's midpoint; velocity is the mass-weighted average so a
-    // resulting shard inherits the cloud's drift.  Material is the COMMITTED
-    // target (honouring fromRock).
-    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, fromRock, material, excessUnits);
+    // Adapter hook routes the tile-vs-material outcome.  Position is the
+    // pair's midpoint; velocity is the mass-weighted average so a resulting
+    // shard inherits the cloud's drift.  Material is the COMMITTED target
+    // (honouring fromRock) — which is the ONLY thing origin still decides:
+    // the tile ROLL is origin-blind (user call), so `fromRock` no longer
+    // reaches the adapter at all.
+    // `canAffordTile` is the LEDGER, and it is a separate answer from the gate
+    // above because the STALL path force-crystallises a cloud that never
+    // reached its cost — without this a stalled 2-unit cloud could still roll
+    // a tile and re-open the growth loop the cost exists to close.
+    const canAffordTile = combinedUnits >= tileCost;
+    this.adapter?.onComposeNebulaShardPair(composition, midpoint, { x: nvx, y: nvy }, entities, physics, material, excessUnits, canAffordTile);
   }
 
   /**

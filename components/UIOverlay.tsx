@@ -130,8 +130,10 @@ interface UIOverlayProps {
   onToggleRepelPush?: () => void;
   onToggleShardBlend?: () => void;
   onCycleShardCoat?: () => void;
-  onCyclePierceFalloff?: () => void;
-  onCyclePierceSpeedRetain?: () => void;
+  onCycleImpactVelocity?: () => void;
+  onCycleCrashEnergy?: () => void;
+  onCycleBlastEnergy?: () => void;
+  onCycleHullDensity?: () => void;
   onTogglePlasticAutomata?: () => void;
   onTogglePlasticAutomataDirection?: () => void;
   onToggleMaterialAutomata?: () => void;
@@ -146,6 +148,8 @@ interface UIOverlayProps {
   onCycleNebulaDamp?: () => void;
   onCycleNebulaSpinDamp?: () => void;
   onCycleNebulaBond?: () => void;
+  onCycleNebulaTileShare?: () => void;
+  onCycleNebulaDrain?: () => void;
   onCycleShatterGrace?: () => void;
   onCyclePlayerThrust?: () => void;
   onCyclePlayerSpeed?: () => void;
@@ -464,8 +468,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onToggleRepelPush,
   onToggleShardBlend,
   onCycleShardCoat,
-  onCyclePierceFalloff,
-  onCyclePierceSpeedRetain,
+  onCycleImpactVelocity,
+  onCycleCrashEnergy,
+  onCycleBlastEnergy,
+  onCycleHullDensity,
   onTogglePlasticAutomata,
   onTogglePlasticAutomataDirection,
   onToggleMaterialAutomata,
@@ -480,6 +486,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onCycleNebulaDamp,
   onCycleNebulaSpinDamp,
   onCycleNebulaBond,
+  onCycleNebulaTileShare,
+  onCycleNebulaDrain,
   onCycleShatterGrace,
   onCyclePlayerThrust,
   onCyclePlayerSpeed,
@@ -1584,12 +1592,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   'Which wire encoding the trigger effects are sent in. TWO conventions are in wide use and a DualSense silently discards the one its firmware does not understand, so this is a diagnostic rather than a preference. "zones" = modes 0x21/0x25, parameters packed into ten travel zones (what the console appears to use). "simple" = modes 0x01/0x02, raw byte parameters (what most samples send). If one gives no resistance, try the other.')}
                 {ctrlRow('  ↳ HID buzz', onTestTriggerLink, 'Test',
                   'Pulses the pad MOTORS through the HID output report — the same framing and CRC the trigger effects ride, but with an encoding that is not in dispute. If this buzzes and the triggers stay limp, the transport is fine and the effect encoding is wrong (try "trig enc"). If it does not buzz, nothing is reaching the pad at all — read the error on the triggers row.')}
-                {ctrlRow('Pierce falloff', onCyclePierceFalloff,
-                  stats.pierceFalloffName ?? 'off (full dmg, def)',
-                  'Per-hit DAMAGE decay on a piercing bolt. SHIPS OFF, so every penetration hit lands FULL projectile damage; the cycle steps off / 0.05 / 0.10 / 0.20 / 0.35 / 0.50. Damage at hit ordinal n is base x (1 - rate)^n, so the first contact is always full and only penetration hits decay. It reaches EVERY damage path a hit produces — the direct bite, the Cannon AoE splash and the Lightning chain all take the same factor — and every weapon equally. The reachable stack is large (six Penetration Mk III = +18, and inside a grain material every GRAIN spends a charge), so the rate mostly decides what a DEEP bore is worth: at 0.05 the 18th hit still lands 40%, at 0.20 it is under 2%.')}
-                {ctrlRow('Pierce spd', onCyclePierceSpeedRetain,
-                  stats.pierceSpeedRetainName ?? '1.00x (def)',
-                  'Speed a PIERCING bolt keeps per hit (1.00 / 0.95 / 0.90 / 0.80x). Ships at 1.00, i.e. off — the second axis to feel against the damage falloff above. One factor per charge actually spent, so inside a grain material — where penetration is spent per GRAIN, not per tile — a bolt that drilled four grains slows four times. Indestructible tiles stop a bolt dead whatever it carries, and spend nothing.')}
+                {ctrlRow('Impact vel', onCycleImpactVelocity,
+                  stats.impactVelocityName ?? 'muzzle (def)',
+                  'WHICH VELOCITY a hit\'s damage is measured in. Damage is now KINETIC — a shot carries energy, not an authored number — and energy is frame-dependent, so this is the one judgement call in it. "muzzle" (ships) scores the bolt in its own launch frame: it lands its authored damage however the ship was moving, and still falls off through a bore because that is a real loss of the bolt\'s own speed. "relative" scores true CLOSING energy against the target, which finishes the unification (the crash paths already spend a relative velocity, so a weapon hit and a hull hit become the same formula) — but a charging ship then hits 2.2-5x harder at POCKET cruise and ~9.5x on the big maps, and a shot at a target fleeing at matched speed lands nothing.')}
+                {ctrlRow('Crash energy', onCycleCrashEnergy,
+                  stats.crashEnergyName ?? '1x (def)',
+                  'How much of a HULL\'s kinetic energy reaches the grain bonds it hits (1 / 0.5 / 0.25 / 2 / 4x over the calibrated coupling). A crash now spends ENERGY like a weapon hit does, so twice the closing speed is four times the bite, and the speed the impactor loses IS what it broke. The coupling is calibrated on ROCK, whose ram count is unchanged at 9; every other material then differs by its own derived toughness rather than by an authored HP (metal used to take 24 to 144 rams across six tiles of identical toughness, because a crash spent one authored HP and metal authors 24 x densityTier). This is the dial for how permeable terrain is; a material\'s own bondStrength is the same question asked of one material.')}
+                {ctrlRow('Blast energy', onCycleBlastEnergy,
+                  stats.blastEnergyName ?? '1x (def)',
+                  'How much of a SHELL\'s kinetic energy becomes its BLAST (a multiplier over BLAST_ENERGY_COUPLING, which ships at 0.4). The splash was the last damage number in the roster still authored as a flat scalar: the direct bite went kinetic in step 3, the crash in step 4 and the bore in step 5, while explosionDamage sat at 10 as every round\'s bank grew tenfold and terrain started deriving ~50 HP a tile — so the blast shrank into a light show. It is now a fraction of the shell\'s own energy, which means it rides GUNNERY and the charge for free (both buy a heavier round) and the RING grows with the round too, by the square root, so its area is the energy. What it does NOT do is shrink when the shell spent its bank boring: the charge is PAYLOAD, sized at spawn, and travel energy only decides how far the round gets. The coupling is the sibling of "Crash energy" — a hull couples ~11% of a contact into breaking work, a shaped charge this much into the blast — and it is set so the charge is worth about one more hit (measured: peak 20.8 against the Cannon\'s 18 bite). The 0.5x step is the A/B against the pre-doubling blast.')}
+                {ctrlRow('Hull density', onCycleHullDensity,
+                  stats.hullDensityName ?? '0.250 / m100 (def)',
+                  'How heavy the SHIP is, as a density (mass per unit of d\u00b2) and the mass it derives — a multiplier over IMPACT_DENSITY.HULL, index 0 what ships. Mass used to be an impulse term and nothing else; under the energy model it is half of what every impact SPENDS, so one number moves crash damage, knockback, the body-impact shake and the roll spring together. Read it against the MATERIAL band, which is the scale it is stated in: glass 0.010, plastic 0.013, rock 0.018, metal 0.030. The hull ships at 0.250 — 25x glass and 8x rock, deliberately, because a ship is a machine rather than a rock and should plow through gravel instead of being batted about by it. The steps walk DOWN toward that band (and one up), because the question worth judging in play is whether the hull should sit that far above it at all. Lower = you ram for less and get shoved more.')}
                 {ctrlRow('Enemy scale', onCycleEnemyScale,
                   stats.enemyScaleName ?? '1×',
                   'Multiplier on the per-wave enemy HP+damage growth (1 / 0 / 0.5 / 1.5 / 2×). 0 disables wave scaling; 2× doubles it. Tuned for a comfortable player lead. Applies to enemies spawned after the change.')}
@@ -1651,7 +1665,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   ['hull', 'Hull'], ['plating', 'Plating'], ['capacitor', 'Capacitor'],
                   ['engine', 'Engine'], ['thrusters', 'Thrusters'],
                   ['gunnery', 'Gunnery'], ['autoloader', 'Autoloader'],
-                  ['piercing', 'Penetration'],
                   // The scanner is the one family with FIVE marks — each adds a
                   // detection tier — so its row is derived from the catalog
                   // rather than from a hardcoded [1,2,3] like the rest.
@@ -1914,6 +1927,12 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {ctrlRow('Neb bond', onCycleNebulaBond,
                   stats.nebulaBondName ?? 'goo',
                   'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (off 1x / firm 2x / strong 5x / goo 12x). GOO ships; \u2018off (old)\u2019 is one click away because the cycle wraps, so the A/B against pre-feature nebula is still the first press. Stretching the timer is what makes the grip legible \u2014 at the base ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles. It COSTS entity count, which is frame time: live shard population measured 28 / 75 / 307 / 597 across the four steps.')}
+                {ctrlRow('Neb solid', onCycleNebulaTileShare,
+                  stats.nebulaTileShareName ?? 'rare 1/8',
+                  'How often a CRYSTALLISING nebula cloud condenses into a solid material shard (rock / glass / plastic / metal) instead of thickening back into a nebula TILE. It was an even 50/50 and measured that way in play (53.9% tile on NEBULA_FIELD, 61.1% on UNIVERSE over 90 s), so nebula leaked into the terrain about as fast as it rebuilt itself; the shipped step makes leaving the family rare. \u2018half (old)\u2019 is the pre-call behaviour. Rock-derived dust is unaffected \u2014 it always returns to rock, which is conservation rather than conversion \u2014 and this never changes WHICH material a cloud picks, only how often it picks one at all.')}
+                {ctrlRow('Neb drain', onCycleNebulaDrain,
+                  stats.nebulaDrainName ?? 'gentle 5u/-10%',
+                  'The nebula MATERIAL LEDGER: how many condense units a cloud must hold to buy a nebula TILE, and what fraction a coalescence sheds. A tile shatters into 3-4 shards of one unit each, and a tile used to cost only 2 \u2014 so the loop tile \u2192 shatter \u2192 coalesce \u2192 tile ran at ~2x and clouds grew without bound. Every step keeps the cost ABOVE the most a shatter can yield, so the ladder tunes how fast nebula recedes and cannot express growth. The two terms share one row because they are coupled: repeated merging converges on a ceiling of (1-loss)/loss, and a loss too large drops that ceiling under the cost, which reads as tiles never forming.')}
                 {ctrlRow('Neb stretch', onCycleNebulaStretch,
                   stats.nebulaStretchName ?? '0.10',
                   'Cycle nebula-shard velocity-stretch stiffness (K on speed → stretch): off / 0.05 / 0.07 / 0.085 / 0.10 ships. The squash axis aligns to velocity while the sprite keeps its own rotation. The shipped step is the TOP of the ladder, so the cycle wraps to OFF on the first click \u2014 the A/B against no stretch at all is one press away.')}

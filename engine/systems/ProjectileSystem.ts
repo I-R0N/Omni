@@ -6,6 +6,8 @@ import {
   LIGHTNING_GRAVITY_RANGE,
   HOMING_ACQUIRE_RANGE,
   MAX_PROJECTILES,
+  projectileMassFor,
+  blastDamageFor,
 } from '../../constants';
 import { nextId } from './IdAllocator';
 import { enforceTypeCap } from './enforceCap';
@@ -158,6 +160,23 @@ export class ProjectileSystem {
       const startY = shooter.position.y + ay * muzzleOffset;
 
       const rotation = Math.atan2(vy, vx);
+      // KINETIC DAMAGE (step 3): the bolt flies a real mass, derived from the
+      // damage and muzzle speed the weapon already authors, and remembers the
+      // speed it launched at.  `muzzleSpeed` is the WORLD speed — inherited
+      // shooter velocity included — because it is the reference the shipped
+      // 'muzzle' impact-velocity mode divides by, which is exactly what makes
+      // that mode land the authored damage however the ship was moving.
+      const projMass = projectileMassFor(config);
+      const muzzleSpeed = Math.hypot(vx, vy);
+      // THE BLAST IS DERIVED unless a config authors one.  Absent means "work
+      // it out from the shell's own energy" (`blastDamageFor`), which is what
+      // makes a Gunnery mark, a charge and MASS_SCALE all reach the splash
+      // without any of them naming it; an authored value is a designed
+      // override and wins (BOSS_WEAPONS.SIEGE).  Computed ONCE here so the
+      // pooled and fresh arms below cannot disagree about it.
+      const blastDamage = config.explosionRadius && config.explosionRadius > 0
+        ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed))
+        : config.explosionDamage;
       const isLight = config.type === WeaponType.LIGHTNING || undefined;
       const isBnc   = config.type === WeaponType.BOUNCER || undefined;
       const bouncesRem = config.type === WeaponType.BOUNCER ? config.bounceCount : undefined;
@@ -178,27 +197,38 @@ export class ProjectileSystem {
         pooled.maxHealth = 1;
         pooled.lifetime = config.lifetime;
         pooled.maxLifetime = config.lifetime;
-        pooled.mass = PROJECTILE_CONSTANTS.MASS;
+        pooled.mass = projMass;
         pooled.damage = config.damage;
+        pooled.spawnSpeed = muzzleSpeed;
         pooled.homing = config.homing;
         pooled.homingStrength = config.homingStrength;
         pooled.ownerType = ownerType;
         pooled.ownerId = shooter.id; // for third-party retaliation (Stage 5)
-        pooled.pierceCount = config.pierce;
-        // Both halves of the penetration state, on the SAME hazard the
-        // rival flags below carry: a recycled shot that kept a previous
-        // gun's falloff table — or a previous shot's hit count — would
-        // start part-way down a curve it never fired through.  Assigning
-        // `config.pierceFalloffRate` unconditionally is what CLEARS it when
-        // the new config has none (undefined → the shared curve).
-        pooled.pierceFalloffRate = config.pierceFalloffRate;
+        // A recycled shot that kept a previous shot's hit count would start
+        // part-way down a curve it never fired through, so both halves of
+        // the penetration state are assigned unconditionally.  `mass` and
+        // `spawnSpeed` above are the same hazard and the reason damage is
+        // now kinetic: a pooled bolt inheriting the PREVIOUS gun's mass or
+        // launch reference would land a damage figure belonging to a weapon
+        // that did not fire it.
         pooled.pierceHits = 0;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
         pooled.isBouncer = isBnc;
         pooled.bouncesRemaining = bouncesRem;
         pooled.explosionRadius = config.explosionRadius;
-        pooled.explosionDamage = config.explosionDamage;
+        // Unconditional, like every other config-derived field on this path:
+        // a recycled shell that kept a previous gun's fuse would detonate on
+        // a timer it never armed.
+        pooled.detonateOn = config.detonateOn;
+        pooled.fuseTimer = config.fuseSeconds;
+        // Unconditional like the fuse beside it, and for a sharper reason: a
+        // recycled shell that kept `detonated` from its last life would never
+        // explode again, and one that kept `blastPending` would explode on
+        // spawn.  Both are per-LIFE state on a pooled object.
+        pooled.blastPending = false;
+        pooled.detonated = false;
+        pooled.explosionDamage = blastDamage;
         pooled.explosionKnockback = config.explosionKnockback;
         pooled.glow = config.glow;
         pooled.chainCount = config.chainCount;
@@ -230,22 +260,25 @@ export class ProjectileSystem {
           maxHealth: 1,
           lifetime: config.lifetime,
           maxLifetime: config.lifetime,
-          mass: PROJECTILE_CONSTANTS.MASS,
+          mass: projMass,
           damage: config.damage,
+          spawnSpeed: muzzleSpeed,
           homing: config.homing,
           homingStrength: config.homingStrength,
           ownerType,
           ownerId: shooter.id, // for third-party retaliation (Stage 5)
-          pierceCount: config.pierce,
-          pierceFalloffRate: config.pierceFalloffRate,
           pierceHits: 0,
           trail: [],
           isLightningProjectile: isLight,
           isBouncer: isBnc,
           bouncesRemaining: bouncesRem,
           explosionRadius: config.explosionRadius,
-          explosionDamage: config.explosionDamage,
+          explosionDamage: blastDamage,
           explosionKnockback: config.explosionKnockback,
+          detonateOn: config.detonateOn,
+          fuseTimer: config.fuseSeconds,
+          blastPending: false,
+          detonated: false,
           glow: config.glow,
           chainCount: config.chainCount,
           chainRange: config.chainRange,

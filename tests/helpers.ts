@@ -323,7 +323,7 @@ export async function dialByName(
     // republished by the rAF loop, so deciding the next click from a value
     // read in the same breath as the last one over-clicks and walks straight
     // past the wanted step.  This is THE race that bit `useScanner` and the
-    // pierce-decay dial in full-suite runs; every dial belongs here.
+    // impact-velocity dial in full-suite runs; every dial belongs here.
     for (let f = 0; f < 40; f++) {
       if (await read() !== now) break;
       await page.evaluate(() => new Promise(r => requestAnimationFrame(() => r(null))));

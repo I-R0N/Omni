@@ -2133,12 +2133,13 @@ penetration path:
    — not of pierce charges, which are a purchased resource and should not
    be what decides whether matter behaves like matter.
 3. **Does the falloff RATE belong to the material rather than the
-   weapon?**  It is a global DBG knob today (`PIERCE_FALLOFF_RATE`,
-   shipped at 0 and applying to all weapons — and to all three damage
-   paths a hit produces — evenly, by user call) with a per-weapon seam
-   (`WeaponConfig.pierceFalloffRate`) that nothing uses.  A material-side
-   rate — how fast a given stuff absorbs an advancing shot — is a third
-   possibility and probably the physically honest one.
+   weapon?**  **PARTLY ANSWERED by step 3**: it belongs to neither as an
+   authored number.  The global knob and the unused per-weapon seam are
+   both deleted, and the rate is now DERIVED per weapon from its energy
+   bank (`1 - 1/(1 + pierce)`).  The material-side question survives in a
+   sharper form — a stuff's `bondStrength` already decides how much energy
+   an advancing shot gives up per grain, so a material-specific ABSORPTION
+   rate on top of that would need to say what it adds.
 4. **Interaction with `damageSpread`.**  The bore works as well as it does
    *because* every material ships `damageSpread: 0`, so each stamp spends
    sequentially outward from its own point.  A non-zero spread would
@@ -2291,16 +2292,21 @@ no track.
    is left).  The second is the real model; the first is a legacy the
    collision paths still speak.  Every new material inherits both.
 
-2. **TWO ENERGY MODELS, one real and one authored.**  Collisions already
+2. **TWO ENERGY MODELS, one real and one authored.**  **RESOLVED for the
+   WEAPON half in step 3 (damage is kinetic; see §9); the crash half is
+   step 4's, and it is now the only one left authored.**
+   Collisions already
    compute genuine mechanics — `impactStrength` is
    `(1+e)·|v_n|·effInv_self/(effInv_self+effInv_other)`, a real velocity
-   step, and the crash gate is `mass × impactSpeed > ASTEROID_CRASH_MOMENTUM`.
+   step, and the crash gate is `mass × impactSpeed > SHARD_CRASH_MOMENTUM`.
    Weapons carry an authored `damage` number with no mass, no speed and no
    relation to either.  The same tile therefore answers to two different
    physics depending on what hit it.
 
 3. **THE FALLOFF IS A SECOND KNOB FOR SOMETHING THE FIRST SHOULD ALREADY
-   SAY.**  `PIERCE_FALLOFF_RATE` decays damage per hit, and
+   SAY.**  **RESOLVED in step 3 — both knobs are deleted and the decay is
+   derived per weapon as `1 - 1/(1 + pierce)`; see §9.**
+   `PIERCE_FALLOFF_RATE` decays damage per hit, and
    `PIERCE_SPEED_RETAIN` decays SPEED per hit — and ships at `1.0`, a no-op.
    If damage were kinetic (`½mv²`, or `mv`), the falloff would **fall out of
    the speed loss** rather than being authored beside it.  Two knobs
@@ -2308,7 +2314,11 @@ no track.
    and it is why the shipped falloff rate is 0: nobody could say what the
    right number was, because the number should not have existed.
 
-4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**  A shot
+4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**
+   **RESOLVED in step 5 — `pierce`, `pierceCount` and `MAX_PIERCE` are all
+   deleted and a round authors its `mass` directly; see §11.**  Step 3 made
+   the budget physical without removing it (`pierce` sized the energy bank at
+   `(1 + pierce)` bites); step 5 removed the count.  A shot
    gets N discrete charges regardless of what it hits — a 36px pane and a
    200-unit boulder each cost the same charge (the bore softened this
    *within* a body but not between bodies).  Under an energy model there is
@@ -2329,7 +2339,14 @@ area), which is precisely the physical constant this wants.  The proposal:
   three grains is slower, so its next bite is smaller, automatically and
   with the right curve.  `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
   collapse into one another and then into nothing.
-- **The player bores terrain by the same routine.**  `borePierceTrack`
+- ~~**The player bores terrain by the same routine.**~~  **DELIVERED in
+  SUBSTANCE, not in form (step 4, §10).**  The user's point was that a hull
+  should behave like a piercing bolt, and it now does in the way that
+  mattered: it spends kinetic energy on grain boundaries and pays for what it
+  breaks.  What it does NOT yet do is deposit along a CHORD — that is the
+  parked bore-track entry, and it is a geometry question rather than an
+  arithmetic one.
+  The original framing:  `borePierceTrack`
   already walks a chord in a body's local frame at `grainSize` steps; a hull
   sweeping through a tile is the same walk with a different energy budget
   and a wider track.  A fast heavy ship ploughs a channel and slows; a slow
@@ -2337,14 +2354,16 @@ area), which is precisely the physical constant this wants.  The proposal:
   user's first point, and it needs no new mechanism — only for path 3 to
   call what path 2 calls.
 - **The crash THRESHOLD becomes a consequence.**
-  `CRASH_VELOCITY_THRESHOLD` and `ASTEROID_CRASH_MOMENTUM` stop being
+  `CRASH_VELOCITY_THRESHOLD` and `SHARD_CRASH_MOMENTUM` stop being
   authored gates and become "did the impactor bring enough energy to break
   the first boundary" — which is automatically material-dependent, so metal
   resists a bump that shatters glass without a per-material threshold table.
-- **A Penetration module stops buying charges** and starts buying what a
-  penetrator actually has: sectional density, or a smaller contact patch —
-  i.e. it concentrates the same energy on less boundary. That is a better
-  story for the item as well as a truer one.
+- ~~**A Penetration module stops buying charges**~~ — **RESOLVED in step 5,
+  and the answer was to DELETE the module (user call).**  It was to start
+  buying sectional density instead; what the measurement showed is that
+  sectional density is exactly what GUNNERY already buys once `damageFrac`
+  scales the mass as well as the bite, so a second module selling the same
+  physical property had nothing left of its own to sell.  See §11.
 
 ### 4. What must NOT be unified
 
@@ -2374,14 +2393,21 @@ PR.  The honest sequencing:
    and §7 below is its result.
 2. ~~**Route paths 3, 4 and 5 through `applyBoundaryDamage`**~~ — **SHIPPED
    (2026-09-07)**, see §8 below.
-3. **Make projectile damage kinetic**, retire the falloff rate and the speed
-   retain, and check the §7 counterplay table still holds.  **NOT STARTED,
-   and §7 below is the reason to be careful: the implied conversion constant
-   is not a constant.**
-4. **Give hulls a bore track**, which is when the user's first point is
-   actually delivered.  Not started.
-5. **Revisit `pierceCount`** last, since removing a budget changes what the
-   Penetration module *is*.  Not started.
+3. ~~**Make projectile damage kinetic**, retire the falloff rate and the
+   speed retain~~ — **SHIPPED (2026-09-11)**, see §9 below.  §7's warning
+   that "the implied conversion constant is not a constant" turned out to be
+   an artefact of `PROJECTILE_CONSTANTS.MASS`, not a property of the roster.
+4. ~~**Give hulls a bore track**~~ — **SHIPPED (2026-09-11) as an energy
+   spend rather than a track**, see §10 below.  The measurement changed what
+   this step had to be: a hull ALREADY passes through terrain, so what was
+   missing was not passage but that the speed it lost had nothing to do with
+   what it broke.  A per-grain hull track is still open, and is now purely a
+   DEPOSITION-GEOMETRY question — see the "Penetration bore tracks as a
+   FRACTURE MODEL" entry, which is where it belongs.
+5. ~~**Revisit `pierceCount`**~~ — **SHIPPED (2026-09-12)**, see §11 below.
+   Removing the budget did change what the Penetration module *is*, and the
+   user's call was that it is nothing: penetration is emergent, so the module
+   is deleted and Gunnery absorbs it.
 
 ### 6. Related entries — this is the hub
 
@@ -2460,9 +2486,9 @@ is `impactStrength`'s own output.
 — mass never enters, so a fully-outfitted ~3× heavier ship crosses it at the
 same 4 u/step.  The asteroid's is MOMENTUM, and over the live shard
 population on ASTEROID_FIELD (n=1200, mass 7.3..460.8) one momentum gate
-spans 43 → 2747 energy, a **63× spread**.  (Note the constant this entry and
-CLAUDE.md call `ASTEROID_CRASH_MOMENTUM` is named `SHARD_CRASH_MOMENTUM` in
-`constants.ts` — doc drift, no code impact.)
+spans 43 → 2747 energy, a **63× spread**.  (The constant this entry and CLAUDE.md
+used to call `ASTEROID_CRASH_MOMENTUM` is named `SHARD_CRASH_MOMENTUM` in
+`constants.ts`; both docs were corrected to the code name in step 3.)
 
 **How far apart the two sides are.**  Weapon side 9..90 KE per derived HP
 (10× spread); crash side on a virgin tile 37..459 (12.6× spread).  The two
@@ -2505,3 +2531,934 @@ Four decisions worth keeping:
 Pinned by `tests/terrain.spec.ts` ("a crush spends on grain boundaries"), all
 three claim-tests verified to FAIL with the routing removed.
 
+### 9. What step 3 SHIPPED (2026-09-11)
+
+**Projectile damage is kinetic.**  A bolt carries ENERGY, and what it lands is
+what that energy is worth at the speed it still has.
+`IMPACT_ENERGY_PER_DAMAGE` (32) is the ONE conversion §4 demands between the
+structural world and the actor world.
+
+**§7's blocker dissolved rather than being paid.**  The measured 9..90 KE per
+point of damage was an artefact of every projectile flying at `mass: 1` — with
+mass pinned, the variation between a Laser pulse and a Cannon shell had nowhere
+to live but the constant.  `projectileMassFor` solves mass from the damage,
+muzzle speed and pierce each weapon already authors, so **the constant is
+constant, the spread becomes SECTIONAL DENSITY, and the roster keeps every
+number it had.**  No re-pricing was needed and the §7 counterplay table is
+untouched by construction.
+
+| weapon | mass | | weapon | mass |
+|---|---|---|---|---|
+| Blaster | 1.00 | | Laser | 1.78 |
+| Shotgun | 0.96 | | Seeker | 3.56 |
+| Burst Rifle | 2.40 | | Cannon | 3.56 |
+| Lightning | 0.85 | | enemy bolt | 7.90 |
+
+**PIERCE BELONGS IN THE SOLVE**, and leaving it out is the mistake this
+invites — caught during implementation, not in review.  A bolt whose whole
+energy equals one bite spends itself on contact, so every weapon stops dead and
+the Laser's `pierce: 4` is unreachable.  The bank is `(1 + pierce)` bites, which
+is the same statement as sectional density.
+
+**The falloff is DERIVED, per weapon**: `1 - 1/(1 + pierce)` — Laser 0.80/hit,
+Burst 0.67, Shotgun 0.50, a non-piercing bolt stops dead.  `PIERCE_FALLOFF_RATE`
+and `PIERCE_SPEED_RETAIN` were the two halves of that one number and are
+deleted.  The Penetration module now buys ENERGY, not licences.
+
+**DBG "Impact vel"** is the one judgement call, because energy is
+frame-dependent and `INHERIT_SHOOTER_VELOCITY` is 1.0.  Index 0 `muzzle` ships
+(day-one neutral); `relative` scores true closing energy and finishes the
+unification, at 2.2–5× for a charging ship (POCKET cruise; ~9.5× on the big
+maps).
+
+**The spawn-HP mismatch is closed too.**  `estimateBoundaryHp` predicts what
+`ensureBoundaryModel` will derive, sharing the model's own site-count rule.
+Authored against derived went rock ×0.96 → ×0.96, glass ×1.32 → ×1.01, plastic
+×2.46 → ×0.95, metal ×3.15 → ×0.94.  That ratio was not cosmetic: a crash spends
+`derived / authored`, so it was a silent ram-count dial.
+
+**What step 4 now has to do is smaller than this entry assumed.**  Measured
+through the real player-crash branch: a ship ALREADY passes through terrain —
+below `CRASH_VELOCITY_THRESHOLD` it bounces (`vx` reverses, ×−0.5), at or above
+it the branch returns before any impulse and the ship ploughs on at ×0.65 the
+incoming speed, at every speed.  So the threshold is already a bounce/passage
+switch.  What is missing is that **the speed lost has no relation to what was
+broken**: from cruise, a ship crosses 5 tiles and decays 21.6 → 14.1 → 9.1 →
+5.9 → 3.9 **identically for glass, rock and metal** — glass shatters all five,
+metal (470 derived HP) loses none, and the ship cannot tell the difference.
+Step 4 is making that speed loss equal the energy actually spent, not adding
+passage.
+
+### 10. What step 4 SHIPPED (2026-09-11)
+
+**A crash spends its KINETIC energy**, through the same
+`IMPACT_ENERGY_PER_DAMAGE` a weapon hit uses, scaled by a new
+`CRASH_ENERGY_COUPLING`.  Twice the closing speed is four times the bite.
+Step 2's "one authored HP" was the documented seam this replaces.
+
+**REDUCED MASS collapses the two gates.**  `m1 m2 / (m1 + m2)` is the energy
+available in a contact and degrades to the impactor's own mass against a
+static body, so the SPEED gate and the MOMENTUM gate stop being two different
+ideas of what a gate is.
+
+**The coupling is an EFFICIENCY, not a tap**, and this is the thing that was
+got wrong first.  A hull that deposits 6 damage does not lose 6 damage worth
+of speed and keep the rest — it loses all of what it spent, and only ~11% of
+that does useful breaking work.  Charging only the absorbed part was measured:
+a ship at cruise crossed **41 rock tiles** losing 3% a tile.
+
+**Calibrated on ROCK, unchanged at 9 rams**, so the anchor is a played number.
+Everything else then differs by derived toughness: glass 1 (V9), plastic
+8 → 65, metal **24..144 → 78**.  Metal is the headline — its old count was a
+density-tier lottery, six tiles of identical toughness taking 24 to 144 rams,
+because a crash spent one authored HP and metal authors `24 × densityTier`
+against a flat derived HP.
+
+**The defect, measured before and after.**  From cruise, a ship used to cross
+five tiles decaying 21.6 → 14.1 → 9.1 → 5.9 → 3.9 IDENTICALLY for glass, rock
+and metal.  It now crosses 4 glass (all destroyed) or 4 rock (3 destroyed),
+and is stopped DEAD inside the first plastic or metal tile.
+
+**Two bugs worth keeping**, both found by measurement rather than review: the
+budget must be read AFTER `ensureBoundaryModel` rewrites `health` (reading it
+early charged a hull against plastic's authored 8 instead of its derived 390,
+and let a ship grind through 23 plastic tiles breaking none), and the energy
+must be spent AFTER the knockback, because every momentum consumer reads
+`proj.velocity` for its direction — paid earlier, a bolt whose bite exhausted
+its bank delivered a knockback of exactly zero, which took out the whole
+knockback suite.
+
+**What is NOT done**: the hull deposits at one contact point, not along a
+chord.  A per-grain hull track — and whether a wide track should free several
+grains as ONE fragment — stays parked under "Grain clusters" and "Penetration
+bore tracks as a FRACTURE MODEL".
+
+### 11. What step 5 SHIPPED (2026-09-12)
+
+**PENETRATION IS EMERGENT, AND THE MODULE THAT SOLD IT IS DELETED** (user
+call).  The brief for this step was "make penetration a natural effect that
+comes out for all impacts", and the module followed from that rather than the
+other way round: once depth is energy divided by what the target charges,
+there is no count left for an item to grant.
+
+**`pierce` is gone; a round authors its `mass`.**  `WeaponConfig.pierce`,
+`GameEntity.pierceCount`, `MAX_PIERCE`, `pierceBonus` and `withPierceBonus`
+are all deleted.  A round now carries two numbers that answer different
+questions: `damage` is the BITE one contact deposits, `mass` with `speed` is
+the BANK.  The authored masses are EXACTLY what step 3's `(1 + pierce)` solve
+produced (Blaster 1.0, Burst 2.4, Shotgun 0.96, Laser 1.7778, Lightning
+0.8521, Seeker and Cannon 3.5556), so retiring the vocabulary rebalanced
+nothing — `perf/impact-audit.mjs` §2 measures the banks back out at 1/3/2/5/1/1/1
+bites.
+
+**GUNNERY ABSORBED IT.**  `damageFrac` scales the bite AND the mass together,
+so a mark buys a denser round: it bites harder and carries further, which
+under the energy model is one statement.  Scaling only the bite — which is
+what the module did while mass was derived FROM damage — would make a Gunnery
+round hit harder and stop SOONER, out of a fixed bank.
+
+**THREE THINGS FELL OUT, and two of them were not planned.**
+
+1. **Depth is the TARGET's price, not the weapon's.**  A grain costs
+   `grainSize × bondStrength`: glass 6.0, rock 5.6, plastic 10.8, metal 14.4.
+   Measured with an energy-bound round (12 of energy): rock 3 grains, glass 2,
+   plastic 2, metal 1 — the price ordering exactly, with the SAME total energy
+   spent in every case.
+2. **Overkill carries through on ACTORS** — the actor-side half of step 4's
+   "pay for what you broke".  A body absorbs only what it had, so a 4-damage
+   Blaster bolt is charged 1 by a 1-HP gnat and punches FOUR of them
+   (measured) while one rock tile still stops it dead.  A PLATE is not
+   overkill: armour and the front shield stop a round rather than run out of
+   room, so a reduced hit pays in full.
+3. **No single shot can destroy a grain tile**, however much energy it
+   carries, because the deposit is capped by the CHORD.  A 36px glass pane is
+   ~3 grains deep, so one contact leaves at most ~18 against a derived HP near
+   49.  This is "passage, not gouge" doing what it says — a hyper-energetic
+   round punches a clean hole and flies on — but it is the one consequence
+   most likely to be read as a bug, and it invalidated a terrain test whose
+   setup one-shot a tile with a `damage: 500` shell.
+
+**THE CANNON NEEDED ITS OWN RULE (5a, user call).**  `applyExplosionAoE` fired
+on EVERY hit, so a shell carrying N penetration detonated N+1 times; universal
+penetration would have made that a full blast per pebble.  `detonateOn:
+'enemy'` means only an ACTOR trips the charge, with `fuseSeconds` (0.42) as
+the fallback so a shell that meets nothing still ends in a blast.  Measured: a
+shell passes through 18 of 18 tiny/small/medium rock shards without
+detonating.
+
+**TWO MEASUREMENT TRAPS, both of which produced a confidently wrong answer
+first.**  Capping a bore step at the BITE rather than the remaining ENERGY let
+a bolt bore for ever, so depth fell back to `bodyWidth / grainSize` and
+finer-grained plastic measured DEEPER than pricier, coarser glass.  And
+comparing depth at HIGH energy measures the chord rather than the price — at
+20 bites metal took 5 steps to glass's 3, exactly backwards — so the
+regression drives an energy-bound round and asserts `alive === false` to prove
+it is not chord-bound.
+
+**What is still NOT done**: the hull still deposits at one contact point
+rather than along a chord (unchanged from §10), and the bore is a line rather
+than a track with width — both still parked under "Penetration bore tracks as
+a FRACTURE MODEL" and "Grain clusters".
+
+### 12. The step-5 follow-up: a fast ship was flying through terrain (2026-09-12)
+
+**REPORTED**: "the player now literally passes through tiles at high impact
+energy — this was explicitly not the intent."  Correct, and it was a real
+defect rather than a tuning question.
+
+**THE CAUSE IS OLDER THAN THE ENERGY MODEL.**  Every contact is tested at the
+END of a step, so a body moving further in one step than its target is wide is
+clear on both sides of it and never tests as touching.  The ship's contact
+window against a 36-unit tile is ±28 units and a substep moves half the
+velocity, so the hole opens near 90 u/step — inside the ship's own 120 cap.
+
+**STEP 4 IS WHAT MADE IT REACHABLE.**  The flat 35%-per-tile retention it
+replaced bled a ship below the tunnelling speed within a tile or two, so
+nothing could stay fast enough to fall in.  Spending real energy lets a ship
+that broke something cheap keep nearly all its speed, and it then outruns the
+test.  This is the general lesson worth keeping: **removing a blunt damper can
+expose a latent hole rather than create one**, and the symptom will be
+attributed to the change that exposed it.
+
+**MEASURED**, through the engine's own physics step against a ten-tile wall at
+the ship's 120 cap — before: out the far side still doing 114.1 with seven
+tiles whole and unmarked behind it (rock; glass 114.5; metal escaped at 160).
+After: stopped dead with nothing crossed untouched, on all three materials at
+60 / 90 / 120 / 160.
+
+**FIXED** by `PhysicsSystem.sweepRewind` — a body whose PATH crossed something
+is put back where it met it, and the ordinary broadphase, SAT, MTV, crash
+spend and `payForCrash` then run exactly as they do at walking pace.  See
+CLAUDE.md §8 for the five rules that hold it up; the two that were measured
+into place are that the rewind must target ENTRY rather than closest approach
+(closest approach reads as "already moving apart" and is refused), and that
+the step's path must be RECORDED rather than re-derived, since a rewind
+invalidates the obvious reconstruction.
+
+**STILL OPEN, and deliberately**: this is contact recovery, not continuous
+collision detection.  A body is rewound to where it met ONE thing; it does not
+sweep a corridor and it does not deposit along the chord it cut.  Both belong
+to the parked "Penetration bore tracks as a FRACTURE MODEL" entry, which is
+the same geometry question asked of the hull.
+
+
+---
+
+### 13. The second step-5 follow-up: a ram that held did no damage and stopped dead (2026-09-12)
+
+**REPORTED**: "the player ship colliding still does not do damage like
+projectiles.  This appears to have regressed severely."
+
+**TWO DEFECTS, ONE SYMPTOM**, both in the player-vs-structure branch of
+`PhysicsSystem.resolveCollision`, and — this is the part worth keeping —
+**neither of them moved a ram COUNT**.  `perf/impact-audit.mjs` §5 and §5b
+read exactly the same before and after the fix (rock 9, glass 1, plastic 65,
+metal flat 78), because both defects were about who was BILLED and whether
+the ship came off, not about how much a crash spends.  An audit that measures
+"how many rams to break this" is structurally blind to "and what happened to
+the ship each time".
+
+1. **IT NEVER BOUNCED.**  Every path through the branch `return`ed before the
+   impulse at the bottom of the function.  The indestructible path did so on
+   the strength of a comment saying "the player already shed velocity above"
+   — that was `CRASH_VELOCITY_RETENTION`, which step 4 deleted, so the comment
+   documented a line that no longer existed.  **A deleted mechanism leaves its
+   justifications behind**, and they read as current.
+
+2. **A SURVIVING BODY WAS CHARGED THE WHOLE SWING.**  `payForCrash` bills
+   `absorbed / CRASH_ENERGY_COUPLING`.  A body that HOLDS absorbs exactly
+   `crashDamageFor` = coupling × KE, so the divide hands the bill straight
+   back as the ship's ENTIRE normal-direction kinetic energy.  Not "too
+   much" — algebraically all of it, every time, independent of the tile.
+   The coupling is an EFFICIENCY (only ~11% of a contact does breaking work);
+   dividing it out is only correct where the absorbed figure is a REMAINING
+   BUDGET rather than the full offer, which is to say only where the body
+   actually broke.
+
+**THE SYMPTOM**, measured on a 55-HP rock tile at 12 u/step: 21 damage dealt
+and the ship stopped DEAD, embedded, with no bounce — three standing starts
+to break one rock.  Which reads exactly as "colliding does no damage", because
+what the player sees is a ship that stops and a tile that is still there.
+
+**FIXED** by deciding both questions off one test — did the wall hold?
+Broke through → charge and carry on.  Held → charge nothing and FALL THROUGH
+to the impulse, bouncing like any other collision with something solid.  The
+mobile path keeps its own early return (the momentum hand-off above already
+shoved it; letting the impulse run too would shove it twice).
+
+**MEASURED AFTER**: v5 / v8 / v12 into rock deal 3 / 8.8 / 21.3 and come off
+at −0.3 / −0.5 / −0.8; v20 breaks through and carries on at ~7 (against 19.3
+with the break-path charge removed, which is the negative control for the
+other half); v40 into metal deals 258.7 and throws the ship back at −12.9.
+
+**THE ENERGY IS NOT LOST BY NOT CHARGING IT.**  The bounce is where it goes.
+That is the invariant to keep in mind if anything ever reintroduces a
+velocity tax on this path: a crash has exactly two sinks, the break and the
+rebound, and billing both is billing twice.
+
+---
+
+### 14. Glass loses its threshold, and mass becomes a stated scale (2026-09-12)
+
+Two follow-ups from the same play-test, both about the energy model being
+undermined by numbers that pre-dated it.
+
+#### 14a. The glass whole-pane crash rule
+
+**REPORTED**: "Ranking a glass plate over a threshold may be the error I'm
+experiencing — this deviated from the energy model and should be removed."
+
+Correct, and it is the clearest single example of what the unified-impact
+work exists to remove.  V9 gave a glass tile a whole-pane crash rule: any
+crash over `CRASH_VELOCITY_THRESHOLD` spent its ENTIRE remaining boundary
+budget.  So glass was the one material whose crash outcome was a **threshold
+question** — did you clear the gate, yes or no — while rock, plastic and
+metal had long since become **amount questions**.  A ship at 4.1 u/step and
+a ship at 40 destroyed a pane identically.
+
+It survived step 2 (which routed it through the grain model rather than
+around it) and step 4 (which made every other crash kinetic) because each of
+those steps preserved it *deliberately*, as "unchanged in meaning".  That is
+the lesson worth keeping: **a special case carried forward with a note
+saying it is unchanged will survive every refactor that is careful**, and
+the care is what hides it.  Only a play-test found it.
+
+**MEASURED**: 1 ram → 9, landing beside rock's 9 — which is the tell that
+the model is now doing the talking, since glass and rock share
+`bondStrength` 0.4 and derive 50.0 and 54.7 HP.  The audit's "KE per derived
+HP" column went FLAT across all four materials (296 / 324 / 286 / 299);
+glass was the one breaking it.
+
+**The sharp form of the regression** is not the ram count — a count would
+pass against a build that merely raised the threshold.  It is that a SLOW
+qualifying crash now leaves the pane standing, which only an amount model
+can produce.
+
+#### 14b. The mass scale
+
+**REPORTED**: "this energy transfer feels good overall but I think we need
+to scale mass for projectiles, the player and entities."
+
+The diagnosis was right and the measurement located it precisely.  Mass used
+to be an IMPULSE term and nothing else, so its numbers only had to be right
+relative to each other inside the solver.  The energy model made mass half
+of what every impact SPENDS — so four unrelated ladders silently became one
+balance surface, and nothing made it readable.
+
+**MEASURED** (`perf/impact-audit.mjs` §7, added for this), as mass per d²:
+
+| class | range | reading |
+|---|---|---|
+| shards | 0.0100 .. 0.0300 | coherent — material density, glass:rock:metal 1:1.8:3 |
+| enemies | 0.0102 .. 0.0400 | inside the material band |
+| projectiles | 0.0139 .. 0.0960 | wide, but authored as energy banks |
+| **player** | **0.2500** | **alone** — 25× glass, 8× rock, 2× the dragon |
+
+A 20-unit hull massing 100 was as dense as nothing else in the game.
+
+**FIXED** by stating the scale rather than by moving the ship (user call): a
+ship is a machine, not a rock, and should plow through gravel.  `PLAYER_MASS`
+is now `massFor(PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL)` — exactly 100, so
+nothing re-priced — and the four shard `sizeToMass` ladders read the same
+table, so the material ratio lives in one place.  `HULL_DENSITY_CYCLE` is
+the live A/B, because ONE number moves crash energy, knockback, the
+body-impact shake and the roll spring together and that is a play question.
+
+**Two classes deliberately do not derive**, and the reason generalises:
+**never couple a physical quantity to a visual one.**  A projectile's `mass`
+is its energy BANK; deriving it from the drawn `size` would make a bolt's
+damage a function of its sprite — and the Cannon proves the point, drawn at
+16 against the Blaster's 6 while massing 3.56 against 1.00, so its density
+is the *lowest* of any round and would have to be authored low anyway.  No
+information gained, one hazard introduced.
+
+**STILL OPEN**: whether the hull should sit that far above the material band
+at all is now a question someone can *ask*, which it was not before.  The
+ladder exists to answer it in play.  Two enemy densities are also flagged
+rather than fixed: the DRAGON at 0.1221 (a mini-boss, deliberately
+immovable) and the BUBBLE at 0.0400 — denser than metal, which reads
+backwards for a gas blob, but its mass 9 is load-bearing and the
+immovability fix rests on that exact impulse arithmetic.
+
+**A MEASUREMENT TRAP worth recording**, because it cost two wrong readings.
+Measuring "how much does one ram take" by running the ship to rest counts
+RAMS, not bite — a lighter ship comes off faster and comes back for more, so
+a half-mass hull read 1.5× the damage.  And resetting a tile's `health`
+between arms does NOT reset its `fractureEdgeFill`, so the second arm
+reports ACCUMULATED erosion (measured 21.3 / 31.9 / 37.2 as the hull got
+*lighter*, which is a running total, not a heavier bite).  One contact, one
+fresh tile.
+
+---
+
+### 15. Every mass x10, so impacts hit ten times harder (2026-09-12)
+
+**ASKED**: "Mass of the player should increase by a factor of ten for
+default ... do the same increase to projectiles and everything else as well
+— 10x", with "areas and sizes of objects should stay constant."
+
+**AND THE FIRST ATTEMPT GOT IT EXACTLY BACKWARDS**, which is the entry worth
+keeping.  Every impact in this engine is worth `mass / IMPACT_ENERGY_PER_DAMAGE`,
+so the "careful" move looked like scaling that conversion alongside the
+masses — preserving every ram count and every weapon number.  That makes the
+whole change a **no-op**: bigger numbers, identical game.  The user's
+response was blunt and correct: *"I legitimately don't understand what the
+point of increasing the mass ten times and then scaling impacts back just as
+much is."*
+
+The lesson is not about physics.  It is that **"nothing changed" is a
+suspicious outcome for a change someone deliberately asked for.**  Energy
+collisions had been the session's whole subject; a mass increase inside that
+work could only have been about making collisions carry more.  Preserving
+the old balance was defensible in the abstract and wrong in context, and no
+amount of measurement would have caught it because the measurement confirmed
+exactly what the mistaken intent predicted.
+
+**WHAT SHIPS**: `MASS_SCALE = 10` multiplies mass SOURCES only.  Nothing is
+compensated — not the energy conversion, not the crash gates, not the flow
+reference, not the audio pitch, not the kick impulse.
+
+Measured at the audit's 6 u/step ram: rock **9 → 1**, glass 9 → 1, plastic
+65 → 7, metal 78 → 8.  A round's energy bank is 10x too, so a Blaster bolt
+punches twelve gnats instead of four and the Laser's falloff is 49/50 a hit
+against its old 4/5.
+
+**RATIOS ARE INVARIANT AND THAT IS WHY THIS WAS EASY TO GET WRONG**: the
+impulse split, the body-impact shake, the roll spring, the ship-weight
+normalisation all cancel a uniform factor, so the ship still handles like
+itself — and *every ratio-shaped test in the suite stayed green through
+both the wrong version and the right one.*  Only the comparisons move.
+
+**TWO THINGS LOOKED LIKE MASS THRESHOLDS AND WERE NOT**, both caught by
+measuring rather than reading:
+
+- **A `/ literal` next to a mass is only a threshold if the mass is on the
+  other side of a comparison.**  `PhysicsSystem`'s shard push,
+  `0.20 / Math.max(1, target.mass / 10)`, reads as "a gate at 10" and is
+  really `min(0.20, 2 / mass)` — an inverse-mass term with a cap on the
+  *result*.  Scaling the 10 put it an order of magnitude from the enemy path
+  it must agree with (0.1125 against 1.125).
+- **A value converted out of authored units must never be written back into
+  an authored field.**  `withGunnery` set `mass: projectileMassFor(config)
+  * mult` into `WeaponConfig.mass`, whose contract is the authored number,
+  so the next conversion scaled it again: a Gunnery mark multiplied the
+  round's mass by 13.6 against its bite's 1.36.
+
+**STILL OPEN**: at this energy a hull occasionally LEAPS a glass tile —
+about 1 run in 6 on the full-speed glass charge, caught by
+`tests/terrain.spec.ts`'s `ghosted` counter.  `sweepRewind` resolves the
+EARLIEST contact in a step and refuses later ones (its documented
+backward-only rule); a tile destroyed outright by a hull that keeps most of
+its speed is a case that rule was not built for.  That belongs to the sweep,
+not to the mass work, and needs its own pass.
+
+### 16. Penetration is re-based, and the blast joins the model (2026-09-12)
+
+**REPORTED**: "the weapons penetrate too much at base level right now.  This
+current level of damage from weapons should occur at roughly 3 MkIII gunnery
+modules.  Additionally the cannon blast effect no longer does much damage.
+This needs to be aligned with the new model."
+
+**TWO ASKS, AND THE FIRST ONE HAS A TRAP IN IT.**  The obvious reading of
+"too much damage at base" is to scale the round down — both its numbers.
+That does not work, and the arithmetic says why in one line: the falloff is
+`1 - bite/energy`, so dividing the BITE and the BANK by the same factor
+leaves the ratio untouched and a round punches exactly as many bodies as
+before.  **Penetration is bank-shaped.**  Only `mass` moves.
+
+That also makes the change safe in the way the user implicitly asked for:
+`damage` is untouched at every Gunnery level, so no enemy takes longer to
+kill, no §7 trait threshold shifts, and the §7 weapon×trait table still
+holds.
+
+**THE CALIBRATION IS THE USER'S**, and it is a statement about progression
+rather than a number chosen here: today's reach is what a fully-gunned ship
+should have.  So the base bank is today's over what three Gunnery Mk III
+multiply it by — `BASE_BANK_DIVISOR = 1 + 3 × 0.36 = 2.08` — and
+`withGunnery` multiplies it straight back, so the two ends meet by
+construction rather than by tuning.
+
+MEASURED through the real resolver (`perf/impact-audit.mjs` §8, added for
+this — 1-HP gnats measure the bank directly, since a bolt is charged only
+what a body could absorb):
+
+| weapon | base before | base after | 3× Mk III after |
+|---|---|---|---|
+| Blaster | 31 | 15 | 36 |
+| Burst | 121 | 58 | 136 |
+| Shotgun | 41 | 20 | 51 |
+| Laser | 201 | 97 | 226 |
+| Lightning | 81 | 39 | 86 |
+| Seeker | 71 | 34 | 76 |
+| Cannon | 171 | 82 | 176 |
+
+Every before/after ratio lands on 2.05..2.09 against the 2.08 divisor, and
+the fully-gunned column sits just above the old base — "roughly", which is
+what was asked for.
+
+**A SECOND AUTHORED-UNITS BUG, IN THE SITE NOBODY LOOKED AT.**  The mass
+work found and fixed `withGunnery` writing `projectileMassFor(config) * mult`
+back into `WeaponConfig.mass` — a field whose contract is the AUTHORED
+figure, so the next conversion applied `MASS_SCALE` again.  `chargedConfigOf`
+had the identical bug at four call sites and kept it: every charged shot flew
+ten times too heavy (a charged Blaster carried a 2000 bank against its
+intended 200).  It survived because an over-penetrating charge looks exactly
+like a strong charge.  **The lesson generalises past this bug**: when a unit
+error is found at one site, the question is not "is it fixed" but "how many
+other sites convert the same way", and the answer here was four.
+
+**THE BLAST.**  `explosionDamage: 10` was the last damage number in the
+roster still authored as a flat scalar while everything around it became
+kinetic — and it did not merely fall behind, it was scaled by a `hitFalloff`
+that only started meaning something in step 3, so the same constant got
+quietly weaker.  It is now `blastDamageFor(mass, speed)`: the shell's own
+kinetic energy times `BLAST_ENERGY_COUPLING` (0.2), the sibling of
+`CRASH_ENERGY_COUPLING` — a hull couples ~11% of a contact into breaking
+work, a shaped charge a fifth of its energy into the blast.  Measured on a
+bystander at half the radius: **5.2 → 10.4**, with a peak of 17.3 against
+the Cannon's 18 direct bite.
+
+Three properties fall out rather than being written: it rides GUNNERY for
+free, a CHARGED shell blasts harder by being heavier, and a shell that spent
+its bank boring blasts weaker — because the `× hitFalloff` already at the
+call site IS the fraction of launch energy left, so peak × (E/E₀) is the
+energy it still carries with no second curve anywhere.
+
+**ABSENT MEANS DERIVED; A VALUE MEANS AUTHORED.**  `BOSS_WEAPONS.SIEGE`
+keeps its own `explosionDamage: 6`.  Deriving it would have tripled the
+Bastion's splash as a side effect of fixing the player's gun, which is a
+boss rebalance nobody asked for — and a designed encounter's number is one
+someone chose.
+
+**WHAT THE TESTS COULD NOT SEE, AND WHY THREE OF THEM MOVED.**  Three
+existing assertions stated the bank as a product (`5 * 10` bites, `49/50`
+decay, `10` bites) — all correct, all now wrong by exactly the divisor.  They
+are rewritten to READ `MASS_SCALE` and `BASE_BANK_DIVISOR` live and compute,
+because that bank has now moved twice and a product written out is a claim
+about whichever build wrote it.  Same rule the nebula grain-size default
+taught: a default that moves a measured quantity has to be walked past every
+assertion written against it.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
+by this.
+
+### 17. A shell that stops, blasts (2026-09-13)
+
+**REPORTED**: "The cannon doesn't appear to blast when hitting tiles or
+shards.  If the cannon runs out of mechanical travel energy then it should
+also blast.  So the two criteria should be time out and energy depletion."
+
+**THE GAP WAS REAL AND STEP 5a PUT IT THERE.**  `detonateOn: 'enemy'` is what
+stops a heavy round being a contact mine — terrain does not trip the charge,
+the shell bores instead — and the fallback for a shell that meets nothing was
+the fuse.  But a shell that meets TERRAIN and stops meets neither: the gate
+refuses the tile, and the fuse never arrives.  It simply vanished.
+
+**THE CRITERIA ARE NOW THREE**, not two, and the third is the user's:
+an ACTOR contact, the FUSE, and RUNNING OUT OF TRAVEL ENERGY.  The actor
+contact is kept deliberately and it is not a quibble — a Cannon shell carries
+a bank of ~86 damage-equivalents against an 18 bite, so it does NOT stop on a
+real enemy; under "stop or fuse" alone the weapon would pass through its
+target and blast somewhere behind it.  Energy depletion is what covers
+terrain, where the shell genuinely stops.
+
+**THE BUG UNDER THE BUG**, and the reason the first attempt failed with the
+flag set correctly the whole time: `updatePhysics` ends with an
+entity-compaction pass that releases INACTIVE projectiles to the pool, and
+`releaseToPool` clears `explosionRadius` / `explosionDamage`.  So a round
+deactivated at the stop is a BLANK by the time `updateGameLogic` reaches the
+fuse pass — mid-step, in the same substep.  The fix is that the stop site
+leaves the round ALIVE and lets the fuse pass end it.  **The general lesson:
+when deferring work to a later phase of the same step, the question is not
+only "does the later phase run" but "does anything between them recycle what
+I am deferring".**  Object pools are exactly where that bites.
+
+**AND THE BLAST STOPPED READING TRAVEL ENERGY.**  Entry 16 derived
+`explosionDamage` at spawn from the round's muzzle energy and left the AoE's
+existing `× hitFalloff` in place, documented as "a shell that spent its bank
+boring blasts weaker".  That is wrong twice over.  It DOUBLE-COUNTS — the
+charge is already a function of the round's energy — and it makes this
+entry's whole trigger inert by construction: a shell detonating *because* it
+ran out of travel energy has ~none left, so the blast fired at the exact
+moment the rule exists for would land ~zero.  A warhead does not shrink
+because the shell flew through a wall.  Mass sizes the charge; travel energy
+only decides how far it gets.
+
+**AT MOST ONCE.**  A round drained to nothing on an ACTOR takes both paths at
+once, so `GameEntity.detonated` guards it — in TWO places, the stop site and
+the fuse pass, which is why the regression goes red only when both are
+removed (measured: two damaging rings instead of one).  Both flags are per
+LIFE and are cleared on the pooled spawn path; a recycled shell that kept
+`detonated` would never explode again, and one that kept `blastPending` would
+explode on spawn.
+
+MEASURED (`perf/impact-audit.mjs` §8, a bystander 55 off the blast centre):
+on an actor contact 6.4, on energy depletion against terrain **0 → 5.9**.
+
+### 18. A further 40% off the base bank (2026-09-13)
+
+**REPORTED**: "Weapons are still a little too powerful.  Let's reduce down
+another 40% ish."
+
+**ONE LINE, AND THE REASON IT IS ONE LINE IS ENTRY 16.**  Penetration is
+bank-shaped — the falloff is `1 - bite/energy`, so only `mass` can move it —
+and entry 16 put every player gun's authored mass behind a single divisor for
+exactly this.  So the change is a factor over that divisor and nothing else:
+no weapon row moved, no bite moved, no §7 threshold moved.
+
+**THE DIVISOR IS TWO FACTORS NOW, AND THEY ARE KEPT APART ON PURPOSE.**
+
+- `GUNNERY_MK3_TRIPLE_MULT` = `1 + 3 × 0.36` = 2.08 — the PROGRESSION anchor.
+  It is a claim about ANOTHER TABLE (what `MODULE_DEFS` grants) and is pinned
+  against the live catalog in `tests/weapons.spec.ts`.
+- `BASE_BANK_TRIM` = 0.6 — this entry.  A play-tested feel number over the
+  anchor, pinned only as a composition.
+
+Folding them into one literal would have been shorter and would have lost
+which half a future Gunnery retune is allowed to move.  The rule
+generalises: **when a constant is the product of a pinned relationship and a
+free one, write it as the product** — the alternative is a number that half a
+test suite is entitled to change.
+
+**THE HONEST CONSEQUENCE, stated because it is easy to read as a bug.**
+Three Mk III still multiply the base bank by exactly 2.08 — the LADDER is the
+anchor's and is untouched — but they now land at 0.6 of the pre-rebase round
+rather than on it.  Restoring the old reach would take ~7 marks, which the
+hex-slot count puts out of range.  That is what the call asks for; what moved
+is where the ladder starts, not its shape.
+
+MEASURED through the real resolver (`perf/impact-audit.mjs` §8):
+
+| weapon | before trim | after trim | 3× Mk III after |
+|---|---|---|---|
+| Blaster | 15 | 9 | 22 |
+| Burst | 58 | 35 | 82 |
+| Shotgun | 20 | 12 | 31 |
+| Laser | 97 | 58 | 136 |
+| Lightning | 39 | 24 | 52 |
+| Seeker | 34 | 21 | 46 |
+| Cannon | 82 | 50 | 106 |
+
+Every base lands on 0.60..0.62 of its previous value — the 40% asked for.
+
+**AND A COUPLED CONSEQUENCE THAT IS THE MODEL WORKING.**  Entry 16 derived
+the Cannon's blast from the shell's OWN mass, so the trim rode straight
+through it: peak 17.3 → 10.4 against an unchanged 18 direct bite.  A lighter
+shell carries a smaller charge — that is what deriving it means, and undoing
+it by re-authoring `explosionDamage` would put back the flat scalar the whole
+step removed.  The dial for the charge ALONE is `BLAST_ENERGY_COUPLING` (DBG
+▸ Player ▸ "Blast energy", step 2× is that A/B), never the trim, which is
+about penetration.  This is worth writing down because the coupling's own
+calibration sentence — "the charge is worth about one more hit" — was
+measured at the old bank and is now a ratio of ~0.6, so the comment beside
+the constant had to be corrected rather than left claiming a number it no
+longer produces.  **A calibration sentence is a measurement with a date on
+it**; anything that moves one of its inputs has to re-read it.
+
+Two stale claims were swept out in the same pass, both left by entry 17:
+the `BLAST_ENERGY_COUPLING` comment still described the `× hitFalloff`
+scaling that entry 17 deleted, and `CLAUDE.md`'s blast block still quoted
+the pre-trim peak.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
+by this.
+
+### 19. A condensing nebula cloud mostly stays nebula (2026-09-13)
+
+**REPORTED**: "reduce the frequency of nebula shards merging into other
+materials significantly while [increasing] the frequency (or reallowing) of
+nebula shards converting into nebula tiles."
+
+**TWO ASKS THAT TURN OUT TO BE ONE NUMBER.**  Both outcomes are the two arms
+of a single roll inside `NebulaSystem.onComposeNebulaShardPair`, which was a
+bare `Math.random() < 0.5`.  So the change is one named share, not two knobs
+that could be set to contradict each other.
+
+MEASURED FIRST (a probe over the real sim, instrumenting the adapter rather
+than differencing populations — a tile can also be destroyed and a condensed
+shard can merge on, so a population count measures the wrong thing):
+
+| | pairs | tile rolls | placed | lost | material |
+|---|---|---|---|---|---|
+| NEBULA_FIELD 90 s | 76 | 41 (53.9%) | 41 | 0 | 35 |
+| UNIVERSE 90 s | 18 | 11 (61.1%) | 10 | 1 | 7 |
+
+So the split really was running at its nominal rate, and nebula was leaving
+the family about as often as it rebuilt itself.  After the change, material
+outcomes fell 29 → 6 per 90 s on NEBULA_FIELD with tile placements flat
+(41 → 39).
+
+**THE MEASUREMENT FOUND A SECOND THING NOBODY WAS LOOKING FOR**, which is the
+argument for measuring before tuning.  `transmuteToTileAt` searches the origin
+hex plus its six neighbours and returns false when all seven are occupied —
+and the caller did nothing with that.  Both source shards have already faded
+by then, so the pair's mass was simply DESTROYED: 9.1% of tile rolls on
+UNIVERSE, a loss only the tile arm could suffer.  It was documented as an
+"acceptable fallback for a 50/50 roll where the shard side always succeeds",
+which was defensible at an even split and stops being defensible the moment
+the tile arm carries 7/8 of the traffic.  **A tolerance written against a
+ratio expires when the ratio moves** — and nothing announces that, because a
+silent loss has no symptom at all.
+
+The fix hands the mass back as a nebula-shard.  Falling through to the
+material arm would have been the other obvious option and is exactly wrong:
+it would turn a crowded neighbourhood into the conversion this entry exists
+to make rare.
+
+**WHAT IS DELIBERATELY UNCHANGED.**  Rock-derived dust (`fromRock`) still
+always returns to rock and is never eligible for a tile.  That dust was rock
+a moment ago — a chip thrown by `GRAIN_CHIP_DUST` — so returning it is
+CONSERVATION, not conversion, and a tile there would mint nebula out of
+terrain.  It bypasses the roll entirely, which is why the effective material
+rate on a natural map sits above the nominal share (20% against 12.5% on
+UNIVERSE, with 3 of 45 pairs rock-derived).  The knob also never changes
+WHICH material a cloud picks — only how often it picks one at all.
+
+Shipped behind `NEBULA_TILE_SHARE_CYCLE` (DBG ▸ Visual ▸ "Neb solid", index 0
+ships) because the direction was the user's and the exact share is a feel
+call they should be able to judge in play; `half (old)` is the pre-call
+behaviour, one click from the end.
+
+`tests/nebulacondense.spec.ts` pins all three claims, each verified red under
+its own targeted revert.  The no-op branch is FORCED rather than waited for:
+at ~9% of rolls a test that waited for it would be a flake generator.
+
+### 20. The tile roll is origin-blind (2026-09-13)
+
+**REPORTED**: "Tile or other material derived dust should also turn into
+nebula tiles at the same rate as regular virgin nebula shards."
+
+**THIS REVERSES ENTRY 19's ONE CARVE-OUT**, which that entry had argued was
+load-bearing ("rock-derived dust is exempt and must stay so").  The argument
+was that returning a rock chip's dust to rock is CONSERVATION and routing it
+to a nebula tile would mint nebula out of terrain.  That reads the timeline
+backwards: by the time a puff is coalescing with another puff it IS nebula,
+and exempting it made material-derived cloud a second class that could only
+ever leave the family.  Origin still decides WHICH material the other branch
+condenses into — rock dust returns to rock — and that is the half which really
+is conservation; the tile roll is not.
+
+`fromRock` therefore no longer reaches `onComposeNebulaShardPair` at all, and
+was removed from the `ShardAdapter` signature rather than left unread.  **A
+parameter nobody reads is worse than no parameter**: it says origin still
+matters at the adapter, which is exactly the thing that stopped being true.
+
+Only ROCK dust ever carried the flag, so glass / plastic / metal dust was
+already rolling the tile at the full rate — the ask was, precisely, the rock
+carve-out.
+
+**A PROXY THAT LOOKS LIKE THE PREDICATE IS NOT THE PREDICATE.**  The first
+in-play measurement keyed on `material === 'rock-shard'` — the committed
+target — because the adapter no longer sees `fromRock`.  That reads
+rock-committed pairs as the MAJORITY on UNIVERSE (88 of 128), which made the
+change look enormous.  It is wrong: a cloud whose blended HUE maps to rock
+commits to rock-shard without ever having been rock dust.  Hooking the
+ShardSystem seam that still holds the source shards gives the real figure, and
+it is the opposite shape — rock-DERIVED pairs are 2 of 113 and 0 of 258 in a
+passive run, matching entry 19's earlier 3 of 45.
+
+So the honest statement is two-part: the RATE claim is measured through the
+real adapter at 800 pairs a side (rock-derived and virgin roll the tile within
+a fraction of a percent), and the in-play effect is concentrated wherever rock
+is actually being BROKEN — a probe watching an idle map barely sees this rule
+at all.  An ablation run also has to put its flag in place with
+`page.evaluate`, not `addInitScript` after `goto`, which applies only to later
+navigations: the first ablated arm silently measured the unablated build, and
+the tell was that the "exempt" arm still produced tiles.
+
+**AND THE REGRESSION FLAKED FIRST TIME, for two compounding reasons** worth
+keeping: a sibling test walks the same DBG cycle and leaves it wherever it
+finished, so an undialled run measures whatever step ran last; and at the
+p = 0.5 that stale dial left behind, a 400-sample 5-point band is 1.4 s.d. —
+about one failure in six with the product perfectly correct.  Dialling
+explicitly and sizing N and the band off the binomial (800 a side, 6 points =
+~3.6 s.d. at the shipped p = 0.875) fixes both.  **A band nobody computed is a
+flake with a delay on it.**
+
+### 21. The nebula material ledger (2026-09-13)
+
+**REPORTED**: "the amount of nebula shard material required to create a nebula
+tile [must be] greater than the amount of nebula shard material created by
+shattering a nebula tile.  This prevents nebula clouds from growing.  This
+should apply to nebula shards that merge together to form larger nebula shards
+as well."
+
+**THE LOOP WAS OPEN BY A FACTOR OF TWO, AND ENTRIES 19-20 WIDENED IT.**  A tile
+shatters into its own Voronoi cells, each worth the default ONE condense unit —
+measured on 40 real tiles, 3-4 children.  A tile COST
+`NEBULA_CONDENSE[committed material].units`, which is 2 for glass and rock.  So
+tile → shatter → coalesce → tile ran at ~2x.  The structural defect is precise
+and worth naming: **the tile branch of the crystallise roll had no price of its
+own**, because the roll happens in the adapter AFTER the accumulation gate, and
+the gate was keyed on a MATERIAL the cloud was not going to become.  Entry 19
+then pushed 7/8 of outcomes down exactly that unpriced branch.
+
+MEASURED on a passive NEBULA_FIELD (nothing shooting anything) over 150 s, by
+building the stashed tree rather than patching the current one in-page:
+
+| | nebula bodies | crystallising pairs | tiles made |
+|---|---|---|---|
+| before | 1152 → 1226 (**+6.4%**) | 128 | 112 |
+| after | 1128 → 1116 (**-1.1%**) | 8 | 7 |
+
+**THE TWO NUMBERS ARE COUPLED, AND THAT IS THE TRAP.**  `TILE_COST` and
+`MERGE_LOSS` look independent and are not: a cloud repeatedly eating 1-unit
+debris follows `u' = (u + 1)(1 - MERGE_LOSS)`, which converges on a CEILING of
+`(1 - MERGE_LOSS) / MERGE_LOSS`.  If that ceiling sits below `TILE_COST`, no
+cloud ever affords a tile again — a dead feature that throws nothing, logs
+nothing and simply looks like tiles having stopped.  The rule is
+`MERGE_LOSS < 1 / (TILE_COST + 1)`; at the shipped 5 / 0.1 the ceiling is 9.
+**Two knobs that each look reasonable alone can compose into a setting nobody
+chose** — so they share one DBG row and the fixed point is asserted per step.
+
+**COMPARE AGAINST THE MAX, NOT THE MEAN.**  The yield is 3.92 on average and 4
+at its luckiest.  A cost of 5 makes the inequality true of EVERY tile; a bound
+set on the mean would still let a lucky run ratchet upward, which is the shape
+of bug that takes minutes of play to become visible and is then hard to
+attribute.
+
+**THE YIELD SIDE IS MEASURED, NEVER DECLARED.**  The regression breaks real
+tiles through the real death path and counts the units that come back, because
+the child count falls out of the grain spec's site placement, its count clamps
+AND the sliver-retirement pass.  A test that read `NEBULA_TILE_SHATTER_YIELD_MAX`
+on both sides of the inequality would check a constant against itself and pass
+for ever while a `grainSize` retune re-opened the loop — the exact failure mode
+CLAUDE.md §8 already records for nebula's grain size moving two test margins.
+
+**AND THE STALL PATH NEEDED ITS OWN ANSWER.**  The accumulation gate is not
+sufficient: `NEBULA_CONDENSE_STALL_BONDS` force-crystallises a cloud that never
+reached its cost, so `canAffordTile` is passed to the adapter separately.
+Without it a stalled under-price cloud still buys a tile, which is the whole
+loop again through a side door.
+
+---
+
+### 22. What the play-test returned: the charge, its ring, and the cloud (2026-09-15)
+
+The session's checklist came back with A, C, D and E good, B2-B7 good, and
+three items to act on.  All three are recorded here because each is a
+different KIND of finding, and only one of them was a bug.
+
+**(1) The coupling doubles, 0.2 -> 0.4.**  A TUNING call, made through the
+dial the model already named.  "The charge is worth about one more hit" is
+the statement behind the coupling, and `BASE_BANK_TRIM` had quietly made it
+worth ~0.6 of one (10.4 against an unchanged 18 bite) by taking 40% off every
+base bank — the blast derives from the shell's mass, so it rode the bank
+down.  Play-tested through the DBG 2x step and then BAKED, per §8's rule
+that a settled value moves into the constant and the knob returns to 1x.
+Measured after: **peak 20.8 against the same 18 bite**; a bystander at half
+the radius loses 9.24.  The ladder's 0.5x step is now the A/B against the
+pre-call blast.
+
+**(2) The ring grows with the round.**  NOT a bug in the arithmetic, which is
+the part worth keeping: three Gunnery Mk III measured the blast at exactly
+x2.08 (20.8 -> 43.2) both before and after this change.  What was wrong is
+that `explosionRadius` was AUTHORED FLAT, so the ring the player watches was
+pixel-for-pixel identical at every mark and the only tell that the mark had
+landed was a damage number on a bystander — hence the report, "I can't
+clearly tell that the blast grows".  `withGunnery` now scales the reach by
+**sqrt(mult)** (110 -> 158.6), because in a 2D world the ring's AREA is what
+the energy buys and a linear radius would count the mark twice over.  Gated
+on the blast being DERIVED, so an authored `explosionDamage` (the Bastion's
+shells) keeps its authored reach too.
+
+> The general lesson, and the reason this is written down rather than just
+> fixed: **a derived quantity that only surfaces in a number nobody reads is
+> indistinguishable, in play, from one that does not move.**  Every other
+> derivation in this work bought a visible consequence for free — a heavier
+> shell bores further, a faster ram breaks more.  This one did not, and
+> nothing in the model said so.
+
+**(3) A blast pushes cloud, it does not break it.**  The only real defect of
+the three.  Nebula takes the voronoi GEOMETRY without the grain damage model
+(CLAUDE.md §8), so it carries no boundaries for `applyBoundaryDamage` to
+spend on and the ring sweep fell through to the whole-body `health -=`.
+Against a 1-HP tile that is instant death for everything inside the radius,
+so one Cannon shell cleared a bank outright — **measured 11 of 11 destroyed
+with the rule removed, 0 of 28 with it**.  A shockwave has nothing solid to
+grip a gas with; the knockback is the whole of what it does to one.
+
+Three things about the fix are deliberate.  The FEEDBACK is skipped with the
+damage rather than beside it — a hit flash and a damage number on a body that
+lost nothing is precisely the misreading the rule exists to remove.  It is the
+BLAST only: shooting a cloud still breaks it, and the shell's own direct hit
+is untouched.  And only the MOBILE half of the family can actually be shoved
+(measured: shard speeds 0.01-0.02 -> 0.24-0.85), because a static tile's
+infinite mass is what bolts it to its hex coordinate — pushing one would break
+the regen, neighbour-count and transmutation logic that all assume
+`position === hexCoord`.
+
+Its regression carries a CONTROL body in the same ring, for a reason that
+generalises to every "X is now immune" test: **"nothing died" is equally true
+of a ring that never fired.**
+
+**E3 was explicitly declined** (user call): the nebula crystallising loop is
+slower after entry 21 (128 -> 8 pairs per 150 s) and that is wanted as it is.
+`NEBULA_DRAIN_CYCLE` stays where it is.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).
+
+---
+
+### 23. The cloud rule was one variant too wide (2026-09-17)
+
+Entry 22's third finding shipped a guard written against "nebula", and the
+follow-up play-test caught what that cost: **blasts stopped shattering nebula
+tiles**, which is not what was asked for and is its own regression.
+
+MEASURING BOTH ARMS is what reframed it.  The build before entry 22 did TWO
+different things to a nebula bank, and only one of them was wrong:
+
+| | before entry 22 | after entry 22 | now |
+|---|---|---|---|
+| tiles in the ring | shatter into cells | untouched | shatter into cells |
+| shards in the ring | **0 of 15 survive** | untouched | all survive |
+
+So the tiles were always correct — a tile decomposes into its Voronoi cells,
+which is a cloud being broken UP.  What was wrong was the shards, which
+declare `shatter.kind: 'none'` and so hand back nothing when they die.  A
+guard naming "nebula" stopped the good half with the bad.
+
+**THE RULE IS NOW A PROPERTY** (user call: option B).
+`constants.breakYieldsNothing` is true of a body whose death would yield no
+children, and the ring's two hardcoded variant-name checks collapse into it:
+*a blast may not damage a body that cannot express being broken.*  Today it
+selects exactly `nebula-shard` (`kind: 'none'`) and `indestructible-tile`
+(powerlaw, `countMax: 0`).  The caveat worth keeping is the VORONOI one: for
+a voronoi variant the count fields are vestigial legacy-A/B values, so
+reading a zero there would exempt a material that breaks perfectly well.
+
+One consequence is deliberate and is a small behaviour change beyond the
+ask: the indestructible wall no longer flashes under a blast either.  Damage
+feedback follows damage, and a number on a body that lost nothing was always
+the misreading this rule removes.
+
+**THE PIECES NOW CARRY THE SHOVE**, and the obvious way to do it is dead.
+Scaling the stamped `lastImpactVelocity` with the charge is measurably a
+NO-OP: the shatter's forward term is
+`min(SHATTER_SCATTER_SPEED_CAP, impactSpeed × forwardDrag + …)` and the ring's
+fixed stamp of 8 already saturates that 2.5 cap at every charge size, so the
+cap — shared by every material's break — would have to move first.  The live
+lever is a separate `GameEntity.blastImpulse`: the ring stamps the outward
+push the parent was about to take, and `handleEntityDeath` adds it to every
+child at the single shatter call site.  Measured: mean fragment speed
+2.93 → **5.45** for 4× the knockback.
+
+> The reason this is at the call site rather than in the three per-style
+> child recipes: children are always APPENDED, so the slice past the old
+> length is exactly this break's output whichever style ran — which is also
+> what stops the rule meaning two different things under the fracture A/B.
+
+**TWO TEST-SHAPE LESSONS**, both found by negative controls rather than by
+review, and both general:
+
+- **A sample that is not filtered to the thing under test passes for the
+  wrong reason.**  The shard-survival claim counted every nebula shard on the
+  map, so "all of them survived" was true of shards nowhere near the blast —
+  and it passed against a build with the exemption deliberately removed.
+- **A sabotage that does not change behaviour is not a control.**  The first
+  attempt at that revert fell through to a second arm of the predicate and
+  still returned true, so the "failing" run was measuring the shipped rule.
+  A control has to be checked for having actually landed.
+
+**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).

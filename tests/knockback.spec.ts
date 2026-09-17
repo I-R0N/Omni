@@ -22,6 +22,14 @@
  */
 
 import { test, expect } from '@playwright/test';
+
+/** Every mass in the game carries `constants.MASS_SCALE`, and these figures
+ *  are the ENEMY_VARIANTS numbers they stand in for.  Written out rather
+ *  than imported (the weapons.spec rule): the claims here are ratio-shaped
+ *  and so survive a uniform scale either way, which is exactly why an
+ *  unscaled literal would have sat here reading as a real enemy and being
+ *  a tenth of one. */
+const MASS_SCALE = 10;
 import { boot, engine, startRun, waitForStats } from './helpers';
 
 /** Fire one synthetic PLAYER shell into a body built to order, and report the
@@ -49,7 +57,9 @@ function shoot(page: any, spec: { kind: 'enemy' | 'shard'; mass: number; maxSpee
       position: { x: at.x + 20, y: at.y },
       velocity: { x: -16, y: 0 },   // the shipped Blaster/Cannon muzzle speed
       rotation: Math.PI, size: { x: 6, y: 6 },
-      mass: 1,                      // PROJECTILE_CONSTANTS.MASS
+      // Module scope does not cross into `page.evaluate`, so this reads the
+      // live constant rather than the suite's own MASS_SCALE literal.
+      mass: (window as any).__omniMass.PROJECTILE_CONSTANTS.MASS,
       active: true,
       color: '#fff', damage: o.damage, ownerType: 'PLAYER', ownerId: 'player',
       hitEntityIds: [],
@@ -76,10 +86,10 @@ test.describe('a shot pushes by momentum, not by damage alone', () => {
     // roster: the mass-4 gnat, the mass-10 drone, the mass-140 Warden, the
     // mass-500 dragon.  Before the fix every one of these returned the same
     // number, which is the bug in one line.
-    const gnat   = await shoot(page, { kind: 'enemy', mass: 4,   maxSpeed: 12, damage: 18 });
-    const drone  = await shoot(page, { kind: 'enemy', mass: 10,  maxSpeed: 7,  damage: 18 });
-    const warden = await shoot(page, { kind: 'enemy', mass: 140, maxSpeed: 3,  damage: 18 });
-    const dragon = await shoot(page, { kind: 'enemy', mass: 500, maxSpeed: 2,  damage: 18 });
+    const gnat   = await shoot(page, { kind: 'enemy', mass: 4 * MASS_SCALE,   maxSpeed: 12, damage: 18 });
+    const drone  = await shoot(page, { kind: 'enemy', mass: 10 * MASS_SCALE,  maxSpeed: 7,  damage: 18 });
+    const warden = await shoot(page, { kind: 'enemy', mass: 140 * MASS_SCALE, maxSpeed: 3,  damage: 18 });
+    const dragon = await shoot(page, { kind: 'enemy', mass: 500 * MASS_SCALE, maxSpeed: 2,  damage: 18 });
 
     expect(gnat.speed).toBeGreaterThan(drone.speed);
     expect(drone.speed).toBeGreaterThan(warden.speed);
@@ -111,13 +121,13 @@ test.describe('a shot pushes by momentum, not by damage alone', () => {
      *  PROJECTILE_CONSTANTS.MASS = 1 it is small against any real hull.  So
      *  the honest invariant is a body's own top speed with headroom for it,
      *  not the cap in isolation. */
-    const absurd = await shoot(page, { kind: 'enemy', mass: 8, maxSpeed: 8, damage: 60 });
+    const absurd = await shoot(page, { kind: 'enemy', mass: 8 * MASS_SCALE, maxSpeed: 8, damage: 60 });
     expect(absurd.speed, 'even an absurd shot cannot launch it')
       .toBeLessThan(8 * 2);
 
     // A maxSpeed-0 emplacement (Turret, Nest) still flinches rather than
     // being immovable, but only just.
-    const turret = await shoot(page, { kind: 'enemy', mass: 50, maxSpeed: 0, damage: 18 });
+    const turret = await shoot(page, { kind: 'enemy', mass: 50 * MASS_SCALE, maxSpeed: 0, damage: 18 });
     expect(turret.speed).toBeGreaterThan(0);
     expect(turret.speed).toBeLessThan(3);
 
@@ -133,8 +143,8 @@ test.describe('a shot pushes by momentum, not by damage alone', () => {
      *  speeds.  They need not be identical — the two paths model different
      *  things and a shard also takes a dent — but they must be the same
      *  ORDER, which is what "this is different than shards" was about. */
-    const npc   = await shoot(page, { kind: 'enemy',  mass: 30, maxSpeed: 7, damage: 18 });
-    const shard = await shoot(page, { kind: 'shard',  mass: 30, damage: 18 });
+    const npc   = await shoot(page, { kind: 'enemy',  mass: 30 * MASS_SCALE, maxSpeed: 7, damage: 18 });
+    const shard = await shoot(page, { kind: 'shard',  mass: 30 * MASS_SCALE, damage: 18 });
 
     expect(npc.speed).toBeGreaterThan(0);
     expect(shard.speed).toBeGreaterThan(0);

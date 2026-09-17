@@ -132,7 +132,14 @@ test.describe('a live shield turns a shot away', () => {
      *  exactly as it did before deflection existed anywhere. */
     const r = await shootPlayer(page, { damage: 40, shield: 10, where: 'hull' });
 
-    expect(r.vx, 'not deflected — it punched through').toBeLessThan(0);
+    // NOT TURNED AROUND is the tell, and it is deliberately not "still
+    // heading in": under the energy model a bolt that spends its whole bank
+    // stops DEAD (`speedAfterSpending` returns 0, so its velocity is zeroed),
+    // and a shot this far over its budget spends everything.  So the reading
+    // is `vx` never becoming positive — plus `active` false, which a real
+    // ricochet is not: the test above pins a deflected bolt as surviving.
+    expect(r.vx, 'not deflected — it punched through').toBeLessThanOrEqual(0);
+    expect(r.active, 'and it is spent, not bounced').toBe(false);
     expect(r.shield, 'the pool is spent').toBe(0);
     expect(r.health, 'and the hull took the remainder').toBeLessThan(r.before.health);
 
@@ -150,7 +157,10 @@ test.describe('a live shield turns a shot away', () => {
      *  that still bounced shots would make the disable do nothing. */
     const r = await shootPlayer(page, { damage: 8, disabled: true, where: 'hull' });
 
-    expect(r.vx, 'an offline shield does not bounce it').toBeLessThan(0);
+    // Same reading as the test above: never turned around, and spent rather
+    // than bounced.
+    expect(r.vx, 'an offline shield does not bounce it').toBeLessThanOrEqual(0);
+    expect(r.active, 'it is spent on the hull, not turned away').toBe(false);
     expect(r.shield, 'nor absorb').toBe(r.before.shield);
     expect(r.health, 'the hit lands on the hull').toBeLessThan(r.before.health);
 

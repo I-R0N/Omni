@@ -33,6 +33,7 @@ import {
     slotUnlockCost,
     HEX_ADJACENCY, WEAPONS, WEAPON_LIST, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
     SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
+  massFor, hullDensity, SPRITE_CONSTANTS,
 } from '../constants';
 
 /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
@@ -73,7 +74,7 @@ export function applyModuleEffects(g: GameEngine) {
     computeActiveSlots(g, g.shipSlots, g.activeShip);
     computeActiveSlots(g, g.weaponSlots, g.activeWeapon);
     let maxHp = 0, maxShield = 0, regen = 0, speed = 0, accel = 0, dmg = 0, cool = 0;
-    let pierce = 0, scanner = 0;
+    let scanner = 0;
     const scannerMarks: number[] = [];
     let shieldCore = false, overcharge = false, flashlight = false;
     // SHIP weight: the hull's own weight plus every ACTIVE module's.  A
@@ -95,7 +96,6 @@ export function applyModuleEffects(g: GameEngine) {
             accel += e.accelFrac ?? 0;
             dmg += e.damageFrac ?? 0;
             cool += e.cooldownFrac ?? 0;
-            pierce += e.pierceBonus ?? 0;
             // Scanner tiers do NOT stack: the ship's scanner is the BEST one
             // aboard, so two Mk I stay a Mk I.  (Every other family sums,
             // which is why this one says so out loud.)
@@ -125,7 +125,12 @@ export function applyModuleEffects(g: GameEngine) {
     // shoves a heavy ship less and lets it plow through debris, while a
     // stripped hull gets knocked around.  Normalised so the LEAN loadout is
     // exactly the old constant — no change to the feel a run starts with.
-    g.player.mass = PHYSICS_CONSTANTS.PLAYER_MASS
+    // The hull's own mass comes from its DENSITY (`hullDensity()`, the DBG
+    // ladder's read) rather than the shipped constant, so cycling the ladder
+    // re-folds the outfit here instead of writing a mass of its own — one
+    // definition, and the ship-weight curve rides the change for free.  At
+    // index 0 this is exactly `PHYSICS_CONSTANTS.PLAYER_MASS`.
+    g.player.mass = massFor(SPRITE_CONSTANTS.PLAYER_BASE_SIZE, hullDensity())
         * ((SHIP_WEIGHT.MASS_BASE + shipWeight)
            / (SHIP_WEIGHT.MASS_BASE + SHIP_WEIGHT.MASS_REFERENCE));
     const newMaxHp = 100 + maxHp;
@@ -138,10 +143,6 @@ export function applyModuleEffects(g: GameEngine) {
     g.player.shieldRechargeRate = SHIELD_CONSTANTS.RECHARGE_RATE * (1 + regen);
     g.player.damageMult = 1 + dmg;
     g.player.cooldownMult = Math.max(COOLDOWN_FLOOR, 1 - cool);
-    // Penetration (A3): the summed bonus rides the PLAYER entity, exactly
-    // like damageMult / cooldownMult, so WeaponSystem folds it into the shot
-    // config without reaching into the engine.
-    g.player.pierceBonus = pierce;
     // Scanner (A4): the renderer's reveal gates read this through one field
     // written per frame in draw(), the same channel the Light's cone override
     // takes — the sim never grows a second path to the render layer.
@@ -301,7 +302,7 @@ export function statBreakdown(g: GameEngine) {
     const hull: Contrib[] = [], shield: Contrib[] = [], regen: Contrib[] = [];
     const speed: Contrib[] = [], accel: Contrib[] = [], dmg: Contrib[] = [];
     const cool: Contrib[] = [], charge: Contrib[] = [], weight: Contrib[] = [];
-    const pierce: Contrib[] = [], scan: Contrib[] = [];
+    const scan: Contrib[] = [];
     let shipWeight = SHIP_WEIGHT.HULL_BASE, shieldCore = false;
 
     const walk = (area: 'ship' | 'weapon', slots: (string | null)[], active: boolean[]) => {
@@ -341,7 +342,6 @@ export function statBreakdown(g: GameEngine) {
             if (e.accelFrac)       accel.push({ ...base, display: pct(e.accelFrac) });
             if (e.damageFrac)      dmg.push({ ...base, display: pct(e.damageFrac) });
             if (e.cooldownFrac)    cool.push({ ...base, display: pct(-e.cooldownFrac) });
-            if (e.pierceBonus)     pierce.push({ ...base, display: `+${e.pierceBonus}` });
             if (e.scannerMk)       scan.push({ ...base, display: `Mk ${'I'.repeat(e.scannerMk)}` });
             if (e.overcharge)      charge.push({ ...base, display: on ? 'enabled' : 'offline' });
         }
@@ -419,8 +419,6 @@ export function statBreakdown(g: GameEngine) {
         line('weight', 'Ship weight', shipWeight.toFixed(1),
              SHIP_WEIGHT.HULL_BASE.toFixed(1), weight,
              'hull + everything mounted; drags Acceleration'),
-        line('pierce', 'Penetration', `+${g.player.pierceBonus ?? 0}`, '+0', pierce,
-             'extra targets each shot passes through, on top of the gun\'s own'),
         // The HEADLINE is the reach at tier 1 — the widest the ship scans, and
         // the number every mark aboard contributes to.  The MARK is named
         // beside it because that is what says which categories are findable

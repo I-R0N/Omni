@@ -19,6 +19,7 @@ import {
   getWaveSpawnBudget,
   buildWaveSpawnList,
   buildBossWaveSpawnList,
+  scaledMass,
 } from '../../constants';
 import { PhysicsSystem } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
@@ -366,7 +367,10 @@ export class WaveSystem {
       health: scaledHealth,
       maxHealth: scaledHealth,
       maxSpeed: config.maxSpeed * statScale.speed,
-      mass: config.mass,
+      // ENEMY_VARIANTS states the number someone chose; the world runs on
+      // the scaled one (constants.MASS_SCALE).  This is the ONE stamp site
+      // every archetype AND every boss passes through.
+      mass: scaledMass(config.mass),
       damageMult: dmgMult,
       armor: ENEMY_TRAITS[subtype]?.armor,
       evasive: ENEMY_TRAITS[subtype]?.evasive,

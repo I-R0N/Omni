@@ -24,10 +24,25 @@ the ram counts through the real player-crash branch of `resolveCollision`.
 Nothing in it re-derives the arithmetic — that is the whole point, since the
 question it answers is what the game DOES, not what the tables say.
 
+§7 is the MASS SCALE and answers a different question from the rest: not
+what an impact is worth, but whether the four ladders that decide it are on
+one scale at all.  It prints every class — player, enemy roster, gun roster,
+shard spawn ladders — as size, mass and mass/size², the implied areal
+density.  Density rather than mass is the honest comparison: a ship and a
+boulder differ in size by design, and only density says whether one of them
+is made of a fundamentally different substance.  It found exactly that (the
+player at 0.2500 against a 0.0100..0.0300 material band), which is what
+`IMPACT_DENSITY` now states.  Unlike the sections above it reads the TABLES,
+through the `window.__omniMass` seam, because masses carry no DBG overrides
+and a table read cannot drift from what the sim reads the way a recomputed
+number can.
+
 Its results are recorded in `docs/PARKING_LOT.md` §7 of the unified-impact
-entry.  Re-run it rather than quoting those numbers after any grain, weapon
-or crash-gate change; a run is a few seconds and the derived-HP figures are
-pattern-dependent (tiles vary ±2..11% body to body, shards ±17..38%).
+entry, and §14 for the glass and mass follow-ups.  Re-run it rather than
+quoting those numbers after any grain, weapon or crash-gate change; a run is
+a few seconds and the derived-HP figures are pattern-dependent (tiles vary
+±2..11% body to body, shards ±17..38%), so ram counts move a step or two run
+to run without anything having changed.
 
 ## Lighting columns and scenes
 

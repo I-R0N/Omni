@@ -6,8 +6,19 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
          detectionAlpha,
          GRAIN_REGULARITY, grainRelaxFor, grainSeparationFor, grainRegularityOf,
-         grainSpecFor, grainLadder, grainTableValue, type GrainKnob,
-         nebulaSpriteSize } from './constants';
+         grainSpecFor, grainLadder, grainTableValue, breakYieldsNothing, type GrainKnob,
+         nebulaSpriteSize,
+         NEBULA_MATERIAL, NEBULA_TILE_SHATTER_YIELD_MAX, NEBULA_DRAIN_CYCLE,
+         nebulaTileCost, nebulaMergeLoss,
+         ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
+         projectileMassFor, PHYSICS_CONSTANTS,
+         IMPACT_DENSITY, massFor, hullDensity,
+         MASS_SCALE, scaledMass, IMPACT_ENERGY_PER_DAMAGE,
+         STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
+         PROJECTILE_CONSTANTS, HIT_FEEDBACK,
+         BASE_BANK_DIVISOR, BASE_BANK_TRIM, GUNNERY_MK3_TRIPLE_MULT,
+         GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
+         blastDamageFor, BLAST_ENERGY_COUPLING } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -119,6 +130,13 @@ const App: React.FC = () => {
       // reaches this resolver reads back perfectly from the panel and
       // changes nothing on screen.
       grainSpecFor, grainLadder, grainTableValue,
+      // WHAT A BREAK LEAVES BEHIND — the predicate the blast ring reads to
+      // decide whether it may damage a body at all.  It belongs on the
+      // __omniFracture terms for a sharp reason: it is DERIVED from the
+      // variant table, so the way it goes wrong is a future variant
+      // silently joining or leaving the exempt set with nothing on screen
+      // to say so.  A table-walk test is the only thing that can see that.
+      breakYieldsNothing, SHARD_VARIANTS,
     };
 
     // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
@@ -144,7 +162,60 @@ const App: React.FC = () => {
     // rotted unnoticed (it keyed off `nebulaTileArea`, which no shard
     // ever carried, so every shard drew a full-tile sprite whatever its
     // size).  Nothing in the game reads this handle.
-    (window as any).__omniNebula = { nebulaSpriteSize };
+    // The nebula MATERIAL LEDGER joins it on the same terms, and with a
+    // motive of its own: a ledger that inverts does not throw, does not log
+    // and does not look wrong in any single frame — it just means the clouds
+    // creep outward over minutes, which is precisely how it shipped growing
+    // at ~2x a cycle without anyone seeing it.  The yield side is deliberately
+    // NOT exposed: a test has to MEASURE it off real shattered tiles, or the
+    // inequality is being checked against a second opinion rather than against
+    // what the fracture core actually produces.
+    (window as any).__omniNebula = {
+      nebulaSpriteSize,
+      NEBULA_MATERIAL, NEBULA_TILE_SHATTER_YIELD_MAX, NEBULA_DRAIN_CYCLE,
+      nebulaTileCost, nebulaMergeLoss,
+    };
+
+    // Debug handle #9 — the MASS SCALE, on the __omniHid terms and with the
+    // sharpest motive of the set.  Under the energy model a body's mass is
+    // half of what its every impact SPENDS, so the masses authored across
+    // the player, the enemy roster, the gun roster and the shard spawn
+    // ladders are a balance surface rather than four unrelated impulse
+    // terms — and they are WRONG IN A WAY NOTHING REPORTS: a projectile a
+    // twentieth the density of the hull that fires it produces perfectly
+    // plausible play, throws no exception and logs nothing.  The only way
+    // to see it is to put all four ladders in one table, which is what
+    // `perf/impact-audit.mjs` §7 does with this.  Exposed as the TABLES
+    // rather than as computed numbers so the audit cannot drift from what
+    // the sim reads.  Nothing in the game reads this handle.
+    (window as any).__omniMass = {
+      ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
+      projectileMassFor, PHYSICS_CONSTANTS,
+      // The scale's own definitions, so a suite can pin that the shipped
+      // hull really is the table's number and that the shard ladders really
+      // read from it — the two claims that make this ONE scale rather than
+      // a comment beside five unrelated literals.
+      IMPACT_DENSITY, massFor, hullDensity, MASS_SCALE, scaledMass,
+      // The three shapes mass takes (see tests/mass.spec.ts): the energy
+      // conversion it is measured against, and the absolute thresholds it
+      // is compared to.  Both must carry MASS_SCALE, and both are wrong
+      // with no symptom if they stop.
+      IMPACT_ENERGY_PER_DAMAGE, STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
+      PROJECTILE_CONSTANTS, HIT_FEEDBACK,
+      // The BANK re-base and the DERIVED blast, on the same terms as the rest
+      // of this handle: both are relationships between two tables that no
+      // symptom reports if they drift apart.  `BASE_BANK_DIVISOR` is only
+      // correct relative to what a Gunnery Mk III actually grants, so
+      // MODULE_DEFS is here to be read rather than restated; `blastDamageFor`
+      // is here because a blast that silently stopped deriving still draws a
+      // perfectly good explosion.  The divisor's two HALVES are published
+      // separately because only one of them is pinned to the catalog: the
+      // Gunnery anchor must keep tracking MODULE_DEFS, the feel trim over it
+      // is free to move.
+      BASE_BANK_DIVISOR, BASE_BANK_TRIM, GUNNERY_MK3_TRIPLE_MULT,
+      GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
+      blastDamageFor, BLAST_ENERGY_COUPLING,
+    };
 
     // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
     // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
@@ -317,8 +388,20 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleShardCoat();
   };
 
-  const handleCyclePierceSpeedRetain = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePierceSpeedRetain();
+  const handleCycleImpactVelocity = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleImpactVelocity();
+  };
+
+  const handleCycleCrashEnergy = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleCrashEnergy();
+  };
+
+  const handleCycleBlastEnergy = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleBlastEnergy();
+  };
+
+  const handleCycleHullDensity = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleHullDensity();
   };
 
   const handleToggleShardBlend = () => {
@@ -611,6 +694,12 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaSpinDamp();
   };
 
+  const handleCycleNebulaTileShare = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaTileShare();
+  };
+  const handleCycleNebulaDrain = () => {
+      if (engineRef.current) engineRef.current.dbg.cycleNebulaDrain();
+  };
   const handleCycleNebulaBond = () => {
       if (engineRef.current) engineRef.current.dbg.cycleNebulaBond();
   };
@@ -958,8 +1047,10 @@ const App: React.FC = () => {
         onToggleShardGravity={handleToggleShardGravity}
         onToggleShardBlend={handleToggleShardBlend}
         onCycleShardCoat={handleCycleShardCoat}
-        onCyclePierceFalloff={() => engineRef.current?.dbg.cyclePierceFalloff()}
-        onCyclePierceSpeedRetain={handleCyclePierceSpeedRetain}
+        onCycleImpactVelocity={handleCycleImpactVelocity}
+        onCycleCrashEnergy={handleCycleCrashEnergy}
+        onCycleBlastEnergy={handleCycleBlastEnergy}
+        onCycleHullDensity={handleCycleHullDensity}
         onToggleShardBonding={handleToggleShardBonding}
         onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
         onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}
@@ -1028,6 +1119,8 @@ const App: React.FC = () => {
         onCycleNebulaDamp={handleCycleNebulaDamp}
         onCycleNebulaSpinDamp={handleCycleNebulaSpinDamp}
         onCycleNebulaBond={handleCycleNebulaBond}
+        onCycleNebulaTileShare={handleCycleNebulaTileShare}
+        onCycleNebulaDrain={handleCycleNebulaDrain}
         onCycleShatterGrace={handleCycleShatterGrace}
         onCyclePlayerThrust={handleCyclePlayerThrust}
         onCyclePlayerSpeed={handleCyclePlayerSpeed}

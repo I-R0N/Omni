@@ -22,6 +22,7 @@ import { GameEntity, EntityType, EnemySubtype, Vector2, WeaponType, WeaponConfig
 import {
     DRAGON_CONSTANTS, PLAYER_MOVEMENT_CONFIG, getActivePlayerThrustMult,
     ENEMY_VARIANTS, COLLISION_CONFIG, StructureVariant,
+  scaledMass,
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
@@ -226,7 +227,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         health: v.health,
         maxHealth: v.health,
         maxSpeed: v.maxSpeed,
-        mass: v.mass,
+        mass: scaledMass(v.mass),
         contactDamage: v.contactDamage,
         enemyShape: 'dragon',
         // A PRIORITY target the player tracks rather than reacts to, so it
@@ -273,7 +274,7 @@ function fireDragonMissile(g: GameEngine, d: GameEntity) {
     const cfg = {
         type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
         speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
-        count: 1, spread: 0, recoil: 0, pierce: 0,
+        count: 1, spread: 0, recoil: 0,
         homing: true, homingStrength: M.homingStrength, glow: true,
     } as WeaponConfig;
     g.spawnProjectileFromConfig(d, g.player.position, cfg, EntityType.ENEMY);

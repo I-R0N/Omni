@@ -28,7 +28,7 @@ import { GameEntity, EntityType, Vector2, WeaponType } from '../types';
 import {
     EXPLOSION_CONSTANTS, PHYSICS_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS,
     noteTraitDamage, hitReactStrength, WEAPONS, markDamaged, markShieldDamaged,
-    stampBubbleAggro } from '../constants';
+    stampBubbleAggro, breakYieldsNothing } from '../constants';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
 import { nextId } from './systems/IdAllocator';
 
@@ -171,9 +171,32 @@ export function updateExplosionRings(g: GameEngine) {
             const dist = Math.sqrt(d2);
             const falloff = 1 - (dist / maxRadius); // 1 at centre, 0 at rim
 
-            if (dmg > 0) {
+            // A BLAST MAY NOT DAMAGE A BODY THAT CANNOT EXPRESS BEING BROKEN
+            // (user call).  `breakYieldsNothing` is the PROPERTY that the two
+            // hardcoded variant-name checks here used to stand in for: a body
+            // whose death hands back no children would simply vanish, and a
+            // shockwave has nothing to grip such a thing with — so it pushes
+            // instead, and the knockback further down is the whole of what it
+            // does.  Today that is `nebula-shard` and `indestructible-tile`.
+            //
+            // Nebula TILES are deliberately NOT covered and take the blast as
+            // they always did: they decompose into their own Voronoi cells, so
+            // one shell still breaks a cloud bank UP — measured, 4 tiles in the
+            // ring became 14 drifting shards.  What was wrong before was only
+            // the shard half (measured: 0 of 15 survived), which is the
+            // "destroyed completely" this rule removes.
+            //
+            // The FEEDBACK is skipped with the damage rather than beside it: a
+            // hit flash and a damage number on a body that lost nothing is the
+            // misreading the rule exists to remove.  That is a change for the
+            // indestructible wall too, which used to flash — deliberately, and
+            // for the same reason.  This is the BLAST only: shooting a cloud
+            // still breaks it, and the shell's own direct hit is untouched.
+            const noBreak = e.type === EntityType.STRUCTURE
+                && breakYieldsNothing(e.shardVariant);
+
+            if (dmg > 0 && !noBreak) {
                 let applied = dmg * falloff;
-                const isIndestructible = e.type === EntityType.STRUCTURE && e.shardVariant === 'indestructible-tile';
                 // Player shield soaks the blast first (kamikaze AoE and any
                 // future enemy-owned explosion) so an AoE hit isn't a raw
                 // shield-bypass — mirrors the projectile / ram absorption.
@@ -185,13 +208,11 @@ export function updateExplosionRings(g: GameEngine) {
                     e.shieldHitFlash = SHIELD_CONSTANTS.HIT_FLASH_DURATION;
                     e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
                 }
-                if (!isIndestructible) {
-                    // GRAIN BOUNDARIES (V15): a blast arrives from the ring's
-                    // centre, so stamp that side and let it break boundaries
-                    // like any other damage rather than draining a pool.
-                    stampLocalImpact(e, ring.position);
-                    if (!applyBoundaryDamage(e, applied)) e.health -= applied;
-                }
+                // GRAIN BOUNDARIES (V15): a blast arrives from the ring's
+                // centre, so stamp that side and let it break boundaries
+                // like any other damage rather than draining a pool.
+                stampLocalImpact(e, ring.position);
+                if (!applyBoundaryDamage(e, applied)) e.health -= applied;
                 // (h) regen: splash damage counts toward a burst too — but
                 // ONLY when the blast is the player's (an enemy shell healing
                 // its own boss through the bucket would be nonsense).  Like
@@ -209,6 +230,26 @@ export function updateExplosionRings(g: GameEngine) {
                     if (ring.ownerType === EntityType.PLAYER) e.killedByPlayer = true;
                     if (e.type === EntityType.STRUCTURE && dist > 0) {
                         e.lastImpactVelocity = { x: (dx / dist) * 8, y: (dy / dist) * 8 };
+                        // AND THE PIECES CARRY THE SHOVE.  The knockback below
+                        // reaches survivors only — a body the ring KILLS breaks
+                        // into fragments born after `validHitIds` was fixed, so
+                        // without this the blast broke a cloud bank up and left
+                        // every puff sitting where its tile had been (measured:
+                        // fragments at 0.35-0.98 after damping, from a charge of
+                        // any size).  `handleEntityDeath` hands it to the
+                        // children and clears it.
+                        //
+                        // It is NOT `lastImpactVelocity` scaled up, which is the
+                        // obvious move and is measurably a no-op: the shatter's
+                        // own forward term is capped at SHATTER_SCATTER_SPEED_CAP
+                        // (2.5) and the stamp above already saturates it at every
+                        // charge size, so the cap — shared by every material —
+                        // would have to move for any of it to read.  This is the
+                        // blast's own distance-falloff knockback instead, the
+                        // exact shove the body was about to take, and it is
+                        // uncapped for the same reason the knockback below is.
+                        const kk = knock * falloff;
+                        if (kk > 0) e.blastImpulse = { x: (dx / dist) * kk, y: (dy / dist) * kk };
                     }
                     if (e.type === EntityType.STRUCTURE && e.mass === Infinity) {
                         g.physics.removeStaticEntity(e);
@@ -237,7 +278,27 @@ export function updateExplosionRings(g: GameEngine) {
  *  DIRECT damage (PhysicsSystem stashes it on the projectile).  Passing it in
  *  keeps every weapon affected equally by the falloff rate: a pierced shot's
  *  fourth blast is as weakened as its fourth bite.  1 when nothing pierced. */
-export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget: GameEntity, falloff: number = 1) {      if (!g.currentMap) return;
+/** `directTarget` is undefined for a FUSE detonation — the shell went off in
+ *  flight having struck nothing, so there is no direct hit to exclude from
+ *  the ring and nothing to compare the owner against. */
+/** Detonate `proj`'s charge at `impactPos`.
+ *
+ *  THE CHARGE IS PAYLOAD, NOT TRAVEL ENERGY (user call).  This used to scale
+ *  the blast by the round's `hitFalloff` — the fraction of launch energy it
+ *  still had — on the reasoning that a shell which spent its bank boring
+ *  should blast weaker.  Two things make that wrong.  It DOUBLE-COUNTS:
+ *  `explosionDamage` is already derived at spawn from the round's own muzzle
+ *  energy (`blastDamageFor`), so re-reading travel energy at detonation
+ *  charges the same quantity twice.  And it makes the ENERGY-DEPLETION
+ *  trigger inert by construction — a shell detonating because it ran out of
+ *  travel energy has, by definition, ~none left, so the blast it fires at the
+ *  exact moment the rule exists for would land ~zero.
+ *
+ *  A warhead does not shrink because the shell flew through a wall.  How big
+ *  the charge is, is the round's own mass (Gunnery and the charged shot both
+ *  buy a heavier one); how far it gets is its travel energy; the two are
+ *  separate quantities and only the first sizes this. */
+export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget?: GameEntity) {      if (!g.currentMap) return;
 // Compact splash blast — deliberately not the boss-death boom, since
 // a Cannon build fires this several times a fight.
 g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
@@ -261,12 +322,12 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
     // DIRECT path below exactly as the kamikaze blast is.
     spawnShockwave(g, impactPos, {
         radius: proj.explosionRadius!,
-        damage: (proj.explosionDamage ?? 0) * falloff,
+        damage: proj.explosionDamage ?? 0,
         knockback: proj.explosionKnockback ?? 0,
         color: WEAPONS[WeaponType.CANNON].color,
         ownerType: proj.ownerType,
         ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
-        excludeIds: [directTarget.id, 'player'],
+        excludeIds: directTarget ? [directTarget.id, 'player'] : ['player'],
     });
 
     // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
@@ -279,7 +340,7 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         applyBlastToPlayer(g, 
             impactPos,
             proj.explosionRadius!,
-            (proj.explosionDamage ?? 0) * falloff,
+            proj.explosionDamage ?? 0,
             proj.explosionKnockback ?? 0,
         );
     }
