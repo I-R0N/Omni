@@ -1,42 +1,16 @@
+import CINEMATIC_BANKS from './CinematicBank.json';
+import { BackgroundMusic } from './BackgroundMusic';
+import { finishVoice } from './SfxVoicing';
+import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
 import SFX_MANIFEST from 'virtual:sfx-manifest';
 import { AUDIO_CONSTANTS, getActiveCollapseMode } from '../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
-/**
- * AudioSystem — the game's SFX manager.
- *
- * `docs/SFX_INVENTORY.md` is the source of truth for WHAT plays and with
- * what parameters; this file is the machinery that plays it.  Two rules
- * from that document shape the whole design:
- *
- *   1. **Ids are the contract.**  Every trigger site calls
- *      `audio.play('weapon.blaster.fire')` and nothing else.  A synth
- *      draft is replaced by a real asset by re-registering the same id —
- *      never by touching a call site.  Consequently nothing here knows
- *      about game entities, and no game system imports audio state.
- *   2. **Drafts are procedural.**  Every sound is synthesised from
- *      oscillators / noise / filters / envelopes, so there are no audio
- *      asset files and `scripts/inline-build.mjs` (the single-file
- *      standalone build) is untouched.
- *
- * Three properties matter for this engine specifically:
- *
- * - **No per-frame work.**  The manager is purely event-driven.  The only
- *   thing called every frame is `setListener()`, two number writes.
- *   Voice bookkeeping is pruned lazily inside `play()`.
- * - **A mass-death frame must not spawn 400 voices.**  Per-id polyphony
- *   caps, a per-id retrigger window that COLLAPSES simultaneous triggers
- *   into one louder voice, and a global voice ceiling that thins by mix
- *   tier.  Same spirit as `enforceCap` for particles: purely cosmetic
- *   output, so dropping is safe — but here dropping is done in a way that
- *   makes a big event sound HEAVIER rather than thinner.
- * - **Torus-correct positioning.**  Pan and distance attenuation go
- *   through `wrapDeltaX`/`wrapDeltaY`, so a sound just across the seam
- *   pans to the near side rather than flipping to the far one.
- *
- * The AudioContext is created on the FIRST USER GESTURE, never in the
- * constructor — mobile browsers refuse to start audio otherwise, and the
- * headless smoke asserts that no context exists before a gesture.
+/** Event-based Web Audio mixer. Registry IDs are the call-site contract.
+ * Existing WAVs and cached production recipes share priority, variation,
+ * toroidal spatialization, category gains and lifecycle handling.
+ * The context starts only after a user gesture. Recipes render immediately
+ * during preparation, so gameplay never waits for downloads or compilation.
  */
 
 // ~600-byte silent 8 kHz WAV.  Used ONLY to promote the iOS audio session
@@ -107,7 +81,7 @@ export interface SfxDef {
   /** Recorded asset(s) for this id — bare filenames under
    *  `public/assets/sfx/`.  When one has DECODED, it replaces `render` for
    *  this voice; until then (and forever, if the file is missing or the
-   *  browser cannot decode it) the synth draft plays instead.  That
+   *  browser cannot decode it) the procedural voice plays instead.  That
    *  fallback is what keeps the id contract honest: a sample is a registry
    *  change and never a trigger-site change, and a missing file degrades
    *  to a sound rather than to silence.
@@ -168,11 +142,15 @@ interface IdState {
   lastGain: GainNode | null;
   /** Accumulated collapse bump on `lastGain`, capped. */
   lastBump: number;
+  lastLevel: number;
+  lastPan: number;
   /** Triggers seen inside the CURRENT retrigger window, counted so the DBG
    *  collapse mode can let a fraction of them through.  Reset when a window
    *  lapses, i.e. when a genuinely new burst starts. */
   winCount: number;
 }
+
+interface LiveVoice { id: string; gain: GainNode; tail: AudioNode; end: number; tier: number; level: number }
 
 interface LiveLoop {
   voice: LoopVoice;
@@ -200,8 +178,32 @@ export class AudioSystem {
   // ── Context (created on first gesture only) ──
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  public music: BackgroundMusic | null = null;
+  private cinematicIds = new Set<string>();
+  public bankFailures: string[] = [];
   private noiseBuf: AudioBuffer | null = null;
-  /** Decoded recorded takes, per id.  Absent or all-null → synth draft. */
+  private buses = new Map<AudioBus, GainNode>();
+  private sfxBus: GainNode | null = null;
+  private _sfxVolume = 1;
+  private _musicVolume = 1;
+  private live = new Set<LiveVoice>();
+  private synthesized = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
+  private _prepared = false;
+  public get prepared(): boolean { return this._prepared; }
+  public get sfxVolume(): number { return this._sfxVolume; }
+  public get musicVolume(): number { return this._musicVolume; }
+  public setSfxVolume(v: number) {
+    if (!Number.isFinite(v)) return;
+    this._sfxVolume = Math.max(0, Math.min(1, v));
+    if (this.ctx) this.sfxBus?.gain.setTargetAtTime(this._sfxVolume, this.ctx.currentTime, 0.02);
+  }
+  public setMusicVolume(v: number) {
+    if (!Number.isFinite(v)) return;
+    this._musicVolume = Math.max(0, Math.min(1, v));
+    this.music?.setEnabled(!this._muted && this._musicVolume > 0);
+    if (this.ctx) this.buses.get('music')?.gain.setTargetAtTime(AUDIO_MIX.music * this._musicVolume, this.ctx.currentTime, 0.02);
+  }
+  /** Decoded recorded takes, per id.  Absent or all-null → procedural voice. */
   private samples = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
   private samplesRequested = false;
   private samplesLoaded = 0;
@@ -214,7 +216,7 @@ export class AudioSystem {
    *  need different advice: one is a typo, this one is an unbuilt feature. */
   private loopSampleFiles: string[] = [];
   /** When false, an id with no usable recording makes NO SOUND rather than
-   *  falling back to its synth draft.  Exists so recorded assets can be
+   *  falling back to its procedural voice.  Exists so recorded assets can be
    *  auditioned alone: with the drafts under them, a sound that is quietly
    *  still synthetic is impossible to tell from one that landed. */
   private _draftsEnabled = true;
@@ -258,7 +260,7 @@ export class AudioSystem {
 
   // ── Registration ──────────────────────────────────────────────────────────
 
-  public register(id: string, def: SfxDef) { this.defs.set(id, def); }
+  public register(id: string, def: SfxDef) { this.defs.set(id, finishVoice(id, def)); }
   public registerLoop(id: string, def: SfxLoopDef) { this.loopDefs.set(id, def); }
   public has(id: string): boolean { return this.defs.has(id) || this.loopDefs.has(id); }
   public get registeredCount(): number { return this.defs.size + this.loopDefs.size; }
@@ -294,7 +296,8 @@ export class AudioSystem {
     // Returning to the tab is the other moment iOS hands the audio session
     // back — resume there too, so a backgrounded phone recovers by itself.
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) this.unlock();
+      if (document.hidden) { this.stopScene(); this.music?.suspend(); void this.ctx?.suspend(); }
+      else if (this.ctx) this.unlock();
     });
   }
 
@@ -348,6 +351,7 @@ export class AudioSystem {
    *  false when audio is unavailable. */
   public unlock(): boolean {
     if (this.ctx) {
+      this.music?.resume();
       // NOT just 'suspended': iOS also uses a non-standard 'interrupted'
       // state (phone call, Siri, another app). Resume on anything that is
       // not already running, or the game stays silent for the rest of the
@@ -368,14 +372,33 @@ export class AudioSystem {
         : undefined;
     if (!Ctor) return false;
     try {
-      this.ctx = new Ctor();
+      this.ctx = new Ctor({ latencyHint: 'interactive' });
     } catch {
       this.ctx = null;
       return false;
     }
     this.master = this.ctx.createGain();
     this.master.gain.value = this._muted ? 0 : this._volume;
-    this.master.connect(this.ctx.destination);
+    const compressor = this.ctx.createDynamicsCompressor();
+    compressor.threshold.value = -8;
+    compressor.knee.value = 10;
+    compressor.ratio.value = 8;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.18;
+    this.master.connect(compressor);
+    compressor.connect(this.ctx.destination);
+    this.sfxBus = this.ctx.createGain();
+    this.sfxBus.gain.value = this._sfxVolume;
+    this.sfxBus.connect(this.master);
+    for (const name of ['world', 'feedback', 'ui', 'music'] as AudioBus[]) {
+      const bus = this.ctx.createGain();
+      bus.gain.value = AUDIO_MIX[name] * (name === 'music' ? this._musicVolume : 1);
+      bus.connect(name === 'music' ? this.master : this.sfxBus);
+      this.buses.set(name, bus);
+    }
+
+    this.music = new BackgroundMusic(this.ctx, this.buses.get('music')!);
+    this.music.setEnabled(!this._muted && this._musicVolume > 0);
 
     // Shared white noise — one buffer for every noise-based voice in the
     // game, sampled at a random offset per voice so repeats don't phase.
@@ -389,23 +412,25 @@ export class AudioSystem {
     // is the whole reason preloading exists: `decodeAudioData` on first
     // COLLISION would land the decode inside a frame the player is already
     // being hit in.  Fetch + decode are async and land whenever they land;
-    // until then every id plays its synth draft, so nothing waits on this.
-    void this.preloadSamples();
+    // until then every id plays its procedural voice, so nothing waits on this.
+    void this.preloadSamples().then(() => this.prepareSynthesis());
     return true;
   }
 
   /** Fetch + decode every `sample` declared in the registry.  Idempotent,
    *  parallel, and FAILURE-TOLERANT by design — a 404 or an undecodable
-   *  file leaves that id on its synth draft and logs nothing to the player.
+   *  file leaves that id on its procedural voice and logs nothing to the player.
    *  The standalone single-file build takes exactly that path today: its
    *  inliner carries images, not audio, so the standalone game is the
    *  procedural game. */
   private async preloadSamples(): Promise<void> {
     if (!this.ctx || this.samplesRequested) return;
     this.samplesRequested = true;
+    await this.preloadCinematicBanks();
     const discovered = this.discoverSamples();
     const jobs: Promise<void>[] = [];
     for (const [id, def] of this.defs) {
+      if (this.hasSample(id)) continue;
       const found = discovered.get(id);
       // An explicit `sample` on the def WINS, so a one-off can always be
       // pinned by name; otherwise the folder decides.  With neither, the id
@@ -414,7 +439,7 @@ export class AudioSystem {
       const names = declared ?? found;
       if (!names || names.length === 0) continue;
       const slots: (AudioBuffer | null)[] = names.map(() => null);
-      this.samples.set(id, { bufs: slots, next: 0 });
+      this.samples.set(id, { bufs: slots, next: -1 });
       names.forEach((name, i) => {
         jobs.push((async () => {
           try {
@@ -427,7 +452,7 @@ export class AudioSystem {
             const inlined = (globalThis as { __omniSfxInline?: Record<string, string> })
               .__omniSfxInline?.[name];
             const res = await fetch(inlined ?? `${SFX_ASSET_DIR}${name}`);
-            if (!res.ok) return;                       // missing → synth draft
+            if (!res.ok) return;                       // missing → procedural voice
             const bytes = await res.arrayBuffer();
             const buf = await this.ctx!.decodeAudioData(bytes);
             // A file that DECODES but carries no signal is the same failure
@@ -443,12 +468,44 @@ export class AudioSystem {
             slots[i] = buf;
             this.samplesLoaded++;
           } catch {
-            /* undecodable → synth draft.  Deliberately silent. */
+            /* undecodable → procedural voice.  Deliberately silent. */
           }
         })());
       });
     }
     await Promise.all(jobs);
+  }
+
+  /** Decode one compressed bank at a time, then retain only cue buffers.
+   * MP3 gapless metadata is honored by decodeAudioData; offsets are in seconds
+   * so AudioContext resampling cannot shift cue boundaries. */
+  private async preloadCinematicBanks() {
+    const inline = (globalThis as { __omniAudioInline?: Record<string, string> }).__omniAudioInline;
+    for (const bank of CINEMATIC_BANKS) {
+      try {
+        const response = await fetch(inline?.[bank.file] ?? `/assets/audio/${bank.file}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await this.ctx!.decodeAudioData(await response.arrayBuffer());
+        if (Math.abs(buffer.duration - bank.frames / bank.sampleRate) > 0.04) throw new Error('Bank timing mismatch');
+        for (const [id, regions] of Object.entries(bank.cues)) {
+          if (!this.has(id)) continue;
+          const bufs = regions.map(([offset, duration]) => {
+            const length = Math.round(duration * buffer.sampleRate);
+            const cue = this.ctx!.createBuffer(1, length, buffer.sampleRate);
+            const start = Math.round(offset * buffer.sampleRate);
+            cue.copyToChannel(buffer.getChannelData(0).subarray(start, start + length), 0);
+            if (peakOf(cue) < AUDIO_CONSTANTS.SAMPLE_MIN_PEAK) throw new Error(`Silent cue ${id}`);
+            return cue;
+          });
+          this.samples.set(id, { bufs, next: -1 });
+          this.cinematicIds.add(id);
+          this.samplesLoaded += bufs.length;
+        }
+      } catch (error) {
+        this.bankFailures.push(`${bank.file}: ${String(error)}`);
+        // Legacy files/recipes remain a recovery path for network/codec failure.
+      }
+    }
   }
 
   /**
@@ -464,7 +521,7 @@ export class AudioSystem {
   private discoverSamples(): Map<string, string[]> {
     const byId = new Map<string, string[]>();
     // Longest id first, so a prefix id cannot claim a longer id's files.
-    const ids = [...this.defs.keys()].sort((a, b) => b.length - a.length);
+    const ids = [...this.defs.keys(), ...this.loopDefs.keys()].sort((a, b) => b.length - a.length);
     const dashed = ids.map(id => [id, id.replace(/\./g, '-')] as const);
     for (const file of SFX_MANIFEST) {
       const stem = file.replace(/\.wav$/i, '').toLowerCase();
@@ -491,12 +548,44 @@ export class AudioSystem {
   private takeSample(id: string): AudioBuffer | null {
     const set = this.samples.get(id);
     if (!set) return null;
-    const n = set.bufs.length;
-    for (let k = 0; k < n; k++) {
-      const buf = set.bufs[(set.next + k) % n];
-      if (buf) { set.next = (set.next + k + 1) % n; return buf; }
-    }
-    return null;
+    return this.chooseTake(set);
+  }
+
+  private chooseTake(set: { bufs: (AudioBuffer | null)[]; next: number }): AudioBuffer | null {
+    const available = set.bufs.map((buf, i) => buf ? i : -1).filter(i => i >= 0);
+    if (!available.length) return null;
+    const choices = available.length > 1 ? available.filter(i => i !== set.next) : available;
+    const index = choices[Math.floor(Math.random() * choices.length)];
+    set.next = index;
+    return set.bufs[index];
+  }
+
+  /** Compile production recipes off the audio thread, one ID at a time.
+   * Decoded recordings always win. Immediate procedural playback covers startup.
+   * Three rendered takes vary noise, pitch and layer timing without runtime graph churn. */
+  private async prepareSynthesis() {
+    try {
+      for (const [id, def] of this.defs) {
+        if (this.hasSample(id)) continue;
+        const bufs: AudioBuffer[] = [];
+        for (let i = 0; i < AUDIO_MIX.variants; i++) {
+          const ctx = new OfflineAudioContext(1, 44100 * 4, 44100);
+          const noiseBuf = ctx.createBuffer(1, 88200, 44100);
+          const data = noiseBuf.getChannelData(0);
+          for (let j = 0; j < data.length; j++) data[j] = Math.random() * 2 - 1;
+          const duration = def.render({ ctx: ctx as unknown as AudioContext,
+            dest: ctx.destination, t0: 0, pitch: 1 + (i - 1) * 0.012,
+            param: 0, noise: noiseBuf });
+          const rendered = await ctx.startRendering();
+          const length = Math.min(rendered.length, Math.ceil((duration + 0.01) * 44100));
+          const trimmed = ctx.createBuffer(1, length, 44100);
+          trimmed.copyToChannel(rendered.getChannelData(0).subarray(0, length), 0);
+          bufs.push(trimmed);
+        }
+        this.synthesized.set(id, { bufs, next: -1 });
+      }
+    } catch { /* Offline rendering unavailable: live production recipes still work. */ }
+    this._prepared = true;
   }
 
   public get unlocked(): boolean { return this.ctx !== null; }
@@ -524,13 +613,15 @@ export class AudioSystem {
 
   public get volume(): number { return this._volume; }
   public setVolume(v: number) {
+    if (!Number.isFinite(v)) return;
     this._volume = Math.max(0, Math.min(1, v));
     this.applyMaster();
   }
   public get muted(): boolean { return this._muted; }
   public setMuted(m: boolean) {
     this._muted = m;
-    if (m) this.stopAllLoops();
+    this.music?.setEnabled(!m && this._musicVolume > 0);
+    if (m) this.stopScene(true);
     this.applyMaster();
   }
   public toggleMute() { this.setMuted(!this._muted); }
@@ -540,7 +631,8 @@ export class AudioSystem {
   public setActive(a: boolean) {
     if (this._active === a) return;
     this._active = a;
-    if (!a) this.stopAllLoops();
+    this.music?.setActive(a);
+    if (!a) this.stopScene();
   }
   public get active(): boolean { return this._active; }
 
@@ -575,9 +667,31 @@ export class AudioSystem {
     // Frozen sim silences the world but not the UI — see `_active`.
     // Counted as a drop rather than returning silently, so the headless
     // smoke can tell "suppressed" from "never reached the manager".
-    if (!this._active && def.positional) { this.counts.dropped++; return; }
+    if ((!this._active && !survivesPause(id)) || this.ctx.state !== 'running') { this.counts.dropped++; return; }
 
     const now = this.ctx.currentTime;
+    // 4. Static per-voice gain: mix level × caller trim × distance.
+    let g = def.gain * Math.max(0, Number.isFinite(opts?.gain) ? opts!.gain! : 1);
+    g *= 1 + (Math.random() * 2 - 1) * AUDIO_MIX.gainVariation;
+    let pan = 0;
+    if (def.positional && opts?.x !== undefined && opts?.y !== undefined) {
+      // NOTE the argument order: wrapDeltaX(from, to) returns `to - from`,
+      // so listener-first gives a delta pointing FROM the listener TO the
+      // source — which is what pan wants (positive = to the right).
+      // Reversing it inverts the stereo image.
+      const dx = wrapDeltaX(this.lx, opts.x);
+      const dy = wrapDeltaY(this.ly, opts.y);
+      const d = Math.sqrt(dx * dx + dy * dy);
+      // Caller override beats the def's own range, which beats the global
+      // default — so ONE id can be near-field when it happens ambiently
+      // and full-range when the player caused it.
+      const atten = this.attenuation(d, opts.near ?? def.near, opts.far ?? def.far);
+      if (atten <= 0) { this.counts.dropped++; return; } // out of earshot
+      g *= atten * atten;
+      pan = Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH));
+    }
+
+    if (g <= 0) return;
     const st = this.stateFor(id);
 
     // 1. Retrigger window.  Inside it, either bump the live voice (so a
@@ -602,7 +716,7 @@ export class AudioSystem {
       st.winCount = 0;
     }
     if (now - st.lastAt < def.minInterval && !through) {
-      if (def.collapse && cm.bump && st.lastGain) {
+      if (def.collapse && cm.bump && st.lastGain && g >= st.lastLevel * 0.5 && Math.abs(pan - st.lastPan) < 0.35) {
         // Each collapsed trigger multiplies the live voice up, saturating
         // at CAP — so ten simultaneous breaks are audibly bigger than one
         // but forty are not ten times louder than ten.
@@ -622,7 +736,14 @@ export class AudioSystem {
 
     // 2. Per-id polyphony.  Prune retired voices first (lazy — no timers).
     this.prune(st.ends, now);
-    if (st.ends.length >= def.poly * cm.poly) { this.counts.dropped++; return; }
+    if (st.ends.length >= def.poly * cm.poly) {
+      // Let a new player action replace its own oldest tail, rather than
+      // dropping the attack because a richer sample lasts longer.
+      const oldest = def.tier === 1 && this.cinematicIds.has(id)
+        ? [...this.live].find(v => v.id === id) : undefined;
+      if (oldest) this.retire(oldest);
+      else { this.counts.dropped++; return; }
+    }
 
     // 3. Global ceiling, thinned by tier.  Tier 1 always plays.
     this.pruneGlobal(now);
@@ -633,28 +754,13 @@ export class AudioSystem {
       if (this.globalEnds.length >= cap) { this.counts.dropped++; return; }
     }
     if (this.globalEnds.length >= AUDIO_CONSTANTS.MAX_VOICES * cm.ceiling) {
-      this.counts.dropped++; return;
+      const candidate = [...this.live].filter(v => v.end > now && (v.tier > def.tier ||
+          (ducksWorld(id) && !ducksWorld(v.id) && !survivesPause(v.id))))
+        .sort((a, b) => b.tier - a.tier || a.level - b.level)[0];
+      if (candidate) this.retire(candidate);
+      else { this.counts.dropped++; return; }
     }
 
-    // 4. Static per-voice gain: mix level × caller trim × distance.
-    let g = def.gain * (opts?.gain ?? 1);
-    let pan = 0;
-    if (def.positional && opts?.x !== undefined && opts?.y !== undefined) {
-      // NOTE the argument order: wrapDeltaX(from, to) returns `to - from`,
-      // so listener-first gives a delta pointing FROM the listener TO the
-      // source — which is what pan wants (positive = to the right).
-      // Reversing it inverts the stereo image.
-      const dx = wrapDeltaX(this.lx, opts.x);
-      const dy = wrapDeltaY(this.ly, opts.y);
-      const d = Math.sqrt(dx * dx + dy * dy);
-      // Caller override beats the def's own range, which beats the global
-      // default — so ONE id can be near-field when it happens ambiently
-      // and full-range when the player caused it.
-      const atten = this.attenuation(d, opts.near ?? def.near, opts.far ?? def.far);
-      if (atten <= 0) { this.counts.dropped++; return; } // out of earshot
-      g *= atten;
-      pan = Math.max(-1, Math.min(1, dx / AUDIO_CONSTANTS.PAN_WIDTH));
-    }
 
     const voiceGain = this.ctx.createGain();
     voiceGain.gain.value = g;
@@ -665,14 +771,14 @@ export class AudioSystem {
       voiceGain.connect(panner);
       tail = panner;
     }
-    tail.connect(this.master);
+    tail.connect(this.buses.get(busFor(id, def.tier))!);
 
     // 5. Render.
     const s = this.scratch;
     s.ctx = this.ctx;
     s.dest = voiceGain;
     s.t0 = now;
-    s.pitch = (opts?.pitch ?? 1) * (def.jitter ? 1 + (Math.random() * 2 - 1) * def.jitter : 1);
+    s.pitch = Math.max(0.25, Math.min(4, Number.isFinite(opts?.pitch) ? opts!.pitch! : 1)) * (def.jitter ? 1 + (Math.random() * 2 - 1) * Math.min(def.jitter, this.cinematicIds.has(id) ? 0.035 : 1) : 1);
     s.param = opts?.param ?? 0;
     s.noise = this.noiseBuf;
     // A decoded take REPLACES the draft; otherwise the draft plays.  One
@@ -681,7 +787,8 @@ export class AudioSystem {
     // per-voice cost — and every budget above it (retrigger collapse,
     // polyphony, tier thinning, attenuation) has already been applied, so
     // a sample obeys the same ceilings as the synth it replaced.
-    const buf = this.takeSample(id);
+    const cached = this.synthesized.get(id);
+    const buf = this.takeSample(id) ?? (this._draftsEnabled && cached ? this.chooseTake(cached) : null);
     let dur: number;
     if (buf) {
       const src = this.ctx.createBufferSource();
@@ -701,6 +808,7 @@ export class AudioSystem {
       // as a drop so the DBG readout can say how much of the game is still
       // silent rather than leaving it to the ear.
       voiceGain.disconnect();
+      tail.disconnect();
       this.counts.dropped++;
       return;
     }
@@ -711,16 +819,20 @@ export class AudioSystem {
     st.lastAt = now;
     st.lastGain = voiceGain;
     st.lastBump = 1;
+    st.lastLevel = g; st.lastPan = pan;
     this.globalEnds.push(endsAt);
     this.counts.played++;
     this.perId.set(id, (this.perId.get(id) ?? 0) + 1);
 
-    // Disconnect once silent so the graph doesn't accumulate dead nodes.
-    // setTimeout is fine here: one per VOICE, not per frame, and the
-    // manager is event-driven by construction.
-    const node = voiceGain;
-    setTimeout(() => { try { node.disconnect(); } catch { /* already gone */ } },
-               (dur + AUDIO_CONSTANTS.VOICE_RELEASE_PAD) * 1000 + 60);
+    const voice = { id, gain: voiceGain, tail, end: endsAt, tier: def.tier, level: g };
+    this.live.add(voice);
+    if (ducksWorld(id)) {
+      const bus = this.buses.get('world')!;
+      bus.gain.cancelScheduledValues(now);
+      bus.gain.setTargetAtTime(AUDIO_MIX.world * AUDIO_MIX.duckGain, now, 0.012);
+      bus.gain.setTargetAtTime(AUDIO_MIX.world, now + Math.min(dur, 0.65), AUDIO_MIX.duckRelease);
+    }
+    setTimeout(() => this.retire(voice), (endsAt - now) * 1000 + 60);
   }
 
   /**
@@ -751,22 +863,21 @@ export class AudioSystem {
     }
 
     // Drafts off and no recording for this id → the loop must NOT sound.
-    // Every loop is a synth draft today (the sample path is one-shot only),
+    // Every loop is a procedural voice today (the sample path is one-shot only),
     // so WAV-only silences all of them — which is the point: the engine bed
     // and the POI hums are exactly the sounds most likely to be mistaken for
     // a recording, because they are always there.
-    const draftOnly = this.takeSample(id) === null;
+    const draftOnly = !this.hasSample(id);
     if (!on || outOfEarshot || this._muted || !this._active
         || (draftOnly && !this._draftsEnabled)) {
       if (live && this.ctx) {
-        live.voice.stop(this.ctx.currentTime);
-        try { live.gain.disconnect(); } catch { /* already gone */ }
+        this.releaseLoop(live);
         this.loops.delete(id);
       }
       return;
     }
 
-    if (!this.ctx || !this.master || !this.noiseBuf) return;
+    if (!this.ctx || !this.master || !this.noiseBuf || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
     const param = opts?.param ?? 0;
 
@@ -797,16 +908,71 @@ export class AudioSystem {
     // Fade in rather than snapping — a loop starting at full gain clicks.
     gain.gain.value = 0;
     gain.gain.setTargetAtTime(g, now, AUDIO_CONSTANTS.LOOP_RAMP);
-    if (panner) { gain.connect(panner); panner.connect(this.master); }
-    else gain.connect(this.master);
+    if (panner) { gain.connect(panner); panner.connect(this.buses.get(busFor(id, def.tier))!); }
+    else gain.connect(this.buses.get(busFor(id, def.tier))!);
 
     const s = this.scratch;
     s.ctx = this.ctx; s.dest = gain; s.t0 = now;
     s.pitch = 1; s.param = param; s.noise = this.noiseBuf;
-    const voice = def.start(s);
+    const recorded = this.takeSample(id);
+    const voice = recorded ? this.startRecordedLoop(id, recorded, s) : def.start(s);
     this.loops.set(id, { voice, gain, panner, param });
     this.counts.played++;
     this.perId.set(id, (this.perId.get(id) ?? 0) + 1);
+  }
+
+  private startRecordedLoop(id: string, buffer: AudioBuffer, s: SynthCtx): LoopVoice {
+    const source = s.ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = s.ctx.createBiquadFilter();
+    filter.type = 'lowpass'; filter.Q.value = 0.65;
+    const level = s.ctx.createGain();
+    const set = (param: number, now: number) => {
+      const p = Math.max(0, Math.min(1, param));
+      const thrust = id === 'move.thrust', charge = id === 'weapon.charge.loop';
+      source.playbackRate.setTargetAtTime(charge ? 0.8 + p * 0.35 : thrust ? 0.92 + p * 0.12 : 1, now, 0.08);
+      filter.frequency.setTargetAtTime(thrust ? 180 + p * 950 : charge ? 220 + p * 800 : 1600, now, 0.08);
+      level.gain.setTargetAtTime(thrust ? 0.13 + p * 0.87 : charge ? (p >= 0.99 ? 0.08 : 0.2 + p * 0.6) : 0.65, now, 0.08);
+    };
+    level.gain.value = 0;
+    source.connect(filter); filter.connect(level); level.connect(s.dest);
+    set(s.param, s.t0);
+    source.start(s.t0);
+    return { set, stop: now => { try { source.stop(now + 0.05); } catch { /* already stopped */ } } };
+  }
+
+  private retire(v: LiveVoice) {
+    if (!this.live.delete(v)) return;
+    const now = this.ctx?.currentTime ?? 0;
+    v.gain.gain.cancelScheduledValues(now);
+    v.gain.gain.setTargetAtTime(0, now, 0.012);
+    const st = this.ids.get(v.id);
+    if (st) {
+      const index = st.ends.indexOf(v.end);
+      if (index >= 0) st.ends.splice(index, 1);
+      if (st.lastGain === v.gain) st.lastGain = null;
+    }
+    const index = this.globalEnds.indexOf(v.end);
+    if (index >= 0) this.globalEnds.splice(index, 1);
+    setTimeout(() => { v.gain.disconnect(); v.tail.disconnect(); }, AUDIO_MIX.release * 1000);
+  }
+
+  /** Map changes discard old world voices and retrigger gates; UI tails survive. */
+  public stopScene(all = false) {
+    this.stopAllLoops();
+    for (const v of this.live) if (all || !survivesPause(v.id)) this.retire(v);
+    for (const [id, st] of this.ids) if (all || !survivesPause(id)) {
+      st.lastAt = -1e9; st.lastGain = null; st.lastBump = 1; st.winCount = 0;
+    }
+  }
+
+  private releaseLoop(l: LiveLoop) {
+    const now = this.ctx?.currentTime ?? 0;
+    l.gain.gain.cancelScheduledValues(now);
+    l.gain.gain.setTargetAtTime(0, now, 0.015);
+    l.voice.stop(now + AUDIO_MIX.release);
+    setTimeout(() => { l.gain.disconnect(); l.panner?.disconnect(); }, 160);
   }
 
   public isLooping(id: string): boolean { return this.loops.has(id); }
@@ -815,8 +981,7 @@ export class AudioSystem {
     if (!this.ctx) { this.loops.clear(); return; }
     const now = this.ctx.currentTime;
     this.loops.forEach(l => {
-      l.voice.stop(now);
-      try { l.gain.disconnect(); } catch { /* already gone */ }
+      this.releaseLoop(l);
     });
     this.loops.clear();
   }
@@ -825,7 +990,7 @@ export class AudioSystem {
 
   public playsOf(id: string): number { return this.perId.get(id) ?? 0; }
   /** How many recorded takes decoded successfully.  0 with samples declared
-   *  means every id is on its synth draft — the normal state until files
+   *  means every id is on its procedural voice — the normal state until files
    *  are dropped in, and the state the standalone build stays in. */
   public get sampleCount(): number { return this.samplesLoaded; }
   /** Synth drafts on/off.  With them off, only recorded takes sound — the
@@ -840,16 +1005,15 @@ export class AudioSystem {
     if (!v && this.ctx) {
       const now = this.ctx.currentTime;
       for (const [id, live] of this.loops) {
-        if (this.takeSample(id) !== null) continue;   // a recorded loop may stay
-        live.voice.stop(now);
-        try { live.gain.disconnect(); } catch { /* already gone */ }
+        if (this.hasSample(id)) continue;   // a recorded loop may stay
+        this.releaseLoop(live);
         this.loops.delete(id);
       }
     }
   }
   /** Ids that have at least one decoded recording. */
   public get sampledIds(): string[] {
-    return [...this.samples.keys()].filter(id => this.takeSample(id) !== null).sort();
+    return [...this.samples.keys()].filter(id => this.hasSample(id)).sort();
   }
   /** Every registered id — one-shots AND loops.  Coverage is over every
    *  sound the game can make, so a readout that counted only one-shots would
@@ -867,7 +1031,7 @@ export class AudioSystem {
   public get rejectedSampleCount(): number { return this.samplesRejected; }
   /** True once a decoded take exists for this id, i.e. `play` will use the
    *  recording rather than the draft. */
-  public hasSample(id: string): boolean { return this.takeSample(id) !== null; }
+  public hasSample(id: string): boolean { return this.samples.get(id)?.bufs.some(Boolean) ?? false; }
   /** Live voice count for one id — the quantity `poly` bounds. */
   public liveVoicesOf(id: string): number {
     const st = this.ids.get(id);
@@ -889,7 +1053,7 @@ export class AudioSystem {
 
   private stateFor(id: string): IdState {
     let st = this.ids.get(id);
-    if (!st) { st = { lastAt: -1e9, ends: [], lastGain: null, lastBump: 1, winCount: 0 }; this.ids.set(id, st); }
+    if (!st) { st = { lastAt: -1e9, ends: [], lastGain: null, lastBump: 1, lastLevel: 0, lastPan: 0, winCount: 0 }; this.ids.set(id, st); }
     return st;
   }
 
@@ -913,7 +1077,10 @@ export class AudioSystem {
     ends.length = w;
   }
 
-  private pruneGlobal(now: number) { this.prune(this.globalEnds, now); }
+  private pruneGlobal(now: number) {
+    for (const v of this.live) if (v.end <= now) this.retire(v);
+    this.prune(this.globalEnds, now);
+  }
 }
 
 // ── Synthesis primitives ────────────────────────────────────────────────────

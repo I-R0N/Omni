@@ -638,3 +638,11 @@ Everything else is fine as a draft, or benefits little from an upgrade
 4. If the row is a loop, use `audio.loop(id, on, opts)` — the manager
    owns start/stop idempotently, so the call site can fire it every step
    without checking.
+
+## September 2026 production update
+
+See `AUDIO_POLISH.md` for the production mixer, repaired assets, lifecycle
+rules, category routing and validation. `ability.scan` is a new tier-1,
+non-positional sonar cue: gain 0.36, polyphony 1, cooldown 500 ms, rising
+420→840 Hz plus a delayed 630→1260 Hz partial and a quiet filtered sweep.
+It fires only after `fireScan` successfully starts a scan.
