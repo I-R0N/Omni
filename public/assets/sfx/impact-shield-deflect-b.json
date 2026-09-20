@@ -1,0 +1,15 @@
+{
+  "prompt": "TrackType: SFX, Ricochet \u2014 a hard ping with an audible pitch *rise* as the bolt leaves. The rise is the information: it bounced, it didn't land, sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "Ricochet \u2014 a hard ping with an audible pitch *rise* as the bolt leaves. The rise is the information: it bounced, it didn't land.",
+  "style": "sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 1762564605,
+  "ms": 180,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "trim": "onset",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.shield.deflect"
+}

@@ -1,0 +1,17 @@
+{
+  "prompt": "TrackType: SFX, an energy shield collapsing, a bright electrical sizzle sweeping steadily downward from a high hiss to a low rumble and thinning away to nothing, sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "description": "an energy shield collapsing, a bright electrical sizzle sweeping steadily downward from a high hiss to a low rumble and thinning away to nothing",
+  "style": "sci-fi spacecraft sound effect for a fast 2D arcade space shooter, crisp synthetic sound design, clean digital core with subtle analog warmth, dry and close with no room or reverb tail, fast controlled decay",
+  "style_kind": "tight",
+  "seed": 501510265,
+  "ms": 420,
+  "model": "stable-audio-3 sm-sfx/same-s (mlx, repo a0b57f5)",
+  "trim": "manual",
+  "take_seconds": 2.0,
+  "raw": false,
+  "peak_dbfs": -6.0,
+  "mono": true,
+  "id": "impact.shield.break",
+  "start": 21521,
+  "start_ms": 488.0
+}
