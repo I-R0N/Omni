@@ -186,6 +186,7 @@ export class AudioSystem {
   private sfxBus: GainNode | null = null;
   private _sfxVolume = 1;
   private _musicVolume = 1;
+  private _combat = false;
   private live = new Set<LiveVoice>();
   private synthesized = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
   private _prepared = false;
@@ -399,6 +400,7 @@ export class AudioSystem {
 
     this.music = new BackgroundMusic(this.ctx, this.buses.get('music')!);
     this.music.setEnabled(!this._muted && this._musicVolume > 0);
+    this.music.setCombat(this._combat);
 
     // Shared white noise — one buffer for every noise-based voice in the
     // game, sampled at a random offset per voice so repeats don't phase.
@@ -635,6 +637,11 @@ export class AudioSystem {
     if (!a) this.stopScene();
   }
   public get active(): boolean { return this._active; }
+  /** Current wave/hostile state. Repeated values are ignored by the score. */
+  public setCombat(combat: boolean) {
+    this._combat = combat;
+    this.music?.setCombat(combat);
+  }
 
   private applyMaster() {
     if (!this.master || !this.ctx) return;

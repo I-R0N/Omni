@@ -25,12 +25,14 @@ Missing/unsupported banks fall back to legacy sources and report bankFailures.
 
 ## Music and controls
 
-The complete ten-minute Space ambient by Osmic streams through an HTML audio
-element into the music bus, avoiding a ten-minute decoded PCM allocation. Playback
+The complete ten-minute Space ambient by Osmic streams as the exploration bed, and
+the Fly, Tracers, and Countdown playlist streams as a battle layer when hostile
+enemies are present and advances rather than looping one battle track.
+Both flow through the music bus, avoiding long decoded PCM allocations. Playback
 starts on user gesture, fades between gameplay and menus, continues quietly through
 pause/scene changes, and preserves its position across mute and music-volume zero.
-Hidden tabs suspend it. Master controls everything; SFX controls every event cue,
-including wave/boss stingers; Music controls the soundtrack. Existing in-memory
+Hidden tabs suspend both. Master controls everything; SFX controls every event cue,
+including wave/boss stingers; Music controls both score layers. Existing in-memory
 settings behavior is preserved. Audio settings show the attribution/license links.
 
 Both web and standalone builds include the banks and score. The standalone embeds
@@ -39,7 +41,8 @@ MP3 data URIs; its download is larger because it contains the full score.
 ## Licensing and reproduction
 
 See public/assets/audio/AUDIO_CREDITS.md and the included notices. Kenney sources
-are CC0; the unmodified score is CC BY 3.0. No runtime third-party service is used.
+are CC0; the unmodified score tracks are individually credited under CC BY 3.0 or
+CC BY 4.0. No runtime third-party service is used.
 
 Download the two source archives linked in the credits and extract into
 SOURCE/scifi and SOURCE/impacts. With Python NumPy/SciPy and ffmpeg installed:

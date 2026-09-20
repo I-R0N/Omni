@@ -8,9 +8,14 @@ asset architecture.
 
 - **Effects:** Kenney's [Sci-Fi Sounds](https://kenney.nl/assets/sci-fi-sounds)
   and [Impact Sounds](https://kenney.nl/assets/impact-sounds), both CC0.
-- **Music:** Osmic's [Space ambient](https://opengameart.org/content/space-ambient),
-  licensed CC BY 3.0. The current `space-ambient.mp3` is the complete, unmodified
-  ten-minute file.
+- **Exploration music:** Osmic's [Space ambient](https://opengameart.org/content/space-ambient),
+  CC BY 3.0; `space-ambient.mp3` is the complete, unmodified ten-minute file.
+- **Battle music:** Alexandr Zhelanov's [Fly](https://opengameart.org/content/techno-space),
+  CC BY 3.0; `fly-battle.mp3` is the published MP3, unmodified.
+- **Battle playlist:** Sygil's [Tracers](https://opengameart.org/content/tracers),
+  CC BY 4.0, and Alexandr Zhelanov's [Countdown](https://opengameart.org/content/countdown-0),
+  CC BY 3.0. The three battle tracks rotate without looping one track during
+  prolonged combat.
 
 Keep a license record for every new asset. Put the source URL, author, license,
 whether the file was changed, and the local filename in
@@ -34,9 +39,11 @@ by the source.
 
 ## Add or replace background music
 
-The game currently streams one looping background track through
-`BackgroundMusic`, which routes it to the Music bus. It is intentionally streamed
-rather than decoded into a ten-minute Web Audio buffer.
+The game streams two looping score layers through `BackgroundMusic`, which routes
+them to the Music bus: `space-ambient.mp3` is the exploration bed and
+`fly-battle.mp3`, `tracers-battle.mp3`, and `countdown-battle.mp3` rotate while
+hostile enemies are present. All are streamed rather than decoded into long Web
+Audio buffers.
 
 1. Use a repository-safe MP3 and place it in `public/assets/audio/`.
 2. If replacing the soundtrack, update the filename in
@@ -69,15 +76,16 @@ matches the implementation of the existing `Space ambient` soundtrack.
 3. Add a dedicated entry to `public/assets/audio/AUDIO_CREDITS.md` using the
    CC-BY template above. For CC-BY, copy the supplied license notice to
    `public/assets/audio/licenses/`; for CC0, record the asset page and CC0 status.
-4. Set that filename in `engine/systems/BackgroundMusic.ts`. The current line is
-   the authoritative pattern:
+4. Set that filename in `engine/systems/BackgroundMusic.ts` using the current
+   track-construction pattern:
 
    ```ts
-   this.media.src = inline?.['space-ambient.mp3'] ?? '/assets/audio/space-ambient.mp3';
+   this.battle = this.makeTrack('fly-battle.mp3', destination);
    ```
 
-   Replace both occurrences of `space-ambient.mp3` with the new filename. This
-   preserves web serving and standalone data-URI playback.
+   Replace the appropriate track filename, or add another `makeTrack` entry when
+   implementing a new music state. `makeTrack` preserves web serving and standalone
+   data-URI playback.
 5. Update the visible music-credit links in `components/UIOverlay.tsx` to the new
    title, creator, source page and license. This is required for CC-BY and is good
    provenance for CC0.
@@ -86,10 +94,9 @@ matches the implementation of the existing `Space ambient` soundtrack.
    fades correctly, follows the Music/Master controls, resumes after mute and is
    present in the generated standalone HTML.
 
-The present system plays one background track. Adding a file alone does not make
-it selectable; the `BackgroundMusic.ts` source line selects the active track. For
-multiple selectable tracks, first implement the catalog/fade behavior described
-above and include a complete credit entry for every catalog item.
+Adding a file alone does not make it selectable. `BackgroundMusic.ts` selects and
+mixes the active tracks. For a third or selectable track, extend its small track
+catalog/fade behavior and include a complete credit entry for every catalog item.
 
 ## Add a produced sound effect
 

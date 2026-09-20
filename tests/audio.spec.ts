@@ -125,12 +125,20 @@ test('burst load stays bounded and critical player feedback displaces background
 });
 
 
-test('streamed background music keeps its place, obeys music/mute, and survives pause', async ({ page }) => {
+test('streamed music keeps its place; battle layer follows combat, music/mute, and pause', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.music?.playing);
   await startRun(page);
   await page.waitForFunction(() => window.__omniEngine.audio.music.currentTime > 0.2);
+  await engine(page, e => e.audio.setCombat(true));
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
+  expect(await engine(page, e => e.audio.music.battleActive)).toBeTruthy();
+  const firstBattle = await engine(page, e => e.audio.music.battleTrackIndex);
+  await engine(page, e => e.audio.music.currentBattle.media.dispatchEvent(new Event('ended')));
+  await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(firstBattle);
+  await engine(page, e => e.audio.setCombat(false));
+  expect(await engine(page, e => e.audio.music.battleActive)).toBeFalsy();
   const before = await engine(page, e => e.audio.music.currentTime);
   await engine(page, e => { e.audio.setSfxVolume(0); e.pauseGame(); });
   await expect.poll(() => engine(page, e => e.audio.music.currentTime)).toBeGreaterThan(before);
