@@ -18,6 +18,20 @@ whether the file was changed, and the local filename in
 `public/assets/audio/licenses/`. CC-BY material also needs a visible attribution;
 the audio settings currently display the soundtrack credit.
 
+### CC-BY attribution checklist
+
+For every CC-BY asset, the repository credit must state the **title**, **creator**,
+**license version**, **source-page URL**, **original-download URL**, local filename,
+and whether Omni changed the work. Use this format:
+
+> `[Title]` by `[Creator]` — [CC BY 3.0/4.0]. Source: `[source page URL]`.
+> Original: `[download URL]`. Modified: `[unmodified / exact changes]`.
+
+The in-game audio settings must show the title and creator and link to both the
+source page and the exact CC-BY license. Do not imply that the creator endorses
+Omni. Keep the license text in `public/assets/audio/licenses/` when it is supplied
+by the source.
+
 ## Add or replace background music
 
 The game currently streams one looping background track through
@@ -39,6 +53,43 @@ Extend `BackgroundMusic` with a small, credited track catalog and change tracks
 by fading its existing gain to zero, switching the element source, then fading up.
 Keep all tracks connected through the single Music bus so the Master and Music
 sliders continue to work.
+
+### Exact OpenGameArt workflow
+
+Use this when requesting or selecting a specific OpenGameArt track for Omni. It
+matches the implementation of the existing `Space ambient` soundtrack.
+
+1. On the track's OpenGameArt page, record its title, creator, license and direct
+   download URL before downloading. Use only a license that permits Omni's intended
+   commercial use; CC0 and CC-BY are the usual candidates. Do not assume an asset
+   is free to use merely because it is hosted on OpenGameArt.
+2. Download the creator's published MP3 and place it at
+   `public/assets/audio/<descriptive-track-name>.mp3`. Retain the original unless
+   the credits explicitly describe an edit.
+3. Add a dedicated entry to `public/assets/audio/AUDIO_CREDITS.md` using the
+   CC-BY template above. For CC-BY, copy the supplied license notice to
+   `public/assets/audio/licenses/`; for CC0, record the asset page and CC0 status.
+4. Set that filename in `engine/systems/BackgroundMusic.ts`. The current line is
+   the authoritative pattern:
+
+   ```ts
+   this.media.src = inline?.['space-ambient.mp3'] ?? '/assets/audio/space-ambient.mp3';
+   ```
+
+   Replace both occurrences of `space-ambient.mp3` with the new filename. This
+   preserves web serving and standalone data-URI playback.
+5. Update the visible music-credit links in `components/UIOverlay.tsx` to the new
+   title, creator, source page and license. This is required for CC-BY and is good
+   provenance for CC0.
+6. Run `npm run typecheck`, `npm run build`, `npm run test:audio`, and
+   `node scripts/inline-build.mjs`. Confirm the music starts after a gesture,
+   fades correctly, follows the Music/Master controls, resumes after mute and is
+   present in the generated standalone HTML.
+
+The present system plays one background track. Adding a file alone does not make
+it selectable; the `BackgroundMusic.ts` source line selects the active track. For
+multiple selectable tracks, first implement the catalog/fade behavior described
+above and include a complete credit entry for every catalog item.
 
 ## Add a produced sound effect
 
