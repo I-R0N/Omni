@@ -1,9 +1,11 @@
 /** Streamed score layers through one Music bus. The exploration bed keeps its
  * place while a non-repeating battle playlist follows hostile presence. */
 interface MusicTrack {
+  file: string;
   media: HTMLAudioElement;
   gain: GainNode;
   error: string | null;
+  loaded: boolean;
 }
 
 export class BackgroundMusic {
@@ -26,12 +28,12 @@ export class BackgroundMusic {
 
   private makeTrack(file: string, destination: AudioNode, loop: boolean): MusicTrack {
     const media = new Audio();
-    media.preload = 'auto';
+    // Score is intentionally opt-in.  Four long tracks must not compete with
+    // the game bundle before a player has started a run.
+    media.preload = 'none';
     media.loop = loop;
     media.setAttribute('playsinline', '');
-    const inline = (globalThis as { __omniAudioInline?: Record<string, string> }).__omniAudioInline;
-    media.src = inline?.[file] ?? `/assets/audio/${file}`;
-    const track: MusicTrack = { media, gain: this.ctx.createGain(), error: null };
+    const track: MusicTrack = { file, media, gain: this.ctx.createGain(), error: null, loaded: false };
     track.gain.gain.value = 0;
     media.addEventListener('error', () => { track.error = media.error?.message || `${file} unavailable`; });
     if (!loop) media.addEventListener('ended', () => {
@@ -40,6 +42,17 @@ export class BackgroundMusic {
     this.ctx.createMediaElementSource(media).connect(track.gain);
     track.gain.connect(destination);
     return track;
+  }
+
+  /** Attach only when the layer is actually needed.  Standalone builds use the
+   * same path, but receive their data URI from the inlined asset catalog. */
+  private ensureLoaded(track: MusicTrack, preload = false) {
+    if (track.loaded) return;
+    const inline = (globalThis as { __omniAudioInline?: Record<string, string> }).__omniAudioInline;
+    track.media.preload = preload ? 'metadata' : 'none';
+    track.media.src = inline?.[track.file] ?? `/assets/audio/${track.file}`;
+    track.loaded = true;
+    if (preload) track.media.load();
   }
 
   /** Call directly from the same gesture that unlocks Web Audio. */
@@ -107,9 +120,14 @@ export class BackgroundMusic {
     next.media.currentTime = 0;
     this.ramp(next.gain, this.active && this.combat ? 0.34 : 0, 0.12);
     this.play(next);
+    // Metadata for one successor hides the hand-off without downloading the
+    // whole battle catalog on the title screen.
+    const successor = this.battleTracks[(this.battleIndex + 1) % this.battleTracks.length];
+    this.ensureLoaded(successor, true);
   }
 
   private play(track: MusicTrack) {
+    this.ensureLoaded(track);
     if (track.media.paused) void track.media.play().catch(() => {
       // Autoplay/interruption recovery retries on the next real gesture.
     });

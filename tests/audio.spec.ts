@@ -129,6 +129,8 @@ test('streamed music keeps its place; battle layer follows combat, music/mute, a
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.music?.playing);
+  expect(await engine(page, e => e.audio.music.battleTrackIndex)).toBe(-1);
+  expect(await engine(page, e => e.audio.music.battleTracks.every(track => !track.loaded))).toBeTruthy();
   await startRun(page);
   await page.waitForFunction(() => window.__omniEngine.audio.music.currentTime > 0.2);
   await engine(page, e => e.audio.setCombat(true));

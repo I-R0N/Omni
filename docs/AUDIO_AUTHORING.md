@@ -43,7 +43,9 @@ The game streams two looping score layers through `BackgroundMusic`, which route
 them to the Music bus: `space-ambient.mp3` is the exploration bed and
 `fly-battle.mp3`, `tracers-battle.mp3`, and `countdown-battle.mp3` rotate while
 hostile enemies are present. All are streamed rather than decoded into long Web
-Audio buffers.
+Audio buffers. Battle sources are attached only when combat starts; one upcoming
+track receives a metadata preload during battle, so the title screen does not
+download the whole playlist.
 
 1. Use a repository-safe MP3 and place it in `public/assets/audio/`.
 2. If replacing the soundtrack, update the filename in

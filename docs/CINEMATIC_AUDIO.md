@@ -31,6 +31,9 @@ enemies are present and advances rather than looping one battle track.
 Both flow through the music bus, avoiding long decoded PCM allocations. Playback
 starts on user gesture, fades between gameplay and menus, continues quietly through
 pause/scene changes, and preserves its position across mute and music-volume zero.
+The battle catalog is not requested on the title screen: its first track starts
+loading only when combat begins, then metadata for one successor is warmed while
+the current track plays.
 Hidden tabs suspend both. Master controls everything; SFX controls every event cue,
 including wave/boss stingers; Music controls both score layers. Existing in-memory
 settings behavior is preserved. Audio settings show the attribution/license links.
