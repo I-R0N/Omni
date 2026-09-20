@@ -19,7 +19,8 @@
 - Original download: https://opengameart.org/sites/default/files/Fly.mp3
 - License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
 - License terms: https://creativecommons.org/licenses/by/3.0/
-- File: `fly-battle.mp3`, copied from the published `Fly.mp3`, unmodified.
+- File: `fly-battle.mp3`, transcoded from the published `Fly.mp3` to a 192 kbps
+  MP3 runtime encode; no musical edits.
 - Runtime looping and gain fades only. No endorsement by the author is implied.
 - Used as the battle layer while hostile enemies are present; attribution and
   license links are visible in the game's audio settings.
@@ -30,7 +31,8 @@
 - Original download: https://opengameart.org/sites/default/files/tracers.mp3
 - License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 - License terms: https://creativecommons.org/licenses/by/4.0/
-- File: `tracers-battle.mp3`, copied from the published `tracers.mp3`, unmodified.
+- File: `tracers-battle.mp3`, transcoded from the published `tracers.mp3` to a
+  192 kbps MP3 runtime encode; no musical edits.
 - Runtime playback and gain fades only. No endorsement by the author is implied.
 
 **Countdown** — **Alexandr Zhelanov**
@@ -39,7 +41,8 @@
 - Original download: https://opengameart.org/sites/default/files/Countdown.mp3
 - License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
 - License terms: https://creativecommons.org/licenses/by/3.0/
-- File: `countdown-battle.mp3`, copied from the published `Countdown.mp3`, unmodified.
+- File: `countdown-battle.mp3`, transcoded from the published `Countdown.mp3`
+  to a 192 kbps MP3 runtime encode; no musical edits.
 - Runtime playback and gain fades only. No endorsement by the author is implied.
 
 ## Sound effects
