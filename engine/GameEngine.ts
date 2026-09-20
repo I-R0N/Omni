@@ -782,10 +782,13 @@ export class GameEngine {
    *  CONTROL for that claim — it should stay near zero while `uiActualMs`
    *  moves.  The real cost is measured by `<Profiler>` (see noteUiRender). */
   private lastStatsScheduleMs: number = 0;
-  /** Last hostile-presence value REPORTED to the score, so the engine speaks
+  /** Last combat-proximity value REPORTED to the score, so the engine speaks
    *  only on the transition.  Undefined until the first frame reports, which
-   *  is what makes the opening report unconditional. */
+   *  is what makes the opening report unconditional.  Also the hysteresis
+   *  state: engaged widens the radius that keeps it engaged. */
   private lastReportedCombat: boolean | undefined;
+  /** `simClock` when a hostile was last in range — the linger's only state. */
+  private lastHostileNearAt = -Infinity;
   // ── React reconciliation cost, reported IN by the UI layer ────────────
   //
   // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
@@ -2190,19 +2193,40 @@ export class GameEngine {
     this.input.setStickExclusion(mm.x, mm.y, mm.size, mm.size);
   }
 
+  /** Half the diagonal of the VISIBLE world rect — the one definition of "a
+   *  screen" in world units, read live so a browser resize needs no listener.
+   *  Shared by the wave spawn ring (`waveContext`) and the battle-music
+   *  proximity gate, which have to agree: the gate's job is to notice the
+   *  wave the ring just placed. */
+  viewportHalfDiagonal(): number {
+    const zoom = this.camera.zoom || 1;
+    return Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+  }
+
   /**
-   * Is anything on the field actually FIGHTING the player?  The battle score
-   * follows hostile PRESENCE, not enemy COUNT, and the two are not the same
-   * list: ambient bubbles are `EntityType.ENEMY` and are kept alive in normal
-   * play forever, so a count would have the battle layer running from the
-   * moment a run starts and never stopping.  Same for an ally or neutral
-   * rival — sharing a map with a privateer that ignores you is not a fight.
-   * A third party that has TURNED on the player does count, because by then
-   * it is one.  Walks the enemy index `prepareFrameEntities` has already
-   * built and returns on the first hostile, so the common case (a wave in
-   * progress) is O(1).
+   * Is a hostile close enough to the player for the battle layer to be
+   * audible?  PROXIMITY, not presence (user call).  Presence was the wrong
+   * question for the sequencing the game actually has: an arena's field goes
+   * empty on every wave clear, so a presence signal fell and rose again a few
+   * seconds later, and each rise used to cut the song short.  What the layer
+   * follows now is whether the fight is HERE — and a lull only ducks it.
+   *
+   * Hostility itself is unchanged: ambient bubbles are `EntityType.ENEMY` and
+   * are kept alive for the whole run, and an ally or neutral rival sharing the
+   * map is not a fight, so both are skipped until they turn on the player.
+   * Walks the enemy index `prepareFrameEntities` has already built and returns
+   * on the first hostile in range.
    */
-  private anyHostileEnemy(): boolean {
+  private hostileNearPlayer(): boolean {
+    // Hysteresis: once engaged it takes a wider radius to lose the layer than
+    // it took to gain it, so an enemy loitering at the boundary cannot pump
+    // the gain.
+    const screens = this.viewportHalfDiagonal();
+    const reach = screens * (this.lastReportedCombat
+      ? AUDIO_CONSTANTS.MUSIC_RELEASE_SCREENS
+      : AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS);
+    const reach2 = reach * reach;
+    const px = this.player.position.x, py = this.player.position.y;
     const enemies = this.entityIndex.enemies;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
@@ -2210,13 +2234,26 @@ export class GameEngine {
       if (e.thirdParty === true || e.isRival === true) {
         // Conditionally hostile — the same "hunting the PLAYER specifically"
         // test the off-screen indicators blink red on.
-        if (e.huntingPlayer === true
-          || (e.provoked === true && e.aggroTargetId === 'player')) return true;
-        continue;
+        if (!(e.huntingPlayer === true
+          || (e.provoked === true && e.aggroTargetId === 'player'))) continue;
       }
-      return true;
+      const dx = wrapDeltaX(px, e.position.x), dy = wrapDeltaY(py, e.position.y);
+      if (dx * dx + dy * dy <= reach2) return true;
     }
     return false;
+  }
+
+  /** The battle layer's ducking signal: a hostile is near, or was recently
+   *  enough that the fight is not over.  The LINGER is measured off
+   *  `simClock` rather than ticked, so this needs no dt and no per-frame
+   *  countdown — a stamp and a subtraction, the same shape the detection
+   *  freshness uses. */
+  private inCombatProximity(): boolean {
+    if (this.hostileNearPlayer()) {
+      this.lastHostileNearAt = this.simClock;
+      return true;
+    }
+    return this.simClock - this.lastHostileNearAt < AUDIO_CONSTANTS.MUSIC_LINGER_SEC;
   }
 
   private loop = (time: number) => {
@@ -2559,7 +2596,7 @@ export class GameEngine {
     // what lets the debug handle drive `setCombat` directly and have the
     // setting stand rather than being overwritten on the next frame.
     const combat = this.gameState === GameState.PLAYING && !this.dockedAtStation
-      && this.anyHostileEnemy();
+      && this.inCombatProximity();
     if (combat !== this.lastReportedCombat) {
       this.lastReportedCombat = combat;
       this.audio.setCombat(combat);
@@ -6411,11 +6448,7 @@ export class GameEngine {
     if (!this.currentMap) return null;
     // Read the live window size + camera zoom at spawn time so a recent
     // browser resize is reflected without needing a resize listener.
-    // halfW/halfH match RenderSystem's viewport math exactly.
-    const zoom = this.camera.zoom || 1;
-    const halfW = (window.innerWidth / 2) / zoom;
-    const halfH = (window.innerHeight / 2) / zoom;
-    const viewportHalfDiagonal = Math.hypot(halfW, halfH);
+    const viewportHalfDiagonal = this.viewportHalfDiagonal();
     return {
       entities: this.currentMap.entities,
       player: this.player,

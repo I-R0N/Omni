@@ -26,8 +26,12 @@ Missing/unsupported banks fall back to legacy sources and report bankFailures.
 ## Music and controls
 
 The complete ten-minute Space ambient by Osmic streams as the exploration bed, and
-the Fly, Tracers, and Countdown playlist streams as a battle layer when hostile
-enemies are present and advances rather than looping one battle track.
+the Fly, Tracers, and Countdown playlist streams as a battle layer under it.
+The playlist is opened once and then runs continuously: a track changes only
+when it ENDS, so one song carries a whole wave sequence rather than restarting
+each time the field clears. Hostile PROXIMITY only ducks the layer — with
+nothing near the player it fades out and pauses, and the next engagement fades
+back in at the same point in the same song.
 Both flow through the music bus, avoiding long decoded PCM allocations. Playback
 starts on user gesture, fades between gameplay and menus, continues quietly through
 pause/scene changes, and preserves its position across mute and music-volume zero.

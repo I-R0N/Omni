@@ -1,5 +1,6 @@
-/** Streamed score layers through one Music bus. The exploration bed keeps its
- * place while a non-repeating battle playlist follows hostile presence. */
+/** Streamed score layers through one Music bus.  The exploration bed keeps its
+ * place; the battle playlist runs CONTINUOUSLY once opened and is only ever
+ * ducked, never rewound — see `setCombat`. */
 interface MusicTrack {
   file: string;
   media: HTMLAudioElement;
@@ -8,11 +9,33 @@ interface MusicTrack {
   loaded: boolean;
 }
 
+/** Mix levels.  The ambient bed ducks under the battle layer rather than
+ *  stopping, so the score never has a hole in it. */
+const AMBIENT_MENU = 0.15;
+const AMBIENT_EXPLORE = 0.28;
+const AMBIENT_DUCKED = 0.12;
+const BATTLE_LEVEL = 0.34;
+/** Gain ramp time CONSTANTS (`setTargetAtTime`), not durations. */
+const FADE_IN_SEC = 0.75;
+const FADE_OUT_SEC = 1.6;
+/** Ramp used when a track hands over to the next at its own end — short,
+ *  because nothing is being ducked, one song simply becomes another. */
+const HANDOVER_SEC = 0.12;
+/** When to actually pause a ducked battle track.  An exponential approach is
+ *  ~95% of the way there after three time constants, which on a 0.34 layer
+ *  leaves 0.017 under a 0.12 ambient bed — inaudible.  Pausing is what makes
+ *  the resume land on the same bar, so it has to wait for the fade to be over
+ *  rather than race it. */
+const BATTLE_PAUSE_DELAY_MS = FADE_OUT_SEC * 3 * 1000;
+
 export class BackgroundMusic {
   private readonly ambient: MusicTrack;
   private readonly battleTracks: MusicTrack[];
+  /** -1 until the playlist is opened for the first time.  After that it only
+   *  ever moves in `advanceBattle`, i.e. when a song ends. */
   private battleIndex = -1;
   private pauseTimer: ReturnType<typeof setTimeout> | undefined;
+  private battlePauseTimer: ReturnType<typeof setTimeout> | undefined;
   private enabled = true;
   private active = false;
   private combat = false;
@@ -36,8 +59,11 @@ export class BackgroundMusic {
     const track: MusicTrack = { file, media, gain: this.ctx.createGain(), error: null, loaded: false };
     track.gain.gain.value = 0;
     media.addEventListener('error', () => { track.error = media.error?.message || `${file} unavailable`; });
+    // THE ONLY TRACK CHANGE THERE IS.  A ducked track is paused, so `ended`
+    // cannot fire while the layer is silent either: a song is never skipped
+    // past while nobody is listening to it.
     if (!loop) media.addEventListener('ended', () => {
-      if (track === this.currentBattle && this.enabled && this.active && this.combat) this.startNextBattle();
+      if (track === this.currentBattle && this.enabled) this.advanceBattle();
     });
     this.ctx.createMediaElementSource(media).connect(track.gain);
     track.gain.connect(destination);
@@ -61,10 +87,7 @@ export class BackgroundMusic {
     clearTimeout(this.pauseTimer);
     this.rampMix();
     this.play(this.ambient);
-    if (this.combat) {
-      if (this.currentBattle) this.play(this.currentBattle);
-      else this.startNextBattle();
-    }
+    this.syncBattlePlayback();
   }
 
   public setEnabled(enabled: boolean) {
@@ -72,6 +95,7 @@ export class BackgroundMusic {
     if (enabled) this.resume();
     else {
       clearTimeout(this.pauseTimer);
+      clearTimeout(this.battlePauseTimer);
       this.ramp(this.ambient.gain, 0, 0.025);
       this.ramp(this.battleGain, 0, 0.025);
       this.pauseTimer = setTimeout(() => {
@@ -84,19 +108,34 @@ export class BackgroundMusic {
   public setActive(active: boolean) {
     this.active = active;
     if (this.enabled && !document.hidden) this.rampMix();
-    if (active && this.enabled && this.combat && !this.currentBattle) this.startNextBattle();
+    this.syncBattlePlayback();
   }
 
-  /** Idempotent; GameEngine may report the current combat state every frame. */
+  /**
+   * Is the player IN a fight right now?  This is a DUCKING signal and nothing
+   * else: it decides whether the battle layer is audible, never which track is
+   * playing or where in it we are.
+   *
+   * It used to open the playlist afresh on every rising edge, so the field
+   * going quiet between waves — which it does on every clear — cut the song
+   * and started the next one.  A wave sequence is one continuous encounter,
+   * so the playlist is opened ONCE and thereafter only ever fades out (and
+   * pauses, holding its position) and fades back in where it left off.
+   *
+   * Idempotent; GameEngine may report the current state every frame.
+   */
   public setCombat(combat: boolean) {
     if (this.combat === combat) return;
     this.combat = combat;
     if (this.enabled && !document.hidden) this.rampMix();
-    if (combat && this.enabled && this.active) this.startNextBattle();
+    this.syncBattlePlayback();
   }
 
   public suspend() {
     clearTimeout(this.pauseTimer);
+    clearTimeout(this.battlePauseTimer);
+    // Positions are deliberately left alone — a tab returning from hidden
+    // resumes the score rather than restarting it.
     this.ambient.media.pause();
     this.battleTracks.forEach(track => track.media.pause());
     this.ramp(this.ambient.gain, 0, 0);
@@ -105,25 +144,70 @@ export class BackgroundMusic {
 
   private rampMix() {
     const playing = this.active;
-    this.ramp(this.ambient.gain, playing ? (this.combat ? 0.12 : 0.28) : 0.15, 0.8);
-    this.ramp(this.battleGain, playing && this.combat ? 0.34 : 0, this.combat ? 0.75 : 1.6);
+    const ambient = playing ? (this.combat ? AMBIENT_DUCKED : AMBIENT_EXPLORE) : AMBIENT_MENU;
+    this.ramp(this.ambient.gain, ambient, FADE_IN_SEC);
+    this.ramp(this.battleGain, this.battleLevel, this.combat ? FADE_IN_SEC : FADE_OUT_SEC);
   }
 
+  /** Start or stop the battle MEDIA to match the mix.  Splitting this from
+   *  `rampMix` is the whole feature: the gain says how loud, this says where
+   *  in the song, and only the first of those may change on a lull. */
+  private syncBattlePlayback() {
+    clearTimeout(this.battlePauseTimer);
+    if (this.audibleBattle) {
+      // First engagement of the run opens the playlist; every later one
+      // resumes whatever was already playing, at its own position.
+      if (this.battleIndex < 0) this.openBattlePlaylist();
+      const track = this.currentBattle;
+      if (track) this.play(track);
+      return;
+    }
+    const track = this.currentBattle;
+    if (!track || track.media.paused) return;
+    // Pause only once the fade is over.  Pausing is what holds the position,
+    // and doing it early would clip the fade the player is listening to.
+    this.battlePauseTimer = setTimeout(() => track.media.pause(), BATTLE_PAUSE_DELAY_MS);
+  }
+
+  private get audibleBattle(): boolean {
+    return this.enabled && this.active && this.combat && !document.hidden;
+  }
+
+  private get battleLevel(): number { return this.active && this.combat ? BATTLE_LEVEL : 0; }
   private get currentBattle(): MusicTrack | null { return this.battleTracks[this.battleIndex] ?? null; }
   private get battleGain(): GainNode { return this.currentBattle?.gain ?? this.battleTracks[0].gain; }
 
-  private startNextBattle() {
+  /** The one place the playlist starts from nothing. */
+  private openBattlePlaylist() {
+    this.battleIndex = 0;
+    this.ramp(this.currentBattle!.gain, this.battleLevel, FADE_IN_SEC);
+    this.preloadSuccessor();
+  }
+
+  /** The one place a track CHANGES — reached only from a track's own `ended`. */
+  private advanceBattle() {
     const previous = this.currentBattle;
-    if (previous) { previous.media.pause(); previous.media.currentTime = 0; }
+    if (previous) {
+      previous.media.pause();
+      previous.media.currentTime = 0;
+      // A paused node left at full gain is a click waiting for the playlist
+      // to come round to it again.
+      this.ramp(previous.gain, 0, 0.05);
+    }
     this.battleIndex = (this.battleIndex + 1) % this.battleTracks.length;
     const next = this.currentBattle!;
     next.media.currentTime = 0;
-    this.ramp(next.gain, this.active && this.combat ? 0.34 : 0, 0.12);
-    this.play(next);
-    // Metadata for one successor hides the hand-off without downloading the
-    // whole battle catalog on the title screen.
-    const successor = this.battleTracks[(this.battleIndex + 1) % this.battleTracks.length];
-    this.ensureLoaded(successor, true);
+    this.ramp(next.gain, this.battleLevel, HANDOVER_SEC);
+    this.preloadSuccessor();
+    // A song that ends while the layer is ducked hands over silently and the
+    // successor waits, paused at 0, for the next engagement.
+    if (this.audibleBattle) this.play(next);
+  }
+
+  /** Metadata for one successor hides the hand-off without downloading the
+   *  whole battle catalog on the title screen. */
+  private preloadSuccessor() {
+    this.ensureLoaded(this.battleTracks[(this.battleIndex + 1) % this.battleTracks.length], true);
   }
 
   private play(track: MusicTrack) {
@@ -143,6 +227,9 @@ export class BackgroundMusic {
   public get battlePlaying(): boolean { return !!this.currentBattle && !this.currentBattle.media.paused && this.currentBattle.media.readyState >= 2; }
   public get battleActive(): boolean { return this.active && this.combat; }
   public get battleTrackIndex(): number { return this.battleIndex; }
+  /** Where the battle layer is IN its song — the quantity a lull must not
+   *  move.  Exposed so the suite can pin "resumes, not restarts". */
+  public get battleCurrentTime(): number { return this.currentBattle?.media.currentTime ?? 0; }
   public get currentTime(): number { return this.ambient.media.currentTime; }
   public get error(): string | null { return this.ambient.error || this.battleTracks.find(track => track.error)?.error || null; }
 }

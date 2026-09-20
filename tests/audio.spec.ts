@@ -156,6 +156,56 @@ test('streamed music keeps its place; battle layer follows combat, music/mute, a
   watch.assertClean();
 });
 
+// The battle layer is a CONTINUOUS playlist that proximity only ducks.  Both
+// halves of that used to be one action: every rising edge of the combat signal
+// called `startNextBattle`, which advanced the index AND rewound to 0 — and an
+// arena's field goes empty on every wave clear, so a wave sequence chopped
+// itself into a new song every few seconds.
+test('a lull ducks the battle layer without changing or rewinding the song', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await engine(page, e => e.audio.setCombat(true));
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
+
+  // PRECONDITION as a selection criterion (README rule 13): "it resumed where
+  // it left off" is only a claim about a track that was genuinely running, so
+  // wait for real playback rather than asserting against a track at 0.
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleCurrentTime > 0.3,
+    null, { timeout: 20000 });
+  const engagedIndex = await engine(page, e => e.audio.music.battleTrackIndex);
+  const engagedAt = await engine(page, e => e.audio.music.battleCurrentTime);
+  expect(engagedIndex).toBeGreaterThanOrEqual(0);
+  expect(engagedAt).toBeGreaterThan(0.3);
+
+  // The lull.  The pause trails the fade by three time constants, so this is
+  // waiting on the real scheduled pause, not on a fixed sleep.
+  await engine(page, e => e.audio.setCombat(false));
+  expect(await engine(page, e => e.audio.music.battleActive)).toBeFalsy();
+  await expect.poll(() => engine(page, e => e.audio.music.battlePlaying),
+    { timeout: 20000 }).toBeFalsy();
+  const heldAt = await engine(page, e => e.audio.music.battleCurrentTime);
+  const heldIndex = await engine(page, e => e.audio.music.battleTrackIndex);
+  // Paused, not stopped: the position is still standing where the fade left it.
+  expect(heldIndex).toBe(engagedIndex);
+  expect(heldAt).toBeGreaterThanOrEqual(engagedAt);
+
+  // Re-engaging resumes THE SAME SONG at THE SAME POINT.  A restart would put
+  // the index one on and the clock back near zero, which is exactly what the
+  // old rising edge did.
+  await engine(page, e => e.audio.setCombat(true));
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
+  expect(await engine(page, e => e.audio.music.battleTrackIndex)).toBe(heldIndex);
+  const resumedAt = await engine(page, e => e.audio.music.battleCurrentTime);
+  expect(resumedAt).toBeGreaterThanOrEqual(heldAt - 0.05);
+
+  // And the hand-over still works — `ended` is now the ONLY thing that moves
+  // the index, so this is the negative control for the claim above.
+  await engine(page, e => e.audio.music.currentBattle.media.dispatchEvent(new Event('ended')));
+  await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(heldIndex);
+  watch.assertClean();
+});
+
 test('long player tails do not suppress the next attack', async ({ page }) => {
   await boot(page);
   await page.mouse.click(5, 5);

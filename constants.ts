@@ -7124,6 +7124,34 @@ export const AUDIO_CONSTANTS = {
   SNITCH_FAR_RADIUS: 1500,
   SNITCH_DISTANCE_CURVE: 2.5,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
+
+  /** THE BATTLE LAYER'S PROXIMITY GATE — what makes the score DUCK, never
+   *  what makes it start over.  The playlist runs continuously once opened
+   *  and a track changes only when it ENDS (see BackgroundMusic); these
+   *  numbers decide nothing but whether it is currently audible.
+   *
+   *  Measured in SCREENS (`GameEngine.viewportHalfDiagonal`) rather than in
+   *  world units, unlike every other radius in this block, and the reason is
+   *  that the thing being detected is itself viewport-derived: a wave spawns
+   *  at `viewportHalfDiagonal + OFFSCREEN_MARGIN + halfSize` (WaveSystem
+   *  .findSpawnPoint), which is ~855 units away on a 390x844 phone and ~2600
+   *  on a 2560x1440 monitor.  A fixed radius would therefore mean "the music
+   *  starts as the wave arrives" on one screen and "the music never starts"
+   *  on another — the same mistake `STAR_DENSITY_CYCLE` documents for star
+   *  COUNT, for the same reason.  In screens it reads the same everywhere.
+   *
+   *  ENGAGE is just past the screen edge, so the layer comes up as a wave
+   *  closes in rather than once it is already shooting.  RELEASE is wider,
+   *  so drifting across the arena during a fight does not pump the gain —
+   *  an enemy has to be comfortably gone before the fade starts. */
+  MUSIC_ENGAGE_SCREENS: 1.35,
+  MUSIC_RELEASE_SCREENS: 2.2,
+  /** Sim seconds with nothing hostile in RELEASE range before the fade
+   *  begins.  Long on purpose: a wave's last kill, or the lull before the
+   *  next wave streams in, is not the end of the fight, and a layer that
+   *  ducked on every clear field would be the "switches too easily"
+   *  behaviour moved from the playlist into the mixer. */
+  MUSIC_LINGER_SEC: 6,
 } as const;
 
 // ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────
