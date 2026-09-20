@@ -4254,6 +4254,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - **Sound goes through one id, and the id is the contract.**  Every
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
+  **Adding or licensing music and produced audio:** see
+  `docs/AUDIO_AUTHORING.md`. It documents the bank generator, streaming music
+  path, standalone inclusion, credits and validation; this paragraph remains the
+  system-contract reference.
   `docs/SFX_INVENTORY.md` is the source of truth for WHAT plays and with
   what parameters — trigger site, mix tier, duration, sonic character,
   frequency + envelope, variation, polyphony + throttle, mix level,
