@@ -273,6 +273,30 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    difference between a named diagnosis and a three-minute one pointing at
    the wrong thing.
 
+15. **A SAMPLING WINDOW MUST NOT OUTLIVE THE THING IT MEASURES.** The shake
+   direction test captured 60 rendered frames, but the shake it armed decays
+   over `SHAKE_DECAY` (0.3 s) and is spent by frame ~14 — so 46 of the 60
+   frames sampled whatever the world did next. Once `shakeTimer` reaches 0
+   the priority guard in `handleScreenShake` lets ANY later event re-arm, at
+   any intensity and on any axis, and the ship is parked in a live glass
+   field. A foreign shake on the Y axis puts its own full magnitude into
+   `maxAbsY`, which the 0.35 jitter never can (0.175 × 30 = 5.25 against the
+   15.78 CI measured), and the axis-dominance ratio collapses.
+
+   The tell that it is this and not a margin: **the off-axis number was
+   outside the range the mechanism can produce.** Before widening a bound,
+   check whether the measured value is even reachable — if it is not, the
+   sample is of something else. Reproduced by landing a y-axis shake the
+   frame after the armed one expires: `23.96 / 21.99`, ratio 1.09, and with
+   the old fixed-60 window the assertion then failed 3/3 at
+   `> 31.207 / 22.548` — the same numbers CI reported (`> 31.564 / 22.535`).
+
+   The fix is rule 13 applied to TIME: sample only the armed shake. The loop
+   stops the frame `shakeTimer` reaches 0, and stops early if the intensity
+   or axis is no longer the one armed; `samples` comes back so an empty
+   window fails loudly rather than passing on a zeroed offset. With the
+   guard in place the same injection passes 3/3.
+
 ## A global rescale breaks the tests that were RIGHT
 
 `MASS_SCALE` (every mass 10x, sizes unchanged, impacts ten times harder)

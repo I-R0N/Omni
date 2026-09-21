@@ -231,7 +231,25 @@ test.describe('shake direction follows the impact vector', () => {
      *  than they landed — the peaks went unobserved and the axis-dominance
      *  ratio below lost the phase lottery (seen once on the PR #90 run;
      *  passed 5/5 locally on the same commit).  Per-frame capture observes
-     *  every excursion the renderer would draw, whatever the runner speed. */
+     *  every excursion the renderer would draw, whatever the runner speed.
+     *
+     *  BUT THE WINDOW MUST NOT OUTLIVE THE SHAKE IT MEASURES.  A fixed
+     *  60-frame count did: the armed shake decays over `SHAKE_DECAY` (0.3 s)
+     *  and is spent by frame ~14, so 46 of the 60 frames sampled whatever the
+     *  world did NEXT.  Once `shakeTimer` reaches 0 the priority guard in
+     *  `handleScreenShake` lets ANY later event re-arm, at any intensity and
+     *  on any axis — and the ship is parked in a live glass field, so a
+     *  drifting shard eventually finds it.  A foreign shake on the Y axis
+     *  puts its own full magnitude into `maxAbsY`, which the 0.35 jitter
+     *  never can (0.175 x 30 = 5.25 against the 15.78 CI measured), and the
+     *  ratio collapses.  Reproduced deliberately: landing a y-axis shake the
+     *  frame after the armed one expires gives 23.96 / 21.99, ratio 1.09.
+     *
+     *  So the loop samples the ARMED shake and nothing else (harness rule
+     *  13 — make the precondition a selection criterion): it stops the frame
+     *  `shakeTimer` reaches 0, and stops early if the intensity or the axis
+     *  is no longer the one that was armed.  `samples` is returned so an
+     *  empty window fails loudly instead of passing on a zeroed offset. */
     const peaks = await engine(page, e => {
       const p = e.player;
       p.velocity.x = 0; p.velocity.y = 0;
@@ -245,19 +263,26 @@ test.describe('shake direction follows the impact vector', () => {
         active: true, color: '#888', health: 9999, maxHealth: 9999,
       };
       e.physics.resolveCollision(body, p, { x: -4, y: 0 }, undefined, undefined, e.handleScreenShake);
-      return new Promise<{ maxAbsX: number; maxAbsY: number; minX: number }>(resolve => {
-        let maxAbsX = 0, maxAbsY = 0, minX = 0, frames = 0;
+      // The shake this test is about, as armed by the contact above.
+      const armedI = e.shakeIntensity, armedX = e.shakeDirX, armedY = e.shakeDirY;
+      return new Promise<{ maxAbsX: number; maxAbsY: number; minX: number; samples: number }>(resolve => {
+        let maxAbsX = 0, maxAbsY = 0, minX = 0, frames = 0, samples = 0;
         const tick = () => {
+          const mine = e.shakeTimer > 0 && e.shakeIntensity === armedI
+            && e.shakeDirX === armedX && e.shakeDirY === armedY;
+          if (!mine) return resolve({ maxAbsX, maxAbsY, minX, samples });
           const s = e.camera.shakeOffset;
           maxAbsX = Math.max(maxAbsX, Math.abs(s.x));
           maxAbsY = Math.max(maxAbsY, Math.abs(s.y));
           minX = Math.min(minX, s.x);
+          samples++;
           if (++frames < 60) requestAnimationFrame(tick);
-          else resolve({ maxAbsX, maxAbsY, minX });
+          else resolve({ maxAbsX, maxAbsY, minX, samples });
         };
         requestAnimationFrame(tick);
       });
     });
+    expect(peaks.samples, 'the armed shake was actually observed').toBeGreaterThan(3);
     expect(peaks.maxAbsX, 'the camera moved at all').toBeGreaterThan(0);
     expect(peaks.maxAbsX, 'displacement is along the impact axis, not across it')
       .toBeGreaterThan(peaks.maxAbsY * 2);
