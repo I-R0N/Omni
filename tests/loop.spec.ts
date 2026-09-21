@@ -260,19 +260,36 @@ test.describe('the run', () => {
     });
     expect(returnPortal).toBe('overworld');
 
-    const beforeHome = await engine(page, e => ({
-      credits: e.credits, score: e.score, health: e.player.health,
+    const snapshot = () => engine(page, e => ({
+      credits: e.credits, score: e.score,
       inv: [...e.inventory], ship: [...e.shipSlots],
     }));
+    const hull = () => engine(page, e => ({ hp: e.player.health, max: e.player.maxHealth }));
+    const beforeHome = await snapshot(), beforeHull = await hull();
     await engine(page, (e, tid: string) => e.transitionToMap(tid), returnPortal!);
     await waitForTransit(page);
     const home = await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
 
-    const afterHome = await engine(page, e => ({
-      credits: e.credits, score: e.score, health: e.player.health,
-      inv: [...e.inventory], ship: [...e.shipSlots],
-    }));
+    const afterHome = await snapshot(), afterHull = await hull();
     expect(afterHome).toEqual(beforeHome);
+    /*  HULL IS CARRIED, NOT REFILLED — stated as a band rather than as an
+     *  equality, because it is the one field here the WORLD can still move.
+     *  Arrival throws the ship clear of the rift it came out of into a LIVE
+     *  hub, so grazing terrain on the way out costs a fraction of a point,
+     *  and how many frames pass before the stats poll first reports OVERWORLD
+     *  is a function of machine load.  An exact equality therefore asserts
+     *  that nothing touched the ship across a window the test does not
+     *  control — measured, it failed a full-suite run on 108.60 against
+     *  109, with the transit itself perfectly correct.  What the test is FOR
+     *  is that crossing a portal does not RESET the hull, and that is what
+     *  the three lines below say: not healed, not meaningfully hurt, and
+     *  still carrying the damage the arena did to it. */
+    expect(afterHull.hp, 'the transit did not heal the hull')
+      .toBeLessThanOrEqual(beforeHull.hp);
+    expect(afterHull.hp, 'nor did the trip chew it up')
+      .toBeGreaterThan(beforeHull.hp - 5);
+    expect(afterHull.hp, 'and the arena damage is still on it')
+      .toBeLessThan(afterHull.max);
     // Home is the surface: the depth resets, the wave ladder is gone.
     expect(await engine(page, e => e.stageIndex)).toBe(0);
     expect(home.wavesEnabled).toBeFalsy();
