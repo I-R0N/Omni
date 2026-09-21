@@ -2231,6 +2231,11 @@ export class GameEngine {
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (e.isExploding) continue;
+      // A CAPSTONE IS NEVER FAR AWAY.  A boss is a designed encounter rather
+      // than ambient wave fighting, and it warps in on the OFFSCREEN ring —
+      // so a distance test would duck the track its own entrance cue just
+      // started, and would duck it again every time the fight opened up.
+      if (e.isBoss === true) return true;
       if (e.thirdParty === true || e.isRival === true) {
         // Conditionally hostile — the same "hunting the PLAYER specifically"
         // test the off-screen indicators blink red on.
@@ -6762,6 +6767,9 @@ export class GameEngine {
       // WaveSystem.haltForBoss.
       this.waves.haltForBoss();
       this.audio.play('boss.intro');
+      // The score joins the entrance beat.  This is the ONE override of the
+      // continuous playlist: everywhere else a track runs to its own end.
+      this.audio.cueBattleTrack();
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,

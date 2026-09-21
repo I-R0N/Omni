@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun } from './helpers';
+import { advanceSim, boot, engine, startRun } from './helpers';
 
 test('all cinematic cues decode with full coverage and bounded memory', async ({ page }) => {
   const watch = await boot(page);
@@ -203,6 +203,42 @@ test('a lull ducks the battle layer without changing or rewinding the song', asy
   // the index, so this is the negative control for the claim above.
   await engine(page, e => e.audio.music.currentBattle.media.dispatchEvent(new Event('ended')));
   await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(heldIndex);
+  watch.assertClean();
+});
+
+
+// The capstone is the ONE override of the continuous playlist (user call): a
+// boss warping in is a designed beat, so the score starts with it rather than
+// carrying on with whatever the wave ladder was playing.
+test('a boss warping in cuts the battle layer to a new song', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await engine(page, e => e.audio.setCombat(true));
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
+
+  // Same precondition as the lull test (README rule 13): "it cut to a new
+  // song" only means something against a song that was genuinely running.
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleCurrentTime > 0.3,
+    null, { timeout: 20000 });
+  const before = await engine(page, e => e.audio.music.battleTrackIndex);
+  expect(before).toBeGreaterThanOrEqual(0);
+
+  await engine(page, e => e.debugSpawnBoss());
+  await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(before);
+  // From the TOP, not from wherever the interrupted track happened to be.
+  expect(await engine(page, e => e.audio.music.battleCurrentTime)).toBeLessThan(0.3);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
+
+  // And the boss holds the layer open from the offscreen ring it arrived on:
+  // shove it far past the release radius and the score stays engaged, where
+  // an ordinary hostile would have been let go.
+  await engine(page, e => {
+    const boss = e.entityIndex.enemies.find((x: { isBoss?: boolean }) => x.isBoss === true);
+    if (boss) { boss.position.x = e.player.position.x + 9000; boss.velocity.x = 0; boss.velocity.y = 0; }
+  });
+  await advanceSim(page, 1);
+  expect(await engine(page, e => e.audio.music.battleActive)).toBeTruthy();
   watch.assertClean();
 });
 

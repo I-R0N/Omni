@@ -131,6 +131,28 @@ export class BackgroundMusic {
     this.syncBattlePlayback();
   }
 
+  /**
+   * CUT TO A NEW SONG, NOW — the one thing allowed to override the
+   * continuous-playlist rule, and the capstone's cue (user call).  A boss
+   * warping in is a designed beat with its own rift, banner and stinger; the
+   * score is part of that beat, so it starts rather than carrying on with
+   * whatever the wave ladder was playing.  Always a DIFFERENT track from the
+   * one it interrupts and always from the top, however much of the playlist
+   * has already been heard.
+   *
+   * This is where boss-specific music lands when there is some: the CALL SITE
+   * says "a boss arrived" and nothing more, so choosing from a boss list here
+   * moves no engine code.
+   *
+   * If the layer is not audible yet — a boss warping in the frame before the
+   * engine reports the fight — the track is armed at 0 and the next
+   * engagement starts it there, which is the same hand-off `advanceBattle`
+   * makes for a song that ends while ducked.
+   */
+  public cueBattleTrack() {
+    this.advanceBattle();
+  }
+
   public suspend() {
     clearTimeout(this.pauseTimer);
     clearTimeout(this.battlePauseTimer);

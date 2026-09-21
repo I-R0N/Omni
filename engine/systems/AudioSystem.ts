@@ -642,6 +642,11 @@ export class AudioSystem {
     this._combat = combat;
     this.music?.setCombat(combat);
   }
+  /** A capstone has reached the field: cut the battle layer to a new song.
+   *  Not queued if the score does not exist yet — the context is created on
+   *  the first gesture and a run cannot start without one, so by the time a
+   *  boss can spawn there is always a `music` to tell. */
+  public cueBattleTrack() { this.music?.cueBattleTrack(); }
 
   private applyMaster() {
     if (!this.master || !this.ctx) return;

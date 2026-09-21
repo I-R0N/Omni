@@ -44,7 +44,10 @@ them to the Music bus: `space-ambient.mp3` is the exploration bed and
 `fly-battle.mp3`, `tracers-battle.mp3`, and `countdown-battle.mp3` form a battle
 playlist that hands over from one track to the next only when a track ENDS.
 Hostile proximity ducks that layer and pauses it, holding its position, so a
-lull never costs the song its place. All are streamed rather than decoded into
+lull never costs the song its place. The single exception is a boss capstone,
+whose entrance calls `BackgroundMusic.cueBattleTrack()` and cuts to a new track
+from the top — add boss-specific music by choosing it inside that method rather
+than at the call site. All are streamed rather than decoded into
 long Web Audio buffers. Battle sources are attached only when combat first
 starts; one upcoming track receives a metadata preload, so the title screen does
 not download the whole playlist.

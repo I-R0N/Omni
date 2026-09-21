@@ -31,7 +31,10 @@ The playlist is opened once and then runs continuously: a track changes only
 when it ENDS, so one song carries a whole wave sequence rather than restarting
 each time the field clears. Hostile PROXIMITY only ducks the layer — with
 nothing near the player it fades out and pauses, and the next engagement fades
-back in at the same point in the same song.
+back in at the same point in the same song. A boss warping in is the one
+override: the capstone's entrance cuts the layer to a new track from the top,
+and the boss holds the layer open at any distance. That cut is also where
+boss-specific music will be chosen from, with no engine call site moving.
 Both flow through the music bus, avoiding long decoded PCM allocations. Playback
 starts on user gesture, fades between gameplay and menus, continues quietly through
 pause/scene changes, and preserves its position across mute and music-volume zero.
