@@ -124,6 +124,27 @@ export class PhysicsSystem {
    *  polygons can still read no overlap; a little depth makes the circle test
    *  that found the contact and the SAT that resolves it agree. */
   private static readonly SWEEP_ENTRY_DEPTH = 0.85;
+  /** How deep inside the pair's contact reach a body has to arrive for the
+   *  sweep to count it as MISPLACED even though its step was short enough to
+   *  have caught the contact.
+   *
+   *  A step shorter than the contact window cannot SKIP the window — which is
+   *  what the sweep was originally gated on — but it can still carry a body
+   *  from outside the window to almost the other body's centre, and there SAT
+   *  reports the wrong thing: the minimum translation is across the travel
+   *  rather than along it, so the contact resolves as a sideways nudge with
+   *  `velAlongNormal` ~ 0, the crash prices it at no energy, and the tile is
+   *  passed through untouched.  Measured on the glass charge, every ghosted
+   *  tile is exactly one such contact: MTV (0, 20) with the closing speed at
+   *  0, against healthy contacts that all resolve along the travel axis.
+   *
+   *  THE NUMBER IS MEASURED, not chosen for feel: over 24 charges the
+   *  flipped-axis contacts sat at 0.14..0.37 of the reach and the deepest
+   *  healthy one at 0.94, so 0.5 clears the worst observed flip by a third.
+   *  Catching a healthy deep contact too is harmless — the rewind moves WHERE
+   *  the pair touches, never how fast they were closing, so the crash spends
+   *  the same energy it would have. */
+  private static readonly SWEEP_DEEP_FRAC = 0.5;
   /** How many contacts the swept rewind has recovered this run.  Diagnostic
    *  only — nothing in the sim reads it — but it is the one way a test can
    *  tell "the fast path never fired" from "it fired and did nothing". */
@@ -3153,18 +3174,33 @@ export class PhysicsSystem {
    *
    * Returns true when it moved something, so the caller can re-read the pair.
    */
-  private sweepRewind(a: GameEntity, b: GameEntity, reach: number): boolean {
-      // THE EARLY-OUT COMES FIRST, and it is the whole cost in normal play: a
-      // step no longer than the pair's own contact window cannot have stepped
-      // over it, so the end-position test the caller is about to do is already
-      // sound.  Measured, a ship at 60 u/step against 36-unit tiles never gets
-      // past this line.  Velocities rather than the recorded paths, because
-      // reaching for a path would mean recording one for every pair that ever
-      // comes close.
+  private sweepRewind(a: GameEntity, b: GameEntity, reach: number, distSq: number): boolean {
+      // THE EARLY-OUT COMES FIRST, and it is the whole cost in normal play.
+      // TWO ways a body can be in the wrong place, and the cheap test for the
+      // first is also the gate on the second:
+      //  - it OUTRAN the window — a step longer than the pair's own contact
+      //    reach, so the contact could be skipped outright.  Measured, a ship
+      //    at 60 u/step against 36-unit tiles never gets past this line.
+      //  - it ARRIVED DEEP — a shorter step that still carried it from
+      //    outside the window to near the other's centre, where the MTV axis
+      //    flips (see SWEEP_DEEP_FRAC).  Rarer, and tested for only after the
+      //    first has already said no.
+      // Velocities rather than the recorded paths, because reaching for a
+      // path would mean recording one for every pair that ever comes close.
       const ts = this.lastTimeScale;
       const rsx = (a.velocity.x - b.velocity.x) * ts;
       const rsy = (a.velocity.y - b.velocity.y) * ts;
-      if (rsx * rsx + rsy * rsy <= reach * reach) return false;
+      const relSq = rsx * rsx + rsy * rsy;
+      if (relSq <= reach * reach) {
+          const deep = reach * PhysicsSystem.SWEEP_DEEP_FRAC;
+          if (distSq >= deep * deep) return false;
+          // Deep, but is it deep because it ARRIVED or because it was already
+          // there?  To have crossed the entry radius this step the pair has to
+          // have moved at least the depth it is now inside by — which is what
+          // keeps a resting stack of shards off this path entirely.
+          const gap = reach * PhysicsSystem.SWEEP_ENTRY_DEPTH - Math.sqrt(distSq);
+          if (relSq <= gap * gap) return false;
+      }
 
       // WHO CAN OUTRUN THE TEST: a ship or a loose rock against terrain.
       // Everything else either cannot move fast enough or has a deliberate
@@ -3190,7 +3226,9 @@ export class PhysicsSystem {
       // resolve earlier this step may already have changed.
       const sx = adx - bdx, sy = ady - bdy;
       const stepSq = sx * sx + sy * sy;
-      if (stepSq <= reach * reach) return false;
+      // Only that it MOVED — the length test lives in the gate above, which
+      // admits the short-step deep arrival as well as the long-step skip.
+      if (!(stepSq > 0)) return false;
 
       // Offset from a to b at the START of the step; the offset at parameter
       // t (0 = start, 1 = end) is `p0 - t*s`.
@@ -3312,19 +3350,26 @@ export class PhysicsSystem {
           if ((a.shield ?? 0) > 0 && (a.maxShield ?? 0) > 0) rA = Math.max(rA, PhysicsSystem.shieldReach(a));
           if ((b.shield ?? 0) > 0 && (b.maxShield ?? 0) > 0) rB = Math.max(rB, PhysicsSystem.shieldReach(b));
       }
-      // A FAST BODY IS PUT BACK WHERE IT HIT, before anything asks where it
-      // is.  This has to run AHEAD of the distance test below, because that
-      // test reads the END of the step too and so misses exactly the contacts
-      // the sweep exists to catch — a body that stepped clean over the other
-      // is far away at both ends of its step.  No-ops (one compare) for every
-      // body moving less than the pair's own contact window.
-      if (this.sweepRewind(a, b, rA + rB)) {
+      // A BODY IS PUT BACK WHERE IT HIT, before anything asks where it is.
+      // The offset is measured first because the sweep needs it — how deep
+      // the pair already is decides whether a short step counts — but the
+      // sweep still runs AHEAD of the range test below, because that test
+      // reads the END of the step too and so misses exactly the contacts the
+      // sweep exists to catch: a body that stepped clean over the other is
+      // far away at both ends of its step.  No-ops (one compare) for every
+      // body moving less than the pair's own contact window and not already
+      // inside it.
+      let wdx = wrapDeltaX(a.position.x, b.position.x);
+      let wdy = wrapDeltaY(a.position.y, b.position.y);
+      let distSq = wdx*wdx + wdy*wdy;
+      if (this.sweepRewind(a, b, rA + rB, distSq)) {
           this.sweptRewinds++;
+          // It moved, so the offset the rest of this function works from has
+          // to be re-read rather than inherited from before the rewind.
+          wdx = wrapDeltaX(a.position.x, b.position.x);
+          wdy = wrapDeltaY(a.position.y, b.position.y);
+          distSq = wdx*wdx + wdy*wdy;
       }
-
-      const wdx = wrapDeltaX(a.position.x, b.position.x);
-      const wdy = wrapDeltaY(a.position.y, b.position.y);
-      const distSq = wdx*wdx + wdy*wdy;
 
       if (distSq > (rA + rB + 10)**2) return;
 

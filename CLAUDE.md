@@ -3146,13 +3146,25 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   a mass is only a threshold if the mass is on the OTHER side of a
   comparison, and a value converted out of authored units must never be
   written back into an authored field.
-  **KNOWN OPEN**: at this energy a hull occasionally LEAPS a glass tile —
-  `tests/terrain.spec.ts`'s `ghosted` counter catches it about 1 run in 6 on
-  the glass charge.  The sweep resolves the EARLIEST contact in a step and
-  refuses later ones (its documented backward-only rule); destroying a tile
-  outright and keeping most of the speed is a case that rule was not built
-  for.  It is the `sweepRewind` fix's gap rather than the mass work's, and
-  it needs its own pass.
+  **THE GLASS LEAP IS CLOSED** (this was the KNOWN OPEN above, and the
+  diagnosis in it was WRONG — worth recording, because the wrong theory is
+  the plausible one).  It was read as the sweep's backward-only rule
+  refusing a second contact in one step.  Instrumenting every player-tile
+  contact says otherwise: each ghosted tile is exactly ONE contact whose
+  MTV came back as `(0, 20)` — across the travel — with `velAlongNormal`
+  at 0, so the crash priced it at no energy and the pane was passed
+  through untouched.  Nothing was refused; the contact happened and was
+  worth nothing.  See `SWEEP_DEEP_FRAC`.
+  The sweep was gated on the body having OUTRUN its contact window, which
+  is the only way a contact can be SKIPPED — but a shorter step can still
+  carry a body from outside the window to almost the other's centre, and
+  there SAT's minimum translation is the cross-axis rather than the travel
+  axis.  The gate now also admits that DEEP ARRIVAL, and the rewind puts
+  the body at entry exactly as it does for a skip, so the normal is along
+  the travel and the ordinary crash spend runs.  Measured: 3 failures in 8
+  glass charges before, 0 in 54 charges after.  Rock and metal never
+  showed it — glass is where a ship keeps enough speed after a one-contact
+  break to land its next step near a tile's centre.
 - **AND THE SCALE ITSELF IS STATED AS A DENSITY** (`IMPACT_DENSITY` /
   `massFor` in `constants.ts`; user call).  Mass used to be an IMPULSE term
   and nothing else, so its numbers only had to be right relative to each
