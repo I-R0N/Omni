@@ -782,6 +782,13 @@ export class GameEngine {
    *  CONTROL for that claim — it should stay near zero while `uiActualMs`
    *  moves.  The real cost is measured by `<Profiler>` (see noteUiRender). */
   private lastStatsScheduleMs: number = 0;
+  /** Last combat-proximity value REPORTED to the score, so the engine speaks
+   *  only on the transition.  Undefined until the first frame reports, which
+   *  is what makes the opening report unconditional.  Also the hysteresis
+   *  state: engaged widens the radius that keeps it engaged. */
+  private lastReportedCombat: boolean | undefined;
+  /** `simClock` when a hostile was last in range — the linger's only state. */
+  private lastHostileNearAt = -Infinity;
   // ── React reconciliation cost, reported IN by the UI layer ────────────
   //
   // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
@@ -1355,6 +1362,7 @@ export class GameEngine {
     if (this.gameState === GameState.PLAYING && !this.dockedAtStation
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
+        this.audio.setActive(false);
         this.audio.play('ui.back');
     }
   }
@@ -1704,6 +1712,7 @@ export class GameEngine {
   }
 
   public restartGame() {
+      this.audio.stopScene(true);
       // Returning to the main menu returns to the DEFAULT map: a run always
       // begins on the OVERWORLD hub (user call).  The menu no longer offers a
       // map choice — picking one is a DEBUG override that lasts for the run it
@@ -2184,6 +2193,74 @@ export class GameEngine {
     this.input.setStickExclusion(mm.x, mm.y, mm.size, mm.size);
   }
 
+  /** Half the diagonal of the VISIBLE world rect — the one definition of "a
+   *  screen" in world units, read live so a browser resize needs no listener.
+   *  Shared by the wave spawn ring (`waveContext`) and the battle-music
+   *  proximity gate, which have to agree: the gate's job is to notice the
+   *  wave the ring just placed. */
+  viewportHalfDiagonal(): number {
+    const zoom = this.camera.zoom || 1;
+    return Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+  }
+
+  /**
+   * Is a hostile close enough to the player for the battle layer to be
+   * audible?  PROXIMITY, not presence (user call).  Presence was the wrong
+   * question for the sequencing the game actually has: an arena's field goes
+   * empty on every wave clear, so a presence signal fell and rose again a few
+   * seconds later, and each rise used to cut the song short.  What the layer
+   * follows now is whether the fight is HERE — and a lull only ducks it.
+   *
+   * Hostility itself is unchanged: ambient bubbles are `EntityType.ENEMY` and
+   * are kept alive for the whole run, and an ally or neutral rival sharing the
+   * map is not a fight, so both are skipped until they turn on the player.
+   * Walks the enemy index `prepareFrameEntities` has already built and returns
+   * on the first hostile in range.
+   */
+  private hostileNearPlayer(): boolean {
+    // Hysteresis: once engaged it takes a wider radius to lose the layer than
+    // it took to gain it, so an enemy loitering at the boundary cannot pump
+    // the gain.
+    const screens = this.viewportHalfDiagonal();
+    const reach = screens * (this.lastReportedCombat
+      ? AUDIO_CONSTANTS.MUSIC_RELEASE_SCREENS
+      : AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS);
+    const reach2 = reach * reach;
+    const px = this.player.position.x, py = this.player.position.y;
+    const enemies = this.entityIndex.enemies;
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
+      if (e.isExploding) continue;
+      // A CAPSTONE IS NEVER FAR AWAY.  A boss is a designed encounter rather
+      // than ambient wave fighting, and it warps in on the OFFSCREEN ring —
+      // so a distance test would duck the track its own entrance cue just
+      // started, and would duck it again every time the fight opened up.
+      if (e.isBoss === true) return true;
+      if (e.thirdParty === true || e.isRival === true) {
+        // Conditionally hostile — the same "hunting the PLAYER specifically"
+        // test the off-screen indicators blink red on.
+        if (!(e.huntingPlayer === true
+          || (e.provoked === true && e.aggroTargetId === 'player'))) continue;
+      }
+      const dx = wrapDeltaX(px, e.position.x), dy = wrapDeltaY(py, e.position.y);
+      if (dx * dx + dy * dy <= reach2) return true;
+    }
+    return false;
+  }
+
+  /** The battle layer's ducking signal: a hostile is near, or was recently
+   *  enough that the fight is not over.  The LINGER is measured off
+   *  `simClock` rather than ticked, so this needs no dt and no per-frame
+   *  countdown — a stamp and a subtraction, the same shape the detection
+   *  freshness uses. */
+  private inCombatProximity(): boolean {
+    if (this.hostileNearPlayer()) {
+      this.lastHostileNearAt = this.simClock;
+      return true;
+    }
+    return this.simClock - this.lastHostileNearAt < AUDIO_CONSTANTS.MUSIC_LINGER_SEC;
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
@@ -2494,6 +2571,7 @@ export class GameEngine {
       perfRecSamples: this.perfRecorder.sampleCount,
       perfRecScene: this.perfRecorder.sceneTag,
       audio: {
+        sfxVolume: this.audio.sfxVolume, musicVolume: this.audio.musicVolume,
         volume: this.audio.volume, muted: this.audio.muted,
         state: this.audio.contextState, audible: this.audio.audible,
         drafts: this.audio.draftsEnabled,
@@ -2512,10 +2590,22 @@ export class GameEngine {
     this.lastStatsScheduleMs = pushStats ? performance.now() - tStats0 : 0;
 
     // Audio follows the camera, and goes quiet whenever the sim does.  Two
-    // number writes and a boolean per frame — the manager is otherwise
-    // purely event-driven, so this is the entire per-frame audio cost.
+    // number writes and a boolean per frame, plus one early-outing walk of
+    // the already-built enemy index — the manager is otherwise purely
+    // event-driven, so this is the entire per-frame audio cost.
     this.audio.setListener(this.camera.position.x, this.camera.position.y);
     this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation);
+    // The battle layer is reported on the TRANSITION, not every frame.  The
+    // score ignores a repeat anyway, so this buys little on its own — what it
+    // buys is that the engine stays silent while nothing changes, which is
+    // what lets the debug handle drive `setCombat` directly and have the
+    // setting stand rather than being overwritten on the next frame.
+    const combat = this.gameState === GameState.PLAYING && !this.dockedAtStation
+      && this.inCombatProximity();
+    if (combat !== this.lastReportedCombat) {
+      this.lastReportedCombat = combat;
+      this.audio.setCombat(combat);
+    }
 
     if (this.gameState !== GameState.PLAYING) {
         // If paused or in menu, still draw (static frame) but skip updates
@@ -3891,7 +3981,11 @@ export class GameEngine {
     if (this.currentMap) {
       const waveCtx = this.waveContext();
       if (waveCtx) {
+        const previousWave = this.waves.waveIndex;
+        const grace = this.waves.waveGraceTimer;
         this.waves.update(dt, waveCtx, this.handleWaveCleared);
+        if (this.waves.waveIndex !== previousWave) this.audio.play('wave.start');
+        else if (grace > 1 && this.waves.waveGraceTimer <= 1 && this.waves.waveGraceTimer > 0) this.audio.play('wave.grace');
       }
     }
 
@@ -4803,6 +4897,7 @@ export class GameEngine {
     if (this.gameState !== GameState.PLAYING) return false;
     if (this.dockedAtStation || !this.nearestStation || this.player.isExploding) return false;
     this.dockedAtStation = true;
+    this.audio.setActive(false);
     this.dockedStation = this.nearestStation;
     this.audio.play('poi.dock');
     this.player.velocity.x = 0;
@@ -6358,11 +6453,7 @@ export class GameEngine {
     if (!this.currentMap) return null;
     // Read the live window size + camera zoom at spawn time so a recent
     // browser resize is reflected without needing a resize listener.
-    // halfW/halfH match RenderSystem's viewport math exactly.
-    const zoom = this.camera.zoom || 1;
-    const halfW = (window.innerWidth / 2) / zoom;
-    const halfH = (window.innerHeight / 2) / zoom;
-    const viewportHalfDiagonal = Math.hypot(halfW, halfH);
+    const viewportHalfDiagonal = this.viewportHalfDiagonal();
     return {
       entities: this.currentMap.entities,
       player: this.player,
@@ -6412,7 +6503,7 @@ export class GameEngine {
       this.scanPingRadius = 0.0001;
       this.scanPingMax = max;
       this.scanCooldown = SCANNER.COOLDOWN_SEC;
-      this.audio.play('ui.confirm');
+      this.audio.play('ability.scan');
       return true;
   }
 
@@ -6676,6 +6767,9 @@ export class GameEngine {
       // WaveSystem.haltForBoss.
       this.waves.haltForBoss();
       this.audio.play('boss.intro');
+      // The score joins the entrance beat.  This is the ONE override of the
+      // continuous playlist: everywhere else a track runs to its own end.
+      this.audio.cueBattleTrack();
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,
@@ -7042,6 +7136,7 @@ export class GameEngine {
     // arena's own wave counter still restarts at 1 for the HUD.
     this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
     this.waves.init(ctx, this.wavesEnabled);
+    if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
 
 
@@ -7126,6 +7221,7 @@ export class GameEngine {
   }
 
   private loadMap(map: BaseMapLayer) {
+      this.audio.stopScene();
       // Push the new map's dimensions into the shared toroidal module
       // BEFORE the map initialises or any system rebuilds its static
       // state — initializeStaticGrid, initObstacles, buildShardFlowField

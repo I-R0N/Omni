@@ -876,7 +876,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `IMPACT_DENSITY` / `massFor` / `HULL_DENSITY_CYCLE` — the one
   mass scale and its DBG ladder, `SIMULATION_CONSTANTS`,
   `LOCAL_GRAVITY_CONSTANTS`
-- `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`, `SHOOTING_STAR_CONSTANTS`,
+- `TRAIL_CONSTANTS`, `PLAYER_TRAIL_CONSTANTS`,
   `GLITTER_TRAIL_CONSTANTS`
 - `PLAYER_ROLL_CONSTANTS` — the DIRECTIONAL TILT: the player ship
   pitches and rolls into changing acceleration, full 360°.
@@ -4254,6 +4254,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - **Sound goes through one id, and the id is the contract.**  Every
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
+  **Adding or licensing music and produced audio:** see
+  `docs/AUDIO_AUTHORING.md`. It documents the bank generator, streaming music
+  path, standalone inclusion, credits and validation; this paragraph remains the
+  system-contract reference.
   `docs/SFX_INVENTORY.md` is the source of truth for WHAT plays and with
   what parameters — trigger site, mix tier, duration, sonic character,
   frequency + envelope, variation, polyphony + throttle, mix level,

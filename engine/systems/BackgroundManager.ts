@@ -1,7 +1,7 @@
 
 import { MapType, Vector2, GameEntity } from '../../types';
 import {
-  COLORS, SHOOTING_STAR_CONSTANTS, effectiveDpr,
+  COLORS, effectiveDpr,
   STARFIELD_CONSTANTS, resolveStarDensity, getActiveStarSizeMode,
   getActiveStarBands, resolveStarParallax, PORTAL_CONSTANTS,
   getPortalLensMult, getPortalLensSpinMult, getPortalLensRadiusMult, portalHorizonRadius,
@@ -42,13 +42,6 @@ interface NebulaPuff {
   cachedCanvas?: HTMLCanvasElement;
 }
 
-interface ShootingStar {
-  position: Vector2;
-  velocity: Vector2;
-  alpha: number;
-  length: number;
-}
-
 export class BackgroundManager {
   private mapType: MapType;
   // ── THE STAR FIELD ───────────────────────────────────────────────────────
@@ -87,8 +80,6 @@ export class BackgroundManager {
   /** Draw groups over the arrays above, in sorted order. */
   private starGroups: StarGroup[] = [];
   private nebulaPuffs: NebulaPuff[] = [];
-  private shootingStars: ShootingStar[] = [];
-  private shootingTimer: number = 0;
   private lastCameraPos: Vector2 | null = null;
   private puffTextures: (HTMLCanvasElement | HTMLImageElement)[] = [];
   private sceneWidth: number = 0;
@@ -167,7 +158,6 @@ export class BackgroundManager {
     } else {
       this.createPuffVariants();
     }
-    this.shootingTimer = Math.random() * (SHOOTING_STAR_CONSTANTS.MAX_TIMER - SHOOTING_STAR_CONSTANTS.MIN_TIMER) + SHOOTING_STAR_CONSTANTS.MIN_TIMER;
   }
 
   private loadNebulaImages(paths: string[]) {
@@ -730,7 +720,7 @@ public setMapType(type: MapType) {
         );
         ctx.drawImage(drawable, -puff.size / 2, -puff.size / 2, puff.size, puff.size);
     });
-    // Restore base DPR transform for subsequent star-band and shooting-star drawing
+    // Restore base DPR transform after drawing nebula puffs
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1.0;
@@ -738,12 +728,6 @@ public setMapType(type: MapType) {
     // RENDER STARS — drawn directly from the star arrays, no intermediate
     // canvas.  See `renderStars`.
     this.renderStars(ctx, dx, dy, dpr);
-
-    // Back to CSS-pixel space for the shooting stars, which are laid out in
-    // CSS units like the rest of the renderer.
-    ctx.imageSmoothingEnabled = true;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.updateAndDrawShootingStars(ctx, width, height);
 
     ctx.restore();
     ctx.globalAlpha = 1.0;
@@ -895,51 +879,6 @@ public setMapType(type: MapType) {
             }
         }
     }
-  }
-
-  private updateAndDrawShootingStars(ctx: CanvasRenderingContext2D, w: number, h: number) {
-      this.shootingTimer--;
-      if (this.shootingTimer <= 0) {
-          this.spawnShootingStar(w, h);
-          this.shootingTimer = Math.random() * (SHOOTING_STAR_CONSTANTS.MAX_TIMER - SHOOTING_STAR_CONSTANTS.MIN_TIMER) + SHOOTING_STAR_CONSTANTS.MIN_TIMER;
-      }
-      for (let i = this.shootingStars.length - 1; i >= 0; i--) {
-          const s = this.shootingStars[i];
-          s.position.x += s.velocity.x * 0.016; 
-          s.position.y += s.velocity.y * 0.016;
-          if (s.position.x < -100 || s.position.x > w + 100 || s.position.y < -100 || s.position.y > h + 100) {
-              this.shootingStars.splice(i, 1);
-              continue;
-          }
-          s.alpha -= 0.005;
-          if (s.alpha <= 0) {
-              this.shootingStars.splice(i, 1);
-              continue;
-          }
-          const tailX = (s.position.x - (s.velocity.x * 0.05));
-          const tailY = (s.position.y - (s.velocity.y * 0.05));
-          ctx.save();
-          ctx.strokeStyle = `rgba(255, 255, 255, ${s.alpha})`;
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(s.position.x, s.position.y); ctx.lineTo(tailX, tailY); ctx.stroke();
-          ctx.restore();
-      }
-  }
-
-  private spawnShootingStar(w: number, h: number) {
-      const off = 50;
-      let sx, sy, tx, ty;
-      const edge = Math.random();
-      if (edge < 0.33) { sx = Math.random()*(w+off*2)-off; sy = -off; tx = Math.random()*(w+off*2)-off; ty = h+off; }
-      else if (edge < 0.66) { sx = -off; sy = Math.random()*(h+off*2)-off; tx = w+off; ty = Math.random()*(h+off*2)-off; }
-      else { sx = w+off; sy = Math.random()*(h+off*2)-off; tx = -off; ty = Math.random()*(h+off*2)-off; }
-      const angle = Math.atan2(ty - sy, tx - sx);
-      const speed = Math.random() * (SHOOTING_STAR_CONSTANTS.SPEED_MAX - SHOOTING_STAR_CONSTANTS.SPEED_MIN) + SHOOTING_STAR_CONSTANTS.SPEED_MIN;
-      this.shootingStars.push({
-          position: { x: sx, y: sy },
-          velocity: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-          alpha: 1.0, length: 20
-      });
   }
 
   /** THE TRANSIT WARP'S SKY — the real star field, swept outward.
