@@ -213,6 +213,23 @@ test.describe('nebula drag', () => {
  *  direct read of the line that changed, with no population dynamics in it.
  */
 test.describe('nebula bonding', () => {
+  /*  THESE TWO ARE GENUINELY SLOW, and the suite's default budget does not
+   *  say so.  Both drive NEBULA_FIELD — ~1300 live entities, the heaviest
+   *  scene in the net — and the bond thresholds they measure are counted in
+   *  SIM SECONDS, so the wall clock is a floor rather than a target: 12 s of
+   *  sim here, 12 s there, which measured 1:1 against real time on an idle
+   *  box (10 runs: sim tracked wall within 6%, entity count flat at
+   *  1229..1407, no stall).  That leaves a 13x margin inside the shared 180 s
+   *  budget, and a loaded runner at the tail of a 20-minute suite ate it —
+   *  CI timed out on `6s of sim time` with the product perfectly healthy.
+   *
+   *  `test.slow()` triples the budget for these tests only.  It is not a
+   *  retry and it weakens no assertion: the inner `advanceSim` timeouts stay
+   *  at 180 s, which now sits BELOW the test budget rather than above it, so
+   *  a real stall still reports "timed out waiting for: 6s of sim time"
+   *  instead of a bare test timeout that says nothing about which wait hung. */
+  test.slow();
+
   const breakTiles = (page: any) => engine(page, (e: any) => {
     const tiles = e.currentMap.entities
       .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, 30);

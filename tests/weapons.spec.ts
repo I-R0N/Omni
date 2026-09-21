@@ -1327,7 +1327,30 @@ test.describe('a blast breaks cloud up; it does not delete it', () => {
             witnessLost,
           };
         };
-        return { error: null, soft: run(6, 0.25), hard: run(24, 0.7) };
+        /*  FOUR CLUSTERS AN ARM, INTERLEAVED.  A single cluster's mean
+         *  fragment speed is a noisy statistic — the seeded pattern decides
+         *  how many pieces a tile hands back (measured 14..51 across runs),
+         *  and a mean over a population that size swings hard.  Measured
+         *  single-sample, the hard/soft ratio ran 1.11..3.83 about a median
+         *  of 2.13, so a 1.4 bar sat barely over one standard deviation
+         *  under the median and the claim failed roughly one run in ten —
+         *  once in CI, on 1.39984.  The physics was never in question
+         *  (CLAUDE.md test rule 11: a derived quantity has a spread; clear
+         *  it, don't sit in it), so the fix is to measure the population
+         *  property with enough samples to see it.  Interleaved because
+         *  each arm consumes the cluster it tested, so running one arm's
+         *  samples back to back would hand the other a thinner field. */
+        const softs: any[] = [], hards: any[] = [];
+        for (const [sp, hp] of [[0.18, 0.30], [0.42, 0.54], [0.62, 0.72], [0.80, 0.88]]) {
+          softs.push(run(6, sp));
+          hards.push(run(24, hp));
+        }
+        const mean = (xs: any[]) =>
+          xs.reduce((a: number, b: any) => a + b.meanSpeed, 0) / xs.length;
+        return {
+          error: null, soft: softs[0], hard: hards[0],
+          softMean: mean(softs), hardMean: mean(hards),
+        };
       });
 
       expect(r.error, 'the scene was set up').toBeNull();
@@ -1356,8 +1379,8 @@ test.describe('a blast breaks cloud up; it does not delete it', () => {
       //     at every charge size.  4x the knockback, and the fragments are
       //     measurably faster even after damping has had 48 substeps at them.
       expect(hard.born, 'the harder arm also broke tiles').toBeGreaterThan(2);
-      expect(hard.meanSpeed, 'a bigger charge scatters the cloud harder')
-        .toBeGreaterThan(soft.meanSpeed * 1.4);
+      expect(r.hardMean!, 'a bigger charge scatters the cloud harder')
+        .toBeGreaterThan(r.softMean! * 1.4);
 
       // (4) THE CONTROL.  Every claim above is equally true of a ring that
       //     never fired, so an ordinary body in the same blast must lose HP.

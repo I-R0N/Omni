@@ -892,33 +892,57 @@ test.describe('glass cracks under a crash like every other material', () => {
       // model, which is what the special case prevented.  Measured 9 and 9;
       // asserted as a RATIO with room either side, since derived HP varies
       // tile to tile by construction (a fixed count would flake).
+      /*  FIVE TILES A MATERIAL, and the MEAN of their ram counts.  One tile
+       *  is far too coarse a sample for a ratio: at 10x impact energy a tile
+       *  goes in one to three rams, so the ratio can only land on 1/3, 1/2,
+       *  1, 2 or 3 and the (0.5, 2) band below rejects two of those — the
+       *  claim failed about one run in ten on a perfectly healthy build, on
+       *  1/3.  Lowering the ram speed to buy resolution is not available:
+       *  measured, at 4 u/step and below neither material breaks at all.
+       *  Averaging is (CLAUDE.md test rule 11: a derived quantity has a
+       *  spread; clear it, don't sit in it) — measured over 8 runs the mean
+       *  ratio then holds 0.75..1.18, which is the SAME claim with the
+       *  quantisation noise taken out of it.
+       *
+       *  Every pick stays ALIVE and is spaced along y rather than being
+       *  activated in turn: a tile that dies is compacted out of
+       *  `currentMap.entities` on the next frame, so a pick re-activated
+       *  afterwards would never reach the static grid and would read as
+       *  immortal. */
       const count = async (map: string, variant: string) => {
         await tileField(page, map);
         return engine(page, (e: any, a: any) => {
           const P: any = e.physics, DT = 1 / 120;
-          const t = e.currentMap.entities.find((x: any) => x.active
+          const all = e.currentMap.entities.filter((x: any) => x.active
             && x.shardVariant === a.variant && x.mass === Infinity);
-          if (!t) throw new Error('no ' + a.variant);
-          for (const x of e.currentMap.entities) if (x !== t) x.active = false;
-          t.position.x = 400; t.position.y = 0; t.active = true;
-          e.chipStructureAt(t, { x: t.position.x, y: t.position.y }, 0);
-          t.health = t.maxHealth;
+          if (all.length < 5) throw new Error('not enough ' + a.variant);
+          const picks = [0, 1, 2, 3, 4].map(i => all[(all.length * (0.1 + i * 0.17)) | 0]);
+          for (const x of e.currentMap.entities) if (!picks.includes(x)) x.active = false;
+          picks.forEach((t: any, i: number) => {
+            t.position.x = 400; t.position.y = i * 1000; t.active = true;
+            e.chipStructureAt(t, { x: t.position.x, y: t.position.y }, 0);
+            t.health = t.maxHealth;
+          });
           P.initializeStaticGrid(e.currentMap.entities);
           const p = e.player;
           p.health = p.maxHealth = 1e9;
-          let rams = 0;
-          while (t.active && rams < 200) {
-            p.position.x = 0; p.position.y = 0;
-            p.velocity.x = 6; p.velocity.y = 0;
-            rams++;
-            for (let i = 0; i < 400; i++) {
-              e.prepareFrameEntities(); e.updatePhysics(DT); p.velocity.y = 0;
-              if (!t.active) break;
-              if (Math.abs(p.velocity.x) < 0.05) break;
-              if (p.position.x > t.position.x + 80) break;
+          const rams: number[] = [];
+          picks.forEach((t: any, i: number) => {
+            let n = 0;
+            while (t.active && n < 200) {
+              p.position.x = 0; p.position.y = i * 1000;
+              p.velocity.x = 6; p.velocity.y = 0;
+              n++;
+              for (let k = 0; k < 400; k++) {
+                e.prepareFrameEntities(); e.updatePhysics(DT); p.velocity.y = 0;
+                if (!t.active) break;
+                if (Math.abs(p.velocity.x) < 0.05) break;
+                if (p.position.x > 480) break;
+              }
             }
-          }
-          return rams;
+            rams.push(n);
+          });
+          return rams.reduce((x: number, y: number) => x + y, 0) / rams.length;
         }, { variant });
       };
 

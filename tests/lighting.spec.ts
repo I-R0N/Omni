@@ -2230,7 +2230,24 @@ test.describe('occluder collection', () => {
       // the comparison into noise.
       await set('dark');                     // a TWO-layer rung, deliberately
       const darkPlus = plus(), darkMinus = minus();
-      px = 600; py = 0; await frames(45);
+      // DWELL UNTIL THE STAMP HAS SETTLED, not for a fixed frame count.  The
+      // memory accumulates over frames, and how many stamps a given number of
+      // frames buys is a function of MACHINE LOAD — the engine's periodic
+      // passes drop cadence under it (PerfController).  Measured on an idle
+      // box the spot reaches 0.90..0.95 of its own unfogged baseline; CI, on
+      // a loaded runner, read 0.45 against the same 45 frames and failed the
+      // 0.5 bar.  Waiting for the value to STOP MOVING waits for the process
+      // to finish rather than for the answer to come out right: every claim
+      // below is still a claim, and the unexplored spot is never dwelt on at
+      // all.
+      px = 600; py = 0;
+      let settled = -1;
+      for (let i = 0; i < 12; i++) {
+        await frames(15);
+        const now = plus();
+        if (now <= settled * 1.01 + 0.01) break;
+        settled = now;
+      }
       px = 0; py = 0; await frames(45);
       const seenPlus = plus(), unseenMinus = minus(), homeAfter = at(0);
 
