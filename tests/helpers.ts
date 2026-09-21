@@ -160,28 +160,57 @@ export async function waitForEngine(
 
 /** Advance the world by `seconds` of SIM time (not wall time).
  *
- *  NOT USED by any suite today — the suites all have a specific condition to
- *  poll for, which is strictly better than waiting a fixed amount. Kept
- *  because "let the world run for a bit" is a real need the moment a suite
- *  tests something time-driven, and re-deriving the runTimeSec trick below is
- *  exactly the kind of wheel this harness exists to stop being reinvented.
- *
  *  `runTimeSec` is the engine's own sim-second accumulator — the one the run
- *  summary reports — so it already excludes paused, docked and dead time,
- *  which is exactly the definition a test wants for "let the world run".
- *  It is a private TS field, but private is a compile-time notion: at
- *  runtime it is an ordinary property on the debug handle.  Reading engine
- *  internals this way is the point of the handle; the suites never WRITE
- *  them. */
+ *  summary reports — so it excludes paused, docked and dead time, which is
+ *  the definition a test wants for "let the world run".  It is a private TS
+ *  field, but private is a compile-time notion: at runtime it is an ordinary
+ *  property on the debug handle.  Reading engine internals this way is the
+ *  point of the handle; the suites never WRITE them.
+ *
+ *  BUT EXCLUDING DEAD TIME MEANS THE CLOCK CAN STOP, and a wait on a stopped
+ *  clock is not slow, it is INFINITE.  `GameEngine` freezes `runTimeSec`
+ *  while `deathDelay > 0 || deathPending` — reading your own obituary is not
+ *  play time — and the death screen deliberately does NOT freeze the sim, so
+ *  a dead run looks perfectly healthy from the outside: entities still move,
+ *  frames still land, and this wait sits there until its timeout and then
+ *  blames the sim clock.  That cost a session: the nebula bonding tests park
+ *  the player for ~18 s with ambient fauna live, a bubble latched and drained
+ *  it, and CI reported `timed out waiting for: 4s of sim time` on a build
+ *  whose only fault was that nobody was flying the ship.
+ *
+ *  So the wait watches for the RUN ENDING as well as for the target, and
+ *  says which happened.  This is not a rescue — a test whose player dies is
+ *  still a failing test — it is the difference between a two-second, named
+ *  diagnosis and a three-minute one pointing at the wrong thing.  The remedy
+ *  it names is the real one: `quietScene` for a test that does not need
+ *  movers, since a parked ship in a live field is not a controlled scene. */
 export async function advanceSim(page: Page, seconds: number, timeoutMs = 120_000) {
   const start = await engine(page, e => e.runTimeSec as number);
+  const target = start + seconds;
   await waitForEngine(
     page,
     // The target is inlined by toString(), so this closure serialises fine.
-    new Function('e', `return e.runTimeSec >= ${start + seconds}`) as (e: Engine) => boolean,
+    new Function(
+      'e',
+      `return e.runTimeSec >= ${target} || e.deathPending === true || e.deathDelay > 0`,
+    ) as (e: Engine) => boolean,
     `${seconds}s of sim time`,
     timeoutMs,
   );
+  // Compared in NODE, not in the page: `engine` stringifies its callback, so
+  // `target` would not be in scope there (harness rule 9).
+  const after = await engine(page, e => ({
+    now: e.runTimeSec as number,
+    hp: (e as unknown as { player: { health: number } }).player.health,
+  }));
+  if (after.now < target) {
+    throw new Error(
+      `the run ENDED before ${seconds}s of sim time elapsed: the player died `
+      + `(health ${after.hp.toFixed(1)}), and runTimeSec stops while it is dead, so this `
+      + `wait could never finish.  A test that parks the ship in a live field needs `
+      + `quietScene().`,
+    );
+  }
 }
 
 /** Watch `read` for `windowMs` of wall time and return the LARGEST value

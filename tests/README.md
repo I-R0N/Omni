@@ -248,6 +248,31 @@ for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
    it would have compared a step against itself and passed while measuring
    nothing. Dial both.
 
+14. **A PARKED SHIP IN A LIVE FIELD IS NOT A CONTROLLED SCENE — and the
+   clock a wait watches can STOP.** `advanceSim` polls `runTimeSec`, which
+   deliberately freezes while the player is dead, and the death screen
+   deliberately does NOT freeze the sim. So a dead run looks perfectly
+   healthy from outside — entities move, frames land — and the wait sits
+   there until its timeout and then blames the sim clock. The nebula bonding
+   tests parked the ship for ~13 s of sim with the ambient fauna keeper
+   running; measured over five runs they finished with the player on
+   **11.6 / 36.3 / 19.8 / 51.4 / 15.8 HP** — being eaten the whole time and
+   surviving only because the test ended first. A slower runner burns more
+   sim seconds reaching the same step (every `dialByName` poll and every
+   `evaluate` round-trip is sim time too), so it crosses zero, and CI
+   reported an intermittent `timed out waiting for: 4s of sim time` on a
+   build whose only fault was that nobody was flying the ship.
+
+   Two rules come out of it. **Call `quietScene` unless the test needs
+   movers** — here the fauna was not merely a hazard, a bubble EATS nebula
+   shards, i.e. the very population being counted; with it the same runs end
+   at 100.0 HP. And **a wait on a quantity that can stop must say so**:
+   `advanceSim` now watches for the run ending as well as for its target and
+   names the real cause in ~0.7 s instead of timing out in 180. That is not
+   a rescue — a test whose player dies is still a failing test — it is the
+   difference between a named diagnosis and a three-minute one pointing at
+   the wrong thing.
+
 ## A global rescale breaks the tests that were RIGHT
 
 `MASS_SCALE` (every mass 10x, sizes unchanged, impacts ten times harder)

@@ -21,7 +21,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { advanceSim, boot, dialByName, engine, startRun, waitForStats } from './helpers';
+import { advanceSim, boot, dialByName, engine, quietScene, startRun, waitForStats } from './helpers';
 
 /** Run one swirl step against a synthetic shard at (ox, oy) from a player
  *  moving along +x, and report the spin it picked up. */
@@ -213,21 +213,28 @@ test.describe('nebula drag', () => {
  *  direct read of the line that changed, with no population dynamics in it.
  */
 test.describe('nebula bonding', () => {
-  /*  THESE TWO ARE GENUINELY SLOW, and the suite's default budget does not
-   *  say so.  Both drive NEBULA_FIELD — ~1300 live entities, the heaviest
-   *  scene in the net — and the bond thresholds they measure are counted in
-   *  SIM SECONDS, so the wall clock is a floor rather than a target: 12 s of
-   *  sim here, 12 s there, which measured 1:1 against real time on an idle
-   *  box (10 runs: sim tracked wall within 6%, entity count flat at
-   *  1229..1407, no stall).  That leaves a 13x margin inside the shared 180 s
-   *  budget, and a loaded runner at the tail of a 20-minute suite ate it —
-   *  CI timed out on `6s of sim time` with the product perfectly healthy.
+  /*  A PARKED SHIP IN A LIVE FIELD IS NOT A CONTROLLED SCENE, and these two
+   *  are the longest park in the net.  They drive NEBULA_FIELD — ~1300 live
+   *  entities, the heaviest scene there is — and the bond thresholds they
+   *  measure are counted in SIM SECONDS, so they leave the ship stationary
+   *  for 12 s and 18 s with the ambient fauna keeper running.  Measured: a
+   *  bubble finds it, latches, and drains it from 100 to dead at sim ~17.9 s,
+   *  right on top of the second test's last wait.
    *
-   *  `test.slow()` triples the budget for these tests only.  It is not a
-   *  retry and it weakens no assertion: the inner `advanceSim` timeouts stay
-   *  at 180 s, which now sits BELOW the test budget rather than above it, so
-   *  a real stall still reports "timed out waiting for: 6s of sim time"
-   *  instead of a bare test timeout that says nothing about which wait hung. */
+   *  That is not a slow test, it is an ENDED RUN — `runTimeSec` stops while
+   *  the player is dead, so `advanceSim` waits on a clock that will never
+   *  move again and blames the sim clock 180 s later.  It presented as an
+   *  intermittent CI timeout on `4s of sim time` (and, on an earlier run,
+   *  `6s`), which is exactly what a coin-flip on whether the kill lands
+   *  before or after the last wait looks like.  `quietScene` is the fix: it
+   *  stops the keeper and clears the movers already out, which is also what
+   *  these tests want on the merits — a bubble EATS nebula shards, i.e. the
+   *  very population being counted.
+   *
+   *  `test.slow()` stays for the honest reason: 30 s of sim across the two
+   *  of them on the heaviest map is a real wall-clock cost, and it must sit
+   *  ABOVE the inner 180 s `advanceSim` budgets so a genuine stall reports
+   *  which wait hung rather than a bare test timeout. */
   test.slow();
 
   const breakTiles = (page: any) => engine(page, (e: any) => {
@@ -253,6 +260,7 @@ test.describe('nebula bonding', () => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+    await quietScene(page);
 
     /*  OFF first.  A bond is composed in the same iteration its timer
      *  crosses `threshold` — and the merge-budget deferral clamps to
@@ -285,6 +293,7 @@ test.describe('nebula bonding', () => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+    await quietScene(page);
 
     /*  This is the property that separates a long timer from plastic's
      *  `cohesionOnly`, and it is the whole reason nebula takes the former:

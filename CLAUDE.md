@@ -78,9 +78,13 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           energy model — falloff, the grain bore,
                           overkill carry-through, the far side),
                           helpers.ts (the shared harness over the debug
-                          handles) and README.md (suite map + the 13
+                          handles) and README.md (suite map + the 14
                           anti-flake rules — read 9, 12 and 13 before
-                          writing a DBG-knob test).  423 tests.  All run at
+                          writing a DBG-knob test, and 14 before parking
+                          the ship anywhere: fauna eats a stationary
+                          player, and `runTimeSec` stops when it dies, so
+                          `advanceSim` waits on a clock that has
+                          halted).  430 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
