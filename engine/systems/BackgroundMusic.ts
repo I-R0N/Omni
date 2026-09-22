@@ -17,7 +17,15 @@ const AMBIENT_DUCKED = 0.12;
 const BATTLE_LEVEL = 0.34;
 /** Gain ramp time CONSTANTS (`setTargetAtTime`), not durations. */
 const FADE_IN_SEC = 0.75;
-const FADE_OUT_SEC = 1.6;
+/** HALVED from 1.6 (user call).  This is the ONE fade-out in the score, so
+ *  every instance the call named rides it: leaving an arena, opening the
+ *  pause menu, returning to the menu, and an ordinary fight ending.  An
+ *  exponential approach is ~95% done after three time constants, so the
+ *  audible tail went ~4.8 s → ~2.4 s.  The ambient bed is deliberately NOT
+ *  direction-aware: its downward move is a DUCK between two audible levels
+ *  (EXPLORE → MENU or → DUCKED), not a fade to silence, and routing it here
+ *  would make it SLOWER than the FADE_IN_SEC it takes today. */
+const FADE_OUT_SEC = 0.8;
 /** Ramp used when a track hands over to the next at its own end — short,
  *  because nothing is being ducked, one song simply becomes another. */
 const HANDOVER_SEC = 0.12;
@@ -132,13 +140,20 @@ export class BackgroundMusic {
   }
 
   /**
-   * CUT TO A NEW SONG, NOW — the one thing allowed to override the
-   * continuous-playlist rule, and the capstone's cue (user call).  A boss
-   * warping in is a designed beat with its own rift, banner and stinger; the
-   * score is part of that beat, so it starts rather than carrying on with
-   * whatever the wave ladder was playing.  Always a DIFFERENT track from the
-   * one it interrupts and always from the top, however much of the playlist
-   * has already been heard.
+   * CUT TO A NEW SONG, NOW.  Always a DIFFERENT track from the one it
+   * interrupts and always from the top, however much of the playlist has
+   * already been heard.
+   *
+   * TWO CALLERS, and they are the same statement: A NEW ENCOUNTER BEGINS.
+   * A capstone warping in is a designed beat with its own rift, banner and
+   * stinger, and the score is part of that beat (user call).  A MAP CHANGE is
+   * the other (user report: re-entering an arena resumed the previous song
+   * mid-phrase) — the continuous-playlist rule is drawn around one arena's
+   * wave ladder, so the map boundary is where it ends rather than an
+   * exception to it.
+   *
+   * Neither is an "override" of the playlist: everywhere INSIDE an encounter
+   * a track still runs to its own end, and a lull still only ducks.
    *
    * This is where boss-specific music lands when there is some: the CALL SITE
    * says "a boss arrived" and nothing more, so choosing from a boss list here

@@ -1414,6 +1414,41 @@ export class GameEngine {
       this.dockedAtStation = false;
       this.dockInRange = false;
       this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
+      // THE BATTLE MUSIC'S LINGER BELONGS TO THE OLD MAP'S FIGHT.
+      // `MUSIC_LINGER_SEC` exists for a LULL inside one arena — the field
+      // goes empty on every wave clear and the next wave is seconds away, so
+      // a presence signal that fell and rose again used to cut the song.  A
+      // map change is the opposite of a lull: `transitionToMap` deliberately
+      // leaves the enemies behind (the portal clears the fight), so the
+      // encounter is definitively over.  Carrying the stamp across meant
+      // fleeing a boss into the quiet hub and still hearing its music
+      // (measured: combat stayed true for the full 6.0 s of overworld, with
+      // the layer's own ~5 s fade on top of that).  Dropping it lets the
+      // DESTINATION decide from its own hostiles on the very next frame — so
+      // arriving somewhere dangerous still engages instantly.
+      this.lastHostileNearAt = -Infinity;
+      // AND THE STAND-DOWN IS PUSHED HERE, not left to the next frame.
+      // `lastReportedCombat` only reports on a TRANSITION, so pushing false
+      // without moving it would desync: arriving somewhere dangerous would
+      // compute `combat === true === lastReportedCombat` and report nothing,
+      // leaving the layer down.  Both move together or neither does.
+      this.lastReportedCombat = false;
+      this.audio.setCombat(false);
+      // A NEW ARENA IS A NEW ENCOUNTER, SO IT GETS A NEW SONG (user report:
+      // re-entering an arena resumed the previous one mid-phrase).  The
+      // continuous-playlist rule exists for a WAVE LADDER — one arena's fight
+      // is one encounter and a lull inside it must not cut the song — and a
+      // map change is the boundary that rule is drawn around, not an
+      // exception to it.
+      //
+      // ORDER IS LOAD-BEARING: the cue is silent only because combat went
+      // down on the two lines above it.  `cueBattleTrack` plays the new track
+      // immediately when the layer is audible, so cueing first would start a
+      // fresh song at full level over the warp beat and then fade it out.
+      // Standing down first takes the documented hand-off instead — the
+      // successor waits, paused at 0, for the destination's own first
+      // engagement.
+      this.audio.cueBattleTrack();
       this.loadMap(this.buildMap(type));
   }
 
@@ -6767,8 +6802,9 @@ export class GameEngine {
       // WaveSystem.haltForBoss.
       this.waves.haltForBoss();
       this.audio.play('boss.intro');
-      // The score joins the entrance beat.  This is the ONE override of the
-      // continuous playlist: everywhere else a track runs to its own end.
+      // The score joins the entrance beat.  One of the two places a track is
+      // cut short (the other is a map change, in `loadMapFresh`); everywhere
+      // INSIDE an encounter a track runs to its own end.
       this.audio.cueBattleTrack();
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
