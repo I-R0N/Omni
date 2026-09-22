@@ -3462,3 +3462,114 @@ review, and both general:
   A control has to be checked for having actually landed.
 
 **STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).
+
+---
+
+## Portal double-tap re-entry, and the music timings it sits beside (2026-09-22) — user call
+
+**Parked from the PR #94 music-linger fix**, where the second half — the
+battle layer standing down on a map change — landed and the first half was
+deliberately left alone.  Both are about the same moment (the frame after a
+transit) and both are TUNING rather than architecture, which is why they are
+one entry.
+
+### 1. A double-tap on a portal flies straight back out
+
+**Reported**: flying into a portal and immediately flying back out of it,
+from one double click.
+
+**The mechanism is established, not guessed** — three shipped rules that are
+each correct in isolation:
+
+- **The fire queue is never drained during the warp beat.**  `loop()` returns
+  above the sim while `portalWarpTimer > 0` (GameEngine.ts:2660), so
+  `getFireEvents()` — the weapon tick, sim step 7 — does not run for the whole
+  `PORTAL_WARP_CYCLE[0]` = **1.4 s**.  `InputSystem.fireEvents` is an unbounded
+  array cleared only by that drain (and one-at-a-time by `claimTapNear`), and
+  the DOM listeners keep pushing to it throughout.  A human double-tap lands
+  its second event ~200 ms in, so it is inside the window by a factor of
+  seven.
+- **Arrival is inside interaction range, on purpose.**
+  `PORTAL_CONSTANTS.ARRIVAL_OFFSET` is **165** against `USE_RANGE` **240**,
+  and the constant's own comment says why: *"the rift stays on screen and
+  still in USE_RANGE, so turning around is one tap."*  Wanted behaviour —
+  an arena you entered by mistake is one tap to leave.
+- **`updateInteractables` claims the stale tap on the first post-warp
+  substep.**  It runs as sim step 5b, ahead of the weapon tick, and
+  `claimTapNear` takes the oldest queued event within `SHIP_SELECT_RADIUS`
+  (46) of the hull — which the second tap of a double-click on the ship is by
+  construction.
+
+So the bounce is not a race or a mis-tuned radius: it is a **press banked
+across a freeze**, spent at the one place in the run where the player is
+guaranteed to be standing in a portal's mouth.
+
+**The E key is immune and the pad is not**, which is a useful tell for
+anything that fixes this.  `dockKeyHeld` is only updated inside
+`updateInteractables`, so a key held (or released and re-pressed) through the
+frozen window still reads as held and cannot re-trigger.  The pad's
+`padInteractPresses` is a COUNTER, and `pollGamepad` runs at the top of
+`loop` above every freeze short-circuit, so a pad double-press banks exactly
+like a double-tap.
+
+**Directions, none chosen:**
+
+- **Drain the queue at the transit.**  Clear `fireEvents` (and the pad latch)
+  when `transitionToMap` arms the warp — the same argument the INTERACT latch
+  already makes for docking: *a press made while the world was frozen must
+  not be spent on the world that replaced it.*  Cheapest, and it generalises
+  to any future freeze.  The thing to check is whether it also eats a shot
+  the player legitimately queued on the far side.
+- **A post-arrival interaction cooldown.**  A few hundred ms in which the
+  arrival rift refuses `enterPortal`.  Directly expresses "you just came out
+  of this", but it is a new piece of state and a new number.
+- **Move the arrival out of range.**  Raising `ARRIVAL_OFFSET` past
+  `USE_RANGE` kills the turn-around-in-one-tap property the comment defends.
+  Recorded to be ruled out, not to be done.
+
+Note the FIRST option makes the warp beat's length irrelevant to the bug,
+which matters because that beat is DBG-cyclable from 0 to 10 s — a fix keyed
+to its duration would be wrong at both ends of the cycle.
+
+### 2. Music timings, now that the layer stands down correctly
+
+The PR #94 fix (`lastHostileNearAt = -Infinity` in `loadMapFresh`) makes a
+map change end the fight, and the user's read is that it "cools down the
+music" — i.e. the behaviour is right and the NUMBERS are the open question.
+The shipped set, all in one place so a tuning pass has a baseline:
+
+| knob | value | what it decides |
+|---|---|---|
+| `MUSIC_ENGAGE_SCREENS` | 1.35 | how close a hostile must be to raise the layer |
+| `MUSIC_RELEASE_SCREENS` | 2.2 | how far it must be gone before the fade can start |
+| `MUSIC_LINGER_SEC` | 6 | quiet sim-seconds before the fade begins |
+| `FADE_IN_SEC` | 0.75 | ramp CONSTANT up (≈2.3 s to ~95%) |
+| `FADE_OUT_SEC` | 1.6 | ramp CONSTANT down (≈4.8 s to ~95%) |
+| `HANDOVER_SEC` | 0.12 | song → next song at a track's own end |
+| `BATTLE_PAUSE_DELAY_MS` | 4800 | when the ducked track actually pauses |
+| levels | 0.15 / 0.28 / 0.12 / 0.34 | menu / explore / ducked ambient, battle |
+
+**The questions worth asking with a controller in hand:**
+
+- **Is a fled fight 6 s + ~4.8 s of tail?**  `MUSIC_LINGER_SEC` is graded for
+  a LULL inside one arena (the field empties on every wave clear), and the map
+  change now bypasses it entirely.  But WITHIN an arena, breaking off a boss
+  fight and flying to the far side still costs the full ~11 s before the
+  battle layer is gone.  That may be right — a boss you ran from is not a
+  boss you beat — or the linger may want to be shorter now that the
+  definitive case is handled elsewhere.
+- **Do engage and release want to be asymmetric by MORE?**  0.85 screens of
+  hysteresis stops the gain pumping as the player drifts; whether it stops
+  the *layer* pumping across a wave's spawn geometry has not been measured.
+- **`BATTLE_PAUSE_DELAY_MS` is derived from `FADE_OUT_SEC`**, so retuning the
+  fade silently moves when the resume-on-the-same-bar behaviour arms.  That
+  coupling is correct and should stay derived — but it means the fade cannot
+  be tuned without re-checking that the pause still lands after it rather
+  than racing it.
+- **Boss music always restarts a track** (the PR #101 behaviour).  Untested
+  against the map-change stand-down: fleeing a boss and returning should not
+  be indistinguishable from starting a second boss.
+
+**What is NOT open**: the map-change stand-down itself, and the `setTargetAtTime`
+ramp shape.  Both are settled — see `docs/AUDIO_AUTHORING.md`, *A MAP CHANGE
+IS NOT A LULL*.
