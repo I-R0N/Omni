@@ -44,7 +44,17 @@ them to the Music bus: `space-ambient.mp3` is the exploration bed and
 `fly-battle.mp3`, `tracers-battle.mp3`, and `countdown-battle.mp3` form a battle
 playlist that hands over from one track to the next only when a track ENDS.
 Hostile proximity ducks that layer and pauses it, holding its position, so a
-lull never costs the song its place. The single exception is a boss capstone,
+lull never costs the song its place. A lull is graded by
+`AUDIO_CONSTANTS.MUSIC_LINGER_SEC` — an arena's field empties on every wave
+clear with the next wave seconds away, so the layer rides that gap out rather
+than cutting. **A MAP CHANGE IS NOT A LULL**: `transitionToMap` deliberately
+leaves the enemies behind, so `loadMapFresh` drops the linger stamp
+(`lastHostileNearAt`) along with the other handles to the old map's fight, and
+the destination decides from its own hostiles on the next frame. Without that,
+fleeing a boss into the quiet hub kept its music playing for the full linger
+plus the layer's own fade (measured: 6.0 s of overworld, ~5 s of fade on top).
+Arriving somewhere dangerous still engages instantly. The single exception to
+the continuous playlist is a boss capstone,
 whose entrance calls `BackgroundMusic.cueBattleTrack()` and cuts to a new track
 from the top — add boss-specific music by choosing it inside that method rather
 than at the call site. All are streamed rather than decoded into

@@ -1414,6 +1414,19 @@ export class GameEngine {
       this.dockedAtStation = false;
       this.dockInRange = false;
       this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_FIRST_SPAWN_SEC;
+      // THE BATTLE MUSIC'S LINGER BELONGS TO THE OLD MAP'S FIGHT.
+      // `MUSIC_LINGER_SEC` exists for a LULL inside one arena — the field
+      // goes empty on every wave clear and the next wave is seconds away, so
+      // a presence signal that fell and rose again used to cut the song.  A
+      // map change is the opposite of a lull: `transitionToMap` deliberately
+      // leaves the enemies behind (the portal clears the fight), so the
+      // encounter is definitively over.  Carrying the stamp across meant
+      // fleeing a boss into the quiet hub and still hearing its music
+      // (measured: combat stayed true for the full 6.0 s of overworld, with
+      // the layer's own ~5 s fade on top of that).  Dropping it lets the
+      // DESTINATION decide from its own hostiles on the very next frame — so
+      // arriving somewhere dangerous still engages instantly.
+      this.lastHostileNearAt = -Infinity;
       this.loadMap(this.buildMap(type));
   }
 
