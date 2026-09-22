@@ -1,3 +1,4 @@
+import type { EnergyType, MaterialFamily } from './engine/systems/energyMaterial';
 
 
 // ShardVariantId is defined in engine/systems/ShardSystem.types.ts
@@ -280,6 +281,7 @@ export interface StatusEffect {
 }
 
 export interface WeaponConfig {
+  energyType?: EnergyType;
   type: WeaponType;
   name: string;
   cooldown: number; // Time between shots (seconds)
@@ -376,6 +378,11 @@ export type DropCompositionEntry =
   | { type: 'health'; value: number };
 
 export interface GameEntity {
+  energyType?: EnergyType;
+  material?: MaterialFamily;
+  /** Present only while meaningfully heated. */
+  materialHeat?: number;
+  fractureEnergy?: EnergyType;
   id: string;
   type: EntityType;
   name?: string;

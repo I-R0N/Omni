@@ -556,7 +556,10 @@ test.describe('how far a round gets is what it can afford', () => {
       expect(metal.alive, 'energy-bound, not chord-bound').toBe(false);
 
       const glassPrice = glass.grainSize! * glass.bondStrength!;
-      const metalPrice = metal.grainSize! * metal.bondStrength!;
+      // The coarser metal profile keeps total toughness by compensating
+      // seam strength with inverse sqrt(0.3); the projectile pays that same
+      // physical boundary price. Independently stated, not resolver-derived.
+      const metalPrice = metal.grainSize! * metal.bondStrength! / Math.sqrt(0.3);
       expect(metalPrice, 'metal charges more per grain than glass')
         .toBeGreaterThan(glassPrice);
       expect(metal.steps, 'so the same round gets fewer grains into it')
@@ -572,7 +575,9 @@ test.describe('how far a round gets is what it can afford', () => {
       // The price itself, read back out of what each tile absorbed per grain
       // — chord-bound rounds are fine for this, since every step but possibly
       // the last is a full grain.
-      const metalDeep = await bore(20, 'metal-tile');
+      // Supply enough energy to exit the tougher coarse plate, so the last
+      // step is not a partial spend that would dilute the per-grain average.
+      const metalDeep = await bore(40, 'metal-tile');
       expect(metalDeep.dealt / metalDeep.steps, "metal's tile absorbed metal's price")
         .toBeCloseTo(metalPrice, 6);
       expect(glassDeep.dealt / glassDeep.steps, "glass's absorbed glass's")

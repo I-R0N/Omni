@@ -1667,6 +1667,18 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // erased any tile that has slow-path overlays active (glow / hit
       // flash / regen) so reaching the per-entity path means the tile
       // legitimately needs the slow-path render below.
+      // Heat outline is an overlay on the already-visible entities, including
+      // baked static tiles. It adds no map scan and leaves the tile cache intact.
+      if ((entity.materialHeat ?? 0) > 0.05) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(0.8, entity.materialHeat! / 60);
+          ctx.strokeStyle = '#fb923c';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(rx, ry, Math.max(entity.size.x, entity.size.y) * 0.53, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+      }
       if (entity._staticCached === true) return;
 
       // ── Fast-path STRUCTURE sprite render ───────────────────────────

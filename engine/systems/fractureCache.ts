@@ -1,3 +1,4 @@
+import { EnergyType, fractureProfile, fractureToughness, thermalStrength, safeEnergy } from './energyMaterial';
 /** The fracture-decomposition CACHE policy (voronoi gauntlet, V3).
  *
  *  One accessor pair shared by the SIM (ShardSystem.shatterVoronoiStyle
@@ -71,10 +72,9 @@ function localImpactPoint(e: GameEntity): { x: number; y: number } | null {
 
 /** Compute (or return the cached) seeded Voronoi decomposition of the
  *  entity's polygon.  Null for variants without a `fracture` block or
- *  entities without a usable polygon.  Site count is a function of size
- *  + merge history only — never the killing hit — so the cracks shown
- *  while alive are the exact seams of the eventual break (see
- *  GrainSpec). */
+ *  entities without a usable polygon. Size and merge history feed the
+ *  material/energy profile selected while pristine. Once damaged, the
+ *  cached seams remain fixed even if later hits change energy domain. */
 export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   if (e.shardVariant === undefined) return null;
   const f = grainSpecFor(e.shardVariant);
@@ -110,14 +110,15 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   // CEILING is a performance guard: decomposition is superlinear in site
   // count, so a very large body gets coarser grains rather than hundreds
   // of cells.  Constant grain size holds BETWEEN the two.
-  sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
+  const profile = fractureProfile(e);
+  sites = Math.max(2, Math.min(32, Math.round(Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites)) * profile.sites)));
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 
   const ip = localImpactPoint(e);
   const biasOverride = getFractureBiasOverride();
   const impact = ip !== null
-    ? { x: ip.x, y: ip.y, bias: biasOverride ?? f.impactBias }
+    ? { x: ip.x, y: ip.y, bias: biasOverride ?? profile.bias }
     : undefined;
 
   e.fractureEdges = undefined; // edges are derived — never outlive the cells
@@ -298,7 +299,7 @@ export function bondStrengthFor(e: GameEntity): number | null {
   const f = grainSpecFor(e.shardVariant);
   const s = f?.bondStrength;
   if (s === undefined) return null;
-  return s * getBoundaryStrengthScale();
+  return s * getBoundaryStrengthScale() * fractureToughness(e);
 }
 
 /** MEASURED: the interior boundary a decomposition puts inside a body, per
@@ -338,8 +339,9 @@ export function estimateBoundaryHp(variantId: ShardVariantId, size: number, merg
   let sites = Math.round(((size / Math.max(1e-6, f.grainSize)) ** 2) * getFractureSiteScale());
   const merges = mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
-  sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
-  return bond * getBoundaryStrengthScale() * BOUNDARY_EDGE_PER_CELL * sites * size;
+  const profile = fractureProfile({ shardVariant: variantId });
+  sites = Math.max(2, Math.min(32, Math.round(Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites)) * profile.sites)));
+  return bond * getBoundaryStrengthScale() * fractureToughness({ shardVariant: variantId }) * BOUNDARY_EDGE_PER_CELL * sites * size;
 }
 
 /** Build (or return) the entity's boundary model, converting its HP to
@@ -562,10 +564,11 @@ function spendSpread(
  *  which is what makes the HUD, the crack overlay, the damage-number
  *  gate and the death check agree with the fracture without any of them
  *  knowing the model exists. */
-export function applyBoundaryDamage(e: GameEntity, damage: number): boolean {
+export function applyBoundaryDamage(e: GameEntity, damage: number, energy: EnergyType = 'mechanical'): boolean {
+  e.fractureEnergy = energy;
   const model = ensureBoundaryModel(e);
   if (model === null) return false;
-  spendOnBoundaries(e, model.edges, model.fill, model.strength, Math.max(0, damage));
+  spendOnBoundaries(e, model.edges, model.fill, model.strength, safeEnergy(damage) / thermalStrength(e));
   let remaining = 0;
   for (let i = 0; i < model.edges.length; i++) {
     remaining += Math.max(0, edgeNeed(e, i, model.strength) - model.fill[i]);

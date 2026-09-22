@@ -1,3 +1,4 @@
+import { fractureProfile, cohesionFor } from './energyMaterial';
 // ShardSystem — orchestrator for tile / shard regen, shatter, and merge.
 //
 // Stage 1: skeleton with no-op update / onDeath.
@@ -348,6 +349,8 @@ export class ShardSystem {
    * treat it as a same-frame snapshot and never hold or mutate it.
    * `tickBonds` compacts this array in place every sim step.
    */
+  public onEnergyFragment?: (parent: GameEntity, child: GameEntity, areaFraction: number) => void;
+
   public get liveBonds(): readonly ShardBond[] { return this.bonds; }
   // Peak per-bond local merge-rate multiplier applied last tickBonds —
   // exposed for the DBG "merge rate" readout (replaces the old global
@@ -733,6 +736,8 @@ export class ShardSystem {
     entity.active = true;
     entity.regenProgress = undefined;
     entity.deathDispatched = undefined; // revived — killable again (V9)
+    entity.materialHeat = undefined;
+    entity.fractureEnergy = undefined;
     entity.shattered = undefined;       // ...and breakable again (V13)
     // The chip-dust bank is per LIFE: a revived tile has shed nothing.
     entity.grainDustArea = undefined;
@@ -794,6 +799,14 @@ export class ShardSystem {
    *  currently invoked only by ROCK_SHARD + NEBULA + NEBULA_SHARD
    *  death dispatch in GameEngine.
    */
+  /** Energy disperses cloud tiles through their existing puff fan, without
+   * entering the solid Voronoi path. Ship-contact breakup stays unchanged. */
+  public disperseCloud(parent: GameEntity, entities: GameEntity[]): void {
+    if (parent.shardVariant !== 'nebula-tile' || parent.shattered) return;
+    parent.shattered = true;
+    this.shatterNebulaStyle(parent, SHARD_VARIANTS['nebula-tile'], entities);
+  }
+
   public shatter(parent: GameEntity, entities: GameEntity[]): void {
     const variantId = shardVariantOf(parent);
     if (variantId === null) return;
@@ -997,7 +1010,8 @@ export class ShardSystem {
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE = parentVariant.shatter.scatterHalfCone;
-    const radialSpeed = parentVariant.grain!.radialSpeed;
+    const impulseScale = fractureProfile(parent).impulse;
+    const radialSpeed = parentVariant.grain!.radialSpeed * impulseScale;
 
     const isRockParent = parent.shardVariant === 'rock-shard'
       || parent.shardVariant === 'rock-tile';
@@ -1053,8 +1067,8 @@ export class ShardSystem {
         const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
           impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
         const fa = impactAngle + (Math.random() - 0.5) * HALF_CONE * 0.5;
-        vx += Math.cos(fa) * fwd;
-        vy += Math.sin(fa) * fwd;
+        vx += Math.cos(fa) * fwd * impulseScale;
+        vy += Math.sin(fa) * fwd * impulseScale;
       }
 
       // Fragment polygon: the cell's own shape, re-centred on its
@@ -1101,6 +1115,7 @@ export class ShardSystem {
         ShardSystem.stampNebulaChild(parent, child, parentVariant, impactSpeed);
       }
       entities.push(child);
+      this.onEnergyFragment?.(parent, child, cell.area / refArea);
     }
 
     this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
@@ -1199,7 +1214,8 @@ export class ShardSystem {
       const a = Math.random() * Math.PI * 2;
       rdx = Math.cos(a); rdy = Math.sin(a);
     }
-    const rSpeed = f.radialSpeed * (1.0 + Math.random() * 0.6);
+    const impulseScale = fractureProfile(parent).impulse;
+    const rSpeed = f.radialSpeed * impulseScale * (1.0 + Math.random() * 0.6);
     let vx = parent.velocity.x + rdx * rSpeed;
     let vy = parent.velocity.y + rdy * rSpeed;
     const iv = parent.lastImpactVelocity;
@@ -1208,8 +1224,8 @@ export class ShardSystem {
       if (s > 1e-3) {
         const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
           s * parentVariant.shatter.forwardDrag + 0.3 + Math.random() * 0.8);
-        vx += (iv.x / s) * fwd;
-        vy += (iv.y / s) * fwd;
+        vx += (iv.x / s) * fwd * impulseScale;
+        vy += (iv.y / s) * fwd * impulseScale;
       }
     }
 
@@ -1273,6 +1289,7 @@ export class ShardSystem {
       dentRecoverDuration: restPoly !== undefined ? recover : undefined,
     };
     entities.push(child);
+    this.onEnergyFragment?.(parent, child, cell.area / refArea);
     return child;
   }
 
@@ -1717,7 +1734,7 @@ export class ShardSystem {
       const velX = fx * parallelSpeed + perpX;
       const velY = fy * parallelSpeed + perpY;
 
-      entities.push({
+      const child: GameEntity = {
         id:              nextId('nebula_shard'),
         // Stage 5: unified carrier with mass-based dispatch.  Mass
         // resolves via childSpawn.sizeToMass() which the nebula-shard
@@ -1745,7 +1762,9 @@ export class ShardSystem {
         nebulaSpawnTimer:    shardSpawnDuration,
         nebulaSpawnDuration: shardSpawnDuration,
         nebulaMergeCooldown: postCooldown,
-      });
+      };
+      entities.push(child);
+      this.onEnergyFragment?.(parent, child, 1 / shardCount);
     }
   }
 
@@ -1820,6 +1839,8 @@ export class ShardSystem {
       const { a, b } = bond;
 
       if (!a.active || !b.active) continue; // discard
+      const heatCohesion = Math.min(cohesionFor(a), cohesionFor(b));
+      if (heatCohesion <= 0) continue;
 
       const dx = wrapDeltaX(a.position.x, b.position.x);
       const dy = wrapDeltaY(a.position.y, b.position.y);
@@ -1837,7 +1858,7 @@ export class ShardSystem {
       // nebula-to-nebula pair is the only thing it touches.
       const nebPair = a.shardVariant === 'nebula-shard' && b.shardVariant === 'nebula-shard';
       const nebBond = nebPair ? getActiveNebulaBond() : null;
-      const breakFactor = BREAK_FACTOR * (bond.breakFactorMul ?? 1)
+      const breakFactor = BREAK_FACTOR * heatCohesion * (bond.breakFactorMul ?? 1)
           * (nebBond !== null ? nebBond.breakMul : 1);
       if (dist > contactDist * breakFactor) continue; // bond broken
 
@@ -1852,7 +1873,7 @@ export class ShardSystem {
       // bleeds toward zero (the tile's "shared velocity").  The
       // mass-weighted formula would NaN with ∞, so we branch.
       if (applyCohesion) {
-        const cohesionRate = COHESION * (bond.cohesionMul ?? 1)
+        const cohesionRate = COHESION * heatCohesion * (bond.cohesionMul ?? 1)
             * (nebBond !== null ? nebBond.cohesionMul : 1);
         const blend        = Math.min(1, cohesionRate * dt);
         if (a.mass === Infinity && b.mass !== Infinity) {
@@ -2221,6 +2242,7 @@ export class ShardSystem {
             // forces "smaller merges into larger" by refusing equal
             // pairs.  Symmetric: applies regardless of which side
             // is the puller.
+            if (cohesionFor(a) <= 0 || cohesionFor(b) <= 0) continue;
             const reqDelta = pullerVariant.merge.requireSizeDeltaFraction;
             if (reqDelta !== undefined && reqDelta > 0) {
               const larger  = Math.max(a.size.x, b.size.x);
@@ -2350,7 +2372,7 @@ export class ShardSystem {
 
       const aR = getCollisionR(a);
       _physics.forEachStaticTileNear(a.position.x, a.position.y, (tile) => {
-        if (bondedThisFrame.has(a)) return;
+        if (bondedThisFrame.has(a) || cohesionFor(a) <= 0 || cohesionFor(tile) <= 0) return;
         if (tile.mass !== Infinity) return;             // dynamic — handled by main loop
         const tileVariantId = shardVariantOf(tile);
         if (tileVariantId === null) return;

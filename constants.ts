@@ -6146,6 +6146,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   [WeaponType.BOUNCER]: {
     type: WeaponType.BOUNCER,
     name: 'Laser',
+    energyType: 'thermal',
     cooldown: 0.55,    // 0.40 → 0.55 (pivot 1b): the 15-ammo/s tax was its real
                        // downside; with ammo gone the crowd-rake needs a brake.
                        // Cooldown (not per-beam damage) so each volley keeps its
@@ -6174,6 +6175,7 @@ export const WEAPONS: Record<WeaponType, WeaponConfig> = {
   },
   [WeaponType.LIGHTNING]: {
     type: WeaponType.LIGHTNING,
+    energyType: 'electrical',
     name: 'Lightning',
     cooldown: 0.65,    // 0.50 → 0.65 (pivot 1b): compensates for free ammo —
                        // chain falloff already limits single-target value

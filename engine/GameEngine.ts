@@ -1,3 +1,5 @@
+import { EnergySystem } from './systems/EnergySystem';
+import { EnergyEvent, materialOf, safeEnergy } from './systems/energyMaterial';
 
 
 import { InputSystem } from './systems/InputSystem';
@@ -25,7 +27,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
@@ -226,6 +228,7 @@ export class GameEngine {
    *  way; this just stops the compiler disagreeing with the debug menu). */
   input: InputSystem;
   physics: PhysicsSystem;
+  energy: EnergySystem;
   /* Typed by the SEAM, not the class (gauntlet WebGPU stage 3): the engine
      depends on what a renderer must provide, and `new RenderSystem()` below
      is the concrete choice. Canvas2D remains the only implementation.
@@ -957,6 +960,13 @@ export class GameEngine {
     registerSfx(this.audio);
     this.audio.armGestureUnlock();
     this.physics = new PhysicsSystem();
+    this.energy = new EnergySystem({
+        nearby: (e, r, visit) => this.physics.forEachEnergyNear(e, r, visit),
+        damage: this.applyMaterialDamage,
+        disperse: this.disperseEnergyNebula,
+        feedback: this.energyFeedback,
+    });
+    this.physics.energyHit = (target, event) => this.energy.deliver(target, event);
     this.renderer = new RenderSystem();
     // Wire physics into the renderer so the material-tile branch can
     // suppress edge strokes on edges that are cleanly butted against
@@ -978,6 +988,7 @@ export class GameEngine {
     this.waves = new WaveSystem();
     this.nebulas = new NebulaSystem(this.particles, this.drops);
     this.shards = new ShardSystem(this.particles);
+    this.shards.onEnergyFragment = (p, c, fraction) => this.energy.inheritHeat(p, c, fraction);
     this.shards.sfx = (id, x, y) => this.audio.play(id, { x, y });
     // Wire the variant-specific completion hook for the
     // neighbourhood-blend regen path (today: nebula-tile only).
@@ -1388,6 +1399,7 @@ export class GameEngine {
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
   private loadMapFresh(type: MapType) {
+      this.energy.clear();
       this.shards.reset();
       this.perfController.reset();
       this.activeDrops = [];
@@ -3059,6 +3071,8 @@ export class GameEngine {
         this.handlePortalEject
       );
 
+      this.energy.update(dt);
+
       // Indexed loop, not `forEach(e => …)`: the callback would be a fresh
       // closure on every substep (120 Hz).  See the CLOSURE HOISTING note on
       // applyFlowTo below — a function re-created per substep never settles
@@ -4484,6 +4498,85 @@ export class GameEngine {
       'nebula-tile': 'nebula',   'nebula-shard': 'nebula',
       // Indestructible tiles never die, but they DO get shot at.
       'indestructible-tile': 'metal',
+  };
+
+  private applyMaterialDamage = (target: GameEntity, amount: number, event: EnergyEvent): void => {
+      if (!target.active || target.isExploding || materialOf(target) === 'nebula'
+          || target.shardVariant === 'indestructible-tile' || !(amount > 0)) return;
+      // A future/unknown variant may not have a geometry/regen definition.
+      // Keep its attenuated generic response out of the authored shard table.
+      if (target.shardVariant && !SHARD_VARIANTS[target.shardVariant]) {
+          target.health = Math.max(0, safeEnergy(target.health) - safeEnergy(amount));
+          if (target.health === 0) {
+              target.active = false;
+              if (target.mass === Infinity) this.physics.removeStaticEntity(target);
+          }
+          return;
+      }
+      target.fractureEnergy = event.type;
+      stampLocalImpact(target, event.position);
+      if (!applyBoundaryDamage(target, amount, event.type)) target.health -= safeEnergy(amount);
+      target.lastImpactVelocity = event.type === 'mechanical' ? event.direction : undefined;
+      markDamaged(target, 0.12);
+      noteTraitDamage(target, amount);
+      target.hitReact = hitReactStrength(amount, target.maxHealth ?? target.health);
+      if (target.health <= 0) {
+          target.killedByPlayer = event.playerOwned === true;
+          target.lastImpactDamage = amount;
+          this.handleEntityDeath(target);
+      } else if (target.shardVariant) this.progressFracture(target, event.position);
+  };
+
+  private disperseEnergyNebula = (target: GameEntity, event: EnergyEvent): void => {
+      if (!this.currentMap || !target.active || target.mergeFadeTimer !== undefined) return;
+      const d = event.direction;
+      const len = d && Number.isFinite(d.x) && Number.isFinite(d.y) ? Math.hypot(d.x, d.y) : 0;
+      const speed = Math.min(8, Math.sqrt(event.magnitude));
+      const vx = len > 0 ? d!.x / len * speed : speed;
+      const vy = len > 0 ? d!.y / len * speed : 0;
+      if (target.shardVariant === 'nebula-tile') {
+          // Existing cloud dissolution emits drifting puffs, never Voronoi.
+          target.lastImpactVelocity = { x: vx, y: vy };
+          target.health = 0;
+          target.mergeFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
+          target.mergeFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
+          this.physics.removeStaticEntity(target);
+          this.shards.disperseCloud(target, this.currentMap.entities);
+          this.handleEntityDeath(target);
+      } else {
+          target.velocity.x = Math.max(-12, Math.min(12, target.velocity.x + vx));
+          target.velocity.y = Math.max(-12, Math.min(12, target.velocity.y + vy));
+          target.nebulaMergeCooldown = Math.max(target.nebulaMergeCooldown ?? 0, 1.5);
+      }
+  };
+
+  private energyFeedback = (target: GameEntity, event: EnergyEvent, from?: GameEntity): void => {
+      if (!this.currentMap) return;
+      const thermal = event.type === 'thermal';
+      if (event.type === 'mechanical') return;
+      target.hitFlash = 0.15;
+      if (thermal) {
+          // Select a coarse pattern only while pristine. Already paid-for
+          // cracks must remain the seams the body eventually separates on.
+          if (target.health === target.maxHealth && !target.fractureEdgeFill?.some(n => n > 0)) {
+              target.fractureEnergy = 'thermal';
+              target.fractureCells = undefined; target.fractureEdges = undefined;
+              target.fractureEdgeNeed = undefined; target.fractureEdgeFill = undefined;
+          }
+      }
+      this.spawnParticles(target.position, 3, thermal ? '#fb923c' : '#a5f3fc', {
+          speedMin: 0.5, speedMax: thermal ? 2 : 6, sizeMin: 1, sizeMax: 2,
+          lifetimeMin: 0.15, lifetimeMax: thermal ? 0.6 : 0.25,
+      });
+      if (thermal) this.audio.play('impact.tile.nebula', { x: target.position.x, y: target.position.y });
+      if (!thermal && !from) this.audio.play('impact.lightning.arc', { x: target.position.x, y: target.position.y });
+      if (from) this.currentMap.entities.push({
+          id: nextId('lightning'), type: EntityType.PARTICLE,
+          position: { ...from.position }, velocity: { x: 0, y: 0 }, size: { x: 1, y: 1 }, rotation: 0,
+          color: '#a5f3fc', active: true, health: 1, maxHealth: 1, mass: 0,
+          lifetime: LIGHTNING_ARC_LIFETIME, maxLifetime: LIGHTNING_ARC_LIFETIME,
+          isLightningArc: true, arcPoints: [{ ...from.position }, { ...target.position }],
+      });
   };
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
@@ -6238,161 +6331,15 @@ export class GameEngine {
    *  shot (user call: every weapon affected equally by the rate).  1 when
    *  nothing pierced. */
   private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity, pierceFalloff: number = 1) {
-      // One trigger for the whole chain: every arc in a chain lands within
-      // this id's retrigger window, so the collapse rule turns a five-link
-      // chain into one bigger crackle instead of five thin ones.
-      this.audio.play('impact.lightning.arc', { x: impactPos.x, y: impactPos.y });
-      if (!this.currentMap) return;
-
-      // Per-projectile chain overrides (set by ProjectileSystem.spawn from
-      // WeaponConfig.chainCount/chainRange/chainBranches — populated by
-      // the charged Lightning variant).  Fall back to the global
-      // LIGHTNING_CHAIN_* constants for normal shots.
-      const hopBudget = proj?.chainCount    ?? LIGHTNING_CHAIN_COUNT;
-      const hopRange  = proj?.chainRange    ?? LIGHTNING_CHAIN_RANGE;
-      const branches  = proj?.chainBranches ?? LIGHTNING_CHAIN_BRANCHES;
-      const hopRangeSq = hopRange * hopRange;
-
-      // Build a branching chain (tree, not list).  Each frontier node forks
-      // to up to `branches` nearest unhit targets within `hopRange`.  Damage
-      // falls off by depth (preserving the existing 1-d/maxDepth feel from
-      // the old linear chain).  hitSet is shared globally so two parents at
-      // the same depth never compete for the same child.
-      // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
-      // full entity array.  Exploding entities are still skipped since the
-      // index holds `active` entities that may be mid-animation.
-      const enemies = this.entityIndex.enemies;
-      const asteroids = this.entityIndex.shardCandidates;
-      const nodesByDepth: GameEntity[][] = [[firstTarget]];
-      const edges: { from: GameEntity; to: GameEntity }[] = [];
-      const hitSet = new Set<string>([firstTarget.id]);
-
-      // Reused candidate buffer.  Cleared at the top of each pickNearestK
-      // call so repeated picks within a single chain don't pile allocations.
-      const candidates: { e: GameEntity; d2: number }[] = [];
-
-      const pickNearestK = (parent: GameEntity, k: number): GameEntity[] => {
-          candidates.length = 0;
-          for (let i = 0; i < enemies.length; i++) {
-              const e = enemies[i];
-              if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(parent.position.x, e.position.x);
-              const dy = wrapDeltaY(parent.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < hopRangeSq) candidates.push({ e, d2 });
-          }
-          for (let i = 0; i < asteroids.length; i++) {
-              const e = asteroids[i];
-              if (e.isExploding || hitSet.has(e.id)) continue;
-              // Filter inert / dielectric shard variants out of the chain.
-              // See LIGHTNING_CHAIN_EXCLUDED_VARIANTS for the table and
-              // for the plastic-/metal-shard note (Phase 1 g2).
-              if (e.shardVariant && LIGHTNING_CHAIN_EXCLUDED_VARIANTS.has(e.shardVariant)) continue;
-              const dx = wrapDeltaX(parent.position.x, e.position.x);
-              const dy = wrapDeltaY(parent.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < hopRangeSq) candidates.push({ e, d2 });
-          }
-          candidates.sort((a, b) => a.d2 - b.d2);
-          const picked: GameEntity[] = [];
-          for (let i = 0; i < candidates.length && picked.length < k; i++) {
-              const c = candidates[i];
-              if (hitSet.has(c.e.id)) continue; // race-resilient (shouldn't happen — defensive)
-              picked.push(c.e);
-              hitSet.add(c.e.id);
-          }
-          return picked;
-      };
-
-      const parentOf = new Map<GameEntity, GameEntity>();
-      for (let depth = 1; depth <= hopBudget; depth++) {
-          const prev = nodesByDepth[depth - 1];
-          const next: GameEntity[] = [];
-          for (let p = 0; p < prev.length; p++) {
-              const parent = prev[p];
-              const picked = pickNearestK(parent, branches);
-              for (let c = 0; c < picked.length; c++) {
-                  edges.push({ from: parent, to: picked[c] });
-                  // Who the arc jumped FROM — the contact side for the
-                  // grain model's boundary spend (V15).
-                  parentOf.set(picked[c], parent);
-                  next.push(picked[c]);
-              }
-          }
-          if (next.length === 0) break;
-          nodesByDepth.push(next);
-      }
-
-      // Apply chain damage by depth.  Depth 0 is the direct-hit target
-      // (already damaged upstream by the projectile collision).  Damage at
-      // depth d = baseDmg * (1 - d/maxDepth) — same falloff curve as the
-      // pre-branching linear chain so balance per-target stays consistent.
-      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage * pierceFalloff;
-      const maxDepth = nodesByDepth.length - 1;
-      for (let d = 1; d <= maxDepth; d++) {
-          const factor = maxDepth > 0 ? Math.max(0, 1 - d / maxDepth) : 1;
-          const dmg = baseDmg * factor;
-          const tier = nodesByDepth[d];
-          for (let i = 0; i < tier.length; i++) {
-              const target = tier[i];
-              if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
-
-              // A chain arrives at the body's nearest face, so stamp the
-              // arc's origin as the contact and let the grain model spend
-              // it on boundaries like any other hit (V15).
-              stampLocalImpact(target, parentOf.get(target)?.position);
-              if (!applyBoundaryDamage(target, dmg)) target.health -= dmg;
-              // (h) regen: chain damage feeds the burst bucket like a pellet
-              // does.  Note the chain deliberately BYPASSES the front-shield
-              // plate — it never travels as a projectile, which is exactly why
-              // Lightning is a §7 answer to a directional defence.
-              noteTraitDamage(target, dmg);
-              markDamaged(target, 0.15);
-              target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
-              this.spawnDamageText(target.position, dmg, target);
-
-              if (target.health <= 0 && !target.isExploding) {
-                  target.lastImpactDamage = dmg;
-                  // Lightning is a player-only weapon — chain kills are
-                  // player-attributed for shard/tile scoring.
-                  target.killedByPlayer = true;
-                  this.handleEntityDeath(target);
-              }
-          }
-      }
-
-      // Only spawn arc visuals if at least one hop landed.
-      if (edges.length === 0) return;
-
-      // Spawn one PARTICLE arc entity per edge in the tree.  Each arc is a
-      // 2-point polyline (parent.position → child.position).  RenderSystem's
-      // existing isLightningArc branch handles the rest.  Cap loosely at
-      // MAX_PARTICLES via ParticleSystem's own bookkeeping; a fully-saturated
-      // default tree (branches=2, depth=2) produces 6 arcs per impact.
-      const arcColor = WEAPONS[WeaponType.LIGHTNING].color;
-      for (let i = 0; i < edges.length; i++) {
-          const { from, to } = edges[i];
-          this.currentMap.entities.push({
-              id: nextId('lightning'),
-              type: EntityType.PARTICLE,
-              position: { x: from.position.x, y: from.position.y },
-              velocity: { x: 0, y: 0 },
-              size: { x: 1, y: 1 },
-              rotation: 0,
-              color: arcColor,
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: LIGHTNING_ARC_LIFETIME,
-              maxLifetime: LIGHTNING_ARC_LIFETIME,
-              mass: 0,
-              isLightningArc: true,
-              arcPoints: [
-                  { x: from.position.x, y: from.position.y },
-                  { x: to.position.x,   y: to.position.y   },
-              ],
-          });
-      }
+      // Material contacts were already delivered by PhysicsSystem. Actor
+      // conversion is deferred: preserve their direct kinetic hit and launch
+      // conduction from them without double-damaging the first actor.
+      if (firstTarget.shardVariant || firstTarget.material) return;
+      this.energy.deliver(firstTarget, {
+          type: 'electrical', magnitude: (proj?.damage ?? WEAPONS[WeaponType.LIGHTNING].damage) * pierceFalloff,
+          position: impactPos, source: proj?.ownerId, playerOwned: proj?.ownerType === EntityType.PLAYER,
+          delivery: { kind: 'projectile', chainHops: proj?.chainCount, chainRadius: proj?.chainRange, chainBranches: proj?.chainBranches },
+      }, true);
   }
 
   // ─── Cannon AoE — radial damage on projectile impact ───────────────────
@@ -7268,6 +7215,7 @@ export class GameEngine {
       if (!map.initialized) {
           map.init();
       }
+      this.energy.clear();
       this.currentMap = map;
       // The fog's EXPLORED memory is world space, and world space means
       // something different here — a memory kept across a load would draw the

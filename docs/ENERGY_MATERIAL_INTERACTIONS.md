@@ -1,0 +1,118 @@
+# Energy and material interactions
+
+Delivery remains in the existing projectile, collision and weapon systems. Blaster,
+Burst, Shotgun, Seeker and Cannon retain their kinetic model. The existing Laser
+(`BOUNCER`) carries thermal energy; Lightning carries electrical energy. Weapon
+configuration and projectiles have an optional `energyType`; missing values remain
+mechanical. No weapon was added or removed.
+
+`energyMaterial.ts` defines the event, material lookup, tuning limits, thermal
+strength and three fracture controls. `EnergySystem` owns sparse heated state and
+bounded electrical events. Its host supplies spatial queries, damage, cloud
+motion, and feedback. `GameEntity.material` optionally overrides the existing
+variant-derived material, leaving an extension point for ships and structures.
+Existing unconverted actors retain their shield, armor and direct-hit rules.
+
+| Material | Mechanical | Thermal | Electrical |
+| --- | --- | --- | --- |
+| Rock | Existing localized kinetic fracture; chunky grains and momentum | Stored heat lowers boundary work, enabling kinetic follow-up | Small boundary effect; stops chains |
+| Glass | More concentrated small fragments and outward impulse | Stress accumulates; failure starts after 0.35 s above threshold; fewer, quieter pieces | Very little boundary effect; stops chains |
+| Metal | Strong existing boundaries, fewer large restrained fragments | Stored heat weakens boundaries; a local share passes to metal neighbours | Strong direct coupling and bounded arcs through metal and other conductors |
+| Plastic | Existing dent, movement, elasticity and bonds | Cohesion weakens and releases before slow structural separation | Insulating; stops chains |
+| Nebula | Existing puff fan/displacement, never solid fracture | Agitation/dispersion; hot mobile clouds resist cohesion | Local energization, motion and arcs; temporarily suppresses cohesion |
+
+## Mechanics and fracture
+
+The kinetic formulas, mass scale, projectile energy bank, collision solver, and
+Voronoi polygon generator are unchanged. Heat reduces the work needed to break
+existing boundaries; it does not replace them with a separate HP pool. Boring
+also charges the heated material's reduced grain cost. Cooling restores resistance
+to future work but never repairs boundaries that have already broken.
+
+Profiles adjust three existing controls: site-count scale, impact concentration,
+and release impulse. Mechanical glass uses 1.4 times the authored clamped site
+count, metal 0.3 times, and rock/plastic retain their count. The absolute count is
+bounded to 2–32. Thermal glass uses 0.4 times the authored count and 0.18 times the
+release impulse. Seed generation, cell geometry, area accounting, and progressive
+separation remain the existing implementation.
+
+A thermal impact may replace a pristine, undamaged cached pattern. Once any
+boundaries have absorbed damage, the pattern stays fixed: already visible cracks
+remain the actual seams. Thus heating previously fractured glass gives quieter
+release but preserves its existing fragment pattern. This is intentional.
+
+## State and performance bounds
+
+- Heat uses internal game units, capped at 100, with linear cooling of 5 units/s.
+- Only heated entities update, with at most 512 tracked bodies. At capacity new
+  thermal state is rejected; there are no untracked permanently hot objects.
+- Negligible heat and dead bodies leave the active set; map/run changes clear it.
+- Fracture and cloud-spawn hooks transfer an area share of heat to children;
+  existing shatter/merge grace periods continue to apply.
+- Metal conduction runs only on deposition: four neighbours within 100 world
+  units, with transferred heat deducted from the source. It does not recurse.
+- Electrical traversal is iterative, with a visited set, at most 12 targets
+  including the first, three hops, two branches per node (three when charged), 150-unit hops, a
+  360-unit radius from the origin, and 0.6 per-hop energy retention before
+  conductivity. Insulators cannot forward a chain.
+- Queries use the existing toroidal static/dynamic grids and stop after 256
+  in-range candidate visits. Selection follows spatial bucket order, avoiding
+  global scans and full-list sorts. Dense local scenes may omit eligible targets.
+- Heat outlines are drawn during the existing visible-entity render pass. Sparks,
+  arcs, and the breathy nebula impact sound reuse the current feedback systems.
+
+Energy dispersal uses the existing nebula puff fan explicitly. Older ship-contact
+cloud breakup may still use its existing geometry-only Voronoi decomposition;
+it never gains solid boundary damage from this system.
+
+## Deliberate limits
+
+No continuous-beam solver, realistic thermodynamics, persistent charge simulation,
+mining, economic changes, or actor conversion is included. Laser retains its
+existing moving beam/ricochet delivery, and deposits heat using its existing
+finite energy bank. Lightning's charged projectile retains its extra branch per
+node; all propagation overrides remain capped by the global safety limits.
+Electrical contact with ordinary actors retains their direct damage and
+launches a material-aware chain without hitting the first actor twice.
+
+Balance is qualitative. Coarse metal has fewer boundaries; its boundary strength
+is compensated by the inverse square root of the site-count scale so making
+larger fragments does not quietly weaken existing walls. Glass has more fracture
+seams. Further tuning should
+measure these outcomes together, not independently change a weapon multiplier.
+
+The next iteration should playtest mixed material encounters and tune heat lifetime,
+metal coarseness and conductor targeting before extending the same responses to
+actor armor. That iteration is not part of this change.
+
+## Validation and compatibility
+
+The added tests exercise all fifteen material/energy paths, invalid input,
+cooling/removal, delayed glass failure, heat conservation, softened boundaries,
+plastic bond release, capped conduction, electrical cycles/ranges/branching,
+projectile pooling, real Laser/Lightning contacts, fragment geometry and cloud
+dispersal. Runtime rendering was inspected: mechanical glass produced fourteen
+small scattered pieces versus four quieter thermal pieces; heat outlines and
+metal arcs were visible.
+
+Existing fracture expectations now reflect coarser metal and finer glass. The
+metal boring fixture pays the compensated boundary price. The ordinary-speed
+terrain control uses 30 rather than 60: after coarse metal breakup, 60 can need
+the live collision sweep, making a deliberately disabled sweep an invalid
+early-out control. The high-speed tunnelling tests are unchanged; the adjusted
+control passed five consecutive repetitions.
+The wall-charge fixture also stops when a rebounding ship retreats behind its
+launch point, preventing a later trip around the toroidal map from being counted
+as a forward escape. Its assertions still require the live sweep to prevent
+crossing untouched tiles.
+
+The final affected suite passed all 137 tests, including 16 new energy tests.
+Type checking and production build pass (the existing large-bundle warning
+remains). Full-suite comparison against untouched base `c59ddc8` reproduced
+unrelated economy, docking, flashlight, lighting, scanner and viewport failures;
+those systems were left outside this feature. The PR records exact run totals
+and the final focused regression result rather than claiming a clean full suite.
+An earlier focused run also had one randomized rock-fragment apparent-size
+assertion fail (3.05px versus a requested value below 3px); it passed five
+isolated repeats and the final suite. Sixty baseline repeats passed, so that
+isolated result is disclosed without claiming it is a verified baseline failure.
