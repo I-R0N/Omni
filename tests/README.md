@@ -1,0 +1,367 @@
+# Omni test suites
+
+Headless Playwright smokes that drive the **real engine in a real browser**.
+Nothing here stubs, mocks, or reimplements the simulation: a test calls the
+same public methods the React shell calls, then reads the same `EngineStats`
+payload the HUD renders from. If a suite can observe it, the UI can too.
+
+This is tiers 1–2 of the parking lot's "Automated test suite" entry (roadmap
+5b, decision #46a). Tiers 3–5 — unit tests, Node sim tests, visual
+regression — stay parked deliberately.
+
+Tier 6 is no longer parked: **these suites run in CI on every pull request**
+as the last gate before a merge (`.github/workflows/pr-checks.yml`, job
+`typecheck · build · test`; see CLAUDE.md §7). A red run uploads the
+Playwright HTML report as a run artifact — read the trace in it before
+re-running, because everything here is timing-sensitive and a re-run that
+happens to pass has told you nothing.
+
+## Running
+
+```
+npx playwright install chromium   # once, per machine
+npm test                          # SMOKE: boot + loop, ~1 minute
+npm run test:full                 # everything — the merge-seam scope
+```
+
+**`npm test` is the SMOKE scope, not the whole suite** (user call). The full
+337 tests cost ~13 minutes, and a gate that expensive stops being run — which
+is exactly what happened: CI got the cheap per-push scope in 2026-08-21 while
+`npm test` still meant everything, so local practice and the gate disagreed
+for months. Both are now the same two npm scripts, and the smoke set is
+defined once, in `package.json`.
+
+Per commit: `npm run typecheck`, `npm run build`, `npm test`, and the suites
+your change touches (`npx playwright test tests/bubbles.spec.ts`). Save
+`test:full` for the seam CI reserves it for — the `plan-completion` → `main`
+promotion, or a PR deliberately labelled `full-tests`.
+
+`npm test` is one command from a clean clone. The `webServer` block in
+`playwright.config.ts` runs `npm run build` and then `vite preview` itself,
+so there is no separate dev server to remember to start.
+
+**It builds every run, and does not reuse a running server.** That costs
+about ten seconds and buys something worth more: `vite preview` serves
+`dist/`, and a prior session got a clean pass out of a suite that was
+quietly testing week-old code. `npm test` means "test what is in the working
+tree" or it means nothing.
+
+Useful variations:
+
+```
+npm run test:full                            # all 337, ~13 minutes
+npx playwright test tests/economy.spec.ts     # one suite
+npx playwright test -g "refold"               # one test by name
+npx playwright test --headed                  # watch it happen
+npx playwright show-trace test-results/…/trace.zip
+```
+
+Traces and screenshots are captured on failure only, under `test-results/`
+(gitignored).
+
+## The debug handles
+
+`App.tsx` publishes these globals on mount, and they exist for exactly this
+(CLAUDE.md §8).  `__omniHid` (the DualSense output-report builders) is
+documented with `input.spec.ts`:
+
+| handle | what it is |
+|---|---|
+| `window.__omniEngine` | the live `GameEngine` instance |
+| `window.__omniStats` | the most recent `EngineStats` payload |
+| `window.__omniHud` | the canvas HUD's three PURE layout functions (`fitFontPx`, `computeMinimapRect`, `computeLoadoutHUDLayout`) — same rationale as `__omniHid`: they are wrong in a way nothing reports. A banner that clips at 320px, a minimap rect that disagrees with the tap handler catching its expand tap, and a loadout strip off the viewport all fail silently, and none of them are visible at the single viewport the suites used to run at. |
+
+Nothing in the game reads any of them; they cost one assignment each and no
+per-frame work. Suites reach them through `tests/helpers.ts` rather than
+`page.evaluate` directly.
+
+Two things worth knowing:
+
+- **`private` is a compile-time notion.** At runtime the engine's private
+  fields and methods are ordinary properties, so a suite can read
+  `e.runTimeSec` or call `e.physics.resolveCollision(...)`. That is
+  deliberate and is what makes it possible to test the damage arithmetic in
+  situ. Suites **read** internals freely; they **write** them only to set up
+  a scenario (park a boss, silence its gun), never to fake the behaviour
+  under test.
+- **The production build minifies class names.** `e.constructor.name` is
+  `'_t'`, not `'GameEngine'`. Identify things by capability, never by name.
+
+## The suites
+
+| file | tests | covers |
+|---|---|---|
+| `boot.spec.ts` | 2 | The harness's own canary: build served, bundle parsed, React mounted, engine constructed, loop running, both handles live, console clean, and the two SHIPPED DEFAULTS a player never opts into (screen shake ON, minimap dots); START reaches a run on the hub with waves off. When everything fails at once, this says whether the problem is the game or the harness. |
+| `loop.spec.ts` | 3 | One continuous run through every seam — hub → earn → dock → buy → outfit → portal → waves → capstone → payout → home — asserting CONTINUITY at each one (credits, score, hull damage, slots and inventory compared byte-for-byte across the portal and across the boss kill). Plus: outfitting refused outside the drydock, the capstone landing on wave index 5, a wave ending on clear-the-field rather than on the clock, and arrival home beside the rift rather than across the hub. |
+| `economy.spec.ts` | 7 | Salvage is the only thing that mints credits and score mints nothing; resale strictly loses (sell 90%, scrap 9%) so buy-then-sell can never pump; purchases land in the inventory and only ACTIVATE on adjacency; plating with no core is connected-but-contributing-nothing; the death penalty is charged exactly once; a broke pilot is zeroed rather than driven negative; spent money is untouched by the penalty. |
+| `attribution.spec.ts` | 7 | **The refold** — the load-bearing suite. Parses the rendered contributor strings back into numbers, folds them the way `applyModuleEffects` folds, and requires equality with the sim, across four outfits. Includes the two DERIVED rows (the fire-rate inverse, the ship-weight drag factor) that sum wrongly if folded additively with the module rows. |
+| `traits.spec.ts` | 10 | The counterplay layer: armor, front-shield, regen, evasive, and the arc shield — every damage number measured through the real projectile path. Asserts the deliberate ORDERING (armor and the plate reduce damage before the regen bucket sees it) and that the regen bucket is FIXED rather than sliding. |
+| `screens.spec.ts` | 11 | Freeze semantics: death is the one full-screen overlay that leaves the world running, stage-clear freezes it, and both directions are asserted. Plus the summary snapshot, the inert wreck, all three exit paths, the 40px tap-target floor, and the depth stride. Plus **a boss ends the ladder** (user call): waves stop the moment a boss appears and do NOT resume once it dies — the second half is asserted after dismissing the stage-clear screen and letting the arena run longer than a grace period, because that is the only moment the old behaviour showed. A fresh arena still runs its own ladder. The descent-rift assertion is INVERTED, not deleted: the rift is switched off pending a rework, so "none appears" is the behaviour, and the descent TRANSITION behind it is still tested. |
+| `input.spec.ts` | 60 | The gamepad mapping layer and the touch joystick (step 5, Pair C). The Gamepad API cannot be synthesised headless, so the layer is split at exactly that line: `pollGamepad()` finds and reads a pad, `applyPadSnapshot()` takes a plain object a test can write. The joystick half drives **real `TouchEvent`s** dispatched at the canvas, because the whole point of it is a second finger being down at the same time and `page.touchscreen` only does single taps. Also the seven CONTROL SCHEMES (including both handednesses): the same touch in the same place flies the ship under one and becomes the stick under another; keyboard/controller keep touch alive while stopping the mouse from dragging; switching mid-run releases whatever the old scheme held; the ship aims where it flies under the stick; the mirrored layout puts the button clear of the minimap. Plus **`gamepad-left`**, the one-thumb scheme: the left stick (and the left D-pad) supplies heading, aim AND throttle at once while the right stick is ignored, and the gun sits on the bottom face button with the left face button still the action — each claim contrasted against the neighbouring scheme it is one flag away from, and the aim half verified non-vacuous by disabling the branch. Plus RUMBLE: the shake→effect curve, the throttle and interrupt rules, and — with a stand-in actuator, the one thing headless cannot supply — that an impact reaches the device and an unsupported browser is asked exactly once. Plus the DualSense ADAPTIVE TRIGGERS (WebHID, G12), which stop at the page boundary on purpose: no browser in CI has a pad, so what is pinned is the half that can be wrong with no symptom — a pad discards a report with a bad CRC or layout in silence, so the suite checks CRC-32 against its published vector (`0xCBF43926`) and the report SHAPE (which bytes move, and that no others do) via `window.__omniHid`. It also pins the sync (gun / charge / released-when-EMP'd) and that an unsupported browser offers no control at all. The offset test earns its keep: it pins the trigger blocks at data offsets 10/21 rather than the 11/22 most published samples quote, which are indices into a buffer that includes the report ID. Plus the FIRE POINT (an analogue read against the profile's own break, per shape, clamped so no profile strands the shot), the TRIGGER-THRUST scheme (stick steers, trigger throttles), and GAMEPAD MENU NAVIGATION — driven through the real DOM, because the driver's premise is that focus is the browser's focus and movement is geometric over whatever the panels render, so stubbing either would test something else. |
+| `help.spec.ts` | 5 | The Controls & Basics panel: reachable from both menus, identical rows in each, the active scheme marked, and it fits 390px — asserted against the document's scroll width AND every row's rect, since a fixed-basis label column beside wrapping prose is the shape that overflows sideways. |
+| `minimap.spec.ts` | 9 | The minimap's material layer and the portal arrow (step 5). Nebula gone from BOTH halves (the terrain layer is proved blank on the nebula-only showcase); drops excluded in every mode; the streamline cache reused across pans and rebuilt across cells. The shipped material default is DOTS (user call), pinned here because a default is exactly what drifts unwatched. Plus OBJECT TRACKING, which terrain and materials both use: terrain is tracked tile by tile (measured on GLASS_FIELD, since the asteroid field has no static tiles at all — the first draft asserted growth on a population that does not exist), a destroyed tile leaves the map through the real death path, only shards at or above the size threshold are tracked, tracking rides the OBJECT rather than the ground (a tracked shard teleported somewhere the ship has never been stays tracked), and it SURVIVES A MERGE driven through the real `composeEntities` — the case the user's confusion came from, where a tracked rock absorbed by an untracked one would otherwise blink off the map, so the suite measures the memory's COVERAGE — a fresh map is charted only where the ship spawned (an arithmetic figure, pi*900^2/36e6 = 7.1%, not a guessed threshold), flying charts a corridor, a scan charts a bubble, and a new map forgets. Rewritten for the SCANNER REWORK: the material layer and the portal arrow are both gated on a SCAN now, so what used to be the baseline is asserted as the blank state and each reveal is measured after a real ping. The portal arrow's bracket is the scan's reach rather than `INDICATOR_RANGE`, and a mark is pinned to OUTLIVE the ping that made it — retreating out of reach leaves the arrow up until the mark goes stale, which is the reveal-and-fade model in one assertion. |
+| `modules.spec.ts` | 26 | **Module families, and one grave.** THE PENETRATION FAMILY IS DELETED (unified impact physics, step 5) and the suite pins that it is gone from every surface a run can reach — the catalog, the adjacency table, the Ship Status panel, and the DBG grant path, which takes a bare id and is therefore the widest door left open. GUNNERY: a mark scales the round's BITE and its MASS together, read off the real spawned projectile, so a Gunnery round bites harder AND carries further — scaling only the bite would make it stop SOONER out of a fixed bank, and nothing on screen would say so; the consequence is measured as bodies-per-bolt through a line of gnats. The adjacency machinery is re-pinned on Gunnery, since the deleted family used to be what proved a weapon-mod can go offline. SCANNER: the baseline is nothing on either readout FROM OUT OF SIGHT (the suite has to search the map for a spot clear of every contact, because natural encounter is deliberately not scanner-gated), the home station and the arrival rift are charted anyway (map mark, never an arrow), flying past a landmark charts it for good while a MOVING contact is only tracked for seconds, auto-scan is Mk II+ and feeds the minimap only (it stamps `trackedAt`, never the arrow-grade `detectedAt`) with the pause-menu switch really stopping it, the mark is a CATEGORY ladder pinned with the same rival at the same distance one mark apart, marks STACK in range but not in category (the user's own Mk III + 2× Mk I worked example, asserted as a ratio), a mark fades and an offline scanner is no scanner, the cooldown refuses the second press, and a fitted-but-never-fired scanner reveals nothing — which is the whole reversal from A4. HEX SLOTS: a locked hex refuses every way in while `HEX_ADJACENCY` never moves, only a station sells the next one, the flower is the cap, and a run reset puts the counts back. |
+| `weapons.spec.ts` | 19 | **What a SHOT does, beyond dealing its damage.** THE PLASMA CANNON'S FUSE: terrain does not trip the charge (the shell spends energy boring instead), an ACTOR trips it exactly once, and a shell that meets nothing still ends in a blast on its fuse — note `resolveCollision` takes the on-hit callback as its SEVENTH argument, and a call that stops at `onDeath` silently measures a world with no explosions in it. THE ENERGY MODEL (moved here from `modules.spec.ts` when Penetration was deleted — these were never module claims): the contact hit is the authored damage EXACTLY while every hit after it decays, the falloff rate is PER WEAPON because it comes out of the round's own mass (Laser 0.80/hit against the Burst's 0.67 — a claim the retired global rate could not make), a spent bolt leaves slower by exactly the energy it deposited and the impact-velocity ladder really reaches the closing frame, a round bores GRAIN BY GRAIN with the MATERIAL setting the price, a round that reaches the far side keeps flying, an INDESTRUCTIBLE tile stops it dead and costs it nothing, OVERKILL CARRIES THROUGH on actors (a body is charged only what it could take), and a ricochet may re-hit what it already struck while sustained contact may not. THE BASE BANK AND THE DERIVED BLAST: the divisor IS what three Gunnery Mk III grant (read off the real MODULE_DEFS — the constant is a literal because the catalog is declared after the weapon table, so this is the only thing standing between a Gunnery retune and a silently wrong base round), three marks put the bank back while moving ONLY the bank, the blast is derived from the flown shell and rides a mark exactly once (g3² would be `withGunnery` scaling it a second time) while its RING grows by √mult so the ring's AREA is the energy the mark bought — the peak was always right and only the reach was invisible, which is why that pair of assertions is worth more than either alone — the coupling keeps the charge worth about one more hit (a deliberately LOOSE band: it pins the calibration, not the number), and a charged shell is heavier in AUTHORED units — the `projectileMassFor` round-trip bug that made every charge fly MASS_SCALE times too heavy. A SHELL THAT STOPS, BLASTS: terrain stops a drained round and the charge goes off there (the third detonation criterion beside an actor contact and the fuse — driven through the REAL substep, because the hand-off from the stop to the fuse pass is an ordering property of it, and the first version failed on exactly that: a deactivated projectile is pooled mid-step and pooling strips its charge). And a round detonates AT MOST ONCE — the guard sits in two places, so that test goes red only when BOTH are removed, which is worth knowing before simplifying either away. A BLAST BREAKS CLOUD UP WITHOUT DELETING IT: a nebula TILE still shatters into its cells, a nebula SHARD is exempt because `shatter.kind: 'none'` means its death hands back nothing, and the fragments carry the blast's own outward shove (4x the knockback measurably scatters them harder — the obvious route of scaling `lastImpactVelocity` is a no-op, since the shatter's forward term is already saturated at its shared 2.5 cap). The exempt set is pinned by walking the WHOLE variant table, because a DERIVED rule fails by a future variant silently joining or leaving it. Three test-shape traps, all found by negative controls: the shard sample must be RADIUS-FILTERED (counting every shard on the map made "all survived" true of shards nowhere near the blast, and passed against a build with the exemption removed), each arm needs its own seeded cluster (the first arm destroys what it tested), and the ring needs its WHOLE 0.35s lifetime or the wavefront never arrives (0 of 4 killed). A CONTROL body rides the same ring, because every claim is equally true of a ring that never fired. The depth comparison uses an ENERGY-BOUND round and asserts `alive === false` to prove it: at high energy the step count is just `tileWidth / grainSize`, so a finer-grained material reads as SOFTER and metal measured DEEPER than glass despite charging three times as much a grain. |
+| `viewports.spec.ts` | 44 | **The viewport matrix** (roadmap 5d, the absorbed parking-lot item). The same handful of LAYOUT questions asked at six sizes instead of one — 320×568, 390×844, 430×932, 768×1024, 1024×768, 1440×900 — plus the case nothing covered before: a mid-session RESIZE. Per size: nothing laid out past either edge, no interactive control under the 40px floor, screen titles on one line, the two hex flowers never overlapping (they are pointer drop targets, so an overlap can take a drop meant for its neighbour), the boss bar clear of the HUD readout row with the row at its tallest, the docked station checked ON EVERY TAB (a panel that only fits while hidden is not a panel that fits) with the sticky balance still on screen at the bottom of the longest tab, and the canvas HUD's minimap, loadout and off-screen-INDICATOR rects on screen — the indicator rect additionally asserted to clear both HUD bands, which is the geometry that stops an edge arrow drawing under a chip. Plus the banner ENVELOPE: every string the game can really put in a banner — boss names read out of the sim by spawning each capstone, not from a list duplicated here — fits without reaching `fitFontPx`'s readability floor. The resize case rotates portrait → landscape → desktop → 320 → back, watching a planted probe keep drifting at every stop, because a cache keyed on canvas size that survives a resize incorrectly shows up either as a throw in the draw pass or as a world that stopped. |
+| `healthbars.spec.ts` | 7 | **Damage-triggered health bars** (roadmap 5d, U5 — the parked item). A bar is a HIT REACTION now, not a permanent label, which is behaviour-visible, so what it does is pinned rather than left to a screenshot: an untouched enemy shows nothing, a real shell through `resolveCollision` arms the window, it decays and expires, a fresh hit RE-ARMS rather than accumulating. Plus the PLAYER, who is the standing exception and keeps a permanent bar under the ship ALONGSIDE the HUD chip (a later user call reversed U5's removal): both are pinned, the bar by driving the real draw call with a RECORDING context and reading the rects it asks for, and the shield strip is pinned to appear only once a Shield core is installed. Plus the shield strip on other entities — no longer player-only, and a shield-ABSORBED hit arms the bar too (which is what makes a drain watchable — the suite caught that gap and it was fixed in the engine, not the test). Plus the opt-out: the dragon keeps a permanent bar, a capstone boss deliberately does not (it has the HUD bar), and the DBG toggle restores the pre-5d always-on behaviour as an honest A/B. |
+| `knockback.spec.ts` | 3 | **Projectile knockback is an impulse** (user report: NPCs launched off screen on every hit, unlike shards). `dv = damage * KICK_PER_DMG` had no mass in it, so one Cannon hit added dv 18 to a mass-4 gnat and a mass-500 dragon alike. Pinned: MASS ORDERS IT (the same shot moves a heavy body less), NOTHING IS LAUNCHED (a hit cannot shove a body past its own top speed, cap expressed in the target's own maxSpeed so it means the same across a 4x speed range), and PARITY WITH SHARDS (an NPC and a shard of equal mass end up within one order of magnitude — the specific inconsistency reported). Verified non-vacuous: all three fail with the fix reverted. |
+| `shake.spec.ts` | 6 | **Screen shake follows the impact, not the speed** (user report: small shards at speed felt overpowered). The player-collision shake had no mass in it, so a chip and a wall shook identically. Three claims pinned separately because they fail independently: ORDERING (heavier impactor shakes more; a light enough one not at all), PARITY (the STATIC-body curve is unchanged, which is what makes this targeted rather than a global nerf — a "just lower the numbers" fix fails here), and DIRECTION (the axis is the shove direction, the camera's excursion along it dwarfs the off-axis jitter, and a caller with no axis still gets isotropic jitter). Plus the emergent one: a heavier SHIP shrugs the same hit off. Plus **a shot never rivals a collision**: the heaviest enemy shell shakes less than a moderate wall crash and a pellet less than the crash threshold itself, compared against LIVE body-impact numbers rather than constants copied into the test. |
+| `mass.spec.ts` | 8 | **The impact density scale** (`IMPACT_DENSITY` / `massFor` / the hull-density DBG ladder). Mass used to be an impulse term and nothing else; under the energy model it is half of what every impact SPENDS, so four unrelated ladders became one balance surface. The audit's §7 found the shard ladders coherent at 0.0100-0.0300 mass per d², enemies inside that band, and the PLAYER alone at 0.2500 — 25× glass, 8× rock. Pinned: the shipped hull is exactly the table (`massFor(20, 0.25)` = the literal 100 it replaced, so nothing re-priced), the four shard `sizeToMass` ladders read that same table so glass:rock:metal stays 1:1.8:3 at two diameters (one diameter cannot tell a density change from a formula change), the hull's 25×/8× gap is written down as the deliberate statement it is, the DBG ladder really moves `player.mass` and wraps home to the default, and a half-density hull really rams for about half — which is the assertion that fails if the ladder writes an index nobody reads, since `player.mass` is derived inside `applyModuleEffects` and a ladder writing its own mass would be overwritten by the next outfit change. TWO MEASUREMENT TRAPS are documented in the ram test because both produced confidently wrong readings: running the ship to rest counts RAMS rather than measuring a bite (a lighter ship comes off faster and comes back for more — measured 1.5× the damage), and resetting a tile's `health` between arms does not reset its `fractureEdgeFill`, so the second arm reports accumulated erosion (21.3 / 31.9 / 37.2 as the hull got lighter). One contact, one fresh tile.  THE 10x MASS SCALE (user call: every mass ten times, every size and area constant) adds three: mass appears in RATIOS (which cancel under a uniform factor — and every ratio test here passed unchanged, which is both the proof the scale is uniform and why the rest is easy to miss), ABSOLUTE THRESHOLDS (`SHARD_CRASH_MOMENTUM`, `TILE_PRESSURE_MIN_MASS`, `FLOW_VARIABILITY.MASS_REF`, the audio pitch reference — each compares a mass against a NUMBER, so each must move with the scale or it silently admits ten times as much), and THE ENERGY CONVERSION (`IMPACT_ENERGY_PER_DAMAGE`, which every impact divides by).  The third is the load-bearing one and is pinned twice — once on the constant and once END TO END on rock's ram count, because that is what the leak actually looks like: measured with C left unscaled, rock fell from nine rams to TWO on a build that threw no exception and logged nothing.  The invariant asserted is `mass / C`, the quantity every crash and every projectile bank is measured in, at its PRE-SCALE values (hull 3.125, rock shard 0.729, bolt 0.03125) — those numbers are the balance, and they must not have moved. |
+| `terrain.spec.ts` | 15 | **A tile breaks the same way whatever killed it** (user report). A tile shot with a projectile shatters; a tile crushed by a drifting asteroid used to vanish, because the two asteroid kill sites never called `onDeath`. Both causes are driven through the real collision resolver and the same observable is measured either side — debris in the world where the tile was — plus the one thing that legitimately differs: a crush is nobody's kill and scores nothing. Verified NON-VACUOUS by reverting the fix and watching the crush case fail (the first draft passed without it, because the synthetic impactor is itself a mobile shard inside the debris radius).  A FAST SHIP CANNOT FLY THROUGH TERRAIN (the step-5 follow-up): a ship charging a ten-tile wall at its own 120 speed cap is STOPPED DEAD by it with nothing crossed untouched, on rock, glass and metal — where before it came out the far side still doing 114.1 with seven tiles whole behind it, because every contact is tested at the END of a step and a ship moving further in one step than a tile is wide is clear on both sides of it. The control STUBS `sweepRewind` out in place and asserts the same charge escapes, so the claim is "it stops BECAUSE of this" rather than "it stops"; a third case pins that an ordinary 60 u/step approach is identical either way, which is the early-out the fix costs nothing behind. Each arm gets a FRESH FIELD — a run through the wall destroys part of it, so a second arm reusing the first arm's tiles compares a full wall against whatever survived. Driven through the engine's own `updatePhysics`, never a hand-rolled step: stepping the ship by a full `velocity` per iteration double-counts the `dt x 60` the integrator applies and reports tunnelling at half the speed it really starts.  A RAM THAT CANNOT BREAK THROUGH BOUNCES (the second step-5 follow-up): a rock tile that HOLDS takes real damage (>10, about five Blaster bolts) AND throws the ship back, an INDESTRUCTIBLE tile takes nothing and still throws it back, and a ram that DOES break carries the ship on having paid for the break.  The three claims are pinned against TWO different reverts, because the defect was two bugs: restoring the unconditional `return` and the unconditional `payForCrash` fails the two bounce cases, while removing `payForCrash` from the BREAK path alone fails the third — which is why its ceiling is 13 and not 20, a first draft's loose bound passed under its own revert (measured 6.5-7.6 paid against 19.25 unpaid).  Ram COUNTS are blind to all of this: `perf/impact-audit.mjs` read identically before and after, because what was wrong was who got billed and whether the ship came off, not how much a crash spends.  Each ram ISOLATES one tile with everything else deactivated — a first draft measured the tile's own debris absorbing the hit and reported a ram that dealt nothing.  GLASS IS NOT A SPECIAL CASE ANY MORE (user call): V9's whole-pane crash rule made glass the one material whose crash outcome was a THRESHOLD rather than an amount, so a pane died in ONE ram whatever the ship brought. The sharp claim is the SLOW crash — a qualifying ram now leaves the pane standing and cracked, which only an amount model can produce and which a ram COUNT would not catch (a count passes against a build that merely raised the threshold). The second test pins glass landing beside ROCK as a ratio rather than a number, since the two share `bondStrength` 0.4 and derived HP varies tile to tile by construction. The non-grain fallback test moved with it: it leaned on the same rule to kill in one crush, and now crushes until the body dies, asserting the count is about the authored HP — which is what says the whole-body decrement really ran. |
+| `deflect.spec.ts` | 9 | **One deflection primitive, and every live shield uses it.** Bouncing a bolt off a surface existed twice — the arc shield's radial mirror and the bouncer's tile-face component flip — and both now call `PhysicsSystem.deflectProjectile`. Deflection also stopped requiring an ARC, so the player's own bubble and the bosses' pools turn shots away instead of swallowing them. Pinned as the pair of claims that generalization has to keep: THE BOLT CHANGES BUT THE ARITHMETIC DOES NOT (a deflected shot drains exactly what the absorb path would have absorbed; a shot bigger than the pool still punches through to the hull — the test that keeps this from being a stealth buff), and A SHOT THAT MAY NOT HIT YOU MAY NOT BOUNCE OFF YOU EITHER (an EMP'd shield is offline; an ally's `sparesPlayer` fire passes through). Plus the PLAYER PARRY — a bolt turned by the player's shield is re-owned to the player, stays live, kills the enemy that fired it as the player's kill, and a parried homing missile keeps homing at its new owner's targets — the `v·n` no-double-deflect rule pinned directly on the static, and the bouncer's tile bounce unchanged by the fold. Every gate verified non-vacuous by reverting it and watching the matching test fail. **And one test drives the REAL fight** — a real SHOOTER_1 spawned through the real wave path, parked OFF-AXIS, asserting every shot that reached the shield was turned away. That one exists because the other seven passed while the shipped build absorbed four shots for every one it deflected: they all handed the resolver a pair they built themselves, head-on, which proves the deflect function works and nothing about the game reaching it. |
+| `flashlight.spec.ts` | 5 | **The ship's light is equipment you tap.** The player beam became a module-gated in-game tool (user call): tapping your own ship in open space cycles off/medium/high, and the tool exists only while the Light module (`flashlight_kit`) is installed and hull-adjacent — a module-less ship carries no beam at all (the DBG flashlight global now ships `off` and stays as the raw dev override under the tool). Both ON levels wear the BEAM style; what steps is the LIGHTING TIER — medium/high run the whole light system at the 'medium'/'high' rungs through the tier override, and the suite pins that `getLightTier` reads through it and falls back to 'low' at off. Also pinned: a REAL tap on the ship cycles the light and fires nothing (the claim eats the gesture); a dock in range still wins the tap; uninstalling turns the beam off with it. Gate verified non-vacuous: with it removed, the no-kit test fails. |
+| `nebulaspin.spec.ts` | 3 | **A starboard pass spins a nebula shard clockwise.** The wake swirl used to sign each shard's rotation by id parity, so a pass had no consistent handedness (user report). The sign is now the DBG cycle Visual ▸ "Neb spin": `physical` (default — the ship's velocity crossed with the ship→shard offset; starboard → clockwise in this y-down world), `inverted` (the A/B), `random` (the old parity vortices, kept as the control and pinned as parity-not-geometry). Driven through the real `applyNebulaPlayerPull`. Sign verified non-vacuous: flipping the cross product fails both directional tests. Proper rotational mechanics are parked (PARKING_LOT). |
+| `nebulacondense.spec.ts` | 3 | **What a condensed nebula cloud becomes — a tile, or something else.** A crystallising nebula pair used to roll a bare `Math.random() < 0.5` between thickening back into a nebula TILE and condensing into a solid shard of its hue's material; measured in play that ran at its nominal rate (53.9% tile on NEBULA_FIELD, 61.1% on UNIVERSE over 90 s), so nebula leaked into the terrain about as fast as it rebuilt itself (user call: make leaving the family significantly rarer). Pins three things, each silent when wrong: the split is `NEBULA_TILE_SHARE_CYCLE`'s and REACHES the roll (a declared-but-unread share still produces tiles, so it looks identical); the roll is ORIGIN-BLIND, so rock-derived dust rolls the tile at the same rate as virgin cloud (it was briefly exempt; reversed by user call, and origin now decides only which MATERIAL the other branch picks); and a tile that cannot be placed hands the pair's mass back as a nebula shard instead of destroying it (both source shards have already faded by then — mass quietly going missing looks like nothing, and at 9.1% of tile rolls on UNIVERSE it is not rare). The shipped-vs-`half (old)` comparison is an A/B rather than an absolute, so the share can be re-tuned without re-aiming the test. The no-op branch is FORCED rather than waited for (it fires ~9% of rolls — a test that waited would be a flake generator); nothing else is stubbed. The origin test DIALS the ladder itself and sizes N and its band off the binomial (800 a side, 6-point band = ~3.6 s.d. at p 0.875): a sibling test walks the same cycle and leaves it wherever it finished, and the first draft's 400/5-point pairing was 1.4 s.d. at the p 0.5 that stale dial left behind — a test that fails ~1 run in 6 while the product is correct. Plus the MATERIAL LEDGER (4): a tile must COST more condense units than a tile's own shatter YIELDS, or the cycle tile → shatter → coalesce → tile has a multiplier above one — it shipped at ~2x (a tile yielded 3-4 units and cost 2), measured as +6.4% total nebula over 150 s on a PASSIVE field against -1.1% after. The yield is MEASURED off real shattered tiles rather than read from a constant, so a grain retune that raises the child count fails here instead of silently re-opening the loop; every `NEBULA_DRAIN_CYCLE` step is checked to clear both the yield bar AND the accumulation fixed point `(1-loss)/loss > cost` (a loss too large strands every cloud under the price and reads as tiles never forming); the coalescence is checked to SHED units rather than conserve them; and `canAffordTile` is checked to refuse a tile to an under-price cloud, which is the stall path's case. All seven verified red under their own targeted revert. |
+| `lighting.spec.ts` | 27 | Unified tile lighting — the occluder set and the shadow-cast light (`docs/GAUNTLET_LIGHTING_LOG.md`). Pins the parts that can be wrong with no symptom until they are very wrong: the occluder FILTER (`nebula-tile` is `passThrough` and must never cast shadow — and is the most numerous static tile on the natural maps, so a filter bug would darken most of the game and read as an art problem), CHURN (a tile that died this frame leaves the set immediately; a stale shadow under a tile the player just shot is the most visible failure this system has), and the RADIUS-CORRECT walk (`forEachStaticNear` scans a 3×3 cell block covering at most `SPATIAL_GRID_SIZE`, while lighting queries at 300+, where that under-reports by 28–45%). |
+| `starfield.spec.ts` | 17 | **Density per unit AREA** — the one star-field invariant worth a merge gate. The count used to be absolute over whatever the viewport happened to be, so a 390×844 phone showed 3.95× the stars per unit area of a 1440×900 desktop (`docs/GAUNTLET_STARFIELD_LOG.md` S1): a visible difference in something the player looks at constantly, and exactly the regression that reappears the moment someone bumps the star count. Reads the derived budget off the live `BackgroundManager` rather than counting lit pixels (harness rule 3), with the density values hard-coded (rule 7). |
+| `fracture.spec.ts` | 56 | **The seeded Voronoi fracture core and the grain model built on it** (the voronoi gauntlet and the material-grain spec). The pure core is driven through `window.__omniFracture` with no engine, no canvas and no timing: determinism (the crack overlay and the shatter must read the SAME decomposition, or the cracks lie about the break), area conservation, cell validity on the concave polygons rock actually spawns as, and a loose cost bound. On top of it, the sim path: cracks ARE the pattern, only the struck piece chips, a body shatters exactly once, damage lands on grain BOUNDARIES with HP derived from them, deformation is bounded and elastic, a detach recoils and re-centres, grain geometry is a material constant shared by a material's tile and its shard, and a fragment is drawn as its own polygon rather than an authored blob. |
+| `shardblend.spec.ts` | 8 | **A cohesion bond draws as ONE blob.** Plastic's cross-material bonds are `cohesionOnly`, so a stuck pair stays two polygons touching forever; `render/shardBlend.ts` fills a metaball connector under them. Two kinds of claim, pinned separately. THE GEOMETRY, traced into a RECORDING context through `window.__omniBlend`, because every failure mode of a connector is silent — a degenerate pair traces nothing, an out-of-domain `acos` yields NaN coordinates Canvas2D discards without a word: the ends land exactly on both bodies, the flank NECKS INWARD (the property that makes it a smooth-min union and not a capsule) and necks harder as the pair stretches, a swallowed pair is refused with the path left untouched, the attach radius follows the hull TOWARD its partner — vertex vs edge on a hexagon, turning with the body's rotation — which is the fix for the first draft's fixed radius, whose bridges hung in space on a jittered 4-gon, only the GOO side of a bond is coated (plastic on a glass tile coats the plastic, never the tile — 'did we repaint the tile' is a question neither the stats payload nor a screenshot of green-on-green can answer), the DBG "Goo coat" cycle SCALES the authored envelope rather than replacing it (walked all the way round to prove it wraps, and put back where it was found — module-level state on a shared page), and the ROUNDED-CORNER path every soft variant draws with cuts each corner IN and never out: one quadratic per corner whose control point is the original vertex, every traced point inside the original hull, and at maximum rounding the fillets ending exactly on the edge midpoints rather than past them — an overshoot there turns a polygon inside out and Canvas2D fills the result without complaint. THE WIRING, through the real engine: a pair bonded by the real broadphase reaches the draw pass, and the DBG toggle takes the DRAWING without taking the bond, which is the whole claim that this layer is presentation only. |
+| `bubbles.spec.ts` | 11 | **The Phase-A bubble fixes.** A1, the NON-AGGRESSION TIMEOUT: aggro used to end only three ways — the target died, it fled past `AGGRO_LOSE_RANGE`, or a latch detached — so a hunter that never landed a bite stayed hostile for life. Provoked through the real projectile-damage path and then held in a chase it can never finish (the player is re-parked 500 units out every frame, because a stationary player inside the leash is caught in about two seconds and the latch would end the aggro long before the window could), it gives up on schedule, drops its target, disarms its window and is NOT left sick — and a second hit two thirds of the way through pushes the give-up past the original deadline by one full window, which is the refresh half of the mechanism. The two older endings are pinned beside it so the new one cannot quietly replace them. A2, IMMOVABILITY: the report was a ship coming to a dead stop against a green post-attack bubble. Not mass — the impulse test drives the real resolver and pins the arithmetic UNCHANGED (mass 9 against the player's 100: 20 → 13.08 for the ship, 0 → 23.08 for the blob, identical sick or calm), which is the control that a calm bubble was not made flimsy. The bug was the AI applying its regime speed cap to the bubble's TOTAL velocity every step, erasing that recoil so the ship re-collided every frame and was drained ~35% each time. So the regression drives the whole real engagement — provoke, latch, let the bite end — and rams the genuinely-sick bubble it produces, asserting both halves: the ship keeps its way, AND the bubble is still moving several frames later, which is the half that was actually broken.  EATING (the mouth-size + bite rules): a shard several times the bubble's own diameter is no longer engulfed in one action — the bubble BITES it instead, on its own cadence, and a static TILE is gnawed at all, which a shard-eater could never even see (tiles are absent from the shard index). The chip claim is driven through `chipStructureAt` DIRECTLY rather than waited out: a first draft parked a bubble on a boulder until a whole grain came off, which takes ~7 sim-seconds on a quiet machine and ~38 in a full-suite run — a flake with extra steps. The parent's own OUTLINE shrinking is the observable, never 'a new shard appeared': a field map's 1200 shards regen and merge continuously, and counting new bodies anywhere on the map made two of these tests pass against the unfixed engine. Plus the two controls that keep the gate honest — food that fits is still swallowed and digested, and an indestructible tile is refused outright with the cadence still armed, so a bubble on unbreakable terrain cannot re-walk the static grid every tick. |
+| `maps.spec.ts` | 12 | Map composition after `MAP_POPULATION` became the authority: per-variant population bands measured before and after the move, plus Seven Rings asserted exactly (its geometry is deterministic) and its ring ORDER by median radius. |
+| `shipsprites.spec.ts` | 5 | **The ship tilt SHEET contract** (user request): the player hull as pre-rendered art, one authored pose per tilt, replacing the cos(tilt) squash. The suite pins the contract between the engine's cell lookup and the artist's file list, because that contract is wrong in a way nothing reports — a mis-folded mirror or a shifted cell order draws a perfectly plausible ship in the WRONG pose, throwing nothing and logging nothing. THE GRID (35 authored cells for the standard sheet; ring 0 is the single level pose; every tilted ring samples both mirror fixed points, the two pure pitches, so the fold is exact; filenames encode their own angles), INDEX ORDER (`cellIndex` arithmetic agrees with `enumerateCells` order for every cell — a packed sheet is read row-major in that order, so a disagreement silently re-poses the whole sheet), MIRRORING (opposite ROLLS resolve to the SAME cell with the flip flag inverted — that is the halving from 57 cells to 35 — while the two pure PITCHES are distinct cells and are never flipped), CLAMPING (a tumble-scale angle draws the outermost pose rather than wrapping to a shallow one), and THE MATRIX (mirrored or not, the art's nose maps onto the facing — the invariant a reflection is easy to compose backwards — and the mirrored form really is a reflection, det = -1). Plus one END-TO-END case: Sheet mode drawing a live bank through the real blit path, which the committed placeholder cells are what make possible. |
+| `roll.spec.ts` | 15 | **The player ship pitches and rolls into changing acceleration, full 360°** (user request). `player.visualRoll` is a purely presentational eased angle — the renderer foreshortens the hull across its wing line by cos(roll) — so the suite pins the SIGNAL and the EASING rather than pixels: DIRECTIONALITY (lateral thrust banks, nose-line thrust flies level, left and right strafes are distinct signed banks, and the lateral axis rotates with the FACING rather than the world), CONVERGENCE (a held strafe approaches `PLAYER_ROLL_CONSTANTS.MAX_ANGLE` without overshoot; releasing settles to literal 0 — the snap that keeps the renderer on its plain-rotation path), ASYMMETRY (rolling in outruns settling out, measured as the first-tick deltas), the TURN TERM (a carve under thrust banks even with thrust locked along the nose — the aim-locked schemes' geometry, where the strafe term is zero by construction and the roll was invisible until the term was added (user report); a coasting swing stays level, and the throttle gate scales rather than switches), the PITCH half (nose-line thrust directly, the washout removed on a later user call: a held throttle HOLDS the lean, cutting it settles to literal level, reverse thrust leans the other way, pure nose-line thrust never rolls, a diagonal fires both axes, and the combined tilt VECTOR respects the authored maximum where a per-axis clamp would reach √2 of it), the two PHYSICS terms (CENTRIPETAL: a standing pivot banks at the floor while the same stick motion at full speed carves the full bank, because real bank is tan(bank) ∝ v·ω; SLIP: a powered sideways drift banks into the slide while the same drift coasting stays exactly level), the SECOND-ORDER SPRING easing (the first tick carries the ω²·A·dt² spring signature, a step OVERSHOOTS and settles — the wobble that reads as inertia — and the damping cycle scales ω so first-tick deltas go with the square of the preset), TILT INERTIA riding ship weight (ω ∝ 1/√mass, pinned as an exact first-tick ratio: 9× the mass, a ninth the response), the TUMBLE tilt mode (thrust drives roll RATE, negated so the hull rolls WITH its travel: the angle sails past any lean maximum, rolls opposite to the lean, keeps advancing under held thrust, freezes mid-roll when thrust drops, and a live tumbling render covers the hidden-marker + aim-reticle draw path), the HULL CYCLE (the legacy SPRITE ships as the default and the whole tilt ships OFF, so a player who never opens the debug menu sees none of this — pinned because a default is exactly what drifts unwatched — with the pre-rendered tilt SHEET deliberately one step away, then the flat CUBE, the corner-up DIAMOND, the great-circle SPHERE, the DODECA and RHOMBIC dodecahedra, and the TRI dart ship behind it, and a live bank driven on EVERY hull so the clean console covers each shape-table projection and the ring-restore transform), the ROTATION-DAMPING cycle (one multiplier over both ease rates, measured as first-tick deltas at three presets, with the attack/release ratio pinned to survive), the LEAN-DIRECTION A/B (DBG Player ▸ "Lean dir": Reversed is ONE sign over the whole signal vector, so each axis's first tick mirrors EXACTLY — same spring, same magnitude — while TUMBLE deliberately keeps its own direction under it, since its roll-with-the-travel sign was its own user call, and a live reversed bank covers the NOSE-UP re-base — under Reversed the wireframe stands each shape's nose feature facing the viewer at rest), the TILT-SOURCE cycle (DBG Ship Tilt ▸ "Tilt src": Thrust — the default, no input no tilt — vs Velocity, the ship's actual motion normalised by its real CRUISE speed (the acc·f/(1−f) terminal speed, ~a third of the cap — normalising by the cap ran every velocity effect ~3× weak, user report; the slip term and centripetal gate share the normaliser, and the test pins it well under the cap; the "Vel gain" sensitivity cycle multiplies the normalised signal before its clamp, pinned as exact first-tick arithmetic — 0.625 of max at 1× and half cruise, saturated full at 2×, and full from a 15%-cruise drift at the extreme 10×); pinned as a real behavioural flip: a coasting drift at cruise speed settles a DEEP bank under Velocity where the slip test pins the same drift to literal 0 under Thrust, thrust at a standstill moves nothing, and coasting motion alone keeps a TUMBLE rolling — the one substitution at the signal source reaches both tilt modes; and the AVERAGE / SUM steps blend the two rotation EFFECTS rather than the input vectors, pinned exactly — Average is the midpoint of the two measured signals, Sum is their total and therefore twice Average, and at a pair sized so neither half clamps alone, Sum saturates on the authored maximum while Average sits at 0.625 of it), and one END-TO-END case: a real held key across live sim steps banks the ship and releasing levels it, with the clean-console assertion covering the composed tilt transform in the draw path. The unit claims drive `tickPlayerRoll` inside a single evaluate so live sim ticks cannot interleave mid-measurement. Plus the DBG feel cycle (Player ▸ "Roll feel", `PLAYER_ROLL_CYCLE`): Deep converges past the Default maximum, Off levels a held strafe out to literal 0 through the same easing, and the preset name reaches the stats payload the row renders. |
+
+**374 tests.** CI runs them in two scopes (user call): every PR push gets the
+SMOKE — `boot.spec.ts` + `loop.spec.ts` — and the FULL suite runs at the merge
+seams (pushes to `main` / `claude/plan-completion`, PRs into `main`, the
+`full-tests` PR label, manual dispatch). Locally the same split applies: the
+touched suites per commit, the full run before a PR is called ready.
+ All but `viewports.spec.ts` run at **390×844** — the phone
+this game is played on, and the size every layout assertion is written
+against. `viewports.spec.ts` sets its own viewport per describe block and
+covers six sizes plus a mid-session resize (roadmap 5d). 390×844 remains the
+DESIGN TARGET: the other five must be functional and unbroken, not designed
+for, and nothing in that suite asserts how they should look. Every test
+asserts a clean console.
+
+## Harness rules
+
+These are not style preferences. Each one is a flake a previous session paid
+for, recorded in `docs/GAUNTLET_PAIR_A_LOG.md` and
+`docs/GAUNTLET_BOSSES_LOG.md`.
+
+1. **Poll, never sleep.** The sim runs on a fixed timestep and this
+   environment renders canvas in software, so sim-seconds elapse *slower*
+   than wall-clock seconds. Every `waitForTimeout(n)` that stands in for
+   "the world advanced" is a coin flip. Use `waitForStats` /
+   `waitForEngine` / `advanceSim`. (`waitForTimeout` is fine for the
+   opposite assertion — "wall time passed and nothing happened".)
+2. **Sample peaks, not instants.** Short-lived state is gone before a naive
+   read lands: a 0.12s hit-stun read 200 ms after the shot is always zero.
+   `samplePeak` watches a value across a window. (It and `advanceSim` are
+   provided but not used by any current suite — see their comments. Nothing
+   in today's net measures a transient; both are kept so the next suite that
+   does need one doesn't rediscover the flake first.)
+3. **Read the sim, not the pixels**, wherever the sim exposes the same fact.
+   Canvas sampling is for things that only exist as pixels.
+4. **Plant your own probe.** Don't measure "the world is running" against
+   whatever fauna happened to spawn — on a quiet map, *nothing moved* and
+   *the sim is frozen* look identical. Plant a drop and watch it drift.
+5. **Isolate from the live world.** A boss shooting near the player picks up
+   splash from its own shells; a player parked inside a 92-unit hull takes
+   crash damage. Park the subject, silence its gun, move the player clear.
+6. **Drive the mechanism, not a proxy.** Where a value is computed by engine
+   code, route through that code — fire a synthetic shell through
+   `resolveCollision` rather than recomputing the damage formula in the
+   test. A test that reimplements the thing it is testing asserts that the
+   test agrees with itself.
+7. **Duplicate the constants you assert against.** `economy.spec.ts` hard-codes
+   `CREDITS_PER_DROP` rather than importing it. A test that imports the value
+   it checks is asserting that a constant equals itself; hard-coding means a
+   tuning change has to touch this file, which is the alarm working.
+8. **Feed and read in ONE evaluation for anything queue-shaped.** The
+   engine's loop drains the fire queues and the interact latch every frame,
+   so injecting input in one `page.evaluate` and reading the queue in the
+   next reads an empty queue — a real frame ran in between. `input.spec.ts`'s
+   `feedThen` does both in one turn of the event loop. Better still, assert a
+   DURABLE consequence (a spawned projectile) rather than the transient.
+9. **Predicates are STRINGIFIED, so they cannot close over test state.**
+   `waitForEngine` / `waitForStats` serialise the callback with `toString()`
+   and re-create it inside the page, so `waitForStats(page, s => s.currentWeapon
+   !== first, …)` does not fail an assertion — it throws `ReferenceError` in the
+   page and surfaces as an *unexplained timeout*, which reads like a product
+   bug. Spell the expected value out (`new Function('e', \`return … \${expected}\`)`),
+   or pass it as an `arg` to `engine()`.
+
+   **Three independent sessions hit this and each wrote its own rule** — step
+   5, the star-field gauntlet, and the nebula pass, which broke it while
+   fixing an unrelated flake and turned six green module tests red with
+   "timed out waiting for" on a condition that was true all along. That it
+   keeps being rediscovered rather than read is the argument for this file —
+   and the reason the note now sits on `waitForStats` itself, where someone
+   about to write the predicate will see it.
+
+   `waitForStatsKeyChange` is the Node-side comparison for the common shape
+   this trap catches: "the readout moved off whatever it was".
+10. **Respect the phase machine.** A boss's traits are a function of its
+   health, and `updateBosses` stamps a phase one frame after the transition.
+   Poll for `bossPhase` instead of reading traits in the same breath as
+   setting health.
+11. **A DERIVED quantity has a SPREAD; clear it, don't sit in it.** Under the
+   V15 grain model a body's HP is not authored — it is
+   `Σ (boundary length × bondStrength)` over that body's OWN seeded Voronoi
+   pattern, so it varies body to body. A 36px glass tile measures 44.6–51.2
+   across runs, and `terrain.spec.ts` fired a fixed 50-damage shell at one:
+   it killed the tile ~7 runs in 8 and left it standing on the other (2
+   failures in 16 repetitions). The tell is that the failure has no timing
+   component at all — the same code, the same tile, the same frame, a
+   different pattern. Where killing something is a test's PRECONDITION rather
+   than its claim, overpower it by a margin no pattern can close; where the
+   derived number IS the claim, assert a range or read the entity's own
+   `fractureBoundaryHp`.
+
+12. **A READOUT LAGS THE CLICK THAT CHANGES IT.** `__omniStats` is
+   republished by the rAF loop, so a value read in the same breath as
+   `e.dbg.cycleX()` can still be the pre-click one. Reading it once and
+   asserting is a race that passes locally and fails in a loaded full-suite
+   run; deciding the NEXT click from it is worse, because the dial
+   over-clicks and walks straight past the step you wanted. Every DBG dial
+   goes through `dialByName`, which waits for the readout to move before
+   clicking again and takes a PREDICATE as well as an exact label — several
+   readouts mark the shipped step with a suffix (`1 (ships)`), so a test
+   that wants a specific rung matches the number, not the caption.
+
+   **The same lag straddles `waitForEngine` and `stats`**, and that pairing
+   is the trap's nastiest form. `waitForEngine` polls the LIVE engine and
+   returns the instant its condition holds; `__omniStats` is a snapshot from
+   the last push. So "wait for the engine to reach X, then read the payload"
+   can read a payload from before X — and where a field is published
+   conditionally (`enemiesRemaining` is `undefined` unless `waveState ===
+   'active'`) the symptom is a matcher error about `undefined`, which reads
+   like a missing field rather than a one-frame lag. It passed locally and
+   failed in CI, because the slower the frames the wider the window. Wait on
+   the payload you are going to assert against.
+13. **MAKE THE PRECONDITION A SELECTION CRITERION, not the assertion.** A
+   test that grabs the first candidate it finds and asserts a property that
+   candidate need not have is asserting on the harness's luck. Four flakes
+   in one PR were this: a bubble bit a different tile than the harness
+   picked; a detach freed two chips where the momentum arithmetic assumed
+   one; a plastic grain came away barely dented, which the springback claims
+   say nothing about. Filter to candidates that satisfy the precondition and
+   assert the FILTERED SET IS NON-EMPTY — that keeps the regression caught
+   (the set goes empty if the property stops happening at all) while
+   removing the coin flip.
+
+   And the same move fixes its mirror: **a test must not read a shipped
+   DEFAULT as one arm of an A/B.** The chip-dust pooling test dialled one arm
+   and let the other take the default; when the default moved onto that step
+   it would have compared a step against itself and passed while measuring
+   nothing. Dial both.
+
+14. **A PARKED SHIP IN A LIVE FIELD IS NOT A CONTROLLED SCENE — and the
+   clock a wait watches can STOP.** `advanceSim` polls `runTimeSec`, which
+   deliberately freezes while the player is dead, and the death screen
+   deliberately does NOT freeze the sim. So a dead run looks perfectly
+   healthy from outside — entities move, frames land — and the wait sits
+   there until its timeout and then blames the sim clock. The nebula bonding
+   tests parked the ship for ~13 s of sim with the ambient fauna keeper
+   running; measured over five runs they finished with the player on
+   **11.6 / 36.3 / 19.8 / 51.4 / 15.8 HP** — being eaten the whole time and
+   surviving only because the test ended first. A slower runner burns more
+   sim seconds reaching the same step (every `dialByName` poll and every
+   `evaluate` round-trip is sim time too), so it crosses zero, and CI
+   reported an intermittent `timed out waiting for: 4s of sim time` on a
+   build whose only fault was that nobody was flying the ship.
+
+   Two rules come out of it. **Call `quietScene` unless the test needs
+   movers** — here the fauna was not merely a hazard, a bubble EATS nebula
+   shards, i.e. the very population being counted; with it the same runs end
+   at 100.0 HP. And **a wait on a quantity that can stop must say so**:
+   `advanceSim` now watches for the run ending as well as for its target and
+   names the real cause in ~0.7 s instead of timing out in 180. That is not
+   a rescue — a test whose player dies is still a failing test — it is the
+   difference between a named diagnosis and a three-minute one pointing at
+   the wrong thing.
+
+15. **A SAMPLING WINDOW MUST NOT OUTLIVE THE THING IT MEASURES.** The shake
+   direction test captured 60 rendered frames, but the shake it armed decays
+   over `SHAKE_DECAY` (0.3 s) and is spent by frame ~14 — so 46 of the 60
+   frames sampled whatever the world did next. Once `shakeTimer` reaches 0
+   the priority guard in `handleScreenShake` lets ANY later event re-arm, at
+   any intensity and on any axis, and the ship is parked in a live glass
+   field. A foreign shake on the Y axis puts its own full magnitude into
+   `maxAbsY`, which the 0.35 jitter never can (0.175 × 30 = 5.25 against the
+   15.78 CI measured), and the axis-dominance ratio collapses.
+
+   The tell that it is this and not a margin: **the off-axis number was
+   outside the range the mechanism can produce.** Before widening a bound,
+   check whether the measured value is even reachable — if it is not, the
+   sample is of something else. Reproduced by landing a y-axis shake the
+   frame after the armed one expires: `23.96 / 21.99`, ratio 1.09, and with
+   the old fixed-60 window the assertion then failed 3/3 at
+   `> 31.207 / 22.548` — the same numbers CI reported (`> 31.564 / 22.535`).
+
+   The fix is rule 13 applied to TIME: sample only the armed shake. The loop
+   stops the frame `shakeTimer` reaches 0, and stops early if the intensity
+   or axis is no longer the one armed; `samples` comes back so an empty
+   window fails loudly rather than passing on a zeroed offset. With the
+   guard in place the same injection passes 3/3.
+
+## A global rescale breaks the tests that were RIGHT
+
+`MASS_SCALE` (every mass 10x, sizes unchanged, impacts ten times harder)
+turned twenty-odd tests red across two passes, and the pattern is the
+opposite of the usual one: **the suites that failed were mostly the suites
+doing it properly.**
+
+- `weapons.spec.ts` and `modules.spec.ts` write `ENERGY_PER_DAMAGE` out
+  longhand rather than importing it, on the rule that a test importing the
+  constant it is checking pins nothing.  That is exactly why they went red
+  and said the model had moved.  An imported constant would have tracked
+  the change in silence and asserted nothing.
+- Hand-built entities with LITERAL masses are the hazard.  Some FAILED
+  loudly (a `mass: 60` rock stopped clearing `SHARD_CRASH_MOMENTUM`, so the
+  crush silently did nothing and no decomposition was ever built), and the
+  rest were worse: they PASSED while flying a tenth of the energy they
+  claim.  DERIVE instead of retyping — `SHARD_VARIANTS[…].spawn.sizeToMass`
+  for a synthetic shard, `projectileMassFor({ damage, speed })` for a bolt
+  meant to carry exactly N bites.  Where a stand-in genuinely has to be a
+  number, spell the factor out (`mass: 140 * MASS_SCALE`).
+- **Tests calibrated on an energy level need re-aiming, not relaxing.**  A
+  dozen terrain/weapon assertions were tuned to speeds and counts that made
+  sense at the old energy: a 12 u/step ram that "holds" now breaks, a wall
+  that "stops" a hull now only slows it, a bank of "five bites" is fifty.
+  Each was re-aimed at the same CLAIM in the new regime — a slower ram for
+  the holds case, a tougher material for the stops case, `5 * 10` for the
+  bank — and the comment says what moved and why.  The one thing never to
+  do is widen a bound until it passes; that is how a suite stops meaning
+  anything.
+- **Ratio-shaped assertions stay green through all of it**, including
+  through a version of the change that was completely wrong.  That is worth
+  remembering: they are the cheapest tests to write and the blindest to a
+  rescale.
+- **AND THE SAME QUANTITY MOVED AGAIN**, which is the part worth keeping.
+  The base shot BANK was then divided by `BASE_BANK_DIVISOR` (penetration
+  re-based so three Gunnery Mk III restore it), and the three assertions
+  that had just been re-aimed to `5 * 10` bites, `49/50` decay and `10`
+  bites went red a second time — correct both times, wrong both times, for
+  the same reason.  They now READ `MASS_SCALE` and `BASE_BANK_DIVISOR` off
+  `__omniMass` and compute.  The rule: once a quantity has moved twice, stop
+  writing it as a product and derive it from the constants that define it —
+  a spelled-out factor documents ONE rescale and silently misstates the
+  next.
+
+## What is NOT covered
+
+Stated plainly so the gap is not mistaken for a guarantee. See the
+completion summary in `docs/GAUNTLET_5B_LOG.md` for the full list and the
+reasoning; the headlines:
+
+- **Layout only, across viewports.** `viewports.spec.ts` (5d) closed the
+  "only 390×844" gap for LAYOUT — six sizes and a resize. It deliberately
+  does NOT re-run the behavioural suites at six sizes: behaviour is not a
+  function of viewport, so that would buy a six-times-longer merge gate and
+  no information. It also does not screenshot; visual regression stays
+  parked.
+- **Almost nothing measured by pixel-sampling the canvas** — the off-screen
+  indicator legend, the size ramp, the aggro blink, the wave-banner fit, and
+  every colour choice in the step-5 minimap faithfulness pass. Those were
+  judged from captures, with the verdicts in
+  `docs/GAUNTLET_PAIRC_POLISH_LOG.md`. The one exception is
+  `minimap.spec.ts`'s nebula test, which reads the pre-rendered terrain
+  canvas back: a blank canvas is the only way to prove ABSENCE from a
+  pre-rendered layer.
+- **Drag-and-drop outfitting.** Suites call `moveModule()` directly.
+- **Balance, by construction.** These suites prove the panel agrees with
+  the sim and the mechanisms behave as designed. They cannot say whether the
+  numbers are any good — that is the step-6 tuning pass.

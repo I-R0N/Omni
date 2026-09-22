@@ -1,7 +1,7 @@
 
 
 import { GameEntity, EnemySubtype, EnemyRole, EntityType, Vector2 } from '../../types';
-import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS } from '../../constants';
+import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS, calmBubble } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
@@ -447,6 +447,30 @@ export class AISystem {
       const maxSpeed = enemy.maxSpeed ?? config.maxSpeed ?? 4.5;
 
       const sick = (enemy.bubbleSickTimer ?? 0) > 0; // queasy: sluggish, no hunt
+
+      // ── A2: THE REGIME CAPS BOUND PROPULSION, NEVER MOTION ─────────────
+      // The caps below say how fast a bubble can drive ITSELF; they said how
+      // fast it could MOVE, and that made it an immovable object.  A body
+      // collision hands the bubble the velocity the impulse solver computed
+      // from both masses (measured: a ship at 20 shoves a bubble to 23.1 and
+      // walks away with 13.1).  Snapping that straight back to a 2.2-unit
+      // drift cap — 0.66 while SICK — deleted the recoil, so the bubble never
+      // left the contact, the player re-collided on the very next step, and
+      // each contact took ~35% of its speed: a dead stop in ~10 frames, which
+      // is the "hits a wall" report.  Sick is the worst case and so the one
+      // that got noticed, but the bug was never about being sick, and never
+      // about mass (a bubble's mass is a constant 9 for its whole life).
+      //
+      // The floor is the speed the bubble ARRIVED with, so this step can only
+      // ever cap the thrust added below it: speed_after <= max(cap, speed_
+      // before).  That is monotone — an overshoot can never be topped back up
+      // by the AI — so the shove bleeds off through the ordinary friction and
+      // flow relaxation every other body uses, instead of being erased in one
+      // step.  Same rule the player's `overSpeedAllow` states for blast
+      // knockback; it needs no stored allowance here because reading the
+      // pre-thrust speed each step IS the decaying allowance.
+      const arrivedSpeed = Math.sqrt(enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y);
+
       let aggro = (!sick && enemy.provoked) ? this.resolveBubbleTarget(enemy, player, enemies) : null;
       // Aggro leash: give up on a target that has fled out of the local area.
       if (aggro) {
@@ -480,12 +504,12 @@ export class AISystem {
       } else if (sick) {
           // ── Sick: sluggish drift only (can't hunt or chase while queasy) ──
           const ds = B.DRIFT_SPEED * BUBBLE_CONSTANTS.SICK_SPEED_MULT;
-          const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+          const flow = flowField.sampleShardFlow(enemy.position.x, enemy.position.y);
           const tx = flow.x * ds, ty = flow.y * ds;
           const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
           enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
           enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
-          this.capSpeed(enemy, ds);
+          this.capSpeed(enemy, Math.max(ds, arrivedSpeed));
       } else if (aggro) {
           // ── Hunt the aggro target: fast seek + lunges so it can catch it ──
           const dx = wrapDeltaX(enemy.position.x, aggro.position.x);
@@ -493,7 +517,7 @@ export class AISystem {
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
           enemy.velocity.x += (dx / dist) * acc * B.SEEK_ACCEL_MULT * dt;
           enemy.velocity.y += (dy / dist) * acc * B.SEEK_ACCEL_MULT * dt;
-          this.capSpeed(enemy, maxSpeed * B.PROVOKED_SPEED_MULT * sBoost);
+          this.capSpeed(enemy, Math.max(maxSpeed * B.PROVOKED_SPEED_MULT * sBoost, arrivedSpeed));
       } else {
           // ── Passive (slow): chase the nearest eatable shard, else ride flow ──
           const target = this.nearestEatableShard(enemy, shards, B.SHARD_VISION);
@@ -503,15 +527,15 @@ export class AISystem {
               const dist = Math.sqrt(dx * dx + dy * dy) || 1;
               enemy.velocity.x += (dx / dist) * accel * dt;
               enemy.velocity.y += (dy / dist) * accel * dt;
-              this.capSpeed(enemy, maxSpeed * B.CHASE_SPEED_MULT);
+              this.capSpeed(enemy, Math.max(maxSpeed * B.CHASE_SPEED_MULT, arrivedSpeed));
           } else {
               // Drift: lerp velocity toward the local flow current.
-              const flow = flowField.sampleAsteroidFlow(enemy.position.x, enemy.position.y);
+              const flow = flowField.sampleShardFlow(enemy.position.x, enemy.position.y);
               const tx = flow.x * B.DRIFT_SPEED, ty = flow.y * B.DRIFT_SPEED;
               const alpha = Math.min(0.8, B.DRIFT_CORRECTION * dt);
               enemy.velocity.x += (tx - enemy.velocity.x) * alpha;
               enemy.velocity.y += (ty - enemy.velocity.y) * alpha;
-              this.capSpeed(enemy, B.DRIFT_SPEED);
+              this.capSpeed(enemy, Math.max(B.DRIFT_SPEED, arrivedSpeed));
           }
       }
 
@@ -614,10 +638,12 @@ export class AISystem {
       return this.clearBubbleAggro(bubble);
   }
 
-  /** Drop a bubble's aggro (attacker gone) → back to passive.  Returns null. */
+  /** Drop a bubble's aggro (attacker gone, or the leash broke) → back to
+   *  passive.  Returns null.  Routed through the shared `calmBubble` so the
+   *  A1 non-aggression window is disarmed with the target rather than left
+   *  armed against a target that is no longer there. */
   private clearBubbleAggro(bubble: GameEntity): null {
-      bubble.aggroTargetId = undefined;
-      bubble.provoked = false;
+      calmBubble(bubble);
       return null;
   }
 
