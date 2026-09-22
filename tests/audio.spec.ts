@@ -292,6 +292,51 @@ test('a portal out of a boss fight stands the battle layer down', async ({ page 
   watch.assertClean();
 });
 
+test('a new arena starts a new song', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page, 'POCKET');
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
+
+  // Open the playlist through the REAL signal (harness rule 6).  The boss
+  // spawn cues a track of its own, which is exactly why the reading below is
+  // taken AFTER it: what is under test is the map change's cue, so the boss's
+  // must already be spent.
+  await engine(page, e => e.debugSpawnBoss());
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
+  const before = await engine(page, e => e.audio.music.battleTrackIndex);
+  expect(before, 'the playlist is open, so there is a song to carry over')
+    .toBeGreaterThanOrEqual(0);
+
+  // The same call `enterPortal()` makes.  Nothing else cues between here and
+  // the reading below — the boss stays behind, so a changed index can only be
+  // the map change.
+  await engine(page, e => e.transitionToMap('overworld'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+
+  const after = await engine(page, e => ({
+    index: e.audio.music.battleTrackIndex,
+    at: e.audio.music.battleCurrentTime,
+  }));
+  expect(after.index, 'a map change opens a different track, not the old one')
+    .not.toBe(before);
+  // From the TOP.  `advanceBattle` rewinds the successor, so this is what
+  // says the layer will not resume the previous song mid-phrase — the whole
+  // of the user report.
+  expect(after.at, 'the new song starts at its beginning').toBeLessThan(0.5);
+
+  // AND THE CUE IS SILENT.  The stand-down runs first in `loadMapFresh`, so
+  // the fresh track waits paused rather than starting at full level over the
+  // warp beat.  (This is a consequence of that ordering, not a proof of it:
+  // the combat report would also have gone down on the first frame after the
+  // transit either way.)
+  expect(await engine(page, e => e.audio.music.battleActive),
+    'arriving somewhere quiet does not play the new song at anybody')
+    .toBeFalsy();
+  watch.assertClean();
+});
+
 test('a lull inside one arena still holds the battle layer up', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
@@ -300,6 +345,7 @@ test('a lull inside one arena still holds the battle layer up', async ({ page })
 
   await engine(page, e => e.debugSpawnBoss());
   await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
+  const opened = await engine(page, e => e.audio.music.battleTrackIndex);
 
   // Empty the field WITHOUT changing map — a wave clear, which is what the
   // linger is for.  The boss is dropped straight out of the world rather than
@@ -322,6 +368,10 @@ test('a lull inside one arena still holds the battle layer up', async ({ page })
     'the field is genuinely empty of bosses').toBe(0);
   expect(await engine(page, e => e.audio.music.battleActive),
     'a lull ducks nothing — the next wave is seconds away').toBeTruthy();
+  // The other half of the same rule, and the A/B against the test above: a
+  // map change cuts to a new song, a lull inside one arena does not.
+  expect(await engine(page, e => e.audio.music.battleTrackIndex),
+    'a lull does not advance the playlist either').toBe(opened);
   watch.assertClean();
 });
 

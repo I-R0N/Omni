@@ -3544,20 +3544,22 @@ The shipped set, all in one place so a tuning pass has a baseline:
 | `MUSIC_RELEASE_SCREENS` | 2.2 | how far it must be gone before the fade can start |
 | `MUSIC_LINGER_SEC` | 6 | quiet sim-seconds before the fade begins |
 | `FADE_IN_SEC` | 0.75 | ramp CONSTANT up (≈2.3 s to ~95%) |
-| `FADE_OUT_SEC` | 1.6 | ramp CONSTANT down (≈4.8 s to ~95%) |
+| `FADE_OUT_SEC` | 0.8 | ramp CONSTANT down (≈2.4 s to ~95%) — halved since |
 | `HANDOVER_SEC` | 0.12 | song → next song at a track's own end |
-| `BATTLE_PAUSE_DELAY_MS` | 4800 | when the ducked track actually pauses |
+| `BATTLE_PAUSE_DELAY_MS` | 2400 | when the ducked track actually pauses |
 | levels | 0.15 / 0.28 / 0.12 / 0.34 | menu / explore / ducked ambient, battle |
 
 **The questions worth asking with a controller in hand:**
 
-- **Is a fled fight 6 s + ~4.8 s of tail?**  `MUSIC_LINGER_SEC` is graded for
+- **Is a fled fight 6 s + ~2.4 s of tail?**  `MUSIC_LINGER_SEC` is graded for
   a LULL inside one arena (the field empties on every wave clear), and the map
   change now bypasses it entirely.  But WITHIN an arena, breaking off a boss
-  fight and flying to the far side still costs the full ~11 s before the
-  battle layer is gone.  That may be right — a boss you ran from is not a
-  boss you beat — or the linger may want to be shorter now that the
-  definitive case is handled elsewhere.
+  fight and flying to the far side still costs ~8.4 s before the battle layer
+  is gone.  That may be right — a boss you ran from is not a boss you beat —
+  or the linger may want to be shorter now that the definitive case is handled
+  elsewhere.  **Note the tail half of this has since been halved** (the fade
+  went 1.6 → 0.8, user call), so what is left open is the LINGER, not the
+  fade.
 - **Do engage and release want to be asymmetric by MORE?**  0.85 screens of
   hysteresis stops the gain pumping as the player drifts; whether it stops
   the *layer* pumping across a wave's spawn geometry has not been measured.
@@ -3566,10 +3568,14 @@ The shipped set, all in one place so a tuning pass has a baseline:
   coupling is correct and should stay derived — but it means the fade cannot
   be tuned without re-checking that the pause still lands after it rather
   than racing it.
-- **Boss music always restarts a track** (the PR #101 behaviour).  Untested
-  against the map-change stand-down: fleeing a boss and returning should not
-  be indistinguishable from starting a second boss.
+- **Boss music always restarts a track** (the PR #101 behaviour).  A MAP
+  CHANGE now does too (user report: re-entering an arena resumed the previous
+  song mid-phrase), so there are two cues rather than one.  What is still
+  untested is whether they read as different events: fleeing a boss and
+  returning fires BOTH, and should not be indistinguishable from starting a
+  second boss.
 
-**What is NOT open**: the map-change stand-down itself, and the `setTargetAtTime`
-ramp shape.  Both are settled — see `docs/AUDIO_AUTHORING.md`, *A MAP CHANGE
-IS NOT A LULL*.
+**What is NOT open**: the map-change stand-down itself, the map-change track
+cue, the halved `FADE_OUT_SEC`, and the `setTargetAtTime` ramp shape.  All
+settled — see `docs/AUDIO_AUTHORING.md`, *A MAP CHANGE IS NOT A LULL* and
+*A MAP CHANGE ALSO STARTS A NEW SONG*.

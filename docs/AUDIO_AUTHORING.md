@@ -53,11 +53,34 @@ leaves the enemies behind, so `loadMapFresh` drops the linger stamp
 the destination decides from its own hostiles on the next frame. Without that,
 fleeing a boss into the quiet hub kept its music playing for the full linger
 plus the layer's own fade (measured: 6.0 s of overworld, ~5 s of fade on top).
-Arriving somewhere dangerous still engages instantly. The single exception to
-the continuous playlist is a boss capstone,
-whose entrance calls `BackgroundMusic.cueBattleTrack()` and cuts to a new track
-from the top — add boss-specific music by choosing it inside that method rather
-than at the call site. All are streamed rather than decoded into
+Arriving somewhere dangerous still engages instantly. **A MAP CHANGE ALSO
+STARTS A NEW SONG**: the same `loadMapFresh` calls `cueBattleTrack()`, so
+re-entering an arena opens a fresh track instead of resuming the previous one
+mid-phrase (user report). The continuous-playlist rule is drawn around ONE
+arena's wave ladder, and the map boundary is where that ladder ends rather than
+an exception to it. Order is load-bearing there: the stand-down
+(`audio.setCombat(false)`, pushed with `lastReportedCombat` so the transition
+gate cannot desync) runs FIRST, which is what makes the cue silent — the
+successor waits paused at 0 for the destination's own first engagement, instead
+of starting at full level over the warp beat and fading straight back out.
+
+Two callers therefore cut a track short, and both say the same thing — a new
+encounter begins: a boss capstone's entrance, and a map change. Everywhere
+INSIDE an encounter a track still runs to its own end. Add boss-specific music
+by choosing it inside `cueBattleTrack()` rather than at a call site.
+
+Fades: `FADE_IN_SEC` (0.75) and `FADE_OUT_SEC` (0.8) are `setTargetAtTime` time
+CONSTANTS, not durations — an exponential approach is ~95% done after three of
+them, so the audible fade-out tail is ~2.4 s. `FADE_OUT_SEC` is the only
+fade-out in the score and so governs every instance of one: leaving an arena,
+the pause menu, returning to the menu, and an ordinary fight ending. It was
+halved from 1.6 (user call). `BATTLE_PAUSE_DELAY_MS` is DERIVED from it — the
+pause is what holds a track's position, so it must land after the fade rather
+than race it — which means retuning the fade moves that too, by construction.
+The ambient bed is deliberately not direction-aware: its downward move is a
+DUCK between two audible levels, not a fade to silence.
+
+All are streamed rather than decoded into
 long Web Audio buffers. Battle sources are attached only when combat first
 starts; one upcoming track receives a metadata preload, so the title screen does
 not download the whole playlist.

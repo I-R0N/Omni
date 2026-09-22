@@ -642,10 +642,11 @@ export class AudioSystem {
     this._combat = combat;
     this.music?.setCombat(combat);
   }
-  /** A capstone has reached the field: cut the battle layer to a new song.
-   *  Not queued if the score does not exist yet — the context is created on
-   *  the first gesture and a run cannot start without one, so by the time a
-   *  boss can spawn there is always a `music` to tell. */
+  /** A new encounter begins — a capstone reaching the field, or a map change:
+   *  cut the battle layer to a new song.  Not queued if the score does not
+   *  exist yet, which is why a map load before the first gesture is silently
+   *  a no-op rather than an ordering hazard: the context is created on that
+   *  gesture, and the playlist has nothing to carry over yet anyway. */
   public cueBattleTrack() { this.music?.cueBattleTrack(); }
 
   private applyMaster() {
