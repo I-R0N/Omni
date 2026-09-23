@@ -1,4 +1,4 @@
-import { EnergyEvent, materialOf, thermalStrength, safeEnergy } from './energyMaterial';
+import { EnergyEvent, materialOf, conductivity, thermalStrength, safeEnergy } from './energyMaterial';
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
@@ -1357,7 +1357,10 @@ export class PhysicsSystem {
       });
       (proj.hitEntityIds ??= []).push(target.id);
       PhysicsSystem.spendProjectileEnergy(proj, proj.mass ?? PROJECTILE_CONSTANTS.MASS, amount);
-      if (PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON) proj.active = false;
+      // Insulation must stop the delivery as well as its chain. Otherwise
+      // a bolt with residual bank passes through and starts another event.
+      if ((kind === 'electrical' && conductivity(target) < 0.4)
+          || PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON) proj.active = false;
       return true;
   }
 
@@ -3795,6 +3798,9 @@ export class PhysicsSystem {
           const nebula = aPassThrough ? a : b;
           const other  = aPassThrough ? b : a;
           if (other.type === EntityType.PROJECTILE) {
+              // Preserve main's kinetic pass-through: ordinary fire must not
+              // pre-break the cloud the ship is about to fly through.
+              if ((other.energyType ?? 'mechanical') === 'mechanical') return;
               const duplicate = other.hitEntityIds?.includes(nebula.id);
               if (this.deliverMaterialProjectile(other, nebula) && !duplicate && onHit) onHit(other.position, other, nebula);
               return;

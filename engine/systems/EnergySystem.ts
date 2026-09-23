@@ -40,7 +40,7 @@ export class EnergySystem {
     // Detached heat is no longer in the surviving parent. Saturated active
     // state cannot manufacture or silently retain an untracked hot fragment.
     parent.materialHeat = Math.max(0, (parent.materialHeat ?? 0) - ((child.materialHeat ?? 0) - before));
-    if (materialOf(child) === 'nebula' || materialOf(child) === 'plastic') child.nebulaMergeCooldown = 1.5;
+    if (materialOf(child) === 'nebula' || materialOf(child) === 'plastic') child.nebulaMergeCooldown = Math.max(child.nebulaMergeCooldown ?? 0, 1.5);
   }
   deliver(e: GameEntity, raw: EnergyEvent, skipFirstElectricalDamage = false): void {
     const magnitude = safeEnergy(raw.magnitude);
@@ -58,7 +58,7 @@ export class EnergySystem {
       else this.host.damage(e, magnitude, event);
       return;
     }
-    this.heat(e, magnitude * L.heatPerEnergy, event);
+    this.heat(e, magnitude * L.heatPerEnergy * (m === 'plastic' ? L.plasticHeatMultiplier : 1), event);
     if (m === 'nebula') this.host.disperse(e, event);
     // Conduction is a small, conservative fan at deposition time, not a
     // recursive heat tick. The source pays every unit its neighbours get.
@@ -93,9 +93,10 @@ export class EnergySystem {
         }
       } else state.stressTime = 0;
       if (m === 'plastic' && e.materialHeat >= L.plasticRelease) {
-        // Cohesion releases first. Slow grain separation also frees pieces
-        // from static plastic, which cannot move until its seams let go.
-        this.host.damage(e, 3 * dt, state.event);
+        // Cohesion releases first; sustained heat then separates static
+        // grains at a heat-dependent rate, with the quiet thermal impulse.
+        this.host.damage(e, (L.plasticSeparationBase
+          + (e.materialHeat - L.plasticRelease) * L.plasticSeparationPerHeat) * dt, state.event);
       }
       if ((e.materialHeat ?? 0) <= L.negligibleHeat) {
         e.materialHeat = undefined; this.heated.delete(e);

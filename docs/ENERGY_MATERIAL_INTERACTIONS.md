@@ -18,8 +18,8 @@ Existing unconverted actors retain their shield, armor and direct-hit rules.
 | Rock | Existing localized kinetic fracture; chunky grains and momentum | Stored heat lowers boundary work, enabling kinetic follow-up | Small boundary effect; stops chains |
 | Glass | More concentrated small fragments and outward impulse | Stress accumulates; failure starts after 0.35 s above threshold; fewer, quieter pieces | Very little boundary effect; stops chains |
 | Metal | Strong existing boundaries, fewer large restrained fragments | Stored heat weakens boundaries; a local share passes to metal neighbours | Strong direct coupling and bounded arcs through metal and other conductors |
-| Plastic | Existing dent, movement, elasticity and bonds | Cohesion weakens and releases before slow structural separation | Insulating; stops chains |
-| Nebula | Existing puff fan/displacement, never solid fracture | Agitation/dispersion; hot mobile clouds resist cohesion | Local energization, motion and arcs; temporarily suppresses cohesion |
+| Plastic | Existing dent, movement, elasticity and bonds | Rapid heating releases cohesion before heat-dependent structural separation | Insulating; stops electrical bolts and chains |
+| Nebula | Ship contact and ordinary-shot pass-through preserved from main | Agitation/dispersion; hot mobile clouds resist cohesion | Local energization, motion and arcs; temporarily suppresses cohesion |
 
 ## Mechanics and fracture
 
@@ -61,9 +61,11 @@ release but preserves its existing fragment pattern. This is intentional.
 - Heat outlines are drawn during the existing visible-entity render pass. Sparks,
   arcs, and the breathy nebula impact sound reuse the current feedback systems.
 
-Energy dispersal uses the existing nebula puff fan explicitly. Older ship-contact
-cloud breakup may still use its existing geometry-only Voronoi decomposition;
-it never gains solid boundary damage from this system.
+Nebula retains the authored cloud breakup for both ship contact and energy
+dispersal, including its geometry-only Voronoi decomposition, fade, composition
+and shard wake. It never gains solid boundary damage. Ordinary kinetic shots
+pass through cloud tiles/shards as on main, leaving them for the ship to disturb.
+Cloud grain controls are not overridden by the solid-material profiles.
 
 ## Deliberate limits
 
@@ -106,7 +108,7 @@ launch point, preventing a later trip around the toroidal map from being counted
 as a forward escape. Its assertions still require the live sweep to prevent
 crossing untouched tiles.
 
-The final affected suite passed all 137 tests, including 16 new energy tests.
+The initial feature validation passed all 137 affected tests, including 16 new energy tests.
 Type checking and production build pass (the existing large-bundle warning
 remains). Full-suite comparison against untouched base `c59ddc8` reproduced
 unrelated economy, docking, flashlight, lighting, scanner and viewport failures;
@@ -116,3 +118,21 @@ An earlier focused run also had one randomized rock-fragment apparent-size
 assertion fail (3.05px versus a requested value below 3px); it passed five
 isolated repeats and the final suite. Sixty baseline repeats passed, so that
 isolated result is disclosed without claiming it is a verified baseline failure.
+
+## Playtest corrections
+
+Electrical insulation now terminates the moving projectile as well as stopping
+its chain; residual delivery energy cannot carry it through glass or plastic.
+Plastic deposits twice the usual heat, releases cohesion at 12 heat units, and
+separates at 6 + 0.5 × excess heat units of boundary work per second. The heat
+cap still applies, and Blaster kinetic tuning is unchanged. A real single-beam
+Laser contact now produces plastic separation within one second in the test.
+
+The initial PR mistakenly made ordinary shots disperse nebula and routed energy
+breakup to the older puff fan. Both paths are corrected. A deterministic
+ship-contact and shard-wake snapshot from untouched main c59ddc8 verifies exact
+parity for fragment sizes, velocities, spin, fade, mass and cooldowns.
+
+Correction validation: 117 energy, cloud, deflection, weapon and fracture tests
+passed. After the final cloud-path cleanup, all 27 energy/cloud tests passed
+again. Type checking and the production builds used by these runs passed.

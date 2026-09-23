@@ -17,7 +17,7 @@ export interface FractureProfile { sites: number; bias: number; impulse: number 
 export const ENERGY_LIMITS = {
   maxHeat: 100, negligibleHeat: 0.05, maxHeated: 512,
   heatPerEnergy: 4, cooling: 5, glassStress: 25, glassDelay: 0.35,
-  plasticRelease: 18, conductionRadius: 100, conductionTargets: 4,
+  plasticRelease: 12, plasticHeatMultiplier: 2, plasticSeparationBase: 6, plasticSeparationPerHeat: 0.5, conductionRadius: 100, conductionTargets: 4,
   hops: 3, targets: 12, hopRadius: 150, totalRadius: 360, attenuation: 0.6,
 } as const;
 export function safeEnergy(n: number): number {
@@ -65,6 +65,8 @@ export function cohesionFor(e: GameEntity): number {
  * already live there; thermal glass deliberately uses coarser, quieter seams. */
 export function fractureProfile(e: Pick<GameEntity, 'material' | 'shardVariant' | 'fractureEnergy'>, type: EnergyType = e.fractureEnergy ?? 'mechanical'): FractureProfile {
   const m = materialOf(e);
+  // Clouds keep their authored breakup geometry and drift in every domain.
+  if (m === 'nebula') return { sites: 1, bias: 0.5, impulse: 1 };
   if (type === 'thermal') return { sites: m === 'glass' ? 0.4 : 0.65, bias: 0.1, impulse: 0.18 };
   if (m === 'glass') return { sites: 1.4, bias: 0.75, impulse: 1.35 };
   if (m === 'metal') return { sites: 0.3, bias: 0.35, impulse: 0.55 };

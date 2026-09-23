@@ -4535,13 +4535,12 @@ export class GameEngine {
       const vx = len > 0 ? d!.x / len * speed : speed;
       const vy = len > 0 ? d!.y / len * speed : 0;
       if (target.shardVariant === 'nebula-tile') {
-          // Existing cloud dissolution emits drifting puffs, never Voronoi.
+          // Preserve the authored cloud breakup, fade and fragment metadata.
           target.lastImpactVelocity = { x: vx, y: vy };
           target.health = 0;
           target.mergeFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
           target.mergeFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
           this.physics.removeStaticEntity(target);
-          this.shards.disperseCloud(target, this.currentMap.entities);
           this.handleEntityDeath(target);
       } else {
           target.velocity.x = Math.max(-12, Math.min(12, target.velocity.x + vx));
@@ -4555,7 +4554,7 @@ export class GameEngine {
       const thermal = event.type === 'thermal';
       if (event.type === 'mechanical') return;
       target.hitFlash = 0.15;
-      if (thermal) {
+      if (thermal && materialOf(target) !== 'nebula') {
           // Select a coarse pattern only while pristine. Already paid-for
           // cracks must remain the seams the body eventually separates on.
           if (target.health === target.maxHealth && !target.fractureEdgeFill?.some(n => n > 0)) {

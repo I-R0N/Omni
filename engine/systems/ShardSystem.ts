@@ -799,14 +799,6 @@ export class ShardSystem {
    *  currently invoked only by ROCK_SHARD + NEBULA + NEBULA_SHARD
    *  death dispatch in GameEngine.
    */
-  /** Energy disperses cloud tiles through their existing puff fan, without
-   * entering the solid Voronoi path. Ship-contact breakup stays unchanged. */
-  public disperseCloud(parent: GameEntity, entities: GameEntity[]): void {
-    if (parent.shardVariant !== 'nebula-tile' || parent.shattered) return;
-    parent.shattered = true;
-    this.shatterNebulaStyle(parent, SHARD_VARIANTS['nebula-tile'], entities);
-  }
-
   public shatter(parent: GameEntity, entities: GameEntity[]): void {
     const variantId = shardVariantOf(parent);
     if (variantId === null) return;

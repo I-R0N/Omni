@@ -69,7 +69,7 @@ test('glass thermal stress waits, then fails after delivery ended', () => {
 
 test('plastic releases cohesion before slow structural separation', () => {
   const e = body('plastic'), h = harness([e]);
-  h.system.deliver(e, packet('thermal', 3));
+  h.system.deliver(e, packet('thermal', 1));
   expect(cohesionFor(e)).toBeGreaterThan(0); expect(cohesionFor(e)).toBeLessThan(1);
   h.system.deliver(e, packet('thermal', 3));
   expect(cohesionFor(e)).toBe(0); expect(h.damage).toHaveLength(0);
@@ -244,7 +244,7 @@ test('real seams: heated solids need less work; thermal glass has coarser quiete
   expect(r.waited && r.failedLater).toBe(true); watch.assertClean();
 });
 
-test('real nebula energy contacts disperse through puffs, never solid fracture', async ({ page }) => {
+test('real nebula energy contacts preserve cloud geometry without solid fracture', async ({ page }) => {
   const watch = await boot(page); await startRun(page, 'NEBULA_FIELD'); await quietScene(page);
   const r = await page.evaluate(() => {
     const g = window.__omniEngine!; g.pauseGame();
@@ -262,7 +262,7 @@ test('real nebula energy contacts disperse through puffs, never solid fracture',
     return out;
   });
   for (const row of r) {
-    expect(row.solidModel, row.type).toBe(false); expect(row.geometry, row.type).toBe(false);
+    expect(row.solidModel, row.type).toBe(false); expect(row.geometry, row.type).toBe(true);
     expect(row.children, row.type).toBeGreaterThan(0); expect(row.moving, row.type).toBe(true);
   }
   watch.assertClean();

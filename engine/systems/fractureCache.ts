@@ -1,4 +1,4 @@
-import { EnergyType, fractureProfile, fractureToughness, thermalStrength, safeEnergy } from './energyMaterial';
+import { EnergyType, materialOf, fractureProfile, fractureToughness, thermalStrength, safeEnergy } from './energyMaterial';
 /** The fracture-decomposition CACHE policy (voronoi gauntlet, V3).
  *
  *  One accessor pair shared by the SIM (ShardSystem.shatterVoronoiStyle
@@ -111,14 +111,16 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   // count, so a very large body gets coarser grains rather than hundreds
   // of cells.  Constant grain size holds BETWEEN the two.
   const profile = fractureProfile(e);
-  sites = Math.max(2, Math.min(32, Math.round(Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites)) * profile.sites)));
+  const cloud = materialOf(e) === 'nebula';
+  const authoredSites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
+  sites = cloud ? authoredSites : Math.max(2, Math.min(32, Math.round(authoredSites * profile.sites)));
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 
   const ip = localImpactPoint(e);
   const biasOverride = getFractureBiasOverride();
   const impact = ip !== null
-    ? { x: ip.x, y: ip.y, bias: biasOverride ?? profile.bias }
+    ? { x: ip.x, y: ip.y, bias: biasOverride ?? (cloud ? f.impactBias : profile.bias) }
     : undefined;
 
   e.fractureEdges = undefined; // edges are derived — never outlive the cells
