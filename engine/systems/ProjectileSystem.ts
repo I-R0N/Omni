@@ -199,6 +199,7 @@ export class ProjectileSystem {
         pooled.maxLifetime = config.lifetime;
         pooled.mass = projMass;
         pooled.damage = config.damage;
+        pooled.energyType = config.energyType ?? 'mechanical';
         pooled.spawnSpeed = muzzleSpeed;
         pooled.homing = config.homing;
         pooled.homingStrength = config.homingStrength;
@@ -262,6 +263,7 @@ export class ProjectileSystem {
           maxLifetime: config.lifetime,
           mass: projMass,
           damage: config.damage,
+          energyType: config.energyType ?? 'mechanical',
           spawnSpeed: muzzleSpeed,
           homing: config.homing,
           homingStrength: config.homingStrength,

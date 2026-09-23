@@ -1331,6 +1331,42 @@ function lightGradient(
     return g;
 }
 
+/** Heat uses the same cached, additive falloff as world lights. Drawn from
+ * the visible-entity pass so even cached tiles and legacy lighting retain
+ * readable heat, without allocating another light or querying occluders. */
+export function renderHeatGlow(
+    ctx: CanvasRenderingContext2D, x: number, y: number, size: number, heat: number, color?: string,
+): void {
+    if (!Number.isFinite(heat) || heat <= 0.05 || !Number.isFinite(size) || size <= 0) return;
+    const intensity = Math.sqrt(Math.min(1, heat / 60));
+    const radius = Math.max(6, size * 1.15);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha *= intensity * 0.85;
+    ctx.fillStyle = lightGradient(ctx, radius, normalizedTint(color ?? '#fb923c'));
+    ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+    ctx.restore();
+}
+
+/** Tint the actual material silhouette after its base draw, so cached tiles
+ * and mobile fragments both visibly heat up without hiding their cracks. */
+export function renderHeatSurface(ctx: CanvasRenderingContext2D, e: GameEntity, x: number, y: number): void {
+    const heat = e.materialHeat ?? 0, points = e.polygonPoints;
+    if (!e.active || !Number.isFinite(heat) || heat <= 0.05 || !points || points.length < 3
+        || e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') return;
+    const tint = normalizedTint(e.color ?? '#fb923c');
+    if (!tint) return;
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(e.rotation);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha *= Math.sqrt(Math.min(1, heat / 60)) * 0.45;
+    ctx.fillStyle = `rgb(${tint})`;
+    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+}
+
 /** The falloff's value at `t` = distance / radius, as a FRACTION of the
  *  light's own peak — so it is 1 at the centre and 0 at the rim, whatever
  *  brightness is selected.  This is the same piecewise ramp the gradient's

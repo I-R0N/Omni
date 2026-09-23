@@ -1,3 +1,4 @@
+import { EnergyEvent, materialOf, conductivity, thermalStrength, safeEnergy } from './energyMaterial';
 
 
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
@@ -1321,6 +1322,48 @@ export class PhysicsSystem {
     }
   }
 
+  public energyHit?: (target: GameEntity, event: EnergyEvent) => void;
+
+  /** Bounded spatial visit including tiles and mobile conductors. The grids
+   * are complete before collision callbacks run; dead entries are filtered. */
+  public forEachEnergyNear(e: GameEntity, radius: number, visit: (e: GameEntity) => boolean | void): void {
+      let inspected = 0;
+      let stopped = false;
+      const cb = (n: GameEntity) => {
+          if (stopped || ++inspected > 256) { stopped = true; return false; }
+          if (visit(n) === false) { stopped = true; return false; }
+      };
+      this.forEachStaticCells(e.position.x, e.position.y, Math.ceil(radius / SPATIAL_GRID_SIZE), radius * radius, cb);
+      if (!stopped) this.forEachStaticCells(e.position.x, e.position.y, Math.ceil(radius / SPATIAL_GRID_SIZE), radius * radius, cb, true);
+  }
+
+  private deliverMaterialProjectile(proj: GameEntity, target: GameEntity): boolean {
+      const kind = proj.energyType ?? 'mechanical';
+      if (!this.energyHit || (!target.shardVariant && !target.material)) return false;
+      if (target.shardVariant === 'indestructible-tile') return false;
+      if (kind === 'mechanical' && materialOf(target) !== 'nebula') {
+          target.fractureEnergy = 'mechanical';
+          return false;
+      }
+      if (proj.hitEntityIds?.includes(target.id)) return true;
+      const amount = safeEnergy(Math.min(PhysicsSystem.projectileEnergyLeft(proj), PhysicsSystem.projectileBiteOn(proj, target)));
+      proj.hitFalloff = amount / Math.max(0.001, proj.damage ?? 1);
+      this.energyHit(target, {
+          type: kind, magnitude: amount, position: proj.position,
+          direction: { ...proj.velocity }, source: proj.ownerId,
+          playerOwned: proj.ownerType === EntityType.PLAYER,
+          delivery: { kind: proj.isBouncer ? 'beam' : 'projectile', mass: proj.mass, velocity: { ...proj.velocity },
+              chainHops: proj.chainCount, chainRadius: proj.chainRange, chainBranches: proj.chainBranches },
+      });
+      (proj.hitEntityIds ??= []).push(target.id);
+      PhysicsSystem.spendProjectileEnergy(proj, proj.mass ?? PROJECTILE_CONSTANTS.MASS, amount);
+      // Insulation must stop the delivery as well as its chain. Otherwise
+      // a bolt with residual bank passes through and starts another event.
+      if ((kind === 'electrical' && conductivity(target) < 0.4)
+          || PhysicsSystem.projectileEnergyLeft(proj) <= PhysicsSystem.SPENT_EPSILON) proj.active = false;
+      return true;
+  }
+
   public removeStaticEntity(entity: GameEntity) {
       const key = cellKey(entity.position.x, entity.position.y);
       const cell = this.staticGrid.get(key);
@@ -1547,7 +1590,7 @@ export class PhysicsSystem {
       // metal 8x1.8 = 14.4.  THAT ratio is the whole of step 5: depth becomes
       // `energy / price`, so the same shell crosses glass and stops in metal
       // without either being written down anywhere.
-      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0));
+      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0) * thermalStrength(target));
       let ordinal = proj.pierceHits ?? 0;
       let steps = 0;
       for (;;) {
@@ -3754,6 +3797,14 @@ export class PhysicsSystem {
 
           const nebula = aPassThrough ? a : b;
           const other  = aPassThrough ? b : a;
+          if (other.type === EntityType.PROJECTILE) {
+              // Preserve main's kinetic pass-through: ordinary fire must not
+              // pre-break the cloud the ship is about to fly through.
+              if ((other.energyType ?? 'mechanical') === 'mechanical') return;
+              const duplicate = other.hitEntityIds?.includes(nebula.id);
+              if (this.deliverMaterialProjectile(other, nebula) && !duplicate && onHit) onHit(other.position, other, nebula);
+              return;
+          }
 
           // Striker must be PLAYER or ENEMY to shatter, AND must not
           // be in the post-shatter cooldown window.  Only nebula-tiles
@@ -3858,6 +3909,14 @@ export class PhysicsSystem {
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY
               && !target.thirdParty && !proj.hitsEnemies) return;
           if (proj.hitsEnemies && target.isRival) return;
+
+          const energyDuplicate = proj.hitEntityIds?.includes(target.id) ?? false;
+          const materialHandled = this.deliverMaterialProjectile(proj, target);
+          if (materialHandled && energyDuplicate) return;
+          if (materialHandled && !proj.active) {
+              if (onHit) onHit(proj.position, proj, target);
+              return;
+          }
 
           // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
           // (today's "tile shards"); they pass through every other shard
@@ -4008,6 +4067,11 @@ export class PhysicsSystem {
                   if (onHit) onHit({ x: contactX, y: contactY }, proj, target);
                   return;
               }
+          }
+
+          if (materialHandled) {
+              if (onHit) onHit(proj.position, proj, target);
+              return;
           }
 
           // PENETRATION FALLOFF: the SECOND body a bolt passes through takes

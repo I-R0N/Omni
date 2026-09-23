@@ -33,7 +33,7 @@ import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadou
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic,
          stampMinimapTile, unstampMinimapTile } from './render/hud';
-import { renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
+import { renderHeatSurface, renderHeatGlow, renderLightLayer, causticStats, shadowStats, beamMaskCount, transmissionWeight, lastWorldLightCount, type Occluder, type EmitSlot } from './render/lighting';
 import { renderFogLayer, resetFogMemory } from './render/fog';
 import { renderShardBlends } from './render/shardBlend';
 
@@ -1667,7 +1667,15 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // erased any tile that has slow-path overlays active (glow / hit
       // flash / regen) so reaching the per-entity path means the tile
       // legitimately needs the slow-path render below.
-      if (entity._staticCached === true) return;
+      // Soft heat emission shares the lighting falloff and gradient cache.
+      // Static tiles keep their baked appearance; mobile bodies sit in the halo.
+      if ((entity.materialHeat ?? 0) > 0.05) {
+          renderHeatGlow(ctx, rx, ry, Math.max(entity.size.x, entity.size.y), entity.materialHeat!, entity.color);
+      }
+      if (entity._staticCached === true) {
+          renderHeatSurface(ctx, entity, rx, ry);
+          return;
+      }
 
       // ── Fast-path STRUCTURE sprite render ───────────────────────────
       // Structures have rotation = 0, no per-entity ctx state changes,
@@ -1730,6 +1738,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
           if (fpAlpha !== 1) ctx.globalAlpha = fpAlpha;
           ctx.drawImage(hexSprite, rx - dHalf, ry - dHalf, drawSize, drawSize);
           if (fpAlpha !== 1) ctx.globalAlpha = 1;
+          renderHeatSurface(ctx, entity, rx, ry);
           return;
       }
 
@@ -2097,6 +2106,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       // mirrors what ctx.restore() did when paired with the now-removed
       // ctx.save() at the top of the slow path.
       ctx.setTransform(camA, camB, camC, camD, camE, camF);
+
+      renderHeatSurface(ctx, entity, rx, ry);
 
       // Render Debug Acceleration Vector (debug mode only)
       if (this.debugMode && entity.type === EntityType.PLAYER && entity.inputVector) {
