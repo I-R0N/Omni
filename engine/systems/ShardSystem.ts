@@ -61,6 +61,7 @@ import {
 import { ParticleSystem } from './ParticleSystem';
 import { PhysicsSystem, pendingPlasticDentEntities } from './PhysicsSystem';
 import { nextId } from './IdAllocator';
+import { polygonArea } from './fracture';
 import { ensureFractureCells, estimateBoundaryHp } from './fractureCache';
 import {
   ShardVariantId,
@@ -1013,6 +1014,7 @@ export class ShardSystem {
     const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
     const parentSize = parent.size.x;
 
+    let heatAreaRemaining = totalArea;
     for (const cell of cells) {
       const newSize = parentSize * Math.sqrt(cell.area / refArea);
 
@@ -1107,7 +1109,8 @@ export class ShardSystem {
         ShardSystem.stampNebulaChild(parent, child, parentVariant, impactSpeed);
       }
       entities.push(child);
-      this.onEnergyFragment?.(parent, child, cell.area / refArea);
+      this.onEnergyFragment?.(parent, child, cell.area / Math.max(cell.area, heatAreaRemaining));
+      heatAreaRemaining = Math.max(0, heatAreaRemaining - cell.area);
     }
 
     this.spawnShatterDust(parent, parentVariant, entities, impactSpeed, impactAngle);
@@ -1281,7 +1284,8 @@ export class ShardSystem {
       dentRecoverDuration: restPoly !== undefined ? recover : undefined,
     };
     entities.push(child);
-    this.onEnergyFragment?.(parent, child, cell.area / refArea);
+    const currentArea = parent.polygonPoints ? polygonArea(parent.polygonPoints) : refArea;
+    this.onEnergyFragment?.(parent, child, cell.area / Math.max(cell.area, currentArea));
     return child;
   }
 
@@ -1514,6 +1518,7 @@ export class ShardSystem {
       }
     }
 
+    let heatAreaRemaining = sizes.reduce((sum, size) => sum + size * size, 0);
     for (let i = 0; i < sizes.length; i++) {
       const newSize = sizes[i];
       // Density-aware mass: dense fragments feel heavy on impact and resist
@@ -1574,7 +1579,7 @@ export class ShardSystem {
         ? randomPlasticShardShade()
         : (isTile ? parent.color : (parent.color || COLORS.ROCK_SHARD));
 
-      entities.push({
+      const child: GameEntity = {
         id:           nextId('shard'),
         type:          EntityType.STRUCTURE,
         shardVariant:  childVariant.id,
@@ -1606,7 +1611,10 @@ export class ShardSystem {
         // Let the shatter debris fly apart before the overlap-collapse
         // pass can re-condense it into a tile (DBG-cyclable delay).
         collapseGraceTimer: getActiveShatterGraceDelay(),
-      });
+      };
+      entities.push(child);
+      this.onEnergyFragment?.(parent, child, newSize * newSize / Math.max(newSize * newSize, heatAreaRemaining));
+      heatAreaRemaining = Math.max(0, heatAreaRemaining - newSize * newSize);
     }
 
     // Variant-driven dust/debris burst — shared with the voronoi style.
@@ -1681,6 +1689,7 @@ export class ShardSystem {
     const childSpawn = childVariant.spawn;
     const postCooldown = parentVariant.shatter.postShatterMergeCooldown ?? 0;
 
+    let heatAreaRemaining = radii.reduce((sum, radius) => sum + radius * radius, 0);
     for (let i = 0; i < shardCount; i++) {
       const radius = radii[i];
 
@@ -1756,7 +1765,8 @@ export class ShardSystem {
         nebulaMergeCooldown: postCooldown,
       };
       entities.push(child);
-      this.onEnergyFragment?.(parent, child, 1 / shardCount);
+      this.onEnergyFragment?.(parent, child, radius * radius / Math.max(radius * radius, heatAreaRemaining));
+      heatAreaRemaining = Math.max(0, heatAreaRemaining - radius * radius);
     }
   }
 
@@ -3344,7 +3354,7 @@ export class ShardSystem {
       // place; shared references would deform every sibling).
       const points: Vector2[] = baseEquilateral.map(p => ({ x: p.x, y: p.y }));
 
-      entities.push({
+      const child: GameEntity = {
         id:            nextId('metal_decomp'),
         type:          EntityType.STRUCTURE,
         shardVariant:  'metal-shard',
@@ -3361,7 +3371,9 @@ export class ShardSystem {
         mass:          triMass,
         metalLatticeR: R,
         collapseGraceTimer: getActiveShatterGraceDelay(),
-      });
+      };
+      entities.push(child);
+      this.onEnergyFragment?.(parent, child, 1 / (cells.length - i));
     }
 
     // Dust puff matches metal-tile's slate colour — same particle

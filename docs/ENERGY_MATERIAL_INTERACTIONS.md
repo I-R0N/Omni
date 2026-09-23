@@ -47,7 +47,8 @@ release but preserves its existing fragment pattern. This is intentional.
 - Only heated entities update, with at most 512 tracked bodies. At capacity new
   thermal state is rejected; there are no untracked permanently hot objects.
 - Negligible heat and dead bodies leave the active set; map/run changes clear it.
-- Fracture and cloud-spawn hooks transfer an area share of heat to children;
+- Fracture and cloud-spawn hooks transfer each child's share of the remaining
+  heat using remaining material area, conserving heat through repeated breaks;
   existing shatter/merge grace periods continue to apply.
 - Metal conduction runs only on deposition: four neighbours within 100 world
   units, with transferred heat deducted from the source. It does not recurse.
@@ -143,3 +144,20 @@ using the existing lighting gradient cache without another map scan or shadow
 query. Cooling is reduced from 5 to 2 units/s (2.5 times the heat lifetime).
 All 20 energy/contact tests, type checking and production build passed; the
 glow was visually inspected in the running game.
+
+Material surface and inheritance follow-up: heated solid tiles and shards now
+receive an additive tint on their actual polygon, using the object's existing
+material color. The surrounding halo uses the same color. The overlay works
+on cached tiles and moving fragments without changing their base appearance.
+
+Fragment transfer formerly multiplied each child's original-area fraction by
+an already depleted heat balance. It now uses remaining area and remaining
+heat together. Partial chips, full Voronoi breakup, legacy solid/cloud breakup,
+legacy DropSystem debris and metal-composite decomposition carry their share.
+Children enter the sparse cooling set and can pass heat to another generation.
+The existing 512-body heat cap still applies.
+
+Validation: 83 energy/fracture tests passed, followed by 22 focused checks
+including successive generations, partial chips and legacy tile breakup.
+Type checking and production build passed. Material-colored surfaces and
+halos were inspected in the running game.

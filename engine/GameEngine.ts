@@ -7155,6 +7155,8 @@ export class GameEngine {
 
   private spawnDrops(entity: GameEntity) {
     if (!this.currentMap) return;
+    const entities = this.currentMap.entities;
+    const firstChild = entities.length;
     this.drops.spawnDrops(
       this.currentMap.entities,
       this.activeDrops,
@@ -7163,6 +7165,22 @@ export class GameEngine {
       (t, c) => this.pushPlayerMessage(t, c),
       (credits) => { this.earnCredits(credits); },
     );
+    // Legacy glass/dent recipes spawn through DropSystem, not ShardSystem.
+    // Only the appended physical fragments participate; pickups stay cold.
+    if ((entity.materialHeat ?? 0) > 0) {
+      let areaLeft = 0;
+      for (let i = firstChild; i < entities.length; i++) {
+        const child = entities[i];
+        if (child.shardVariant && materialOf(child) === materialOf(entity)) areaLeft += child.size.x ** 2;
+      }
+      for (let i = firstChild; i < entities.length && areaLeft > 0; i++) {
+        const child = entities[i];
+        if (!child.shardVariant || materialOf(child) !== materialOf(entity)) continue;
+        const area = child.size.x ** 2;
+        this.energy.inheritHeat(entity, child, area / Math.max(area, areaLeft));
+        areaLeft = Math.max(0, areaLeft - area);
+      }
+    }
   }
 
   /**

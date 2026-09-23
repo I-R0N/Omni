@@ -31,7 +31,8 @@ export class EnergySystem {
     e.materialHeat = Math.min(L.maxHeat, safeEnergy(e.materialHeat ?? 0) + amount);
   }
   /** Carry heat into existing fragment spawning without discovering children
-   * by scanning the map. A fragment receives its area share of the heat. */
+   * by scanning the map. Fraction is relative to the material STILL in the
+   * parent, not its original area, so successive children exhaust its heat. */
   inheritHeat(parent: GameEntity, child: GameEntity, fraction: number): void {
     const state = this.heated.get(parent);
     if (!state || !Number.isFinite(fraction)) return;

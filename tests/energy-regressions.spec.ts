@@ -100,3 +100,66 @@ test('ordinary shots leave a nebula cloud available for the ship to disturb', as
   for (const r of result) expect(r).toEqual({ hp: true, cloudAlive: true, shotAlive: true, spawned: 0 });
   watch.assertClean();
 });
+
+test('heated tiles and their shards pass all heat to successive fragment generations', async ({ page }) => {
+  const watch = await boot(page); await startRun(page, 'POCKET'); await quietScene(page);
+  const result = await page.evaluate(() => {
+    const g = window.__omniEngine!; g.pauseGame();
+    const p: any = { id: 'heat-generations', type: 'STRUCTURE', shardVariant: 'glass-tile', active: true,
+      position: { x: 1000, y: 1000 }, velocity: { x: 0, y: 0 }, size: { x: 600, y: 600 }, rotation: 0,
+      mass: Infinity, health: 100, maxHealth: 100, color: '#80bbdd', crackSeed: 123,
+      polygonPoints: [{ x: -300, y: -300 }, { x: 300, y: -300 }, { x: 300, y: 300 }, { x: -300, y: 300 }] };
+    g.currentMap.entities.push(p);
+    g.energy.deliver(p, { type: 'thermal', magnitude: 20, position: p.position });
+    const initial = p.materialHeat;
+    const breakBody = (body: any) => {
+      const start = g.currentMap.entities.length; body.health = 0; g.handleEntityDeath(body);
+      return g.currentMap.entities.slice(start).filter((e: any) => e.shardVariant === 'glass-shard');
+    };
+    const first = breakBody(p);
+    const heat = (es: any[]) => es.reduce((sum, e) => sum + (e.materialHeat ?? 0), 0);
+    const child = first.reduce((a: any, b: any) => a.size.x > b.size.x ? a : b);
+    const childBefore = child.materialHeat, firstTotal = heat(first), parentLeft = p.materialHeat;
+    const second = breakBody(child);
+    const secondTotal = heat(second), allHot = [...first.filter((e: any) => e !== child), ...second].every((e: any) => e.materialHeat > 0);
+    const beforeCooling = second[0].materialHeat;
+    g.energy.update(0.1);
+    return { initial, firstTotal, parentLeft, childBefore, secondTotal, allHot,
+      firstCount: first.length, secondCount: second.length, cooled: second[0].materialHeat < beforeCooling };
+  });
+  expect(result.firstCount).toBeGreaterThan(1); expect(result.secondCount).toBeGreaterThan(1);
+  expect(result.firstTotal).toBeCloseTo(result.initial, 8); expect(result.parentLeft).toBeCloseTo(0, 8);
+  expect(result.secondTotal).toBeCloseTo(result.childBefore, 8);
+  expect(result.allHot).toBe(true); expect(result.cooled).toBe(true); watch.assertClean();
+});
+
+test('partial chips and legacy tile debris keep their share of heat', async ({ page }) => {
+  const watch = await boot(page); await startRun(page, 'POCKET'); await quietScene(page);
+  const result = await page.evaluate(() => {
+    const g = window.__omniEngine!; g.pauseGame();
+    const rect = (left: number, right: number) => [{ x: left, y: -20 }, { x: right, y: -20 }, { x: right, y: 20 }, { x: left, y: 20 }];
+    const make = (id: string): any => ({ id, type: 'STRUCTURE', shardVariant: 'glass-tile', active: true,
+      position: { x: 1000, y: 1000 }, velocity: { x: 0, y: 0 }, size: { x: 40, y: 40 }, rotation: 0,
+      mass: Infinity, health: 100, maxHealth: 100, color: '#80bbdd', crackSeed: 123, polygonPoints: rect(-20, 20) });
+    const parent = make('partial-heat');
+    g.energy.deliver(parent, { type: 'thermal', magnitude: 10, position: parent.position });
+    const chip = (left: number, right: number) => g.shards.spawnDetachedCell(parent,
+      { area: 400, centroid: { x: (left + right) / 2, y: 0 }, points: rect(left, right) }, 1600, g.currentMap.entities);
+    const a = chip(-20, -10); parent.polygonPoints = rect(-10, 20);
+    const b = chip(-10, 0); parent.polygonPoints = rect(0, 20);
+    const partial = { first: a.materialHeat, second: b.materialHeat, remainder: parent.materialHeat };
+    g.dbg.cycleFractureMode(); // the existing legacy A/B mode
+    try {
+      const legacy = make('legacy-heat');
+      g.energy.deliver(legacy, { type: 'thermal', magnitude: 10, position: legacy.position });
+      const start = g.currentMap.entities.length;
+      g.spawnDrops(legacy);
+      const pieces = g.currentMap.entities.slice(start).filter((e: any) => e.shardVariant === 'glass-shard');
+      return { partial, count: pieces.length, heat: pieces.reduce((sum: number, e: any) => sum + (e.materialHeat ?? 0), 0),
+        allHot: pieces.every((e: any) => e.materialHeat > 0) };
+    } finally { g.dbg.cycleFractureMode(); }
+  });
+  expect(result.partial).toEqual({ first: 10, second: 10, remainder: 20 });
+  expect(result.count).toBeGreaterThan(1); expect(result.heat).toBeCloseTo(40, 8); expect(result.allHot).toBe(true);
+  watch.assertClean();
+});
