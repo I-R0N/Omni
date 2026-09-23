@@ -1331,6 +1331,24 @@ function lightGradient(
     return g;
 }
 
+/** Heat uses the same cached, additive falloff as world lights. Drawn from
+ * the visible-entity pass so even cached tiles and legacy lighting retain
+ * readable heat, without allocating another light or querying occluders. */
+export function renderHeatGlow(
+    ctx: CanvasRenderingContext2D, x: number, y: number, size: number, heat: number,
+): void {
+    if (!Number.isFinite(heat) || heat <= 0.05 || !Number.isFinite(size) || size <= 0) return;
+    const intensity = Math.min(1, heat / 60);
+    const radius = Math.max(6, size * 1.15);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha *= intensity * 0.85;
+    ctx.fillStyle = lightGradient(ctx, radius, '255, 115, 35');
+    ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+    ctx.restore();
+}
+
 /** The falloff's value at `t` = distance / radius, as a FRACTION of the
  *  light's own peak — so it is 1 at the centre and 0 at the rim, whatever
  *  brightness is selected.  This is the same piecewise ramp the gradient's

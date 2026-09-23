@@ -16,7 +16,7 @@ export interface EnergyEvent {
 export interface FractureProfile { sites: number; bias: number; impulse: number }
 export const ENERGY_LIMITS = {
   maxHeat: 100, negligibleHeat: 0.05, maxHeated: 512,
-  heatPerEnergy: 4, cooling: 5, glassStress: 25, glassDelay: 0.35,
+  heatPerEnergy: 4, cooling: 2, glassStress: 25, glassDelay: 0.35,
   plasticRelease: 12, plasticHeatMultiplier: 2, plasticSeparationBase: 6, plasticSeparationPerHeat: 0.5, conductionRadius: 100, conductionTargets: 4,
   hops: 3, targets: 12, hopRadius: 150, totalRadius: 360, attenuation: 0.6,
 } as const;

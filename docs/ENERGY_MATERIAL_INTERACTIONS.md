@@ -43,7 +43,7 @@ release but preserves its existing fragment pattern. This is intentional.
 
 ## State and performance bounds
 
-- Heat uses internal game units, capped at 100, with linear cooling of 5 units/s.
+- Heat uses internal game units, capped at 100, with linear cooling of 2 units/s.
 - Only heated entities update, with at most 512 tracked bodies. At capacity new
   thermal state is rejected; there are no untracked permanently hot objects.
 - Negligible heat and dead bodies leave the active set; map/run changes clear it.
@@ -58,7 +58,8 @@ release but preserves its existing fragment pattern. This is intentional.
 - Queries use the existing toroidal static/dynamic grids and stop after 256
   in-range candidate visits. Selection follows spatial bucket order, avoiding
   global scans and full-list sorts. Dense local scenes may omit eligible targets.
-- Heat outlines are drawn during the existing visible-entity render pass. Sparks,
+- Soft additive heat glows share the lighting system's cached falloff gradients
+  and are drawn during the existing visible-entity render pass. Sparks,
   arcs, and the breathy nebula impact sound reuse the current feedback systems.
 
 Nebula retains the authored cloud breakup for both ship contact and energy
@@ -94,7 +95,7 @@ cooling/removal, delayed glass failure, heat conservation, softened boundaries,
 plastic bond release, capped conduction, electrical cycles/ranges/branching,
 projectile pooling, real Laser/Lightning contacts, fragment geometry and cloud
 dispersal. Runtime rendering was inspected: mechanical glass produced fourteen
-small scattered pieces versus four quieter thermal pieces; heat outlines and
+small scattered pieces versus four quieter thermal pieces; heat glows and
 metal arcs were visible.
 
 Existing fracture expectations now reflect coarser metal and finer glass. The
@@ -136,3 +137,9 @@ parity for fragment sizes, velocities, spin, fade, mass and cooldowns.
 Correction validation: 117 energy, cloud, deflection, weapon and fracture tests
 passed. After the final cloud-path cleanup, all 27 energy/cloud tests passed
 again. Type checking and the production builds used by these runs passed.
+
+Heat presentation follow-up: the orange outline is replaced by a soft glow,
+using the existing lighting gradient cache without another map scan or shadow
+query. Cooling is reduced from 5 to 2 units/s (2.5 times the heat lifetime).
+All 20 energy/contact tests, type checking and production build passed; the
+glow was visually inspected in the running game.

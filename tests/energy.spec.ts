@@ -44,8 +44,10 @@ test('heat accumulates, cools, and completely leaves active processing', () => {
   h.system.deliver(e, packet('thermal', 5));
   h.system.deliver(e, packet('thermal', 5));
   expect(e.materialHeat).toBe(40);
-  h.system.update(0.1); expect(e.materialHeat).toBe(39.5);
-  for (let i = 0; i < 100; i++) h.system.update(0.1);
+  h.system.update(0.1); expect(e.materialHeat).toBeCloseTo(39.8);
+  for (let i = 0; i < 99; i++) h.system.update(0.1);
+  expect(e.materialHeat).toBeCloseTo(20); // still hot after ten seconds
+  for (let i = 0; i < 101; i++) h.system.update(0.1);
   expect(e.materialHeat).toBeUndefined(); expect(h.system.activeHeatedCount).toBe(0);
 });
 
