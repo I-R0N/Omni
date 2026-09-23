@@ -4586,13 +4586,6 @@ export class GameEngine {
         break;
     }
 
-    // PENETRATION FALLOFF reaches the on-hit effects too, so every weapon is
-    // affected equally (user call): a bolt's fourth blast is as weakened as
-    // its fourth direct bite.  The factor is the one PhysicsSystem actually
-    // used for this hit — read, never re-derived, because the grain bore may
-    // have advanced `pierceHits` since.  1 when nothing pierced.
-    const hitFalloff = proj.hitFalloff ?? 1;
-
     // ENERGY PAYLOAD (energy modules): heat lands now; an electric
     // discharge (the charged bolt's chain) or a magnetic attractor is queued
     // for after the physics step, since both read the grids.
@@ -4668,9 +4661,9 @@ export class GameEngine {
       this.shipSlots[5] = 'scanner_mk5';       // every detection tier — touches the hull core
 
       // Weapon flower: two guns + the four mods around the center gun.
-      // Centre gun (0) touches every hex; the second gun (1) touches 0/2/6,
-      // so the explosive modifier at 6 arms BOTH and the thermal at 5 only
-      // the centre one (first in hex order wins per gun).
+      // Centre gun (0) touches every hex and takes the FIRST modifier in hex
+      // order (the thermal at 5); the second gun (1) touches 0/2/6 and so
+      // takes the explosive at 6 — a projector+thermal and a beam+explosive.
       this.weaponSlots[0] = 'dlv_projectile';
       this.weaponSlots[1] = 'dlv_beam';
       this.weaponSlots[2] = 'gunnery_mk3';

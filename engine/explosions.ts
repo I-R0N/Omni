@@ -208,7 +208,9 @@ export function updateExplosionRings(g: GameEngine) {
             // mechanical impulse AND a smaller thermal packet at the same
             // point.  The heat lands on everything the wave reaches — nebula
             // included, which answers by agitating rather than breaking.
-            if (dmg > 0) {
+            // Owned rings only: a detonation, not the shard→tile merge
+            // blow-back, which borrows the ring primitive for a shove.
+            if (dmg > 0 && ring.ownerType !== undefined) {
                 depositHeat(g, e, dmg * falloff * ENERGY_CONSTANTS.EXPLOSIVE_THERMAL_FRAC,
                             ring.position, ring.ownerType === EntityType.PLAYER);
             }

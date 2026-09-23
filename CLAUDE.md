@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  430 tests.  All run at
+                          whatever happened next).  447 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize

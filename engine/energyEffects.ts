@@ -205,8 +205,14 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
             markDamaged(e, 0.12);
         }
         if (text) g.spawnDamageText(e.position, d, e);
-        if (e.health <= 0) killBody(g, e, from, byPlayer, d);
-        else if (e.deathDispatched && e.mass === Infinity) { /* chip path killed it */ }
+        if (e.health <= 0) {
+            killBody(g, e, from, byPlayer, d);
+            // The chip path ends a body through `handleEntityDeath` alone,
+            // which neither drops a static tile from the grid nor retires the
+            // entity — both the ring and `killByFracture` do that themselves.
+            if (e.mass === Infinity && e.active) g.physics.removeStaticEntity(e);
+            e.active = false;
+        }
         return;
     }
     // Actors (enemies).  Like the old lightning chain and the blast ring, an
@@ -688,6 +694,7 @@ function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, 
     return { e: best, t: best ? bestT : range };
 }
 
+const _passed: GameEntity[] = [];
 function tickBeam(g: GameEngine, dt: number): void {
     const b = g.energy.beam;
     if (!b) return;
@@ -737,7 +744,7 @@ function tickBeam(g: GameEngine, dt: number): void {
         return;
     }
 
-    const passed: GameEntity[] = [];
+    const passed = _passed;
     const hit = raycast(g, ox, oy, ux, uy, range, c.beamWidth ?? 3, passed);
     const hx = ox + ux * hit.t, hy = oy + uy * hit.t;
     b.x1 = hx; b.y1 = hy; b.hit = hit.e !== null;
