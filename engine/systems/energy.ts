@@ -438,8 +438,8 @@ const FRACTURE_BASE: Readonly<Record<SolidMaterial, Record<'mechanical' | 'therm
   rock:    { mechanical: { siteScale: 0.9, bias: 0.6, impulse: 1.15 },
              thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
   // Metal: few, large, heavy, slow — whatever broke it.
-  metal:   { mechanical: { siteScale: 0.7, bias: 0.3, impulse: 0.55 },
-             thermal:    { siteScale: 0.5, bias: 0.1, impulse: 0.35 } },
+  metal:   { mechanical: { siteScale: 0.4, bias: 0.3, impulse: 0.4 },
+             thermal:    { siteScale: 0.35, bias: 0.1, impulse: 0.25 } },
   // Plastic: gives rather than shatters.
   plastic: { mechanical: { siteScale: 0.9, bias: 0.4, impulse: 0.7 },
              thermal:    { siteScale: 0.6, bias: 0.1, impulse: 0.3 } },

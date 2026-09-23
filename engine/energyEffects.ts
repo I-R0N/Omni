@@ -51,6 +51,7 @@ interface BeamState {
     config: WeaponConfig;
     time: number;       // seconds left
     acc: number;        // time since last tick
+    angle: number;      // aim, fixed at the trigger pull (a pulse goes where it was fired)
     // Drawn this frame (renderer reads).
     x0: number; y0: number; x1: number; y1: number; hit: boolean;
 }
@@ -281,7 +282,7 @@ function applyHeatThresholds(g: GameEngine, e: GameEntity): void {
  *  same cloud path a ship flying through it takes, never the solid one. */
 function agitateNebula(g: GameEngine, e: GameEntity, heat: number, dt: number): void {
     if (e.mass !== Infinity) {
-        const k = 2.2 * Math.min(heat, 1.5) * dt * 60 * 0.05;
+        const k = 0.4 * Math.min(heat, 1.5) * dt * 60;
         const a = Math.random() * Math.PI * 2;
         e.velocity.x += Math.cos(a) * k;
         e.velocity.y += Math.sin(a) * k;
@@ -547,7 +548,7 @@ export function applyProjectilePayload(g: GameEngine, impactPos: Vector2, proj: 
 export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, target: Vector2): void {
     const aim = Math.atan2(wrapDeltaY(player.position.y, target.y), wrapDeltaX(player.position.x, target.x));
     if (c.delivery === 'beam') {
-        g.energy.beam = { config: c, time: c.beamDuration ?? 0.3, acc: c.beamTick ?? 0.05,
+        g.energy.beam = { config: c, time: c.beamDuration ?? 0.3, acc: c.beamTick ?? 0.05, angle: aim,
                           x0: player.position.x, y0: player.position.y,
                           x1: player.position.x, y1: player.position.y, hit: false };
         return;
@@ -695,7 +696,7 @@ function tickBeam(g: GameEngine, dt: number): void {
     b.time -= dt;
     if (b.time <= 0) { g.energy.beam = null; return; }
     const c = b.config;
-    const ang = p.rotation;
+    const ang = b.angle;
     const ux = Math.cos(ang), uy = Math.sin(ang);
     const muzzle = Math.max(p.size.x, p.size.y) * 0.6;
     const ox = p.position.x + ux * muzzle, oy = p.position.y + uy * muzzle;

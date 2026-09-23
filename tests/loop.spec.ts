@@ -57,10 +57,10 @@ test.describe('the run', () => {
     expect(start.wavesEnabled).toBeFalsy();
 
     const leanWeapons = await engine(page, e => ({
-      guns: e.weaponSlots.filter((s: string | null) => s && s.startsWith('wpn_')),
+      guns: e.weaponSlots.filter((s: string | null) => s && s.startsWith('dlv_')),
       equipped: e.equippedWeapons.filter((w: unknown) => w !== null).length,
     }));
-    expect(leanWeapons.guns).toEqual(['wpn_blaster']);
+    expect(leanWeapons.guns).toEqual(['dlv_projectile']);
     expect(leanWeapons.equipped).toBe(1);
 
     // ── 2. EARN ──────────────────────────────────────────────────────────
@@ -85,18 +85,18 @@ test.describe('the run', () => {
     // ── 4. BUY ───────────────────────────────────────────────────────────
     const buy = await engine(page, e => {
       const before = e.credits;
-      const ok = e.purchaseModule('hull_mk2') && e.purchaseModule('wpn_shotgun');
+      const ok = e.purchaseModule('hull_mk2') && e.purchaseModule('dlv_spread');
       return { ok, spent: before - e.credits, inv: e.inventory.filter((i: string | null) => i !== null) };
     });
     expect(buy.ok).toBe(true);
     expect(buy.spent).toBeGreaterThan(0);
-    expect(buy.inv).toEqual(['hull_mk2', 'wpn_shotgun']);
+    expect(buy.inv).toEqual(['hull_mk2', 'dlv_spread']);
 
     // ── 5. OUTFIT ────────────────────────────────────────────────────────
     const outfit = await engine(page, e => {
       const hp0 = e.player.maxHealth;
       e.moveModule({ area: 'inventory', idx: e.inventory.indexOf('hull_mk2') }, { area: 'ship', idx: 1 });
-      e.moveModule({ area: 'inventory', idx: e.inventory.indexOf('wpn_shotgun') }, { area: 'weapon', idx: 2 });
+      e.moveModule({ area: 'inventory', idx: e.inventory.indexOf('dlv_spread') }, { area: 'weapon', idx: 2 });
       const snap = e.outfittingSnapshot();
       return {
         hp0, hp1: e.player.maxHealth,

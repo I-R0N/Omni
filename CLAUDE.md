@@ -67,7 +67,9 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           roll / shipsprites /
                           shardblend, fracture, bubbles (the Phase-A
                           aggro timeout + the immovability fix, and
-                          the mouth-size / bite eating rules) and
+                          the mouth-size / bite eating rules), energy
+                          (the delivery × energy module table and the
+                          energy/material pipeline) and
                           mass (the impact density scale, the 10x
                           MASS_SCALE unit change and the hull-density
                           ladder),
@@ -122,7 +124,16 @@ engine/
   explosions.ts           Shockwaves, the expanding AoE ring, and the
                           direct player-blast path (the player is not in
                           `currentMap.entities`, so the ring can never
-                          reach it — see §8)
+                          reach it — see §8).  Every damaging ring is
+                          capped at 64 bodies and also deposits the
+                          EXPLOSIVE composite's heat (see §8, energy)
+  energyEffects.ts        ENERGY MODULES, the side-effect half: the
+                          bounded heated set (cooling, burn latch, glass
+                          thermal failure, plastic bond release, metal
+                          conduction, nebula agitation), bounded electric
+                          discharge, capped magnetic pulses + attractors,
+                          beams, radial pulses, instant cones, and the
+                          single `damageBody` entry point.  See §8
   outfitting.ts           Hex-slot machinery: the adjacency fixpoint,
                           the fold into player stats, the derived gun
                           loadout, tile move/swap, pricing,
@@ -244,6 +255,8 @@ engine/
                           joystick, fitFontPx
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
+      energyFx.ts         Energy feedback: heat glow over the heated set,
+                          the energised-nebula rim, the live beam line
       shardBlend.ts   The bonded-pair "goo" layer: one metaball
                       connector per live cohesion bond, filled
                       UNDER both hulls so a stuck pair reads as
@@ -258,9 +271,18 @@ engine/
                           detection, arc-shield slew
     ParticleSystem.ts     Pooled particle FX
     TrailSystem.ts        Generic trail point management
-    ProjectileSystem.ts   Projectile lifetime, homing, lightning gravity,
-                          bouncer, pierce
-    WeaponSystem.ts       Fire-rate, burst queues, projectile spawning
+    ProjectileSystem.ts   Projectile lifetime, homing (incl. preference
+                          targets), lightning gravity, pierce
+    WeaponSystem.ts       Fire-rate, the generic charged variant,
+                          Gunnery fold, dispatch by DELIVERY (rounds →
+                          ProjectileSystem, beam/radial/instant cone →
+                          `onInstantFire`, the energy layer)
+    energy.ts             ENERGY MODULES, the PURE half: delivery / energy
+                          / material vocabulary, the legacy weapon-id map,
+                          MATERIAL_RESPONSE, heat arithmetic, the bounded
+                          chain planner, magnetic falloff, fracture
+                          profiles, explosive packets.  Published as
+                          `window.__omniEnergy`
     DropSystem.ts         Salvage + health drop spawn / collection
     WaveSystem.ts         Completion-wave spawn scheduler + grace
                           timer + spawn geometry.  A wave ends only when
@@ -1368,7 +1390,32 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   per-hit hit-stun below `stunDamage` and takes a scaled-down knockback, so
   chip fire can neither lock a boss up nor shove it off its line; a plain
   archetype field, NOT a boss branch).
-- `WEAPONS`, `WEAPON_LIST`.  **A HEAVY SHELL IS NOT A CONTACT MINE** (user
+- `WEAPONS` / `weaponConfig()` / `nominalDps()` / `LEGACY_BASE_WEAPON` /
+  `ENERGY_COLORS` / `WEAPON_LIST` (= the deliveries) / `WEAPON_TRIGGERS`
+  (keyed on DELIVERY).  **WEAPONS ARE MODULES** (energy modules): a gun
+  module IS a DELIVERY (`dlv_projectile` / `dlv_beam` / `dlv_spread` /
+  `dlv_homing` / `dlv_radial`), and an ENERGY MODIFIER module (`nrg_kinetic`
+  / `nrg_electric` / `nrg_thermal` / `nrg_magnetic` / `nrg_explosive`,
+  family `'energy'`, requires a gun) touching it in the weapon flower
+  decides what it fires — per GUN, unlike Gunnery/Autoloader (a modifier
+  touching two guns modifies both; a gun touching several takes the first
+  in hex order, `outfitting.energyForGunSlot`).  A weapon's identity is a
+  `WeaponKey` string (`'projectile'`, `'beam+thermal'`); `WEAPONS` holds all
+  30 keys, precomputed from `DELIVERY_BASE` + `COMBOS`.  UNMODIFIED
+  deliveries are the weak base: plain kinetic at ~60% of the retired
+  Blaster's 28.6 dmg/s (all five sit at 16.7).  The OLD roster maps onto
+  the combinations it already was (`LEGACY_WEAPON_MAP` in energy.ts:
+  BLASTER→projectile, BURST→projectile+kinetic, SHOTGUN→spread+kinetic,
+  BOUNCER→beam+thermal, LIGHTNING→projectile+electric,
+  HOMING→homing+kinetic, CANNON→projectile+explosive, and the `wpn_*`
+  catalog ids likewise) and those combinations inherit the old gun's
+  tuning, so `weaponConfig('CANNON')` IS the old Cannon.  Old ids resolve
+  anywhere a key is read (`currentWeapon`, `debugGrantWeapon`); unknown
+  ids fail safe to the bare projector.  The ricochet (bouncer) primitive
+  and the enum-keyed lightning chain are GONE; the charged bolt's chain is
+  the energy layer's bounded discharge.  The rest of this entry describes
+  the projectile rules every round-firing combination still lives by.
+  **A HEAVY SHELL IS NOT A CONTACT MINE** (user
   call, unified impact physics step 5a).  `WeaponConfig.detonateOn`
   (`'impact'` | `'enemy'`) says what trips an AoE charge and `fuseSeconds`
   is its fallback; the Plasma Cannon is `'enemy'` + 0.42 s.  It was always
@@ -3802,6 +3849,52 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   budget that ignored the parent entirely, to 6-8 cells that tile the
   parent's own polygon (child area / parent area 0.85..1.05), with body
   sizes spanning 4.99..20.2 — a 4× range.
+- **ENERGY MODULES: DELIVERY + ENERGY → MATERIAL** (`engine/systems/energy.ts`
+  pure, `engine/energyEffects.ts` side effects).  A packet's magnitude is
+  DAMAGE-EQUIVALENT (one unit = `IMPACT_ENERGY_PER_DAMAGE`); heat is
+  NORMALISED per material (1 = critical).  `MATERIAL_RESPONSE` holds the
+  coefficients; BEHAVIOUR lives in the paths that read them.  Rules to keep:
+  - **KINETIC IS THE EXISTING MODEL**, untouched.  The one thing the other
+    domains put on it is `mechanicalScale(material, heat)`: HEAT LOWERS THE
+    THRESHOLD.  In the projectile path it scales what the BODY takes (never
+    what the bolt is charged), and in the grain bore each grain costs the
+    bolt the cold price while breaking `heatScale`× the boundary — so heated
+    metal/rock breaks far more easily with no combo bookkeeping.
+  - **HEAT lives only on bodies that have some**: one bounded active set
+    (`EnergyState.heated`, ≤ `MAX_HEATED`), cooled every step, slow effects
+    every 0.2 s, and a body LEAVES it the moment it is cold (heat snaps to 0
+    below `HEAT_EPSILON`).  Glass FAILS at heat 1 under the THERMAL fracture
+    profile; plastic RELEASES its cohesion bonds (`ShardSystem.releaseBondsOf`
+    — the existing physics pulls the goo apart); metal CONDUCTS to ≤3 cooler
+    metal neighbours on a cadence; nebula is AGITATED (and a tile at full
+    heat disperses through the ordinary nebula break-up).
+  - **ELECTRIC is instantaneous and planned by `planChain`** under hop /
+    target / origin-radius / hop-range caps, per-hop attenuation and a
+    visited set — no recursion, cycles cannot recur.  Candidates are
+    conductivity-weighted; a body below `CHAIN_MIN_CONDUCTIVITY` (glass,
+    plastic, rock) is a TERMINAL.  Nebula is ENERGISED (`energizedUntil`)
+    rather than damaged, and only an energised cloud answers to a magnet.
+  - **MAGNETIC does no damage itself**: a capped radius pulse (≤ 40 bodies,
+    ≤ `MAG_MAX_DV` each) on metal (+ energised nebula).  What it does comes
+    from the force: slams go through the ordinary collision/crash energy, and
+    a LOOSE (≤ 60% health) static metal tile has a grain dragged free through
+    `chipStructureAt`.
+  - **EXPLOSIVE is a composite, not a column**: every damaging ring also
+    deposits `EXPLOSIVE_THERMAL_FRAC` of its hit as heat.
+  - **FRACTURE PROFILES drive the existing Voronoi through three existing
+    knobs**: `siteScale` (the pattern's site count, applied after the
+    material clamp, bounded to [2, 1.5×max]), `bias` (impact bias) and
+    `impulse` (the shatter's radial + forward scatter).  Stamped on every
+    energy event (`stampFractureProfile`); site scale/bias only matter at
+    FIRST decomposition, impulse at the break.  NEBULA HAS NO PROFILE.
+  - **Anything that reads a grid is QUEUED out of the collision step**: a
+    projectile's electric/magnetic payload is resolved in `tickEnergy`
+    after physics, because the dynamic grid is only safe between substeps.
+    Every query is a grid radius walk with a hard cap; `nearestK` makes an
+    overflowing cap drop the FAR bodies.
+  - **Beams** are timed pulses (one per trigger pull — there is no hold-to-
+    fire), aimed at the pull, ticking a capped raycast; an electric beam
+    arcs to the nearest conductor in a forward cone or fizzles.
 - **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
   the sharpest consequence of the bullet above — and the rule was drawn ONE
   VARIANT TOO WIDE at first, which is the part worth keeping.  Measured, the

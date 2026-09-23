@@ -354,8 +354,11 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
       // The densest round in the roster against a mid-weight one.  Same
       // damage path, different banks — and the bank is the only thing that
       // can separate their decay.
-      const beam = await walk('BOUNCER');
-      const burst = await walk('BURST');
+      // (Energy modules: the old Laser is a raycast beam now, so the dense
+      //  round here is the kinetic SLUG, three bites, against the SHOTGUN
+      //  pellet's two.)
+      const beam = await walk('projectile+kinetic');
+      const burst = await walk('spread+kinetic');
       // The authored SOLVE (5 bites / 3 bites), times MASS_SCALE, over the
       // base-bank divisor — three factors now, so both are read live rather
       // than written as one product that silently means the wrong thing the
@@ -365,11 +368,11 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
         return { scale: M.MASS_SCALE, divisor: M.BASE_BANK_DIVISOR };
       });
       expect(bankInBites(beam.damage, beam.speed, beam.mass),
-        'the Laser launches with the solve\'s five bites, scaled and re-based')
-        .toBeCloseTo(5 * k.scale / k.divisor, 2);
-      expect(bankInBites(burst.damage, burst.speed, burst.mass),
-        'the Burst Rifle with three, likewise')
+        'the slug launches with its three-bite solve, scaled and re-based')
         .toBeCloseTo(3 * k.scale / k.divisor, 2);
+      expect(bankInBites(burst.damage, burst.speed, burst.mass),
+        'the shotgun pellet with two, likewise')
+        .toBeCloseTo(2 * k.scale / k.divisor, 2);
 
       const beamDecay = beam.bites[1] / beam.bites[0];
       const burstDecay = burst.bites[1] / burst.bites[0];
@@ -381,8 +384,8 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
       // The CLAIM is untouched and is the line below: the rate comes out of
       // the round's OWN mass, so the two weapons differ — which is exactly
       // what the retired global `PIERCE_FALLOFF_RATE` could not say.
-      const beamBites = 5 * k.scale / k.divisor;
-      const burstBites = 3 * k.scale / k.divisor;
+      const beamBites = 3 * k.scale / k.divisor;
+      const burstBites = 2 * k.scale / k.divisor;
       expect(beamDecay, 'the beam gave up one bite out of its own bank')
         .toBeCloseTo((beamBites - 1) / beamBites, 4);
       expect(burstDecay, 'and the burst round one out of its smaller one')
@@ -734,85 +737,10 @@ test.describe('how far a round gets is what it can afford', () => {
       watch.assertClean();
     });
 
-  test('a ricochet may re-hit what it already struck; sustained contact may not',
-    async ({ page }) => {
-      const watch = await boot(page);
-      await quietField(page);
-      const r = await engine(page, (e, a: any) => {
-        const ctx = e.waveContext();
-        const foe = e.waves.spawnAt('RAMMER_1',
-          { x: e.player.position.x + 300, y: e.player.position.y }, ctx, false);
-        foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6;
-        const tile = e.currentMap.entities.find((x: any) => x.active
-          && x.shardVariant === 'glass-tile' && x.mass === Infinity);
-
-        const beam = () => ({
-          id: 'beam_' + Math.random(), type: 'PROJECTILE',
-          position: { x: foe.position.x, y: foe.position.y },
-          velocity: { x: a.speed, y: 0 }, rotation: 0,
-          size: { x: 6, y: 6 }, mass: a.mass, active: true, color: '#fff',
-          damage: 5, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-          pierceHits: 0, isBouncer: true, bouncesRemaining: 3,
-        } as any);
-        const strike = (p: any) => {
-          const before = foe.health;
-          e.physics.resolveCollision(p, foe, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-          return before - foe.health;
-        };
-
-        // (a) SUSTAINED overlap — the same beam meeting the same body again
-        // with nothing in between.
-        const held = beam();
-        strike(held);
-        const afterFirst = Math.hypot(held.velocity.x, held.velocity.y);
-        strike(held);
-        const sustained = { alive: held.active === true, steps: held.pierceHits,
-                            kept: Math.hypot(held.velocity.x, held.velocity.y) / afterFirst };
-
-        // (b) The same two contacts with a REFLECTION between them.
-        const bounced = beam();
-        strike(bounced);
-        bounced.position.x = tile.position.x - tile.size.x * 0.5 - 2;
-        bounced.position.y = tile.position.y;
-        e.physics.resolveCollision(bounced, tile, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-        const reflected = { vx: bounced.velocity.x, ids: bounced.hitEntityIds.length,
-                            bounces: bounced.bouncesRemaining };
-        const secondBite = strike(bounced);
-
-        // Snapshot BEFORE tidying the scene up — reading `active` after
-        // clearing it is how a passing test lies.
-        const after = { alive: bounced.active === true, steps: bounced.pierceHits };
-        foe.active = false; bounced.active = false;
-        return { sustained, reflected, secondBite, after };
-      }, { speed: 900, mass: massForBank(5, 900, 5) });
-
-      // The reflection happened, and it emptied the struck-ID list — which is
-      // where the re-hit is bought, NOT by weakening the `alreadyHit` guard
-      // (that guard is what stops a beam in sustained overlap grinding a body
-      // at 120Hz, and it is still doing that job below).
-      expect(r.reflected.vx, 'the beam turned around').toBeLessThan(0);
-      expect(r.reflected.bounces).toBe(2);
-      expect(r.reflected.ids, 'a bounce clears what it has struck').toBe(0);
-
-      // (a) Held against the body, the beam does NOT carry on: it stops on
-      // the re-contact and is charged nothing for it.
-      expect(r.sustained.alive, 'sustained contact ends the beam').toBe(false);
-      expect(r.sustained.steps, 'and buys it no further step of the curve').toBe(1);
-      expect(r.sustained.kept, 'nor does the re-contact cost it energy')
-        .toBeCloseTo(1, 9);
-
-      // (b) After a bounce the same beam strikes the same body again and
-      // survives to keep going.
-      expect(r.after.alive, 'a returning beam carries on').toBe(true);
-      expect(r.after.steps, 'and its second damage event is its second step').toBe(2);
-      expect(r.secondBite, 'at the derived curve\'s next entry')
-        .toBeCloseTo(biteAt(5, 5, 1), 6);
-      // ENERGY IS A LIFETIME BANK: bounces buy COVERAGE, not extra damage.
-      // A beam that turns around still lands only what it can afford.
-      expect(r.secondBite, 'the bounce did not refill the bank').toBeLessThan(5);
-
-      watch.assertClean();
-    });
+  // (The ricochet test lived here.  The ricochet was the retired Laser's
+  //  tile-bounce primitive; the Laser became the thermal BEAM (a raycast
+  //  pulse, energy modules) and nothing in the roster bounces any more, so
+  //  the primitive and its test were removed together.)
 });
 
 /** THE BASE BANK, AND THE BLAST THAT IS NOW DERIVED FROM IT.
@@ -914,7 +842,10 @@ test.describe('the base bank, and the blast derived from it', () => {
         return out;
       };
       const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
-      const types = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
+      // Every combination that fires ROUNDS (a beam or a radial pulse has no
+      // bank to scale).  The legacy-tuned ones are the old roster.
+      const types = ['projectile', 'projectile+kinetic', 'spread+kinetic', 'projectile+electric',
+                     'homing+kinetic', 'projectile+explosive', 'spread', 'homing'];
       return types.map(t => ({ type: t, base: fire(t, 1), gunned: fire(t, g3), g3 }));
     });
 
@@ -960,9 +891,9 @@ test.describe('the base bank, and the blast derived from it', () => {
         };
         const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
         return {
-          authored: M.WEAPONS.CANNON.explosionDamage ?? null,
-          authoredRadius: M.WEAPONS.CANNON.explosionRadius ?? null,
-          bite: M.WEAPONS.CANNON.damage,
+          authored: M.WEAPONS['projectile+explosive'].explosionDamage ?? null,
+          authoredRadius: M.WEAPONS['projectile+explosive'].explosionRadius ?? null,
+          bite: M.WEAPONS['projectile+explosive'].damage,
           base: fire(1), gunned: fire(g3), g3,
           coupling: M.BLAST_ENERGY_COUPLING,
           perDamage: M.IMPACT_ENERGY_PER_DAMAGE,
@@ -1047,15 +978,16 @@ test.describe('the base bank, and the blast derived from it', () => {
           return mass;
         };
         return {
-          blasterBase: fire('BLASTER', false), blasterCharged: fire('BLASTER', true),
-          homingBase: fire('HOMING', false), homingCharged: fire('HOMING', true),
+          blasterBase: fire('projectile', false), blasterCharged: fire('projectile', true),
+          homingBase: fire('homing+kinetic', false), homingCharged: fire('homing+kinetic', true),
         };
       });
 
-      // The authored multipliers are 20 (Blaster) and 2 (Seeker).  Scaled
-      // twice they would read 200 and 20 — which is what shipped.
-      expect(r.blasterCharged! / r.blasterBase!, 'a charged Blaster is 20x, not 200x')
-        .toBeCloseTo(20, 6);
+      // The authored multipliers are 6 (a charged round, energy modules'
+      // generic projectile charge) and 2 (a charged seeker).  Scaled twice
+      // they would read 60 and 20.
+      expect(r.blasterCharged! / r.blasterBase!, 'a charged round is 6x, not 60x')
+        .toBeCloseTo(6, 6);
       expect(r.homingCharged! / r.homingBase!, 'a charged Seeker is 2x, not 20x')
         .toBeCloseTo(2, 6);
 

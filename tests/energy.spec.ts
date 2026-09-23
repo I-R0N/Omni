@@ -312,31 +312,37 @@ test.describe('the weapons, fired into the world', () => {
   test('HEAT: a thermal beam makes glass FAIL under the thermal profile', async ({ page }) => {
     const watch = await boot(page);
     await onMap(page, 'GLASS_FIELD');
-    const r = await engine(page, e => {
+    // Whatever pane the beam FIRST touches is the one under test — in a
+    // cluster that is not necessarily the one aimed at.
+    const fire = () => engine(page, e => {
+      const p = e.player;
+      const aim = (window as any).__aim;
+      p.currentWeapon = 'beam+thermal'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, aim, undefined, false);
+    });
+    await engine(page, e => {
       const p = e.player;
       const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile' && x.mass === Infinity);
       p.position.x = t.position.x - 120; p.position.y = t.position.y;
-      p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
-      e.player.overchargeUnlocked = false;
-      (window as any).__glassT = t;
-      return { id: t.id };
+      p.velocity.x = 0; p.velocity.y = 0;
+      (window as any).__aim = { x: t.position.x, y: t.position.y };
     });
-    // Fire the Heat Lance repeatedly and let each pulse run.
+    await fire();
+    await page.waitForTimeout(200);
+    const id = await engine(page, e => {
+      const hit = e.currentMap.entities.find((x: any) => x.id === e.energy.lastBeamHitId);
+      (window as any).__glassT = hit;
+      return hit ? hit.shardVariant : null;
+    });
+    expect(id).toBe('glass-tile');
     for (let i = 0; i < 8; i++) {
-      const done = await engine(page, e => {
-        const p = e.player, t = (window as any).__glassT;
-        if (!t.active) return true;
-        p.rotation = Math.atan2(t.position.y - p.position.y, t.position.x - p.position.x);
-        p.currentWeapon = 'beam+thermal'; p.weaponCooldown = 0;
-        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
-        return false;
-      });
-      if (done) break;
       await page.waitForTimeout(450);
+      if (!(await engine(page, e => (window as any).__glassT.active))) break;
+      await fire();
     }
     const out = await engine(page, e => {
       const t = (window as any).__glassT;
-      return { active: t.active, profile: t.fractureProfile, heat: t.heat };
+      return { active: t.active, profile: t.fractureProfile };
     });
     expect(out.active).toBe(false);
     // It went under the THERMAL profile: few, large, quiet pieces.
@@ -514,14 +520,17 @@ test.describe('the weapons, fired into the world', () => {
     const r = await engine(page, e => {
       const start = e.player.currentWeapon;
       e.debugGrantWeapon('beam+thermal');
-      const combo = e.player.currentWeapon;
-      e.debugGrantWeapon('CANNON');
-      const legacy = e.player.currentWeapon;
-      return { start, combo, legacy, equipped: [...e.equippedWeapons] };
+      const afterBeam = [...e.equippedWeapons];
+      e.debugGrantWeapon('CANNON');   // an OLD id: the projector gets the explosive modifier
+      const afterCannon = [...e.equippedWeapons];
+      return { start, afterBeam, afterCannon, current: e.player.currentWeapon };
     });
     expect(r.start).toBe('projectile');
-    expect(r.combo).toBe('beam+thermal');
-    expect(r.legacy).toBe('projectile+explosive');
+    expect(r.afterBeam).toContain('beam+thermal');
+    expect(r.afterBeam).toContain('projectile');    // the modifier did NOT bleed onto the other gun
+    expect(r.afterCannon).toContain('projectile+explosive');
+    expect(r.afterCannon).toContain('beam+thermal');
+    expect(r.current).toBe('projectile+explosive');  // still firing the same gun, now modified
     watch.assertClean();
   });
 });

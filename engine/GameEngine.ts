@@ -43,13 +43,13 @@ import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentD
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
-import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, acquireHomingTargets } from './energyEffects';
+import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, acquireHomingTargets, depositHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
 import { ShockwaveOpts, spawnShockwave as emitShockwave, updateExplosionRings, applyExplosionAoE,
          applyBlastToPlayer, applyKamikazeBlastToPlayer } from './explosions';
-import { computeActiveSlots, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
+import { computeActiveSlots, energyForGunSlot, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
          firstFreeSlotFor, areaSlots, resaleValue, statBreakdown,
          moveModuleInternal as moveModuleTiles, modulePrice as catalogPrice,
          outfittingSnapshot as buildOutfittingSnapshot } from './outfitting';
@@ -5221,63 +5221,71 @@ export class GameEngine {
       // OLD id ('CANNON', 'wpn_cannon') — resolved through the legacy map.
       const parsed = parseWeaponKey(resolveWeaponKey(id));
       if (!parsed) return;
-      const mDef = MODULE_DEFS.find(m => m.weapon === parsed.delivery);
-      if (!mDef) return;
-      let slot = this.weaponSlots.indexOf(mDef.id);
-      if (slot === -1) {
-          const gunSlots = this.weaponSlots
-              .map((s, i) => ({ s, i }))
-              .filter(e => e.s !== null && moduleDef(e.s)?.kind === 'weapon');
-          if (gunSlots.length < MAX_INSTALLED_GUNS) {
-              slot = this.weaponSlots.indexOf(null);
-              if (slot === -1) slot = gunSlots.length > 0 ? gunSlots[gunSlots.length - 1].i : 0;
-          } else {
-              // At the gun limit — replace the mounted gun the ACTIVE weapon is
-              // not, so the weapon under test doesn't yank the one being fired.
-              const victim = gunSlots.find(e => parseWeaponKey(this.player.currentWeapon)?.delivery
-                  !== moduleDef(e.s!)?.weapon) ?? gunSlots[0];
-              slot = victim.i;
+      const want = MODULE_DEFS.find(m => m.weapon === parsed.delivery);
+      const wantE = parsed.energy ? MODULE_DEFS.find(m => m.effect?.energy === parsed.energy) : undefined;
+      if (!want) return;
+      const prevDelivery = parseWeaponKey(this.player.currentWeapon)?.delivery;
+
+      // Take the flower apart: guns (with the modifier each one touches) and
+      // everything else.  A DBG grant then lays it out DETERMINISTICALLY so a
+      // modifier touches only the gun it is for — the granted gun on hex 1
+      // with its modifier on 2, the kept gun on 4 with its modifier on 5, and
+      // the shared mods on 0 / 3 / 6, where they touch a gun.  (In play the
+      // player arranges the flower; the adjacency rule is the same.)
+      const active = new Array(MODULE_SLOT_COUNT).fill(false);
+      computeActiveSlots(this, this.weaponSlots, active);
+      const guns: { gun: string; energy: string | null }[] = [];
+      const rest: string[] = [];
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const sid = this.weaponSlots[i];
+          const d = sid !== null ? moduleDef(sid) : undefined;
+          if (sid === null || !d) continue;
+          if (d.kind === 'weapon') {
+              const e = energyForGunSlot(this.weaponSlots, active, i);
+              guns.push({ gun: sid, energy: e ? MODULE_DEFS.find(m => m.effect?.energy === e)!.id : null });
+          } else if (d.family !== 'energy') {
+              rest.push(sid);
           }
-          this.stowToInventory(slot);
-          this.weaponSlots[slot] = mDef.id;
       }
-      // The MODIFIER: clear every energy module touching this gun, then put
-      // the requested one on a free (or non-gun) neighbour hex.
-      for (const n of HEX_ADJACENCY[slot]) {
-          const nid = this.weaponSlots[n];
-          if (nid !== null && moduleDef(nid)?.family === 'energy') this.stowToInventory(n);
+      // The gun kept beside the granted one: the active weapon's, if it is a
+      // different delivery; else any other.
+      const others = guns.filter(g => moduleDef(g.gun)?.weapon !== parsed.delivery);
+      const kept = others.find(g => moduleDef(g.gun)?.weapon === prevDelivery) ?? others[0];
+      // Everything leaving the flower goes to the inventory (DBG: dropped if full).
+      const stow = (mid: string | null) => {
+          if (!mid) return;
+          const inv = this.inventory.indexOf(null);
+          if (inv !== -1) this.inventory[inv] = mid;
+      };
+      for (const g of guns) {
+          if (g !== kept && moduleDef(g.gun)?.weapon !== parsed.delivery) stow(g.gun);
+          if (g !== kept && g.energy && g.energy !== wantE?.id) stow(g.energy);
       }
-      if (parsed.energy) {
-          const eDef = MODULE_DEFS.find(m => m.effect?.energy === parsed.energy)!;
-          const nbrs = HEX_ADJACENCY[slot];
-          let at = nbrs.find(n => this.weaponSlots[n] === null);
-          if (at === undefined) at = nbrs.find(n => moduleDef(this.weaponSlots[n] ?? '')?.kind !== 'weapon');
-          if (at !== undefined) { this.stowToInventory(at); this.weaponSlots[at] = eDef.id; }
+      this.weaponSlots.fill(null);
+      this.weaponSlotsUnlocked = Math.max(this.weaponSlotsUnlocked, MODULE_SLOT_COUNT);
+      this.weaponSlots[1] = want.id;
+      if (wantE) this.weaponSlots[2] = wantE.id;
+      if (kept) {
+          this.weaponSlots[4] = kept.gun;
+          if (kept.energy) this.weaponSlots[5] = kept.energy;
+      }
+      const free = [0, 3, 6];
+      for (const mid of rest) {
+          const at = free.shift();
+          if (at === undefined) { stow(mid); continue; }
+          this.weaponSlots[at] = mid;
       }
       syncLoadoutFromSlots(this);
-      const key = this.weaponKeyForSlot(slot);
-      if (key) this.player.currentWeapon = key;
+      // Keep firing what was being fired (its key may have changed if its
+      // modifier did); the grant does not grab the trigger.
+      const keep = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === prevDelivery);
+      if (keep) this.player.currentWeapon = keep;
   }
 
-  /** Move a weapon hex's module to the inventory if there is room (DBG). */
-  private stowToInventory(slot: number) {
-      const displaced = this.weaponSlots[slot];
-      if (displaced === null) return;
-      const inv = this.inventory.indexOf(null);
-      if (inv !== -1) this.inventory[inv] = displaced;
-      this.weaponSlots[slot] = null;
-  }
-
-  /** The loadout key the gun at weapon hex `slot` currently fires. */
-  private weaponKeyForSlot(slot: number): string | null {
-      let n = 0;
-      for (let i = 0; i < this.weaponSlots.length; i++) {
-          const d = moduleDef(this.weaponSlots[i] ?? '');
-          if (d?.weapon === undefined) continue;
-          if (i === slot) return this.equippedWeapons[n] ?? null;
-          n++;
-      }
-      return null;
+  /** DBG / test seam: put a THERMAL packet into a body through the real
+   *  energy path (the same call every thermal weapon makes). */
+  public debugHeat(target: GameEntity, magnitude: number) {
+      depositHeat(this, target, magnitude, null, true);
   }
 
   /** Weapon catalog for the pause-menu DEBUG weapons rows (built only

@@ -178,7 +178,7 @@ test.describe('the Penetration module is gone', () => {
       await grant(page, 'gunnery_mk3');
       expect(await engine(page, e => e.player.damageMult), 'connected: Mk III').toBeCloseTo(1.36, 6);
 
-      const iso = await isolate(page, 'weapon', 'wpn_blaster', 'gunnery_mk3');
+      const iso = await isolate(page, 'weapon', 'dlv_projectile', 'gunnery_mk3');
       expect(iso.rootActive, 'the gun is a root — always active').toBe(true);
       expect(iso.modActive, 'the mod is not touching it').toBe(false);
       expect(await engine(page, e => e.player.damageMult),
@@ -193,11 +193,11 @@ test.describe('Gunnery buys a heavier round', () => {
     const watch = await boot(page);
     await quietField(page);
 
-    // BASELINE — the starter Blaster, authored 4 damage in a round whose
-    // whole energy is one bite of it.
+    // BASELINE — the starter projector (energy modules: the unmodified
+    // delivery), authored 3 damage in a round whose whole energy is one bite.
     const bare = await fireOne(page);
     expect(bare.count, 'one bolt').toBe(1);
-    expect(bare.damage, 'the authored bite').toBeCloseTo(4, 6);
+    expect(bare.damage, 'the authored bite').toBeCloseTo(3, 6);
     // The bank is the authored ONE bite, times MASS_SCALE, over the base-bank
     // divisor — a BASE round is deliberately a fraction of a fully-gunned
     // one, which is the whole point of the re-base.  Read live rather than
@@ -282,8 +282,8 @@ test.describe('Gunnery buys a heavier round', () => {
     // the rest — only the count it reaches moved.  A floor rather than an
     // exact figure, because the Gunnery arm below has to out-reach it and a
     // flock deep enough for that cannot also pin this to the gnat.
-    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so its 10x bank buys many')
-      .toBeGreaterThan(8);
+    expect(bare, 'a 3-damage bolt is charged 1 a gnat, so its 10x bank buys many')
+      .toBeGreaterThan(5);
 
     await grant(page, 'gunnery_mk3');
     const heavy = await punch();

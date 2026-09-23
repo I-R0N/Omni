@@ -6147,7 +6147,7 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // DENSE SLUG (was BURST).  A heavy 7-damage round with a three-bite bank:
     // it punches through brittle material and keeps going.
     kinetic: { name: 'Slug', damage: 7, speed: 24, cooldown: 0.22, size: 6, recoil: 0.8,
-      mass: 2.3 / BASE_BANK_DIVISOR },
+      mass: 2.3333 / BASE_BANK_DIVISOR },   // solve: exactly 3 bites at 7 / 24
     // CHARGED BOLT (was LIGHTNING) — the old Lightning's numbers; the chain is
     // now the bounded, conductivity-aware discharge.
     electric: { name: 'Arc Bolt', damage: 9, speed: 26, cooldown: 0.65, lifetime: 15, size: 6,
