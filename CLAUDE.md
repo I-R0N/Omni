@@ -125,8 +125,10 @@ engine/
                           direct player-blast path (the player is not in
                           `currentMap.entities`, so the ring can never
                           reach it — see §8).  Every damaging ring is
-                          capped at 64 bodies and also deposits the
-                          EXPLOSIVE composite's heat (see §8, energy)
+                          capped at 64 bodies, ticks only its own spawn-
+                          time snapshot of them (never the whole map), and
+                          an OWNED ring also deposits the EXPLOSIVE
+                          composite's heat (see §8, energy)
   energyEffects.ts        ENERGY MODULES, the side-effect half: the
                           bounded heated set (cooling, burn latch, glass
                           thermal failure, plastic bond release, metal
@@ -3887,6 +3889,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     `impulse` (the shatter's radial + forward scatter).  Stamped on every
     energy event (`stampFractureProfile`); site scale/bias only matter at
     FIRST decomposition, impulse at the break.  NEBULA HAS NO PROFILE.
+    Two rules hold it inside the material model rather than beside it:
+    **a COLD mechanical break keeps the material's own grain** (site scale
+    1, its own bias — the play-tested grain table is material identity and
+    `fracture.spec` pins it; the mechanical profile only sets how hard the
+    pieces fly), and **a body HOT when it breaks (`HOT_BREAK_HEAT`) takes the
+    thermal profile whatever lands the blow** — which is what gives heated
+    glass / metal / rock their few-large-quiet-piece failures with no combo
+    bookkeeping.  And **a profile never changes TOUGHNESS**: a rescaled
+    pattern has more or less boundary, and HP is derived from boundary, so
+    `fractureCache.profileBondScale` rescales that body's per-pixel bond
+    strength by the site ratio to the 0.65 power (measured; derived HP lands
+    within ~1-2% of the material's own).  Heat's own weakening is
+    `mechanicalScale`, deliberately a separate knob.
   - **Anything that reads a grid is QUEUED out of the collision step**: a
     projectile's electric/magnetic payload is resolved in `tickEnergy`
     after physics, because the dynamic grid is only safe between substeps.

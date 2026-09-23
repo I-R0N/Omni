@@ -404,53 +404,64 @@ export function planChain(
 // THE EXISTING VORONOI IS DRIVEN, NOT REPLACED.  A profile is THREE numbers,
 // and each one scales a parameter the fracture path already has:
 //
-//   `siteScale` → the pattern's SITE COUNT (fractureCache: the same place the
-//        global DBG "Frac sites" multiplier applies, and composing with it) —
-//        more sites, more and smaller pieces.  Read at FIRST decomposition
-//        only: a pattern is fixed once made (V8), so the energy that first
-//        breaks into a body decides its grain.
-//   `bias`      → the pattern's IMPACT BIAS (`grain.impactBias`): how crowded
-//        the sites are toward the contact — a violent hit crowds the small
-//        pieces at the impact, a thermal failure spreads them evenly.
+//   `siteScale` → the pattern's SITE COUNT (fractureCache, beside the global
+//        DBG "Frac sites" multiplier and composing with it) — fewer sites,
+//        fewer and larger pieces.  Read at FIRST decomposition only: a
+//        pattern is fixed once made (V8).
+//   `bias`      → the pattern's IMPACT BIAS (`grain.impactBias`); undefined
+//        keeps the material's own.
 //   `impulse`   → the shatter's post-fracture SCATTER (the cell radial speed
 //        and the forward term from `lastImpactVelocity`): 0 is a quiet
 //        collapse where the body stood.
 //
-// `material + domain + magnitude → profile`, clamped.  NEBULA HAS NO PROFILE —
-// it is not a solid and never enters the solid fracture path (§8).
+// A COLD MECHANICAL BREAK KEEPS THE MATERIAL'S OWN GRAIN.  Grain size,
+// regularity and bond strength are play-tested material identity (metal fine
+// and near-honeycomb, grain size a material constant — pinned by
+// tests/fracture.spec.ts), and the kinetic path is the existing destruction,
+// so the mechanical profile changes only how hard the pieces FLY: glass
+// sprays, rock throws chunks, metal and plastic barely scatter.  What changes
+// the GEOMETRY is heat: a body that is HOT when it breaks — whatever delivers
+// the final blow (`HOT_BREAK_HEAT`) — breaks under the THERMAL profile, fewer
+// and larger pieces that barely move.  That is the sequential interaction the
+// materials are specified by (glass: heat → thermal-stress failure; metal:
+// heat then a slug → few, large, heavy, slow pieces) with no combo
+// bookkeeping, and it is also the MINING hook: violent → the material's small
+// grains, controlled thermal → big pieces.
 //
-// MINING HOOK: the profile that broke a body is left on its fragments' parent
-// (`GameEntity.fractureProfile`), so "violent → small pieces, controlled
-// thermal → large pieces" is information a later mining pass can read rather
-// than rediscover.
+// NEBULA HAS NO PROFILE — it is not a solid and never enters the solid
+// fracture path (§8).  A profile never changes a material's TOUGHNESS: the
+// boundary model rescales a thermal pattern's bond strength to keep derived
+// HP (fractureCache `profileBondScale`).
 
-export interface FractureProfile { siteScale: number; bias: number; impulse: number }
+export interface FractureProfile { siteScale: number; bias?: number; impulse: number }
+
+/** Heat at or above which a breaking body takes the thermal profile. */
+export const HOT_BREAK_HEAT = 0.5;
 
 type SolidMaterial = Exclude<MaterialId, 'nebula'>;
 const FRACTURE_BASE: Readonly<Record<SolidMaterial, Record<'mechanical' | 'thermal', FractureProfile>>> = {
-  // Glass: a violent mechanical SHATTER — more, smaller pieces crowded at the
-  // impact, flung hard — against a thermal STRESS failure: few, large, quiet
-  // pieces.  The headline contrast (§8).
-  glass:   { mechanical: { siteScale: 1.15, bias: 0.9, impulse: 1.5 },
+  // Glass: a violent mechanical SHATTER (flung hard) against a thermal
+  // STRESS failure (few, large, quiet pieces) — the headline contrast.
+  glass:   { mechanical: { siteScale: 1, impulse: 1.5 },
              thermal:    { siteScale: 0.45, bias: 0.0, impulse: 0.2 } },
-  // Rock: chunky and localised — fewer, heavier pieces than glass, carrying
-  // real momentum.
-  rock:    { mechanical: { siteScale: 0.9, bias: 0.6, impulse: 1.15 },
+  // Rock: chunky and localised, carrying real momentum.
+  rock:    { mechanical: { siteScale: 1, impulse: 1.15 },
              thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
-  // Metal: few, large, heavy, slow — whatever broke it.
-  metal:   { mechanical: { siteScale: 0.4, bias: 0.3, impulse: 0.4 },
+  // Metal: heavy and slow whatever broke it; the fewest, largest pieces of
+  // any solid once heat has had it.
+  metal:   { mechanical: { siteScale: 1, impulse: 0.4 },
              thermal:    { siteScale: 0.35, bias: 0.1, impulse: 0.25 } },
   // Plastic: gives rather than shatters.
-  plastic: { mechanical: { siteScale: 0.9, bias: 0.4, impulse: 0.7 },
+  plastic: { mechanical: { siteScale: 1, impulse: 0.7 },
              thermal:    { siteScale: 0.6, bias: 0.1, impulse: 0.3 } },
-  generic: { mechanical: { siteScale: 1, bias: 0.5, impulse: 1 },
+  generic: { mechanical: { siteScale: 1, impulse: 1 },
              thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
 };
 
 /** Resolve a profile.  Electric and magnetic resolve as MECHANICAL — a
  *  conducted arc cracks like an impact, a magnetically driven slam IS an
- *  impact.  A bigger mechanical hit crowds its pieces a little harder
- *  (bias) and flings them a little faster (impulse); heat never does. */
+ *  impact.  A bigger mechanical hit flings its pieces a little harder;
+ *  heat never does. */
 export function fractureProfile(mat: MaterialId, domain: EnergyDomain, magnitude: number): FractureProfile | null {
   if (mat === 'nebula') return null;
   const base = FRACTURE_BASE[mat as SolidMaterial] ?? FRACTURE_BASE.generic;
@@ -458,16 +469,18 @@ export function fractureProfile(mat: MaterialId, domain: EnergyDomain, magnitude
   const bump = domain === 'thermal' ? 0 : Math.min(1, safeMag(magnitude) / 40);
   return {
     siteScale: clamp(p.siteScale, 0.25, 2),
-    bias: clamp(p.bias + 0.1 * bump, 0, 1),
+    bias: p.bias === undefined ? undefined : clamp(p.bias, 0, 1),
     impulse: clamp(p.impulse * (1 + 0.3 * bump), 0, 2.5),
   };
 }
 
-/** Stamp the profile of an energy event onto a body (the ONE writer).
+/** Stamp the profile of an energy event onto a body (the ONE writer).  A
+ *  body already HOT breaks under the thermal profile whatever the energy.
  *  Nebula and non-structure bodies are left alone. */
 export function stampFractureProfile(e: GameEntity, domain: EnergyDomain, magnitude: number): void {
   if (!e.shardVariant) return;
-  const p = fractureProfile(materialOf(e), domain, magnitude);
+  const effective: EnergyDomain = domain !== 'thermal' && (e.heat ?? 0) >= HOT_BREAK_HEAT ? 'thermal' : domain;
+  const p = fractureProfile(materialOf(e), effective, magnitude);
   if (p) e.fractureProfile = p;
 }
 

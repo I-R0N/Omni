@@ -30,7 +30,7 @@ import {
 } from './systems/energy';
 import {
     breakYieldsNothing, noteTraitDamage, markDamaged, hitReactStrength,
-    isCollectibleDrop, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS,
+    isCollectibleDrop, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
 } from '../constants';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
@@ -293,10 +293,20 @@ function agitateNebula(g: GameEngine, e: GameEntity, heat: number, dt: number): 
         e.velocity.x += Math.cos(a) * k;
         e.velocity.y += Math.sin(a) * k;
         if (heat > 0.2) e.nebulaMergeCooldown = Math.max(e.nebulaMergeCooldown ?? 0, 0.5);
-    } else if (heat >= 1 && e.health > 0) {
+    } else if (heat >= 1 && e.health > 0 && !e.deathDispatched) {
+        // Mirrors the ship-through-cloud break-up in PhysicsSystem exactly —
+        // out of the static grid, a FADE rather than a pop (the fade tick
+        // retires it), and the ordinary nebula death — with no impact
+        // direction, since heat has none, and the full slow fade.
+        const childD = Math.max(e.size.x, e.size.y) * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
+        if (childD < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return;
         e.lastImpactVelocity = { x: 0, y: 0 };
-        e.mergeFadeTimer = 0.4; e.mergeFadeDuration = 0.4;
-        killBody(g, e, null, false, 1);
+        e.lastImpactDamage = 1;
+        e.health = 0;
+        e.mergeFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
+        e.mergeFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
+        g.physics.removeStaticEntity(e);
+        g.handleEntityDeath(e);
     }
 }
 

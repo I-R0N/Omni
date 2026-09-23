@@ -764,6 +764,7 @@ export class ShardSystem {
     entity.burnRate = undefined;
     entity.energizedUntil = undefined;
     entity.fractureProfile = undefined;
+    entity.fractureSiteRatio = undefined;
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +

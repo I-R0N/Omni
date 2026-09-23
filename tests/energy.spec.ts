@@ -211,6 +211,16 @@ test.describe('energy arithmetic (pure)', () => {
       out.nebula = E.fractureProfile('nebula', 'mechanical', 10);
       out.crazy = E.fractureProfile('glass', 'mechanical', 1e12);
       out.packets = E.explosivePackets(0, 0, 20).map((p: any) => [p.domain, p.magnitude]);
+      // THE HOT-BREAK RULE: a body already hot breaks under the thermal
+      // profile whatever lands the blow; a cold one keeps the mechanical.
+      const cold: any = { shardVariant: 'glass-tile' };
+      const hot: any = { shardVariant: 'glass-tile', heat: 0.8 };
+      E.stampFractureProfile(cold, 'mechanical', 10);
+      E.stampFractureProfile(hot, 'mechanical', 10);
+      out.coldStamp = cold.fractureProfile; out.hotStamp = hot.fractureProfile;
+      const puff: any = { shardVariant: 'nebula-shard' };
+      E.stampFractureProfile(puff, 'mechanical', 10);
+      out.puffStamp = puff.fractureProfile ?? null;
       return out;
     });
     const g = r.glass;
@@ -218,15 +228,26 @@ test.describe('energy arithmetic (pure)', () => {
     // Thermal glass: fewer, larger, quieter pieces.
     expect(g.heat.siteScale).toBeLessThan(g.mech.siteScale);
     expect(g.heat.impulse).toBeLessThan(g.mech.impulse);
+    // A COLD mechanical break keeps every material's own grain (site scale
+    // 1, bias its own) — the play-tested grain table is material identity.
+    for (const m of ['glass', 'rock', 'metal', 'plastic']) {
+      expect(r[m].mech.siteScale, m).toBe(1);
+      expect(r[m].mech.bias, m).toBeUndefined();
+    }
+    // Rock is not glass: its pieces carry less scatter (and its grain is its own).
     expect(r.rock.mech).not.toEqual(g.mech);
-    expect(r.rock.mech.siteScale).toBeLessThan(g.mech.siteScale);
-    // Metal favours the fewest, largest fragments of the solids.
+    expect(r.rock.mech.impulse).toBeLessThan(g.mech.impulse);
+    // Metal favours the fewest, largest, slowest fragments of the solids.
     for (const m of ['glass', 'rock', 'plastic']) {
-      expect(r.metal.mech.siteScale).toBeLessThan(r[m].mech.siteScale);
+      expect(r.metal.heat.siteScale, m).toBeLessThan(r[m].heat.siteScale);
+      expect(r.metal.mech.impulse, m).toBeLessThan(r[m].mech.impulse);
     }
     expect(r.nebula).toBeNull();
-    for (const k of ['siteScale', 'bias', 'impulse']) expect(Number.isFinite(r.crazy[k])).toBe(true);
-    expect(r.crazy.bias).toBeLessThanOrEqual(1);
+    expect(r.puffStamp).toBeNull();
+    expect(r.coldStamp).toEqual(g.mech);
+    expect(r.hotStamp.siteScale).toBe(g.heat.siteScale);
+    for (const k of ['siteScale', 'impulse']) expect(Number.isFinite(r.crazy[k])).toBe(true);
+    expect(r.crazy.impulse).toBeLessThanOrEqual(2.5);
     // Explosive = a dominant mechanical packet plus a smaller thermal one.
     expect(r.packets.map((p: any) => p[0])).toEqual(['mechanical', 'thermal']);
     expect(r.packets[1][1]).toBeLessThan(r.packets[0][1]);
@@ -429,33 +450,42 @@ test.describe('the weapons, fired into the world', () => {
   test('NEBULA: only an ENERGISED cloud answers to a magnet', async ({ page }) => {
     const watch = await boot(page);
     await onMap(page, 'NEBULA_FIELD');
-    const r = await engine(page, e => {
-      const p = e.player;
-      const puffs = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'nebula-shard');
-      // Put two puffs beside the ship: one energised, one not.
-      const [a, b] = puffs;
-      p.position.x = 2000; p.position.y = 2000; p.velocity.x = 0; p.velocity.y = 0;
-      a.position.x = 2100; a.position.y = 2000; b.position.x = 1900; b.position.y = 2000;
-      a.velocity.x = a.velocity.y = b.velocity.x = b.velocity.y = 0;
-      a.energizedUntil = e.simClock + 10;
-      return { ids: [a.id, b.id] };
+    // Break a patch of cloud into drifting puffs.
+    await engine(page, e => {
+      const tiles = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'nebula-tile');
+      const c = tiles[0].position;
+      const near = tiles.filter((t: any) => Math.hypot(t.position.x - c.x, t.position.y - c.y) < 160).slice(0, 12);
+      for (const t of near) {
+        t.health = 0; t.lastImpactVelocity = { x: 0, y: 0 };
+        e.physics.removeStaticEntity(t); e.handleEntityDeath(t); t.active = false;
+      }
+      (window as any).__cloudAt = { x: c.x, y: c.y };
     });
-    // Let the grids see the new positions, then pulse.
-    await page.waitForTimeout(100);
-    const out = await engine(page, (e, ids: string[]) => {
-      const p = e.player;
-      const a = e.currentMap.entities.find((x: any) => x.id === ids[0]);
-      const b = e.currentMap.entities.find((x: any) => x.id === ids[1]);
-      a.position.x = p.position.x + 100; a.position.y = p.position.y;
-      b.position.x = p.position.x - 100; b.position.y = p.position.y;
-      a.velocity.x = a.velocity.y = b.velocity.x = b.velocity.y = 0;
-      a.energizedUntil = e.simClock + 10; b.energizedUntil = undefined;
+    // Past the puffs' fade-in (a fading body is kept out of the grid).
+    await page.waitForTimeout(1500);
+    // ONE evaluate: the puffs are measured where the grid already has them,
+    // so nothing can merge or drift between the setup and the pulse.
+    const out = await engine(page, e => {
+      const p = e.player, at = (window as any).__cloudAt;
+      p.position.x = at.x; p.position.y = at.y; p.velocity.x = 0; p.velocity.y = 0;
+      const puffs = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'nebula-shard'
+        && x.mergeFadeTimer === undefined
+        && Math.hypot(x.position.x - at.x, x.position.y - at.y) < 250);
+      const on = puffs.filter((_: any, i: number) => i % 2 === 0);
+      const off = puffs.filter((_: any, i: number) => i % 2 === 1);
+      for (const q of puffs) { q.velocity.x = 0; q.velocity.y = 0; q.energizedUntil = undefined; }
+      for (const q of on) q.energizedUntil = e.simClock + 10;
       p.currentWeapon = 'radial+magnetic'; p.weaponCooldown = 0;
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 10, y: p.position.y }, undefined, false);
-      return { a: Math.hypot(a.velocity.x, a.velocity.y), b: Math.hypot(b.velocity.x, b.velocity.y) };
-    }, r.ids);
-    expect(out.a).toBeGreaterThan(0);
-    expect(out.b).toBe(0);
+      const sp = (q: any) => Math.hypot(q.velocity.x, q.velocity.y);
+      return { on: on.length, off: off.length,
+               onMoved: on.filter((q: any) => sp(q) > 0).length,
+               offMoved: off.filter((q: any) => sp(q) > 0).length };
+    });
+    expect(out.on, 'energised puffs to test').toBeGreaterThan(0);
+    expect(out.off, 'plain puffs to test').toBeGreaterThan(0);
+    expect(out.onMoved, 'an energised cloud is steered').toBeGreaterThan(0);
+    expect(out.offMoved, 'a plain cloud is untouched').toBe(0);
     watch.assertClean();
   });
 

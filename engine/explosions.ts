@@ -83,8 +83,10 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
     // An ordinary enemy death spawns TWO cosmetic rings, so on a
     // kill-heavy frame this was two dead Sets per kill.
     let validHitIds = EMPTY_HIT_IDS;
+    let validHitEntities: GameEntity[] | undefined = undefined;
     if (!cosmeticRing) {
         validHitIds = new Set<string>();
+        validHitEntities = [];
         for (let i = 0; i < ents.length; i++) {
             const e = ents[i];
             if (!e.active || e.isExploding) continue;
@@ -98,6 +100,7 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
                 // a shell into a dense debris field touches at most this many.
                 if (validHitIds.size >= BLAST_MAX_TARGETS) break;
                 validHitIds.add(e.id);
+                validHitEntities.push(e);
             }
         }
     }
@@ -125,6 +128,7 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
         ownerId: opts.ownerId,
         hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
         validHitIds,
+        validHitEntities,
     });
 }
 
@@ -133,10 +137,11 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
 // Walks isExplosionRing particles each fixed step.  For each, computes
 // currentRadius via the same `1 − lifetime/maxLifetime` formula the
 // renderer uses (so the damage front is always pixel-aligned with the
-// visible ring).  Then walks the master entity list once, damaging /
-// knocking back any entity whose current toroidal distance falls
-// within currentRadius and that hasn't been hit yet.  hitEntityIds
-// grows monotonically to prevent double-hits as the wave widens.
+// visible ring).  Then walks the ring's own spawn-time snapshot of
+// bodies (capped), damaging / knocking back any whose current toroidal
+// distance falls within currentRadius and that hasn't been hit yet.
+// hitEntityIds grows monotonically to prevent double-hits as the wave
+// widens.
 export function updateExplosionRings(g: GameEngine) {
     if (!g.currentMap) return;
     const entities = g.currentMap.entities;
@@ -162,11 +167,19 @@ export function updateExplosionRings(g: GameEngine) {
         // Only candidates that were in range AT SPAWN are eligible —
         // entities born during the sweep (e.g. glass-shards from tiles
         // the wave just shattered) are excluded.
+        //
+        // The tick walks that SNAPSHOT (≤ BLAST_MAX_TARGETS bodies), not the
+        // master list: a ring used to scan every entity on the map on every
+        // step it lived, which is a global per-frame pass, and the energy
+        // modules' pulsed/radial blasts spawn rings far more often than the
+        // Cannon did.  Same bodies, same order (the snapshot was filled in
+        // master-list order), same one-hit-each rule.
         const valid = ring.validHitIds;
-        if (!valid || valid.size === 0) continue;
+        const cands = ring.validHitEntities;
+        if (!valid || valid.size === 0 || !cands) continue;
 
-        for (let i = 0; i < entities.length; i++) {
-            const e = entities[i];
+        for (let i = 0; i < cands.length; i++) {
+            const e = cands[i];
             if (!e.active || e.isExploding) continue;
             if (!valid.has(e.id)) continue;
             if (hits.includes(e.id)) continue;

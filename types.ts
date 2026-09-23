@@ -591,6 +591,10 @@ export interface GameEntity {
    *  read at first decomposition (site scale + bias) and at shatter
    *  (impulse), so the break takes the character of what broke it. */
   fractureProfile?: FractureProfile;
+  /** Unscaled ÷ profile-scaled site count of the CURRENT pattern (fracture
+   *  profiles); the boundary model uses it to keep the material's derived
+   *  toughness when a profile coarsens or refines the grain. */
+  fractureSiteRatio?: number;
   /** Projectile carrying an energy payload (copied from its WeaponConfig). */
   energyHeat?: number;
   energyBurnSeconds?: number;
@@ -1205,6 +1209,9 @@ export interface GameEntity {
   // salvage drops because each newborn shard rolled the asteroid drop
   // table when the wave killed it.
   validHitIds?: Set<string>;
+  // The same snapshot as ENTITIES, so the per-step ring tick walks only the
+  // bodies it may reach (≤ the blast cap) instead of the whole map.
+  validHitEntities?: GameEntity[];
 
   // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
   isLightningProjectile?: boolean;
