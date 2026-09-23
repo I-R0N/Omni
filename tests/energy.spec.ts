@@ -330,6 +330,42 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
+  test('HEAT: only the active set carries heat — a full set refuses more, a map change leaves bodies cold', async ({ page }) => {
+    // Cooling walks the active set and nothing else, so heat on a body
+    // OUTSIDE it would never leave: permanently weakened, and breaking under
+    // the thermal profile for good.  Both ways that could happen are pinned.
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const CAP = 400;   // ENERGY_CONSTANTS.MAX_HEATED, written out
+      const tiles = e.currentMap.entities.filter((t: any) => t.active
+        && t.shardVariant === 'metal-tile' && t.mass === Infinity);
+      for (let i = 0; i < CAP && i < tiles.length; i++) e.debugHeat(tiles[i], 5);
+      const full = e.energy.heated.length;
+      const extra = tiles[CAP];
+      if (extra) e.debugHeat(extra, 5);
+      const refused = extra !== undefined && extra.heat === undefined
+        && e.energy.heated.length === CAP;
+      const body = tiles[0];
+      const hotBefore = (body.heat ?? 0) > 0;
+      // Leaving the map runs the same reset every map load does.
+      const left = e.transitionToMap('overworld');
+      return {
+        n: tiles.length, full, refused, hotBefore, left,
+        coldAfter: body.heat === undefined && body.heatTracked === undefined,
+        setAfter: e.energy.heated.length,
+      };
+    });
+    expect(r.n, 'enough metal on the map to fill the set').toBeGreaterThan(400);
+    expect(r.full).toBe(400);
+    expect(r.refused, 'a full set takes no heat it could never cool').toBe(true);
+    expect(r.hotBefore).toBe(true);
+    expect(r.left).toBe(true);
+    expect(r.coldAfter, 'a body leaves the set cold, not merely untracked').toBe(true);
+    expect(r.setAfter).toBe(0);
+    watch.assertClean();
+  });
+
   test('HEAT: a thermal beam makes glass FAIL under the thermal profile', async ({ page }) => {
     const watch = await boot(page);
     await onMap(page, 'GLASS_FIELD');

@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  447 tests.  All run at
+                          whatever happened next).  448 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -3865,7 +3865,12 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   - **HEAT lives only on bodies that have some**: one bounded active set
     (`EnergyState.heated`, ≤ `MAX_HEATED`), cooled every step, slow effects
     every 0.2 s, and a body LEAVES it the moment it is cold (heat snaps to 0
-    below `HEAT_EPSILON`).  Glass FAILS at heat 1 under the THERMAL fracture
+    below `HEAT_EPSILON`).  UNTRACKED MEANS COLD, because the set is the only
+    thing that ever cools a body: a FULL set refuses new heat (and burn, and
+    conduction) rather than leave it on a body nothing will cool, and every
+    exit — cooled, inactive, or the map-load `reset()` — clears it, so debris
+    carried through a portal arrives cold instead of permanently weakened.
+    The energized-nebula set follows the same rule.  Glass FAILS at heat 1 under the THERMAL fracture
     profile; plastic RELEASES its cohesion bonds (`ShardSystem.releaseBondsOf`
     — the existing physics pulls the goo apart); metal CONDUCTS to ≤3 cooler
     metal neighbours on a cadence; nebula is AGITATED (and a tile at full

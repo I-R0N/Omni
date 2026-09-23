@@ -125,7 +125,10 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   // Remembered so the boundary model can keep the MATERIAL's toughness: a
   // profile changes how a body breaks, never how hard it is (see
   // `bondStrengthFor`).  Undefined when the pattern is the material's own.
-  e.fractureSiteRatio = sites !== baseSites ? baseSites / sites : undefined;
+  // Set only when needed (CLAUDE.md §4: optional fields stay optional), so
+  // a body no profile ever touched never grows the key.
+  if (sites !== baseSites) e.fractureSiteRatio = baseSites / sites;
+  else if (e.fractureSiteRatio !== undefined) e.fractureSiteRatio = undefined;
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 

@@ -81,8 +81,15 @@ export class EnergyState {
     readonly buf2: GameEntity[] = [];
 
     reset(): void {
-        for (const e of this.heated) { e.heatTracked = undefined; }
-        for (const e of this.energized) { e.energizedTracked = undefined; }
+        // A body leaves the sets COLD, not merely untracked.  Nothing else
+        // ever cools a body, so heat left on one outside the set would stay
+        // forever — and portal transit carries debris into the next map,
+        // where it would read as permanently weakened.
+        for (const e of this.heated) dropHeat(e);
+        for (const e of this.energized) {
+            e.energizedTracked = undefined;
+            e.energizedUntil = undefined;
+        }
         this.heated.length = 0;
         this.energized.length = 0;
         this.fields.length = 0;
@@ -124,18 +131,24 @@ function gather(g: GameEngine, x: number, y: number, r: number, out: GameEntity[
 /** Keep only the `k` bodies nearest (x,y) — so when a dense field overflows
  *  a cap, the cap drops the FAR bodies, not whichever the grid walked last. */
 const _nd: number[] = [];
+const _ns: number[] = [];
+const byValue = (a: number, b: number) => a - b;
 function nearestK(buf: GameEntity[], x: number, y: number, k: number): void {
-    if (buf.length <= k) return;
-    _nd.length = 0;
-    for (let i = 0; i < buf.length; i++) {
+    const m = buf.length;
+    if (m <= k) return;
+    // Index-fill both scratch arrays (the refill idiom — no per-call garbage).
+    for (let i = 0; i < m; i++) {
         const dx = wrapDeltaX(x, buf[i].position.x), dy = wrapDeltaY(y, buf[i].position.y);
-        _nd.push(dx * dx + dy * dy);
+        const d = dx * dx + dy * dy;
+        _nd[i] = d;
+        _ns[i] = d;
     }
+    if (_nd.length !== m) { _nd.length = m; _ns.length = m; }
     // Selection by threshold: find the k-th smallest distance, keep ≤ it.
-    const sorted = _nd.slice().sort((a, b) => a - b);
-    const cut = sorted[k - 1];
+    _ns.sort(byValue);
+    const cut = _ns[k - 1];
     let n = 0;
-    for (let i = 0; i < buf.length && n < k; i++) if (_nd[i] <= cut) buf[n++] = buf[i];
+    for (let i = 0; i < m && n < k; i++) if (_nd[i] <= cut) buf[n++] = buf[i];
     buf.length = n;
 }
 
@@ -229,11 +242,25 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
 
 // ── Thermal ──────────────────────────────────────────────────────────────────
 
-function trackHeat(s: EnergyState, e: GameEntity): void {
-    if (e.heatTracked) return;
-    if (s.heated.length >= ENERGY_CONSTANTS.MAX_HEATED) return;
+/** Admit a body to the heated set.  False when the set is full — and the
+ *  callers then deposit NOTHING: the set is the only thing that cools a
+ *  body, so heat on a body outside it would never leave. */
+/** Leave the heated set COLD.  Untracked must mean unheated, because the
+ *  set is the only thing that ever cools a body. */
+function dropHeat(e: GameEntity): void {
+    e.heat = undefined;
+    e.burnTimer = undefined;
+    e.burnRate = undefined;
+    e.heatByPlayer = undefined;
+    e.heatTracked = undefined;
+}
+
+function trackHeat(s: EnergyState, e: GameEntity): boolean {
+    if (e.heatTracked) return true;
+    if (s.heated.length >= ENERGY_CONSTANTS.MAX_HEATED) return false;
     e.heatTracked = true;
     s.heated.push(e);
+    return true;
 }
 
 /** Deposit a THERMAL packet.  Heat accumulates (normalised per material),
@@ -245,10 +272,10 @@ export function depositHeat(g: GameEngine, e: GameEntity, magnitude: number, fro
     const mat = materialOf(e);
     const gain = heatGain(mat, magnitude);
     if (gain <= 0) return;
+    if (!trackHeat(g.energy, e)) return;
     e.heat = clampHeat((e.heat ?? 0) + gain);
     if (byPlayer) e.heatByPlayer = true;
     if (from && e.type === EntityType.STRUCTURE && mat !== 'nebula') stampLocalImpact(e, contactOn(e, from));
-    trackHeat(g.energy, e);
     applyHeatThresholds(g, e);
 }
 
@@ -256,10 +283,10 @@ export function depositHeat(g: GameEngine, e: GameEntity, magnitude: number, fro
  *  the thermal seeker).  Tracked through the same active set. */
 export function latchBurn(g: GameEngine, e: GameEntity, seconds: number, rate: number, byPlayer: boolean): void {
     if (!e.active || e.isExploding || !(seconds > 0) || !(rate > 0)) return;
+    if (!trackHeat(g.energy, e)) return;
     e.burnTimer = Math.min(6, Math.max(e.burnTimer ?? 0, seconds));
     e.burnRate = Math.min(40, Math.max(e.burnRate ?? 0, rate));
     if (byPlayer) e.heatByPlayer = true;
-    trackHeat(g.energy, e);
 }
 
 function applyHeatThresholds(g: GameEngine, e: GameEntity): void {
@@ -317,7 +344,7 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
     let n = 0;
     for (let i = 0; i < list.length; i++) {
         const e = list[i];
-        if (!e.active || e.isExploding) { e.heatTracked = undefined; continue; }
+        if (!e.active || e.isExploding) { dropHeat(e); continue; }
         const mat = materialOf(e);
         const r = responseOf(mat);
         // Burn latch keeps feeding heat.
@@ -337,7 +364,7 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
         }
         if (heat > 0.3 && doConduct && r.conduct > 0 && e.active) conductHeat(g, e, r.conduct);
         if (!e.active || (heat <= 0 && !(e.burnTimer && e.burnTimer > 0))) {
-            e.heat = undefined; e.heatByPlayer = undefined; e.heatTracked = undefined;
+            dropHeat(e);
             continue;
         }
         list[n++] = e;
@@ -358,11 +385,11 @@ function conductHeat(g: GameEngine, e: GameEntity, frac: number): void {
         if (o === e || materialOf(o) !== 'metal') continue;
         const diff = (e.heat ?? 0) - (o.heat ?? 0);
         if (diff <= 0.05) continue;
+        if (!trackHeat(g.energy, o)) break;   // set full: nothing may take heat
         const q = diff * frac;
         e.heat = clampHeat((e.heat ?? 0) - q);
         o.heat = clampHeat((o.heat ?? 0) + q);
         if (e.heatByPlayer) o.heatByPlayer = true;
-        trackHeat(g.energy, o);
         given++;
     }
 }
@@ -424,11 +451,14 @@ export function dischargeElectric(g: GameEngine, origin: Vector2, first: GameEnt
         if (node.depth === 0 && !damageFirst) continue;
         const mat = materialOf(e);
         if (mat === 'nebula') {
-            e.energizedUntil = now + C.ENERGIZE_SEC;
-            if (!e.energizedTracked && g.energy.energized.length < MAX_ENERGIZED) {
+            // Same rule as heat: only a body in the set carries the state,
+            // so the magnet and the rim can never disagree about it.
+            if (!e.energizedTracked) {
+                if (g.energy.energized.length >= MAX_ENERGIZED) continue;
                 e.energizedTracked = true;
                 g.energy.energized.push(e);
             }
+            e.energizedUntil = now + C.ENERGIZE_SEC;
             continue;
         }
         const dmg = node.mag * responseOf(mat).electricDamage;
