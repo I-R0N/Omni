@@ -1,5 +1,6 @@
 
 
+import { mechanicalScale, materialOf, stampFractureProfile } from './energy';
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
@@ -1548,6 +1549,7 @@ export class PhysicsSystem {
       // `energy / price`, so the same shell crosses glass and stops in metal
       // without either being written down anywhere.
       const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0));
+      const heatScale = mechanicalScale(materialOf(target), target.heat);
       let ordinal = proj.pierceHits ?? 0;
       let steps = 0;
       for (;;) {
@@ -1562,7 +1564,9 @@ export class PhysicsSystem {
           const remaining = PhysicsSystem.projectileEnergyLeft(proj);
           if (remaining <= PhysicsSystem.SPENT_EPSILON) break;  // spent; stops inside
           const bite = Math.min(remaining, grainCost);
-          if (!applyBoundaryDamage(target, bite)) {
+          // A HOT body's boundaries are weakened (energy modules): the same
+          // work breaks more of them.  The bolt still pays the cold price.
+          if (!applyBoundaryDamage(target, bite * heatScale)) {
               // The model went away under us (an empty decomposition).
               // Nothing has been spent yet on the first step, so hand the
               // body back to the ordinary path rather than eating the hit.
@@ -3859,157 +3863,6 @@ export class PhysicsSystem {
               && !target.thirdParty && !proj.hitsEnemies) return;
           if (proj.hitsEnemies && target.isRival) return;
 
-          // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
-          // (today's "tile shards"); they pass through every other shard
-          // variant (rock-shards, nebula tiles, nebula shards).
-          //
-          // Stage 5: shard-family entities all share EntityType.STRUCTURE
-          // now, so distinguishing static tiles vs glass-shards needs a
-          // variant check.  STRUCTURE-tile variants (glass / plastic /
-          // metal / indestructible) are mass=Infinity, so we can short-
-          // circuit on that for tile reflection.  Mobile shards then
-          // need a per-variant check — only glass-shard reflects.
-          if (proj.isBouncer) {
-              let isReflective = false;
-              if (target.type === EntityType.STRUCTURE) {
-                if (target.mass === Infinity) {
-                  // Static tile.  All STRUCTURE tile variants reflect EXCEPT
-                  // nebula-tile (passThrough = true).
-                  isReflective = target.shardVariant !== 'nebula-tile';
-                } else {
-                  // Mobile shard.  Only glass-shard reflects.
-                  isReflective = target.shardVariant === 'glass-shard';
-                }
-              }
-              const isTile = isReflective;
-              // Bounce-count gate: when bouncesRemaining is set (post-d2
-              // pierce-beam), the projectile dissipates after N reflections
-              // instead of bouncing forever inside its lifetime window.
-              // bouncesRemaining=0 means "no bounces left" → deactivate on
-              // the contact frame, fire onHit at the contact point, skip
-              // the reflection math.
-              if (isTile && proj.velocity && proj.bouncesRemaining !== undefined && proj.bouncesRemaining <= 0) {
-                  if (onHit) onHit(proj.position, proj, target);
-                  proj.active = false;
-                  return;
-              }
-              if (isTile && proj.velocity) {
-                  // Tiles are axis-aligned AABBs, and the projectile is thin and
-                  // rotated along its travel direction — SAT's minimum-overlap axis
-                  // is often the wrong reflection axis. Instead, infer the entry
-                  // face from the projectile's velocity direction and the tile's
-                  // dilated AABB: for each axis, compute the reverse-unwind time
-                  // to exit the corresponding entry face. The axis with the smaller
-                  // unwind time was the most-recently-crossed face → that's the
-                  // face we bounce off of.
-                  const tileHX = target.size.x / 2;
-                  const tileHY = target.size.y / 2;
-
-                  // Effective projectile half-extents along world X and Y,
-                  // accounting for the projectile's rotation. This lets us push
-                  // the projectile out just enough to clear the tile face,
-                  // avoiding big visual teleports that break the trail.
-                  const cosR = Math.abs(Math.cos(proj.rotation));
-                  const sinR = Math.abs(Math.sin(proj.rotation));
-                  const hw = proj.size.x / 2;
-                  const hh = proj.size.y / 2;
-                  const hxEff = cosR * hw + sinR * hh;
-                  const hyEff = sinR * hw + cosR * hh;
-
-                  const vx = proj.velocity.x;
-                  const vy = proj.velocity.y;
-                  const relX = proj.position.x - target.position.x;
-                  const relY = proj.position.y - target.position.y;
-
-                  // Reverse-unwind time to the entry face along each axis, using
-                  // a conservative dilated AABB (use max effective half-extent).
-                  const dHX = tileHX + hxEff;
-                  const dHY = tileHY + hyEff;
-                  let tX = Infinity;
-                  let tY = Infinity;
-                  if (vx >  0.0001) tX = (relX + dHX) / vx;  // entered through left face
-                  else if (vx < -0.0001) tX = (relX - dHX) / vx;  // entered through right face
-                  if (vy >  0.0001) tY = (relY + dHY) / vy;
-                  else if (vy < -0.0001) tY = (relY - dHY) / vy;
-
-                  // Contact point on the tile face, clamped to the tile's extent —
-                  // this is where sparks should spawn so they sit on the surface
-                  // rather than inside the tile.
-                  let contactX = 0;
-                  let contactY = 0;
-
-                  // Pick the entry axis: the one with the SMALLER reverse-unwind
-                  // time was crossed last, so that's the face we're reflecting off.
-                  // Snap the projectile position to just outside that face + ε.
-                  //
-                  // The face normal then goes through the SHARED deflection
-                  // helper — the same one the shield ring uses.  For an
-                  // axis-aligned normal its mirror reduces to negating one
-                  // component, which is exactly the arithmetic this branch used
-                  // to do by hand.  `keepHoming` because a tile bounce is the
-                  // bouncer working as designed, not a shot being turned away.
-                  if (tX <= tY) {
-                      const nx = vx > 0 ? -1 : 1;
-                      contactX = target.position.x + nx * tileHX;
-                      contactY = Math.max(
-                          target.position.y - tileHY,
-                          Math.min(target.position.y + tileHY, proj.position.y)
-                      );
-                      PhysicsSystem.deflectProjectile(proj, nx, 0, {
-                          snapX: target.position.x + nx * (tileHX + hxEff + 0.5),
-                          keepHoming: true,
-                      });
-                  } else {
-                      const ny = vy > 0 ? -1 : 1;
-                      contactY = target.position.y + ny * tileHY;
-                      contactX = Math.max(
-                          target.position.x - tileHX,
-                          Math.min(target.position.x + tileHX, proj.position.x)
-                      );
-                      PhysicsSystem.deflectProjectile(proj, 0, ny, {
-                          snapY: target.position.y + ny * (tileHY + hyEff + 0.5),
-                          keepHoming: true,
-                      });
-                  }
-
-                  // Decrement remaining-bounces counter (set on bouncer
-                  // projectiles via WeaponConfig.bounceCount).  Counter is
-                  // checked at the top of the reflection branch on the
-                  // *next* tile contact; the projectile keeps moving on
-                  // this frame after the reflection.
-                  if (proj.bouncesRemaining !== undefined) {
-                      proj.bouncesRemaining -= 1;
-                  }
-
-                  // A RICOCHET MAY RE-HIT WHAT IT ALREADY STRUCK (user call).
-                  // A reflection is a discrete "the beam left and is coming
-                  // back" event, so the struck-ID list is cleared HERE rather
-                  // than by weakening the `alreadyHit` guard in the projectile
-                  // branch — that guard is load-bearing for an unrelated
-                  // reason (it stops a bolt in SUSTAINED OVERLAP with a body
-                  // from re-damaging it every substep at 120Hz), and the list
-                  // simply refills after the bounce, so same-contact dedup is
-                  // preserved on both legs of the flight.
-                  //
-                  // The semantics this produces are the intended reading: the
-                  // bolt's ENERGY is a lifetime bank, so a bouncing beam lands
-                  // only what it can still afford however many times it turns
-                  // around, each bite further down the curve its own mass
-                  // sets.  Bounces buy COVERAGE, not extra damage — do not
-                  // "fix" that by refilling the bank on a bounce.
-                  //
-                  // Length-reset, not a fresh array (CLAUDE.md §8's refill
-                  // rule): this runs inside the collision path.
-                  if (proj.hitEntityIds !== undefined) proj.hitEntityIds.length = 0;
-
-                  // Fire the impact callback AFTER the reflection so sparks spawn
-                  // on the tile's surface and spray along the outgoing (reflected)
-                  // velocity direction — away from the tile, not into it.
-                  if (onHit) onHit({ x: contactX, y: contactY }, proj, target);
-                  return;
-              }
-          }
-
           // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
           // less than the first, the third less again — and it is measured,
           // never tabulated.  `projectileBiteOn` reads the bolt's CURRENT
@@ -4037,6 +3890,16 @@ export class PhysicsSystem {
           // whittled down below (a shield eats part of it, a plate scales it)
           // while the energy the bolt is charged for is the whole of it.
           const biteFull = projDmg;
+          // HEAT LOWERS THE THRESHOLD (energy modules): a hot body takes more
+          // from the same mechanical bite — metal or rock heated first is
+          // then broken far more easily.  Scales what the BODY takes, never
+          // what the bolt is charged (`biteFull` above), so a hot target
+          // costs a round no extra energy.  1 on a cold body.
+          const heatScale = mechanicalScale(materialOf(target), target.heat);
+          if (heatScale !== 1) projDmg *= heatScale;
+          // The break takes the character of what broke it: a mechanical
+          // profile for this material (read at first decomposition + shatter).
+          stampFractureProfile(target, 'mechanical', projDmg);
           // Set by the two reductions below.  A plate or armour that turns a
           // shot aside has STOPPED it, so such a hit is never refunded — see
           // the overkill rule at the spend site.

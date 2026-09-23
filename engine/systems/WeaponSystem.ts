@@ -1,106 +1,93 @@
-import { GameEntity, EntityType, Vector2, WeaponType, WeaponConfig, RumbleKind } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponConfig, RumbleKind } from '../../types';
 import {
   INPUT_CONSTANTS,
-  WEAPONS,
-  WEAPON_LIST,
+  weaponConfig,
+  resolveWeaponKey,
   ENEMY_WEAPON,
   ENEMY_CONSTANTS,
   ENEMY_VARIANTS,
   ENEMY_ATTACK_EFFECTS,
   CORROSION,
   COLLISION_CONFIG,
-  LIGHTNING_CHAIN_BRANCHES,
   projectileMassFor,
 } from '../../constants';
 import { ProjectileSystem } from './ProjectileSystem';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
-/**
- * Build the per-weapon config used for a charged-shot trigger.  The base
- * config is shallow-copied and the relevant fields are overridden.  Each
- * weapon owns its own thematic charge effect (see docs/GAME_FEEDBACK_PLAN.md
- * d2 design notes):
- *   - BLASTER: 5× damage slug in a 20× heavier round, no recoil
- *   - BURST:   5-shot burst (vs 3), each sub-shot a third heavier
- *   - SHOTGUN: 12-pellet wide cone (50°), each pellet half again as heavy
- *   - BOUNCER: 8-beam 360° nova — beams keep their per-shot mass/bounce
- *   - LIGHTNING: chain doubles to 4 hops over 2× range (read on the projectile)
- *   - HOMING:  4-missile volley with weaker tracking (homingStrength 0.5),
- *              each missile twice as heavy
- *   - CANNON:  2× explosion radius, 1.5× explosion damage + knockback
- *
- * THE MASS BUMPS ARE THE OLD `pierce` BUMPS, REPRICED (step 5).  A charge used
- * to buy an authored count of extra bodies; it now buys a denser round, which
- * is the same purchase expressed in the one quantity every impact spends.  The
- * factors are exactly what the retired `(1 + pierce)` solve produced, so no
- * charged shot changed: Blaster 5 damage-multiples × a 4-bite bank, Burst 4/3,
- * Shotgun 3/2, Seeker 2/1.  Written as a multiple of the round's OWN resolved
- * mass so a gun that authors none still gets a coherent number, and so Gunnery
- * (applied after this) composes rather than overwrites.
- */
 /** Authored-units multiply for a charged shot's BANK.
  *
  *  `WeaponConfig.mass` is the AUTHORED figure and `projectileMassFor` is what
  *  converts it, so writing that function's RESULT back into the field makes
  *  the next conversion scale it again — MASS_SCALE twice over, a 10x heavier
  *  charge than intended.  `withGunnery` carries the same note for the same
- *  reason; this path had the identical bug and kept it. */
+ *  reason. */
 function chargedMass(config: WeaponConfig, k: number): number | undefined {
   return config.mass !== undefined ? config.mass * k : undefined;
 }
 
+/**
+ * The CHARGED variant of any weapon (Overcharge).  One rule per DELIVERY,
+ * plus one per PAYLOAD — so all thirty combinations have a charge without
+ * thirty authored entries, and the charge premium always reads as "more of
+ * what this delivery does":
+ *   projectile — a much heavier round (the old Blaster fireball); a shell
+ *                gets the old Cannon charge (bigger, heavier blast)
+ *   spread     — twice the rounds in a wider cone
+ *   homing     — a three-round volley with looser tracking
+ *   beam       — a longer, wider pulse; a tractor PUSHES instead of pulling
+ *   radial     — a wider ring
+ * and every payload rides along: more heat, a longer arc chain, a stronger
+ * pull.  The mass bumps are expressed in AUTHORED units (`chargedMass`).
+ */
 function chargedConfigOf(config: WeaponConfig): WeaponConfig {
-  switch (config.type) {
-    case WeaponType.BLASTER:
-      // Larger fireball-style projectile; RenderSystem picks the red+orange
-      // two-tone gradient when isCharged is set.
-      return {
-        ...config,
-        damage: config.damage * 5,
-        mass: chargedMass(config, 20),          // 5 bite-multiples × 4 bites
-        recoil: 0,
-        size: config.size * 2.6,  // 6 → ~16
-        isCharged: true,
-      };
-    case WeaponType.BURST:
-      return { ...config, mass: chargedMass(config, 4 / 3), burstCount: 5 };
-    case WeaponType.SHOTGUN:
-      return { ...config, count: 12, spread: 25, mass: chargedMass(config, 1.5) };
-    case WeaponType.BOUNCER:
-      // Omnidirectional nova — 8 beams equally spaced around 360°
-      // (every 45°).  ProjectileSystem.spawn handles the equal-angle
-      // ring layout when omniDirectional is set.  Recoil zeroed since
-      // forces cancel in all directions.
-      return { ...config, count: 8, spread: 360, omniDirectional: true, recoil: 0 };
-    case WeaponType.LIGHTNING:
-      // Lightning's charge is read off the projectile by GameEngine.fireLightningChainFromImpact.
-      // ProjectileSystem.spawn copies these onto the projectile at spawn.
-      // Charged variant adds one extra simultaneous jump per node — saturated
-      // tree grows from 1+2+4+8=15 (base) to 1+3+9+27=40.  Depth and range
-      // are kept identical to base so the charge premium is purely "wider"
-      // rather than "further".
-      return {
-        ...config,
-        chainBranches: LIGHTNING_CHAIN_BRANCHES + 1, // 3 vs base 2
-      };
-    case WeaponType.HOMING:
-      return { ...config, count: 4, spread: 30, mass: chargedMass(config, 2), homingStrength: 0.5 };
-    case WeaponType.CANNON:
-      // The charge premium is a HEAVIER SHELL, which under the energy model
-      // raises the blast (derived from the round's own mass) and its reach
-      // together — the same repricing the Blaster's charge took in step 5.
-      // Scaling `explosionDamage` here would have been scaling a field the
-      // player Cannon no longer authors.
-      return {
-        ...config,
-        mass:               chargedMass(config, 1.5),
-        explosionRadius:    (config.explosionRadius    ?? 0) * 2,
-        explosionDamage:    config.explosionDamage !== undefined
-                              ? config.explosionDamage * 1.5 : undefined,
-        explosionKnockback: (config.explosionKnockback ?? 0) * 1.5,
-      };
+  const out: WeaponConfig = { ...config };
+  switch (config.delivery) {
+    case 'projectile':
+      if (config.explosionRadius) {
+        out.mass = chargedMass(config, 1.5);
+        out.explosionRadius = config.explosionRadius * 2;
+        out.explosionDamage = config.explosionDamage !== undefined ? config.explosionDamage * 1.5 : undefined;
+        out.explosionKnockback = (config.explosionKnockback ?? 0) * 1.5;
+      } else {
+        out.damage = config.damage * 2.5;
+        out.mass = chargedMass(config, 6);
+        out.size = config.size * 1.8;
+        out.recoil = 0;
+        // The fireball render belongs to the plain / kinetic round.
+        if (!config.energy || config.energy === 'kinetic') out.isCharged = true;
+      }
+      break;
+    case 'spread':
+      out.count = config.count * 2;
+      out.spread = config.spread * 1.4;
+      out.mass = chargedMass(config, 1.5);
+      if (config.coneHalfDeg) out.coneHalfDeg = config.coneHalfDeg * 1.4;
+      break;
+    case 'homing':
+      out.count = 3;
+      out.spread = 30;
+      out.mass = chargedMass(config, 2);
+      out.homingStrength = 0.5;
+      break;
+    case 'beam':
+      out.beamDuration = (config.beamDuration ?? 0) * 1.6;
+      out.beamWidth = (config.beamWidth ?? 2) * 1.5;
+      break;
+    case 'radial':
+      out.pulseRadius = (config.pulseRadius ?? 0) * 1.35;
+      if (config.explosionRadius) out.explosionRadius = config.explosionRadius * 1.35;
+      break;
   }
-  return config;
+  if (config.heat) out.heat = config.heat * 1.75;
+  if (config.electric) {
+    out.electric = { ...config.electric, magnitude: config.electric.magnitude * 1.5,
+      targets: config.electric.targets + 2, branches: config.electric.branches + 1 };
+  }
+  if (config.magnetic) {
+    out.magnetic = { ...config.magnetic, strength: config.magnetic.strength * 1.5,
+      mode: config.delivery === 'beam' ? 'push' : config.magnetic.mode };
+  }
+  return out;
 }
 
 /** Apply the player's GUNNERY modules to one shot config.
@@ -134,6 +121,10 @@ function withGunnery(config: WeaponConfig, player: GameEntity): WeaponConfig {
   return {
     ...config,
     damage: config.damage * mult,
+    // Energy payloads are part of the round, so a denser round carries more
+    // of them.  Magnetic force is not — it is capped per body (MAG_MAX_DV).
+    heat: config.heat !== undefined ? config.heat * mult : undefined,
+    electric: config.electric ? { ...config.electric, magnitude: config.electric.magnitude * mult } : undefined,
     // AUTHORED UNITS, because that is what `WeaponConfig.mass` means and
     // `projectileMassFor` is what converts it — writing its already-scaled
     // RESULT back into this field made the round scale twice (measured: a
@@ -180,6 +171,9 @@ export class WeaponSystem {
   /** SFX sink for enemy fire.  Set once by GameEngine; the system itself
    *  stays free of audio state (same shape as PhysicsSystem.sfx). */
   public onEnemyFire: ((id: string, x: number, y: number) => void) | null = null;
+  /** Resolves a delivery that is not a round (beam, radial, instant cone).
+   *  Set once by GameEngine to the energy layer; see engine/energyEffects.ts. */
+  public onInstantFire: ((config: WeaponConfig, player: GameEntity, target: Vector2) => void) | null = null;
 
   constructor(private projectiles: ProjectileSystem) {}
 
@@ -200,103 +194,63 @@ export class WeaponSystem {
     onShake?: (amount: number, opts?: { rumble?: RumbleKind }) => void,
     charged: boolean = false,
     /** Haptic-only feedback: rumble WITHOUT a camera shake.  The plain
-     *  Blaster is the case that needs it — it is the fastest gun in the game,
-     *  so shaking the camera on every shot would be unplayable, but the hand
-     *  should still feel each one. */
+     *  projector is the case that needs it — the fastest cadence in the game,
+     *  so shaking the camera every shot would be unplayable. */
     onRumble?: (amount: number, kind?: RumbleKind) => void,
-    /** Fired once per shot actually spawned, for SFX.  Symmetrical with
-     *  `onShake` — WeaponSystem stays free of audio state; the caller
-     *  maps the weapon type onto an SFX_INVENTORY id. */
-    onFire?: (weapon: WeaponType, isCharged: boolean, subShotIndex: number) => void,
+    /** Fired once per shot, for SFX.  WeaponSystem stays free of audio
+     *  state; the caller maps the weapon onto an SFX_INVENTORY id. */
+    onFire?: (weapon: WeaponConfig, isCharged: boolean, subShotIndex: number) => void,
   ): boolean {
-    // Weaponless flight (no gun mounted) is a legal outfit — nothing to
-    // fire.  The weight system pays this back as an acceleration boost.
+    // Weaponless flight (no gun mounted) is a legal outfit — nothing to fire.
     if (player.currentWeapon === undefined) return false;
     if (player.weaponCooldown && player.weaponCooldown > 0) return false;
 
-    const weaponType = player.currentWeapon;
-    const baseConfig = WEAPONS[weaponType];
+    // Resolve through the module table (old ids map onto their combination).
+    const baseConfig = weaponConfig(player.currentWeapon);
 
-    // Charged shots require the Overcharge unlock; there is no resource
-    // cost — the 1.0s hold IS the price (by design, WEAPONS_AMMO_PLAN §2.3).
+    // Charged shots require the Overcharge unlock; the hold IS the price.
     const isCharged = charged && (player.overchargeUnlocked ?? false);
 
     let config = isCharged ? chargedConfigOf(baseConfig) : baseConfig;
-    // Progression: Gunnery scales damage (incl. cannon AoE), Autoloader
-    // scales fire cadence.  Copy the config before scaling so the shared
-    // WEAPONS table is never mutated.
+    // Gunnery scales the round (bite, bank, payloads); Autoloader the cadence.
+    // Copy-on-write, so the shared WEAPONS table is never mutated.
     config = withGunnery(config, player);
-    player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1); // base cadence × Autoloader
+    player.weaponCooldown = baseConfig.cooldown * (player.cooldownMult ?? 1);
 
-    // Every player shot asks for the TRIGGER kind: on a pad with trigger
-    // motors the recoil is felt in the trigger under the finger that pulled
-    // it, and everywhere else it falls back to the ordinary handle thump.
+    // Feel by delivery: the heavy commits shake, the fast cadence only buzzes.
     if (onShake) {
-      if (config.type === WeaponType.SHOTGUN) {
-        onShake(isCharged ? 8 : 5, { rumble: 'trigger' });
-      } else if (config.type === WeaponType.CANNON) {
+      if (config.explosionRadius && config.delivery !== 'beam') {
         onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM, { rumble: 'trigger' });
-      } else if (config.type === WeaponType.BURST) {
-        onShake(3, { rumble: 'trigger' });
-      } else if (config.type === WeaponType.BLASTER && isCharged) {
+      } else if (config.delivery === 'spread' || config.delivery === 'radial') {
+        onShake(isCharged ? 8 : 5, { rumble: 'trigger' });
+      } else if (isCharged) {
         onShake(COLLISION_CONFIG.SHAKE.MEDIUM, { rumble: 'trigger' });
       }
     }
-    // The plain Blaster shakes NO camera by design; it still kicks the pad.
-    if (onRumble && config.type === WeaponType.BLASTER && !isCharged) {
+    if (onRumble && !isCharged && (config.delivery === 'projectile' || config.delivery === 'homing')
+        && !config.explosionRadius) {
       onRumble(INPUT_CONSTANTS.RUMBLE.WEAPON_TICK, 'trigger');
     }
 
-    if (config.type === WeaponType.BURST && config.burstCount) {
-      player.burstQueue = config.burstCount - 1;
-      player.burstTimer = config.burstDelay;
-      player.burstCharged = isCharged || undefined;
+    // DISPATCH BY DELIVERY.  Rounds go to the projectile system; a beam, a
+    // radial pulse and an instant-cone spread (electric forks, magnetic
+    // repulsor) are resolved by the energy layer, which owns the grids.
+    const instant = config.delivery === 'beam' || config.delivery === 'radial'
+      || (config.delivery === 'spread' && config.coneHalfDeg !== undefined);
+    if (instant) {
+      this.onInstantFire?.(config, player, target);
+    } else {
+      this.projectiles.spawn(entities, player, target, config, EntityType.PLAYER);
     }
-
-    this.projectiles.spawn(entities, player, target, config, EntityType.PLAYER);
-    onFire?.(config.type, isCharged, 0);
+    onFire?.(config, isCharged, 0);
     return true;
   }
 
-  /**
-   * Advance the player's burst queue: if a burst is pending and its timer
-   * has expired, fire the next shot.  Called each sim tick.  Triggers a
-   * screen shake on burst-weapon sub-shots via `onShake`.
-   */
-  public tickPlayerBurst(
-    entities: GameEntity[],
-    player: GameEntity,
-    dt: number,
-    onShake?: (amount: number) => void,
-    onFire?: (weapon: WeaponType, isCharged: boolean, subShotIndex: number) => void,
-  ) {
+  /** Tick the player's weapon cooldown.  Called each sim tick. */
+  public tickPlayerCooldown(player: GameEntity, dt: number) {
     if (player.weaponCooldown && player.weaponCooldown > 0) {
       player.weaponCooldown -= dt;
     }
-
-    if (!(player.burstQueue && player.burstQueue > 0)) return;
-
-    player.burstTimer = (player.burstTimer || 0) - dt;
-    if (player.burstTimer > 0) return;
-
-    player.burstQueue--;
-    const baseConfig = WEAPONS[player.currentWeapon || WeaponType.BLASTER];
-    let config = player.burstCharged ? chargedConfigOf(baseConfig) : baseConfig;
-    // A burst sub-shot is a player shot like any other — same Gunnery.
-    config = withGunnery(config, player);
-    player.burstTimer = config.burstDelay || 0.1;
-    const targetX = player.position.x + Math.cos(player.rotation) * 100;
-    const targetY = player.position.y + Math.sin(player.rotation) * 100;
-    this.projectiles.spawn(entities, player, { x: targetX, y: targetY }, config, EntityType.PLAYER);
-    // Sub-shot index counts UP as the queue drains, so the caller can step
-    // the pitch and make a burst read as a rising triplet.
-    onFire?.(config.type, player.burstCharged === true,
-             (config.burstCount ?? 1) - player.burstQueue);
-    if (onShake && config.type === WeaponType.BURST) onShake(3);
-
-    // Clear the charged flag once the burst fully drains so the next
-    // trigger pull starts fresh.
-    if (player.burstQueue === 0) player.burstCharged = undefined;
   }
 
   /**
@@ -406,40 +360,33 @@ export class WeaponSystem {
   }
 
   /**
-   * Weapon selection semantics (2-slot loadout model, pivot 1b):
+   * Weapon selection semantics (2-slot loadout):
    * - Only an EQUIPPED weapon can be selected — the loadout is the in-field
-   *   commitment; ownership alone isn't enough (swap at the Drydock).
+   *   commitment.  Old ids are resolved to their combination first.
    * - Selecting the already-active weapon is a no-op.
-   * Returns the new currentWeapon index in WEAPON_LIST for UI state.
+   * Returns the selected weapon's loadout slot, or -1.
    */
-  public selectWeapon(player: GameEntity, wType: WeaponType): number {
-    const equipped = player.equippedWeapons ?? [WeaponType.BLASTER, null];
-    if (!equipped.includes(wType)) {
-      return WEAPON_LIST.indexOf(player.currentWeapon || WeaponType.BLASTER);
-    }
-    if (player.currentWeapon !== wType) {
-      player.currentWeapon = wType;
-      player.burstQueue = 0;
-    }
-    return WEAPON_LIST.indexOf(wType);
+  public selectWeapon(player: GameEntity, id: string): number {
+    const equipped = player.equippedWeapons ?? [];
+    const key = resolveWeaponKey(id) ?? id;
+    const slot = equipped.indexOf(key);
+    if (slot < 0) return equipped.indexOf(player.currentWeapon ?? null);
+    player.currentWeapon = key;
+    return slot;
   }
 
-  /**
-   * Cycle between the (at most 2) equipped loadout slots.  With one slot
-   * filled this is a no-op.
-   */
+  /** Cycle between the (at most 2) equipped loadout slots. */
   public cycleWeapon(player: GameEntity): number {
-    const equipped = (player.equippedWeapons ?? [WeaponType.BLASTER, null])
-      .filter((w): w is WeaponType => w !== null);
-    if (equipped.length <= 1) return WEAPON_LIST.indexOf(player.currentWeapon || equipped[0] || WeaponType.BLASTER);
-    const currentIdx = equipped.indexOf(player.currentWeapon || equipped[0]);
+    const equipped = (player.equippedWeapons ?? []).filter((w): w is string => w !== null);
+    if (equipped.length === 0) return -1;
+    if (equipped.length === 1) { player.currentWeapon = equipped[0]; return 0; }
+    const currentIdx = equipped.indexOf(player.currentWeapon ?? equipped[0]);
     player.currentWeapon = equipped[(currentIdx + 1) % equipped.length];
-    player.burstQueue = 0;
-    return WEAPON_LIST.indexOf(player.currentWeapon);
+    return (player.equippedWeapons ?? []).indexOf(player.currentWeapon);
   }
 
-  /** Expose the weapon config for a given type (convenience for callers). */
-  public getConfig(wType: WeaponType): WeaponConfig {
-    return WEAPONS[wType];
+  /** Expose the weapon config for an id (convenience for callers). */
+  public getConfig(id: string): WeaponConfig {
+    return weaponConfig(id);
   }
 }

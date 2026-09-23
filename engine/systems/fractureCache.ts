@@ -111,13 +111,23 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   // count, so a very large body gets coarser grains rather than hundreds
   // of cells.  Constant grain size holds BETWEEN the two.
   sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
+  // ENERGY FRACTURE PROFILE (energy modules, §7): the energy that first
+  // breaks into a body scales the site count it decomposes with — glass
+  // under heat fails into a few large pieces, under a slug into many.  It
+  // applies AFTER the material clamp because that is the point (a thermal
+  // pane below glass's own floor), bounded to [2, 1.5 × max] so a profile
+  // can neither degenerate the pattern nor blow the decomposition budget.
+  const siteScale = e.fractureProfile?.siteScale;
+  if (siteScale !== undefined && siteScale !== 1) {
+    sites = Math.max(2, Math.min(Math.ceil(f.grainCountMax * 1.5), Math.round(sites * siteScale)));
+  }
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 
   const ip = localImpactPoint(e);
   const biasOverride = getFractureBiasOverride();
   const impact = ip !== null
-    ? { x: ip.x, y: ip.y, bias: biasOverride ?? f.impactBias }
+    ? { x: ip.x, y: ip.y, bias: biasOverride ?? e.fractureProfile?.bias ?? f.impactBias }
     : undefined;
 
   e.fractureEdges = undefined; // edges are derived — never outlive the cells

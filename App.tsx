@@ -1,6 +1,7 @@
 
 import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
+import * as Energy from './engine/systems/energy';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
@@ -18,7 +19,7 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          PROJECTILE_CONSTANTS, HIT_FEEDBACK,
          BASE_BANK_DIVISOR, BASE_BANK_TRIM, GUNNERY_MK3_TRIPLE_MULT,
          GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
-         blastDamageFor, BLAST_ENERGY_COUPLING } from './constants';
+         blastDamageFor, BLAST_ENERGY_COUPLING, weaponConfig, nominalDps, LEGACY_BASE_WEAPON } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -188,6 +189,14 @@ const App: React.FC = () => {
     // `perf/impact-audit.mjs` §7 does with this.  Exposed as the TABLES
     // rather than as computed numbers so the audit cannot drift from what
     // the sim reads.  Nothing in the game reads this handle.
+    // __omniEnergy: the PURE half of the energy-module pipeline (material
+    // table, heat arithmetic, chain planner, fracture profiles, the legacy
+    // weapon map) plus the composed weapon table.  Same terms as the handles
+    // around it: every one of these can be wrong with no symptom — a chain
+    // cap that stopped holding still draws arcs, a thermal glass profile
+    // that equals the mechanical one still shatters.  Nothing in the game
+    // reads it.
+    (window as any).__omniEnergy = { ...Energy, WEAPONS, weaponConfig, nominalDps, LEGACY_BASE_WEAPON };
     (window as any).__omniMass = {
       ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
       projectileMassFor, PHYSICS_CONSTANTS,

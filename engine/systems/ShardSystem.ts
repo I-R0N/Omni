@@ -349,6 +349,26 @@ export class ShardSystem {
    * `tickBonds` compacts this array in place every sim step.
    */
   public get liveBonds(): readonly ShardBond[] { return this.bonds; }
+
+  /**
+   * RELEASE every cohesion bond that holds `e`, and keep it from re-bonding
+   * for `holdSec` (the existing `nebulaMergeCooldown` gate, which blocks pull
+   * and bond formation for any variant).  This is how HEAT breaks plastic
+   * (energy modules, §8): the bonds let go and the ordinary physics does the
+   * rest — the goo pulls apart instead of being shattered.  Compacts in place
+   * (no allocation); returns how many bonds were released.
+   */
+  public releaseBondsOf(e: GameEntity, holdSec: number): number {
+    let n = 0, released = 0;
+    for (let i = 0; i < this.bonds.length; i++) {
+      const b = this.bonds[i];
+      if (b.a === e || b.b === e) { released++; continue; }
+      this.bonds[n++] = b;
+    }
+    if (this.bonds.length !== n) this.bonds.length = n;
+    if (e.mass !== Infinity) e.nebulaMergeCooldown = Math.max(e.nebulaMergeCooldown ?? 0, holdSec);
+    return released;
+  }
   // Peak per-bond local merge-rate multiplier applied last tickBonds —
   // exposed for the DBG "merge rate" readout (replaces the old global
   // count-driven multiplier).  1.0 = no local acceleration this frame.
@@ -737,6 +757,13 @@ export class ShardSystem {
     // The chip-dust bank is per LIFE: a revived tile has shed nothing.
     entity.grainDustArea = undefined;
     entity.grainDustChips = undefined;
+    // Energy state is per LIFE too: a regrown tile is cold, unbroken and
+    // carries no profile of whatever broke its previous body.
+    entity.heat = undefined;
+    entity.burnTimer = undefined;
+    entity.burnRate = undefined;
+    entity.energizedUntil = undefined;
+    entity.fractureProfile = undefined;
 
     // Variant-specific completion hook (nebula composition rewrite
     // + cache invalidation + neighbour-counts dirty bookkeeping +
@@ -997,7 +1024,11 @@ export class ShardSystem {
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE = parentVariant.shatter.scatterHalfCone;
-    const radialSpeed = parentVariant.grain!.radialSpeed;
+    // The energy profile's IMPULSE scales both scatter terms (energy
+    // modules, §7): a thermal failure collapses where it stood, a slug
+    // throws its pieces.  1 when no energy event touched the body.
+    const profImpulse = parent.fractureProfile?.impulse ?? 1;
+    const radialSpeed = parentVariant.grain!.radialSpeed * profImpulse;
 
     const isRockParent = parent.shardVariant === 'rock-shard'
       || parent.shardVariant === 'rock-tile';
@@ -1050,7 +1081,7 @@ export class ShardSystem {
       let vx = parent.velocity.x + rdx * rSpeed;
       let vy = parent.velocity.y + rdy * rSpeed;
       if (impactAngle !== null) {
-        const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
+        const fwd = profImpulse * Math.min(SHATTER_SCATTER_SPEED_CAP,
           impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
         const fa = impactAngle + (Math.random() - 0.5) * HALF_CONE * 0.5;
         vx += Math.cos(fa) * fwd;
