@@ -525,6 +525,11 @@ export class GameEngine {
   // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
   // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
   screenShakeEnabled: boolean = true;
+  /** DBG ▸ Weapon modules ▸ "Outfit anywhere": lifts `moveModule`'s drydock
+   *  guard so the flowers are editable from the pause menu anywhere on the
+   *  map.  A test affordance, not a rule change — off by default, and it
+   *  survives restarts like the other DBG toggles. */
+  dbgOutfitAnywhere: boolean = false;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
   // When `shardFlowEnabled` is false, the per-asteroid / per-drop
@@ -1236,6 +1241,7 @@ export class GameEngine {
       shardLodEnabled: this.renderer.shardLodEnabled,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      outfitAnywhere: this.dbgOutfitAnywhere,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
@@ -2465,6 +2471,7 @@ export class GameEngine {
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
       weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
+      weaponModuleCatalog: this.gameState === GameState.PAUSED ? this.weaponModuleSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2485,6 +2492,7 @@ export class GameEngine {
       shardLodEnabled: this.renderer.shardLodEnabled,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      outfitAnywhere: this.dbgOutfitAnywhere,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
@@ -5073,7 +5081,7 @@ export class GameEngine {
       to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ): boolean {
       const cargoOnly = from.area === 'inventory' && to.area === 'inventory';
-      if (!cargoOnly && !this.dockedServices()?.drydock) {
+      if (!cargoOnly && !this.dockedServices()?.drydock && !this.dbgOutfitAnywhere) {
           // Outfitting away from a drydock is the single most common thing
           // a player tries and cannot do — it needs an audible "no".
           this.audio.play('poi.reject');
@@ -5273,6 +5281,107 @@ export class GameEngine {
       // modifier did); the grant does not grab the trigger.
       const keep = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === prevDelivery);
       if (keep) this.player.currentWeapon = keep;
+  }
+
+  // ── DBG: the ten weapon modules (5 deliveries + 5 energy modifiers) ──
+  //
+  // The quick path for testing combinations without the shop: add a module
+  // straight onto the weapon flower (or into cargo when the flower has no
+  // room), take one off again, or clear them all.  Every path ends in
+  // `syncLoadoutFromSlots`, so the loadout, the adjacency fixpoint and the
+  // per-gun modifier are exactly what the real outfitting would produce.
+
+  /** The ten ids, deliveries first, in catalog order. */
+  private weaponModuleIds(): string[] {
+      return MODULE_DEFS
+          .filter(d => d.weapon !== undefined || d.family === 'energy')
+          .map(d => d.id);
+  }
+
+  /** DBG: add one weapon module.  Installs it on the first free weapon hex
+   *  when it can function there (a gun only below the mounted cap); else it
+   *  goes to cargo; no-op when both are full. */
+  public debugAddWeaponModule(id: string): boolean {
+      const def = moduleDef(id);
+      if (!def || !this.weaponModuleIds().includes(id)) return false;
+      const gunsMounted = this.weaponSlots.filter(s => s !== null && moduleDef(s)?.kind === 'weapon').length;
+      const canMount = def.kind !== 'weapon' || gunsMounted < MAX_INSTALLED_GUNS;
+      const free = canMount ? firstFreeSlotFor(this, def) : -1;
+      if (free !== -1) {
+          this.weaponSlots[free] = id;
+      } else {
+          const inv = this.inventory.indexOf(null);
+          if (inv === -1) return false;
+          this.inventory[inv] = id;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+      return true;
+  }
+
+  /** DBG: remove one copy of a weapon module — the INSTALLED one first (the
+   *  last hex holding it), else one from cargo. */
+  public debugRemoveWeaponModule(id: string): boolean {
+      let at = this.weaponSlots.lastIndexOf(id);
+      if (at !== -1) {
+          this.weaponSlots[at] = null;
+      } else {
+          at = this.inventory.lastIndexOf(id);
+          if (at === -1) return false;
+          this.inventory[at] = null;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+      return true;
+  }
+
+  /** DBG: strip every delivery and energy module from the flower and cargo
+   *  (other weapon mods — Gunnery, Autoloader, Overcharge — stay). */
+  public debugClearWeaponModules() {
+      const ids = this.weaponModuleIds();
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const s = this.weaponSlots[i];
+          if (s !== null && ids.includes(s)) this.weaponSlots[i] = null;
+      }
+      for (let i = 0; i < this.inventory.length; i++) {
+          const s = this.inventory[i];
+          if (s !== null && ids.includes(s)) this.inventory[i] = null;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+  }
+
+  /** DBG: toggle outfitting away from a drydock (see `dbgOutfitAnywhere`). */
+  public debugToggleOutfitAnywhere() {
+      this.dbgOutfitAnywhere = !this.dbgOutfitAnywhere;
+  }
+
+  /** After a DBG edit: keep firing the current weapon if it is still on the
+   *  flower, else take the first equipped one (or none — weaponless flight
+   *  is legal). */
+  private ensureCurrentWeapon() {
+      const cur = this.player.currentWeapon;
+      if (cur !== undefined && this.equippedWeapons.includes(cur)) return;
+      const cd = cur !== undefined ? parseWeaponKey(cur)?.delivery : undefined;
+      const same = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === cd);
+      const next = same ?? this.equippedWeapons.find(k => k !== null) ?? undefined;
+      this.player.currentWeapon = next ?? undefined;
+      this.currentWeaponIndex = next ? this.equippedWeapons.indexOf(next) : 0;
+  }
+
+  /** DBG snapshot (paused only): each weapon module with how many are on
+   *  the flower and in cargo. */
+  private weaponModuleSnapshot() {
+      return this.weaponModuleIds().map(id => {
+          const d = moduleDef(id)!;
+          return {
+              id,
+              name: d.label,
+              kind: (d.weapon !== undefined ? 'delivery' : 'energy') as 'delivery' | 'energy',
+              installed: this.weaponSlots.filter(s => s === id).length,
+              stored: this.inventory.filter(s => s === id).length,
+          };
+      });
   }
 
   /** DBG / test seam: put a THERMAL packet into a body through the real

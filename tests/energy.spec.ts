@@ -599,4 +599,50 @@ test.describe('the weapons, fired into the world', () => {
     expect(r.current).toBe('projectile+explosive');  // still firing the same gun, now modified
     watch.assertClean();
   });
+
+  test('DBG: weapon modules add, remove and clear without a shop, and outfit anywhere is a toggle', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'GLASS_FIELD');
+    const r = await engine(page, e => {
+      const cat = () => e.weaponModuleSnapshot();
+      const ten = cat().map((m: any) => m.id);
+      // Add a second delivery and an energy modifier: both land on the flower.
+      e.debugAddWeaponModule('dlv_beam');
+      e.debugAddWeaponModule('nrg_electric');
+      const afterAdd = [...e.equippedWeapons];
+      // A third gun is over the 2-gun cap, so it goes to cargo.
+      e.debugAddWeaponModule('dlv_radial');
+      const radial = cat().find((m: any) => m.id === 'dlv_radial');
+      // Remove takes the installed copy first.
+      e.debugRemoveWeaponModule('nrg_electric');
+      const afterRemove = [...e.equippedWeapons];
+      // Away from any drydock, installing is refused... until the toggle.
+      const inv = e.inventory.indexOf('dlv_radial');
+      const beamAt = e.weaponSlots.indexOf('dlv_beam');
+      const refused = e.moveModule({ area: 'weapon', idx: beamAt }, { area: 'inventory', idx: e.inventory.indexOf(null) });
+      e.debugToggleOutfitAnywhere();
+      const freed = e.moveModule({ area: 'weapon', idx: beamAt }, { area: 'inventory', idx: e.inventory.indexOf(null) });
+      const mounted = e.moveModule({ area: 'inventory', idx: inv }, { area: 'weapon', idx: beamAt });
+      const afterMove = [...e.equippedWeapons];
+      e.debugToggleOutfitAnywhere();
+      // Clear strips every delivery and modifier; weaponless flight is legal.
+      e.debugClearWeaponModules();
+      const left = cat().reduce((n: number, m: any) => n + m.installed + m.stored, 0);
+      return { ten, afterAdd, radial, afterRemove, refused, freed, mounted, afterMove,
+               left, current: e.player.currentWeapon ?? null };
+    });
+    expect([...r.ten].sort()).toEqual(['dlv_beam', 'dlv_homing', 'dlv_projectile', 'dlv_radial', 'dlv_spread',
+      'nrg_electric', 'nrg_explosive', 'nrg_kinetic', 'nrg_magnetic', 'nrg_thermal']);
+    expect(r.afterAdd.some((k: string | null) => k?.includes('+electric'))).toBe(true);
+    expect(r.afterAdd.some((k: string | null) => k?.startsWith('beam'))).toBe(true);
+    expect(r.radial).toMatchObject({ installed: 0, stored: 1 });
+    expect(r.afterRemove.some((k: string | null) => k?.includes('+electric'))).toBe(false);
+    expect(r.refused, 'no drydock, no toggle: the flower stays committed').toBe(false);
+    expect(r.freed).toBe(true);
+    expect(r.mounted).toBe(true);
+    expect(r.afterMove).toContain('radial');
+    expect(r.left).toBe(0);
+    expect(r.current).toBeNull();
+    watch.assertClean();
+  });
 });

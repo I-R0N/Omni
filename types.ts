@@ -1960,6 +1960,10 @@ export interface EngineStats {
   /** Full weapon catalog for the pause-menu DEBUG weapons rows (built only
    *  while paused).  `slot` = equipped loadout slot (0/1) or null. */
   weaponCatalog?: { id: string; name: string; owned: boolean; slot: number | null }[];
+  /** DBG (paused only): the ten weapon modules and where each copy is. */
+  weaponModuleCatalog?: { id: string; name: string; kind: 'delivery' | 'energy'; installed: number; stored: number }[];
+  /** DBG: outfitting is allowed away from a drydock. */
+  outfitAnywhere?: boolean;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

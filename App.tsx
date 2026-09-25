@@ -942,6 +942,18 @@ const App: React.FC = () => {
   const handleGrantWeapon = (id: string) => {
       if (engineRef.current) engineRef.current.debugGrantWeapon(id);
   };
+  const handleAddWeaponModule = (id: string) => {
+      if (engineRef.current) engineRef.current.debugAddWeaponModule(id);
+  };
+  const handleRemoveWeaponModule = (id: string) => {
+      if (engineRef.current) engineRef.current.debugRemoveWeaponModule(id);
+  };
+  const handleClearWeaponModules = () => {
+      if (engineRef.current) engineRef.current.debugClearWeaponModules();
+  };
+  const handleToggleOutfitAnywhere = () => {
+      if (engineRef.current) engineRef.current.debugToggleOutfitAnywhere();
+  };
 
   const handleTeleportStation = () => {
       if (engineRef.current) engineRef.current.debugTeleportToStation();
@@ -1192,6 +1204,10 @@ const App: React.FC = () => {
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}
         onGrantWeapon={handleGrantWeapon}
+        onAddWeaponModule={handleAddWeaponModule}
+        onRemoveWeaponModule={handleRemoveWeaponModule}
+        onClearWeaponModules={handleClearWeaponModules}
+        onToggleOutfitAnywhere={handleToggleOutfitAnywhere}
         onTeleportStation={handleTeleportStation}
         onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
         onToggleFFOverlayCells={handleToggleFFOverlayCells}

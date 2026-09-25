@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  448 tests.  All run at
+                          whatever happened next).  449 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -4316,7 +4316,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   debug overlays only).  DBG **Weapons** rows (grant + equip per weapon,
   `debugGrantWeapon`) are the wave-map test path for weapons now that
   commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
-  feeds them.  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
+  feeds them.  DBG **Weapon Modules** is the shop-free path for the ten energy-module
+  items: a `+` / `−` per delivery and energy module
+  (`debugAddWeaponModule` mounts on the first free weapon hex — a gun only
+  under the 2-gun cap — else drops to cargo; `debugRemoveWeaponModule`
+  takes the installed copy first), an EQUIP COMBO grid (delivery × bare /
+  K / E / T / M / X, through `debugGrantWeapon`'s deterministic layout),
+  `Clear`, and **Outfit anywhere** (`dbgOutfitAnywhere`): lifts
+  `moveModule`'s drydock guard and makes the pause menu's flowers the
+  station's editable ones, so the loadout can be rearranged mid-field.
+  Off by default; the station-only rule is unchanged when it is off.
+  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
   with its full phase table, each click stacking another (the Dragon-menu
   pattern).  Step 5 added four rows: Player ▸ **Gamepad** + **↳ axes** (a
   live READOUT — the pad has nothing to switch, and what a hardware check
