@@ -1014,6 +1014,22 @@ export const UI_CONSTANTS = {
      *  same reason the rest of this block is one. */
     NARROW_WIDTH: 372,
     WRAP_INSET: 36,
+    /** The top-right CONTROL COLUMN — PAUSE with the DEBUG launcher stacked
+     *  under it (components/DebugMenu.tsx).  The launcher went UNDER pause
+     *  rather than beside it because the readout row beside it is already
+     *  width-bound (it wraps at 390px in an arena), so a fifth fixed control
+     *  in that row would push the chips onto more lines; stacked, it costs
+     *  the chips nothing and costs the arrows only this band.  It is TALLER
+     *  than the unwrapped readout row, so the top band is whichever of the
+     *  two reaches lower — and since the column also covers a readout row
+     *  wrapped onto two lines, WRAP_INSET no longer moves the band on its
+     *  own at any width the column is up.
+     *
+     *  MEASURED like the rest of this block: the column bottoms out at y=94
+     *  (8px HUD padding + a 42px pause button + a 4px gap + the 40px
+     *  launcher) at every width, and an arrow is centred on the rect edge, so
+     *  the edge sits ~SIZE_NEAR below that, less EDGE_INSET. */
+    CONTROL_COLUMN_INSET: 81,
     /** Never let the two bands close up on a short window — a landscape
      *  phone is ~390px tall and would otherwise be left with no rect at
      *  all.  Below this the bands give way and the arrows ride a thin
@@ -1245,6 +1261,13 @@ export const INPUT_CONSTANTS = {
   CHARGE_FULL: 1.0,        // seconds: hold time required for a charged shot AND for the ring to read "full"
   TAP_DISTANCE_LIMIT: 20,  // px: max finger travel for a tap to register
   THROTTLE_DISTANCE: 150,  // px from screen center that maps to full throttle (1.0)
+  /** The DEBUG PANEL's keyboard shortcut, as a `KeyboardEvent.code` — so it
+   *  is a physical POSITION (left of 1, under Esc) rather than a character,
+   *  and survives keyboard layouts that put something other than ` there.
+   *  The classic dev-console key, and unbound: flight is WASD/arrows, the
+   *  mouse aims and shoots, E interacts and Q scans.  Escape also CLOSES the
+   *  panel (never opens it).  The pad's twin is `GAMEPAD.BUTTONS.DEBUG`. */
+  DEBUG_KEY: 'Backquote',
 
   // ── Gamepad rumble ─────────────────────────────────────────────────────
   // Force feedback rides the SCREEN SHAKE.  Every impact in the game already
@@ -1431,8 +1454,16 @@ export const INPUT_CONSTANTS = {
       // flight, which is safe because they are only ever SPENT while a
       // full-screen overlay is up and the world is frozen: Cross cannot fire
       // (the FIRE queue is gated on the world) and the D-pad cannot thrust.
+      // The ONE exception is the debug panel, which can be open over a live
+      // world — so while it is up it CAPTURES the pad outright (no pad thrust,
+      // aim or fire; see `GameEngine.pollGamepad`) rather than relying on a
+      // freeze it may not have.
       CONFIRM:      [0],      // Cross — activate the focused control
       BACK:         [1],      // Circle — dismiss / resume / undock
+      /** Toggle the DEBUG PANEL (the pad's twin of the ` key).  Select /
+       *  Share / View — the one standard button bound to nothing in flight or
+       *  in the menus, and where console dev menus conventionally live. */
+      DEBUG:        [8],      // Create / Share / View / Select
     },
     /** Menu D-pad auto-repeat: the first step is immediate, then a held
      *  direction waits DELAY before repeating every INTERVAL.  Without the
@@ -8338,7 +8369,7 @@ export function computeIndicatorRect(
 ): { left: number; right: number; top: number; bottom: number } {
   const {
     EDGE_INSET, TOP_INSET, BOSS_BAR_INSET, BOTTOM_INSET, MIN_BAND,
-    NARROW_WIDTH, WRAP_INSET,
+    NARROW_WIDTH, WRAP_INSET, CONTROL_COLUMN_INSET,
   } = UI_CONSTANTS.INDICATORS;
   const left  = Math.min(EDGE_INSET, Math.max(0, screenWidth  * 0.5 - 8));
   const right = screenWidth - left;
@@ -8346,10 +8377,12 @@ export function computeIndicatorRect(
   // is the tallest.  Reserving its height permanently would cost every
   // ordinary fight ~60px of play area for a widget that is not on screen, so
   // the band grows while it is up instead — and likewise narrows back when
-  // the readout row is wide enough not to wrap.
-  let top     = EDGE_INSET + TOP_INSET
-              + (bossBar ? BOSS_BAR_INSET : 0)
-              + (screenWidth < NARROW_WIDTH ? WRAP_INSET : 0);
+  // the readout row is wide enough not to wrap.  The band itself is the
+  // deeper of its two columns: the readout row on the left, and the
+  // pause-over-debug control column on the right.
+  const readoutRow = TOP_INSET + (screenWidth < NARROW_WIDTH ? WRAP_INSET : 0);
+  let top     = EDGE_INSET + Math.max(readoutRow, CONTROL_COLUMN_INSET)
+              + (bossBar ? BOSS_BAR_INSET : 0);
   let bottom  = screenHeight - EDGE_INSET - BOTTOM_INSET;
   // A short window (a landscape phone) would otherwise have the two bands
   // meet or cross.  The bands give way rather than the arrows vanishing.

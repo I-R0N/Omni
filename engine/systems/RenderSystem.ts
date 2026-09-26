@@ -92,6 +92,21 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  state, deliberately — the canvas layer must not start measuring React's
    *  layout, but "is a capstone alive" is something the sim already knows. */
   public bossBarActive: boolean = false;
+  /** Where the open DEBUG PANEL sits (CSS px), or null — set per frame by
+   *  `GameEngine.draw` from the rect the panel itself reported.  The panel is
+   *  SEE-THROUGH (user call), so the WORLD reads through it; the screen-space
+   *  HUD — banners, edge arrows, minimap, prompts, loadout strip, the touch
+   *  controls — is clipped out from under it instead.  Those are bottom-docked
+   *  exactly where the panel docks, so under its rows they read as the same
+   *  double-vision the DOM HUD is already hidden from behind an overlay
+   *  (CLAUDE.md §8); with the opaque panel they were simply covered.  A hole,
+   *  not a skip: a widget half under the panel (an expanded minimap on a short
+   *  screen, the minimap beside a centred desktop panel) still draws the part
+   *  that is not. */
+  public hudHole: { x: number; y: number; w: number; h: number } | null = null;
+  /** How far past the panel's own rect the hole reaches — enough to swallow a
+   *  border stroke that sits on the panel's edge. */
+  static readonly HUD_HOLE_PAD = 4;
   /** SCANNER, pushed once per frame in `GameEngine.draw` — the same channel
    *  the Light's cone override takes.  `scannerMk` says which detection
    *  TIERS the ship can find; `scanRanges` says how far each reaches; the
@@ -1374,6 +1389,23 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
         }
     }
 
+    // THE HUD HOLE: everything from here to the end of the pass is screen-
+    // space HUD, and none of it draws under an open debug panel (see
+    // `hudHole`).  One even-odd clip — the screen minus the panel's rect —
+    // restored after step 10.  Padded by HUD_HOLE_PAD, because a widget whose
+    // edge sits ON the panel's edge (the loadout strip shares its 8px bottom
+    // gutter) strokes a border a pixel or two past it, which would otherwise
+    // show as a hairline just outside the panel.
+    const hudHole = this.hudHole;
+    if (hudHole) {
+        const pad = RenderSystem.HUD_HOLE_PAD;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, width, height);
+        ctx.rect(hudHole.x - pad, hudHole.y - pad, hudHole.w + pad * 2, hudHole.h + pad * 2);
+        ctx.clip('evenodd');
+    }
+
     // 5c. Render Wave Announcements (Screen Space, above game entities)
     if (waveAnnouncements && waveAnnouncements.length > 0) {
         renderWaveAnnouncements(ctx, waveAnnouncements, width, height, minimapExpanded);
@@ -1427,6 +1459,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     if (fireButton) {
         renderFireButton(ctx, fireButton);
     }
+
+    if (hudHole) ctx.restore();
 
     this.lastRenderMs = performance.now() - t0;
   }
