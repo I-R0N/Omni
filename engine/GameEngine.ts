@@ -452,6 +452,28 @@ export class GameEngine {
   // Debug mode
   debugMode: boolean = false;
 
+  // ── The DEBUG PANEL (components/DebugMenu.tsx) ──────────────────────────
+  // Whether the panel is up, and whether it HOLDS the sim while it is.  Engine
+  // state rather than React state because three devices open it (the on-screen
+  // launcher, the ` key, the pad's Select/Share button) and three engine paths
+  // read it (the loop's freeze branch, the pad capture in `pollGamepad`, and
+  // the stats payload's panel-only fields).  In memory only, like every other
+  // preference in the project.
+  //
+  // Opening the panel NEVER changes game state: it is not a pause, a dock or a
+  // screen.  It floats over whatever screen is up — including live play, which
+  // is what it is for (watching a setting take effect).
+  debugPanelOpen: boolean = false;
+  /** ❄ FREEZE — hold the sim while the panel is open over live play.  Ships
+   *  OFF: the in-play launcher exists to watch a knob take effect, and the
+   *  frozen experience was already one tap away (pause the game first).  It
+   *  never holds a dying or dead player's world — see `debugFreezeHolds`. */
+  debugFreeze: boolean = false;
+  /** Which device last OPENED the panel.  The UI focuses the filter box only
+   *  for the keyboard: a touch open that raised the soft keyboard would bury
+   *  the panel it had just opened under it. */
+  debugPanelVia: 'pointer' | 'key' | 'pad' = 'pointer';
+
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
   trailShape: TrailShape = TrailShape.CIRCLE;
@@ -1207,6 +1229,7 @@ export class GameEngine {
         },
       } : undefined,
       outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
+      debugPanel: this.debugPanelSnapshot(),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1374,6 +1397,47 @@ export class GameEngine {
         this.lastTime = performance.now(); // Prevent physics jump
         this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
+  }
+
+  /** Open or close the DEBUG PANEL.  Deliberately touches nothing else — not
+   *  `gameState`, not docking, not the death or stage-clear flags — because
+   *  the panel is not a screen: it floats over whichever screen is up, and a
+   *  future overlay gets it for free precisely because opening it asks
+   *  nothing of that overlay.  `via` records the device, for the one thing
+   *  the UI does differently per device (see `debugPanelVia`). */
+  public setDebugPanelOpen(open: boolean, via: 'pointer' | 'key' | 'pad' = 'pointer') {
+    if (open === this.debugPanelOpen) return;
+    this.debugPanelOpen = open;
+    if (open) this.debugPanelVia = via;
+  }
+
+  public toggleDebugPanel(via: 'pointer' | 'key' | 'pad' = 'pointer') {
+    this.setDebugPanelOpen(!this.debugPanelOpen, via);
+  }
+
+  /** The panel's ❄ Freeze toggle.  A preference, not a state change: it only
+   *  HOLDS the sim while `debugFreezeHolds()` says so. */
+  public setDebugFreeze(on: boolean) {
+    this.debugFreeze = on;
+  }
+
+  /** Is the ❄ Freeze actually holding the sim right now?
+   *
+   *  Only over LIVE play.  Every other screen already has its own answer —
+   *  pause, dock and stage-clear freeze through their own branches, the menu
+   *  draws a static frame — and DEATH IS THE ONE THAT MUST NOT FREEZE (user
+   *  call, CLAUDE.md §3): the field keeps fighting behind the summary.  So the
+   *  freeze stands down the moment the player starts dying, through the
+   *  explosion, the beat before the summary, and the summary itself; a panel
+   *  left frozen over a death is simply a panel over a live world.  That is
+   *  what keeps "death does not freeze the game" true with no exception to
+   *  document. */
+  public debugFreezeHolds(): boolean {
+    return this.debugPanelOpen && this.debugFreeze
+        && this.gameState === GameState.PLAYING
+        && !this.dockedAtStation && !this.stageClearPending
+        && !this.deathPending && this.deathDelay <= 0
+        && !this.player.isExploding;
   }
 
   /** Tear down MAP-SCOPED state and load a fresh copy of `type`.
@@ -2168,7 +2232,18 @@ export class GameEngine {
   private pollGamepad() {
     const frozen = this.gameState !== GameState.PLAYING || this.dockedAtStation
                 || this.stageClearPending || this.deathPending;
-    this.input.pollGamepad(!frozen);
+    // THE DEBUG PANEL CAPTURES THE PAD.  Menu navigation reuses buttons that
+    // are bound in flight — D-pad is thrust, Cross is fire, Circle is scan —
+    // and GAMEPAD.BUTTONS documents why that is safe: they are only ever
+    // spent while a full-screen overlay has FROZEN the world.  The debug panel
+    // breaks that assumption, because it can be open over live play.  So while
+    // it is up the pad belongs to it outright: no pad thrust or aim, no pad
+    // fire, and the flight edges are drained below rather than banked.  The
+    // keyboard and the canvas still fly the ship; they share no buttons with
+    // the panel.
+    const captured = this.debugPanelOpen;
+    this.input.setPadCaptured(captured);
+    this.input.pollGamepad(!frozen && !captured);
 
     const conn = this.input.consumePadConnectionEvent();
     if (conn) {
@@ -2178,6 +2253,14 @@ export class GameEngine {
         INPUT_CONSTANTS.GAMEPAD.HINT_LIFETIME,
       );
     }
+
+    // The debug panel's own controls, spent here — above every freeze
+    // short-circuit in `loop` — for the same reason PAUSE is: they have to
+    // work from inside a frozen screen.  ` and the pad's Select/Share toggle
+    // it on any screen; Escape only ever closes it.
+    if (this.input.consumeDebugKeyPress()) this.toggleDebugPanel('key');
+    if (this.input.consumePadDebugPress()) this.toggleDebugPanel('pad');
+    if (this.input.consumeEscapePress() && this.debugPanelOpen) this.setDebugPanelOpen(false);
 
     if (this.input.consumePausePress()) {
       // pauseGame() is already a no-op while docked (one full-screen overlay
@@ -2189,10 +2272,14 @@ export class GameEngine {
     // Both of these are DRAINED every frame whether or not they can be spent,
     // so a press made against a frozen world cannot fire later out of context.
     // The one exception is INTERACT while docked — the docked branch below is
-    // its consumer, and undocking is exactly what it is for.
+    // its consumer, and undocking is exactly what it is for.  Under the debug
+    // panel's capture the exception goes too (the panel has the pad), and so
+    // does SCAN, whose Circle half is the panel's BACK: closing the panel must
+    // not also fire a scan into the live world behind it.
     const cycle = this.input.consumeCyclePress();
-    if (cycle && !frozen) this.cycleWeapon();
-    if (frozen && !this.dockedAtStation) this.input.consumeInteractPress();
+    if (cycle && !frozen && !captured) this.cycleWeapon();
+    if ((frozen && !this.dockedAtStation) || captured) this.input.consumeInteractPress();
+    if (captured) while (this.input.consumeScanPress()) { /* drained, not banked */ }
   }
 
   /**
@@ -2206,6 +2293,11 @@ export class GameEngine {
    * picks one for you is worse than no button.
    */
   public menuBack() {
+    // The debug panel floats ABOVE every other overlay, so it is the one BACK
+    // dismisses first — backing out of a panel opened over the pause menu
+    // lands on the pause menu, not in the game.  On the death and stage-clear
+    // screens this is the only thing BACK ever does, for the reason above.
+    if (this.debugPanelOpen) { this.setDebugPanelOpen(false); return; }
     if (this.dockedAtStation) { this.undock(); return; }
     if (this.gameState === GameState.PAUSED) { this.resumeGame(); return; }
   }
@@ -2454,7 +2546,14 @@ export class GameEngine {
       dock: this.dockStatsSnapshot(),
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
-      weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
+      // PANEL-ONLY payloads.  Nothing but a debug row reads these, so they
+      // are built only while the panel is up — on whatever screen that is.
+      // (The weapon catalog used to be built on every PAUSED frame, because
+      // the pause menu was the only place the panel could be open.)
+      weaponCatalog: this.debugPanelOpen ? this.weaponCatalogSnapshot() : undefined,
+      debugSlotLock: this.debugPanelOpen
+        ? `${this.slotsUnlocked('ship')}/${MODULE_SLOT_COUNT}` : undefined,
+      debugPanel: this.debugPanelSnapshot(),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2629,14 +2728,17 @@ export class GameEngine {
     // the already-built enemy index — the manager is otherwise purely
     // event-driven, so this is the entire per-frame audio cost.
     this.audio.setListener(this.camera.position.x, this.camera.position.y);
-    this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation);
+    // A debug ❄ freeze is a frozen sim like any other, so it silences the
+    // world the way pause and dock do.
+    const debugFrozen = this.debugFreezeHolds();
+    this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation && !debugFrozen);
     // The battle layer is reported on the TRANSITION, not every frame.  The
     // score ignores a repeat anyway, so this buys little on its own — what it
     // buys is that the engine stays silent while nothing changes, which is
     // what lets the debug handle drive `setCombat` directly and have the
     // setting stand rather than being overwritten on the next frame.
     const combat = this.gameState === GameState.PLAYING && !this.dockedAtStation
-      && this.inCombatProximity();
+      && !debugFrozen && this.inCombatProximity();
     if (combat !== this.lastReportedCombat) {
       this.lastReportedCombat = combat;
       this.audio.setCombat(combat);
@@ -2681,6 +2783,19 @@ export class GameEngine {
     // available — and the frame still draws, which is what animates it.
     if (this.portalWarpTimer > 0) {
         this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // Debug panel ❄ Freeze: hold the sim while the panel is open over live
+    // play — the pause short-circuit, opted into from the panel's header.
+    // `debugFreezeHolds` is false for a dying or dead player, so this can
+    // never become the death-screen freeze the NOTE below rules out.  After
+    // the warp branch on purpose: a freeze holds the SIMULATION, and the
+    // tunnel beat is wall-clock presentation over a sim that is already held.
+    if (debugFrozen) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -5227,8 +5342,20 @@ export class GameEngine {
       syncLoadoutFromSlots(this);
   }
 
-  /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
-   *  while paused): every gun variety with its presence + gun-hex index. */
+  /** The debug panel's state for the UI — four scalars, sent on every push
+   *  (including the short one `skipWave` sends) so the panel never blinks
+   *  shut for a frame because a payload happened to omit it. */
+  private debugPanelSnapshot() {
+      return {
+          open: this.debugPanelOpen,
+          freeze: this.debugFreeze,
+          holding: this.debugFreezeHolds(),
+          via: this.debugPanelVia,
+      };
+  }
+
+  /** Weapon catalog for the debug panel's Weapons rows (built only while the
+   *  panel is open): every gun variety with its presence + gun-hex index. */
   private weaponCatalogSnapshot() {
       return MODULE_DEFS.filter(d => d.family === 'gun').map(d => ({
           id: d.weapon as string,

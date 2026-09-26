@@ -71,6 +71,10 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           mass (the impact density scale, the 10x
                           MASS_SCALE unit change and the hull-density
                           ladder),
+                          debugmenu (the debug panel: reachable from
+                          every screen, the freeze decision, that no
+                          device flies the ship through it, the
+                          panel-only payload, and every old row label),
                           modules (Gunnery, Scanner, hex slots, and
                           that the deleted Penetration family is gone
                           from every surface), weapons (what a SHOT
@@ -86,7 +90,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  430 tests.  All run at
+                          whatever happened next).  459 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -100,8 +104,19 @@ components/
                           and no focus order is authored anywhere
   UIOverlay.tsx           Entire HUD (menu, pause, wave banner, station
                           UI, dock affordance, death/run-summary screen,
-                          audio settings row; debug panel lives inside
-                          the pause menu)
+                          audio settings row).  Renders DebugMenu LAST,
+                          so the debug panel floats above every screen
+  uiClasses.ts            The named DOM class vocabulary (T_*, PANEL*,
+                          BTN_*, CHIP_*, HUD_CHIP, SECTION_TOGGLE, the
+                          overlay scrim) — shared by UIOverlay and the
+                          debug panel, so neither can drift (see §8)
+  DebugMenu.tsx           THE DEBUG PANEL — one component on every
+                          screen: the DBG launcher, the ❄ freeze, the
+                          filter box, and a renderer for whatever
+                          debugSections declares (see §8)
+  debugSections.tsx       The debug panel's REGISTRY — every group,
+                          section and row as data.  Adding a section is
+                          one entry in `DEBUG_SECTIONS`
 
 engine/
   GameEngine.ts           Orchestrator (~4900 lines).  Owns the player
@@ -130,7 +145,7 @@ engine/
                           COMMERCE API (moveModule / purchaseModule /
                           sellModule / scrapModule) stays on GameEngine
   debugControls.ts        `DebugControls` — every toggle and cycle behind
-                          pause ▸ Debug Menu, reached as `engine.dbg.*`.
+                          the debug panel, reached as `engine.dbg.*`.
                           A class, not free functions, because the UI is
                           the caller.  The flags it writes are still
                           GameEngine fields; only the methods moved
@@ -382,10 +397,14 @@ only honored from the main menu; mid-game requires `restartGame()`.
 `HUB_DESCRIPTOR.mapType` AND `restartGame()` resets it back there, so
 returning to the menu returns to the default — map choice is a DEBUG
 override that lasts the run it starts, never a preference that sticks to
-the front door.  The main menu is correspondingly three controls:
-DIFFICULTY, START, and a collapsed Debug Menu dropdown holding the map
-picker and the enemy-test rows (user call).  So `setMapType` from the menu
-is now reachable only through that dropdown.
+the front door.  The main menu correspondingly offers no map choice:
+DIFFICULTY and START, with the controls picker and help beside them.  The
+map picker is a DEBUG row — World & Maps ▸ Maps in the debug panel, whose
+launcher floats in the menu's corner as it does over every screen — so
+`setMapType` is reachable only through the panel.  From the menu it swaps
+the backdrop START will use; from anywhere else it is a switch-and-play
+(`resetAndLoadSelectedMap`, which clears docked / death / stage-clear
+state on the way).
 
 **Map loading comes in two flavours** (roadmap step (k)).  Both share
 `loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
@@ -608,7 +627,9 @@ Per-frame `loop()`:
    `deathPending` is deliberately NOT in this list: the death screen is
    the one full-screen overlay that leaves the world running (see §3's
    Death paragraph).  So the freezing overlays are PAUSED / docked /
-   stage-clear; death is not one.
+   stage-clear; death is not one.  The debug panel's opt-in ❄ FREEZE
+   (`debugFreezeHolds()`) joins them only over LIVE play and never while
+   the ship is exploding, in its death beat or on the summary (see §8).
 2. Drain the accumulator one `FIXED_DT` step at a time. Each sim step:
    - `prepareFrameEntities()` — rebuild master entity list + `EntityIndex`
    - `PerfController.beginStep(...)` — samples a load signal
@@ -823,8 +844,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `AI_CONFIG`, `COLLISION_CONFIG`
 - `UI_CONSTANTS`, `LOADOUT_HUD_CONSTANTS`, `MINIMAP_CONSTANTS`
   (including `FLOW` — the minimap's streamline layer — and
-  `STATION_BLIP`; see §8), `INPUT_CONSTANTS`.  The latter grew two
-  nested blocks in step 5 (Pair C):
+  `STATION_BLIP`; see §8), `INPUT_CONSTANTS`.  The latter carries
+  `DEBUG_KEY` (the debug panel's key, the physical ` position — see §8)
+  and grew two nested blocks in step 5 (Pair C):
   - `INPUT_CONSTANTS.GAMEPAD` — W3C standard-gamepad axis/button
     indices per action, radial `STICK_DEADZONE` (rescaled, not just
     clamped), `TRIGGER_THRESHOLD`, and `AIM_RADIUS`, the distance from
@@ -939,7 +961,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   signal is the shared movement vector.
   `PLAYER_ROLL_CYCLE` is the DBG feel knob (Ship Tilt ▸ "Roll feel"):
   named MAX-angle presets — Off / Subtle / Default / Deep — cycled live
-  from the pause debug menu; `tickPlayerRoll` reads the active angle, so
+  from the debug panel; `tickPlayerRoll` reads the active angle, so
   Off levels out through the same easing rather than a separate branch.
   THE WHOLE TILT SHIPS OFF (user call): `PLAYER_ROLL_CYCLE` defaults to
   'Off' and `PLAYER_HULL_CYCLE` to 'Ship', so an untouched build renders
@@ -1116,8 +1138,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   sites) per the same user call.  Metal keeps `decomposeMetalComposite`
   as its fracture (the lattice IS its cell set — composite cracks stroke
   the lattice edges); nebula and indestructible are excluded.  The DBG
-  SHAPE of the cells is four DBG knobs beside that A/B (V11, pause ▸
-  Debug Menu ▸ Visual): **Frac relax** (LLOYD RELAXATION rounds — the
+  SHAPE of the cells is four DBG knobs beside that A/B (V11, DBG ▸
+  Materials ▸ Grain & Fracture): **Frac relax** (LLOYD RELAXATION rounds — the
   regularity dial; each round moves every site to its own cell's
   centroid, so 0 is raw ragged Poisson Voronoi and the shipped 2
   measured cell-area CV 0.28 / roundness 0.77 against 0.53 / 0.69 at
@@ -1128,7 +1150,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   regularity by construction).  All four bump a tuning GENERATION that
   invalidates cached patterns, so a knob is visible on the next hit
   rather than only on fresh terrain.  The
-  A/B (pause ▸ Debug Menu ▸ Visual ▸ Fracture) flips every opted-in
+  A/B (DBG ▸ Materials ▸ Grain & Fracture ▸ "Fracture") flips every opted-in
   variant back to its shipped legacy break — powerlaw spray, dent
   breakShards, the spawnGlassShards fan, ROCK_CHIP — pending the user's
   call (`getActiveFractureMode`).  See
@@ -1452,8 +1474,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   timer or when the player closes
   inside PANIC_RADIUS (panic darts bias away from the player; a
   cooldown guarantees coast windows between them).  The whole ramp is
-  scaled live by the DBG `SNITCH_SPEED_CYCLE` multiplier (Player ▸
-  "Snitch spd").  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS`
+  scaled live by the DBG `SNITCH_SPEED_CYCLE` multiplier (Enemies & Bosses ▸
+  Snitch ▸ "Snitch spd").  Catching it pays `SCORE_CONSTANTS.SNITCH_POINTS`
   plus a spray of `SALVAGE_CONSTANTS.SNITCH_CATCH_DROPS` salvage drops
   (score no longer mints credits, so the catch pays money physically),
   wipes every live enemy for `SNITCH_SWEEP_KILL_FRACTION` (half) of its
@@ -1551,8 +1573,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   distance fade (losing the boss arrow behind a crowd of stragglers is
   the case the arrow exists for; it wears the shared enemy RED — its size
   and self-label are what set it apart), and a ringed `MINIMAP_CONSTANTS.BOSS_BLIP`
-  contact that clamps to the border instead of being culled.  DBG: pause ▸
-  Debug Menu ▸ Bosses.
+  contact that clamps to the border instead of being culled.  DBG ▸
+  Enemies & Bosses ▸ Bosses.
 - `CORROSION` / `DISABLE` / `ENEMY_ATTACK_EFFECTS` — status-effect
   framework (generic: `StatusEffectKind` / `EffectPayload` /
   `StatusEffect` in `types.ts`).  An attack with `appliesEffect`
@@ -1797,14 +1819,14 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     `GameEntity.spawnSpeed` is the launch reference the measurement divides
     by.
     WHICH VELOCITY the energy is measured in is the one judgement call, and
-    it is a DBG ladder (▸ Player ▸ "Impact vel") because energy is
-    FRAME-DEPENDENT and `INHERIT_SHOOTER_VELOCITY` is 1.0 — a forward shot
-    already carries the ship's velocity.  `muzzle` (index 0, what ships)
-    scores the bolt in its own launch frame: day-one neutral however the
-    ship was moving, and it still falls off through a bore because that is
-    a real loss of the bolt's own speed.  `relative` scores true CLOSING
-    energy, which finishes the unification — the crash paths already spend
-    a relative velocity, so a weapon hit and a hull hit become the same
+    it is a DBG ladder (▸ Player & Ship ▸ Impact Model ▸ "Impact vel")
+    because energy is FRAME-DEPENDENT and `INHERIT_SHOOTER_VELOCITY` is 1.0 —
+    a forward shot already carries the ship's velocity.  `muzzle` (index 0,
+    what ships) scores the bolt in its own launch frame: day-one neutral
+    however the ship was moving, and it still falls off through a bore because
+    that is a real loss of the bolt's own speed.  `relative` scores true
+    CLOSING energy, which finishes the unification — the crash paths already
+    spend a relative velocity, so a weapon hit and a hull hit become the same
     formula — at the price of a charging ship hitting 2.2–5× harder
     (measured at POCKET cruise 15; ~9.5× at ASTEROID_FIELD's 33.3) and a
     shot at a target fleeing at matched speed landing nothing.
@@ -1879,11 +1901,11 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   round, and the same coupling was worth only ~10.4 — WHAT THE CHARGE IS
   WORTH RIDES THE BANK, which is what deriving it means.  The BITE never
   moved, so what the trim changed was the RATIO, not the gun, and the
-  coupling is the right dial for it (DBG ▸ Player ▸ "Blast energy") — never
-  the trim, which is about penetration.  Measured after: **20.8 against the
-  same 18 bite**, so the original statement holds again.  The ladder keeps 1×
-  meaning WHAT SHIPS, so its 0.5× step is now the A/B against the pre-call
-  blast.
+  coupling is the right dial for it (DBG ▸ Player & Ship ▸ Impact Model ▸
+  "Blast energy") — never the trim, which is about penetration.  Measured
+  after: **20.8 against the same 18 bite**, so the original statement holds
+  again.  The ladder keeps 1× meaning WHAT SHIPS, so its 0.5× step is now the
+  A/B against the pre-call blast.
   THREE properties FALL OUT rather than being written: it rides GUNNERY for
   free (a mark buys a heavier round and the blast reads the round's mass);
   a CHARGED shell blasts harder by being heavier (the charge premium is
@@ -1960,7 +1982,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   and a shipped run is unchanged: the count is the SEAM for the ship
   catalog (the same way `SHIP_WEIGHT.HULL_BASE` is 0), and lowering it
   for the current hull is a balance call for the economy pass.  DBG ▸
-  Modules ▸ "Lock slots" (7 / 5 / 4 / 3) is what makes the locked state
+  Economy ▸ "Lock slots" (7 / 5 / 4 / 3) is what makes the locked state
   and the shop's "+1 Hex Slot" entry reachable in play.
 - `SCANNER` / `DETECT_TIER` / `detectTierFor()` / `scannerRangesFor()` /
   `scannerMarkRange()` / `detectionAlpha()` / `isAlwaysCharted()` — the
@@ -2115,13 +2137,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   worth buying, leaving it selling off-screen arrows and the pressed ping but
   not the MAP.  Anything tuning scanner economics needs the reveal off, which
   is now simply the default.
-  The DBG ▸ Visual ▸ "Scan off" row still switches the whole subsystem off in
-  exchange for a fully drawn minimap, and it is kept as a PERF A/B rather than
-  as a gameplay knob: the scanner does real continuous work, and a
-  frame-rate report needs a way to take all of it away without also taking
-  the minimap away.  `tests/helpers.ts` `useScanner(page)` remains the seam
-  every scanner suite calls — idempotent, so with the reveal off by default
-  it now checks and does nothing rather than flipping.
+  The DBG ▸ Visual / HUD ▸ Camera & HUD ▸ "Scan off" row still switches the
+  whole subsystem off in exchange for a fully drawn minimap, and it is kept as
+  a PERF A/B rather than as a gameplay knob: the scanner does real continuous
+  work, and a frame-rate report needs a way to take all of it away without
+  also taking the minimap away.  `tests/helpers.ts` `useScanner(page)` remains
+  the seam every scanner suite calls — idempotent, so with the reveal off by
+  default it now checks and does nothing rather than flipping.
 - `STATION_CONSTANTS` / `STATION_VARIANTS` / `OVERWORLD_STATIONS` /
   `OVERWORLD_CONSTANTS` — the space-station POIs (size / `DOCK_RANGE` /
   placement `CLEARANCE` / `REPAIR_COST_PER_HP` — hull repair is
@@ -2278,10 +2300,10 @@ Engine plumbing for adding a map: register the `MapType` value in
 `types.ts`, add a row to `MAP_DESCRIPTORS` in `MapDescriptors.ts`, add
 the subclass in `MapClasses.ts`, switch on it in `GameEngine.buildMap()`,
 add per-map config in `constants.ts` (`PLAYER_MOVEMENT_CONFIG`,
-`MAP_POPULATION`), and add the button to `renderMapGroup` in
-`UIOverlay.tsx` (which now renders inside the main menu's DEBUG dropdown
-and the pause menu's Switch Map section — the front door offers no map
-choice).  To make it portal-reachable as well, add a `HUB_PORTAL_SITES`
+`MAP_POPULATION`), and add the button to `REAL_MAPS` or `TEST_MAPS` in
+`components/debugSections.tsx` (the debug panel's World & Maps group,
+reachable from every screen — the front door offers no map choice).  To
+make it portal-reachable as well, add a `HUB_PORTAL_SITES`
 entry pointing at its descriptor id and call `this.addReturnPortal()` at
 the end of its `init()` — showcase maps skip both and stay debug-only.
 
@@ -2458,11 +2480,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (`'skirmisher'`), `updateSwarm` (`'swarm'` — Stage 4; separation + jitter
   flock with a DBG-selectable base steer via `getActiveSwarmMove`: weave
   (serpentine — the default) / boids / vortex (orbit + dart) / burst (coast +
-  telegraphed dash), cycled by the Player ▸ "Gnat move" DBG row), and
-  `updateBubble` (`'bubble'` — Stage 5; passive flow-field drift / shard-chase
-  while UNprovoked, floaty player-seek once `provoked`, skipped entirely while
-  latched — receives the `shards` list so it can target food); the
-  per-subtype quirks (Drone jitter,
+  telegraphed dash), cycled by the Enemies & Bosses ▸ Enemy Tuning ▸ "Gnat
+  move" DBG row), and `updateBubble` (`'bubble'` — Stage 5; passive flow-field
+  drift / shard-chase while UNprovoked, floaty player-seek once `provoked`,
+  skipped entirely while latched — receives the `shards` list so it can target
+  food); the per-subtype quirks (Drone jitter,
   Orbiter true-orbit, Sniper lock, Turret no-move) still live INSIDE those
   routines.  Strategies receive the filtered `enemies` list (so a flock can scan
   neighbours) AND the `shards` list (so the bubble can target food).  `ENEMY_ROLE`
@@ -2972,8 +2994,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   into a tile, both `killStructureByImpact` sites, the tile-pressure
   trigger) — each stamping its own contact point via the shared
   `stampLocalImpact`, so splash, chain, bite and crush damage all erode
-  from where they arrived.  DBG ▸ Visual ▸ "Bnd strength" is the master
-  multiplier over every material.
+  from where they arrived.  DBG ▸ Materials ▸ Grain & Fracture ▸ "Bnd
+  strength" is the master multiplier over every material.
 - **A CRUSH SPENDS ON THE BOUNDARIES TOO, AND IT SPENDS THE SAME FRACTION
   IT ALWAYS DID** (`PhysicsSystem.crashBoundaryDamage` /
   `crashContactOn`; step 2 of the unified-impact sequencing in
@@ -3095,9 +3117,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   mechanic inert (a 40-mass shard at half the old gate carries ~0.4 damage
   against a 54-HP rock tile).  It keeps its own damping rather than
   `payForCrash`, since those contacts each already paid through the ordinary
-  bounce.  DBG ▸ Player ▸ "Crash energy" is the permeability dial (a
-  multiplier over the coupling, index 0 ships); a material's own
-  `bondStrength` is the same question asked of one material.
+  bounce.  DBG ▸ Player & Ship ▸ Impact Model ▸ "Crash energy" is the
+  permeability dial (a multiplier over the coupling, index 0 ships); a
+  material's own `bondStrength` is the same question asked of one material.
 - **EVERY MASS IS 10x, AND IMPACTS HIT 10x HARDER** (`MASS_SCALE` /
   `scaledMass` in `constants.ts`; user call: "mass of the player should
   increase by a factor of ten ... do the same increase to projectiles and
@@ -3129,9 +3151,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   factor cancels in all of them, which is why the ship still handles like
   itself while hitting far harder, and why a ratio-shaped test cannot see
   any of this.
-  THE DIAL, if ten is too much, is `CRASH_ENERGY_COUPLING` (DBG ▸ Player ▸
-  "Crash energy") or a material's own `bondStrength` — never
-  `IMPACT_ENERGY_PER_DAMAGE`, which is the conversion the whole model is
+  THE DIAL, if ten is too much, is `CRASH_ENERGY_COUPLING` (DBG ▸ Player &
+  Ship ▸ Impact Model ▸ "Crash energy") or a material's own `bondStrength` —
+  never `IMPACT_ENERGY_PER_DAMAGE`, which is the conversion the whole model is
   calibrated against.
   `scaledMass()` is the seam every AUTHORED mass passes through (enemies at
   `WaveSystem.buildEnemy`, the dragon head, projectiles via
@@ -3194,11 +3216,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   replaced, so nothing re-priced, and 100 × `MASS_SCALE` today) with the
   material band beside it, and the four shard
   `sizeToMass` ladders read the same table, so glass : rock : metal is 1 :
-  1.8 : 3 in ONE place.  `HULL_DENSITY_CYCLE` (DBG ▸ Player ▸ "Hull
-  density", index 0 ships) is the live A/B, and it is a ladder rather than a
-  constant because ONE number moves the ship's crash energy (so ram counts),
-  how far every impact shoves it, the body-impact shake (which reads the
-  solver's own mass split) and the roll spring's frequency together.
+  1.8 : 3 in ONE place.  `HULL_DENSITY_CYCLE` (DBG ▸ Player & Ship ▸ Impact
+  Model ▸ "Hull density", index 0 ships) is the live A/B, and it is a ladder
+  rather than a constant because ONE number moves the ship's crash energy (so
+  ram counts), how far every impact shoves it, the body-impact shake (which
+  reads the solver's own mass split) and the roll spring's frequency together.
   THE LADDER RE-FOLDS THE OUTFIT rather than writing a mass:
   `applyModuleEffects` is the one place `player.mass` is derived, so
   `hullDensity()` is read THERE and the ship-weight curve rides the change
@@ -3410,9 +3432,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   distance field would blend in.  Cost is one path + one fill per visible
   bond: no per-pixel work, no offscreen surface, no allocation.
   (2) **PRESENTATION ONLY.**  Physics still resolves the two hulls as two
-  polygons; the sim never reads `blend`.  DBG ▸ Visual ▸ "Goo bond" takes
-  the drawing away and leaves the bond, which is the property the suite
-  pins.
+  polygons; the sim never reads `blend`.  DBG ▸ Materials ▸ Material Look ▸
+  "Goo bond" takes the drawing away and leaves the bond, which is the property
+  the suite pins.
   (3) **A SOFT variant's silhouette is soft in two ways**, both draw-time
   and both per-variant: `outline: false` drops the dark rim line (a rim
   traces every notch and reads as a hard edge, which is exactly what goo
@@ -3434,12 +3456,12 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   says the tile is goo when it is the thing the goo is stuck to.  Each
   body also wears its own SHADE, so a two-shade plastic pair stays two
   shades; only the bridge has to pick one, and the larger body wins it.
-  `SHARD_COAT_CYCLE` (DBG Visual ▸ "Goo coat": 1× / 1.5× / 2× / 3× / 4× /
-  6×) MULTIPLIES the authored `envelope` rather than replacing it, so the
-  variant table stays the statement of how thick that material's goo is —
-  the same relationship `MATERIAL_GLOW_BRIGHTNESS_CYCLE` has with a
-  variant's `glow.peakAlpha`.  It cycles UP from the shipped value, and
-  its top step is past useful on purpose: a range whose top is not too
+  `SHARD_COAT_CYCLE` (DBG ▸ Materials ▸ Material Look ▸ "Goo coat": 1× / 1.5×
+  / 2× / 3× / 4× / 6×) MULTIPLIES the authored `envelope` rather than
+  replacing it, so the variant table stays the statement of how thick that
+  material's goo is — the same relationship `MATERIAL_GLOW_BRIGHTNESS_CYCLE`
+  has with a variant's `glow.peakAlpha`.  It cycles UP from the shipped value,
+  and its top step is past useful on purpose: a range whose top is not too
   far cannot show where too far is.
   (5) **The attach point is DIRECTIONAL, not a radius.**  A plastic shard
   is a 4-gon with vertex radii jittered 0.65..1.10 of its base, so one
@@ -3476,8 +3498,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `GameEntity.alwaysShowHealthBar` opts a priority target back into a
   permanent bar (the dragon takes it, capstone bosses deliberately do NOT —
   they have the dedicated HUD bar); and the PLAYER is the standing
-  EXCEPTION — see below.  DBG ▸ Visual ▸ "HP bars" restores the always-on
-  behaviour as the A/B.
+  EXCEPTION — see below.  DBG ▸ Visual / HUD ▸ Camera & HUD ▸ "HP bars"
+  restores the always-on behaviour as the A/B.
 - **The PLAYER gets BOTH readouts, and they are different questions**
   (user call, reversing U5's removal).  `renderPlayerVitalsBar` draws a
   permanent hull bar under the ship — never damage-triggered, because your
@@ -3610,8 +3632,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   harmlessly — the kill-early counter.
 - **Nebula wake spin has a HANDEDNESS cycle** (user report: a starboard
   pass should turn a shard clockwise; the shipped id-parity sign gave a
-  pass no consistent handedness at all).  DBG ▸ Visual ▸ "Neb spin":
-  `physical` (default — the ship's velocity crossed with the ship→shard
+  pass no consistent handedness at all).  DBG ▸ Materials ▸ Nebula ▸ "Neb
+  spin": `physical` (default — the ship's velocity crossed with the ship→shard
   offset, so starboard → clockwise in this y-down world), `inverted` (the
   A/B), `random` (the old parity vortices).  Below a small speed floor the
   parity fallback keeps an idle cloud varied.  PROPER rotational mechanics
@@ -3917,9 +3939,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     PAIR-CONSUMING (both inputs retire and a new body appears), so
     nothing rewrites `polygonPoints` in place.
   The visible consequence is that a shatter now leaves ~1.9× the tile's
-  own cloud instead of ~3.0× (three full-size sprites), so DBG ▸ Visual ▸
-  **"Neb sprite"** is the live A/B on the overhang — a MULTIPLIER over
-  the authored constant, the same relationship `SHARD_COAT_CYCLE` has
+  own cloud instead of ~3.0× (three full-size sprites), so DBG ▸ Materials ▸
+  Nebula ▸ **"Neb sprite"** is the live A/B on the overhang — a MULTIPLIER
+  over the authored constant, the same relationship `SHARD_COAT_CYCLE` has
   with a variant's `envelope`.  **IT SHIPS AT 1.25×** (user call): the
   calibration above is what a full hex tile draws at **1×**, so a shipped
   run draws that tile at 150 and every other body 25% larger in
@@ -3942,10 +3964,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   Measured through the real sim it ran at exactly that — 53.9% tile on
   NEBULA_FIELD and 61.1% on UNIVERSE over 90 s — so nebula leaked into the
   terrain about as fast as it rebuilt itself, and the clouds visibly thinned.
-  `nebulaTileShare()` (`NEBULA_TILE_SHARE_CYCLE`, DBG ▸ Visual ▸ **"Neb
-  solid"**, index 0 ships at 7/8 toward the tile) is that split, named rather
-  than inlined so there is one number to move.  Read AT THE ROLL, so a click
-  re-tunes the clouds already in the world.  Measured after: material
+  `nebulaTileShare()` (`NEBULA_TILE_SHARE_CYCLE`, DBG ▸ Materials ▸ Nebula ▸
+  **"Neb solid"**, index 0 ships at 7/8 toward the tile) is that split, named
+  rather than inlined so there is one number to move.  Read AT THE ROLL, so a
+  click re-tunes the clouds already in the world.  Measured after: material
   outcomes 29 → 6 per 90 s on NEBULA_FIELD, with tile placements flat
   (41 → 39).  Three things go with it:
   - **THE LADDER IS THE MATERIAL SIDE read as a rarity**, because that is
@@ -4003,13 +4025,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
       `MERGE_LOSS < 1 / (TILE_COST + 1)`.  At 5 / 0.1 the ceiling is 9 against
       a cost of 5; at a loss of 0.167 it would land exactly on the cost and
       tiles would stop existing with nothing in the code to say why.
-    `NEBULA_DRAIN_CYCLE` (DBG ▸ Visual ▸ **"Neb drain"**, index 0 ships) tunes
-    how fast nebula recedes and CANNOT express growth — every step clears both
-    the yield bar and the fixed point, which is what makes the inequality a
-    rule rather than a preference.  `tests/nebulacondense.spec.ts` measures the
-    yield off real shattered tiles rather than reading the constant, so a
-    GRAIN retune that raises the child count fails there instead of quietly
-    re-opening the loop.
+    `NEBULA_DRAIN_CYCLE` (DBG ▸ Materials ▸ Nebula ▸ **"Neb drain"**, index 0
+    ships) tunes how fast nebula recedes and CANNOT express growth — every
+    step clears both the yield bar and the fixed point, which is what makes
+    the inequality a rule rather than a preference.
+    `tests/nebulacondense.spec.ts` measures the yield off real shattered tiles
+    rather than reading the constant, so a GRAIN retune that raises the child
+    count fails there instead of quietly re-opening the loop.
   - **A FAILED TILE PLACEMENT NOW RETURNS THE MASS.**  `transmuteToTileAt`
     searches the origin hex plus its six neighbours and can find every one
     occupied; both source shards have already faded by then, so the bare
@@ -4102,9 +4124,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   lens piles stars up minus where it evacuates them, sampled ABOVE the
   rift so the label and ship stay out of it.  HOW STRONG all of that is is a
   live A/B (user report: the rift reads as too powerful, and strafing it
-  is dizzying) — DBG ▸ **Portals** carries five multipliers: rift SIZE,
-  gravity STRENGTH and RANGE, and the star lens split into AMOUNT and
-  SPIN.  Every one is applied AT THE READ (`getPortalSizeMult` et al. in
+  is dizzying) — DBG ▸ World & Maps ▸ **Portals** carries five multipliers:
+  rift SIZE, gravity STRENGTH and RANGE, and the star lens split into AMOUNT
+  and SPIN.  Every one is applied AT THE READ (`getPortalSizeMult` et al. in
   PhysicsSystem / BackgroundManager / dropShapes), never baked into the
   portal entity, so the entity keeps `PORTAL_CONSTANTS` as its base and
   a knob re-tunes the rifts already in the world with no map reload.
@@ -4190,38 +4212,136 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   as one dark shape; the destination-size variation is legible with the
   DBG Lens knob dialled down.  `openPortal` still fires only on an
   actual transit.
-- **DBG ▸ Player carries the impact model's four dials**, all index-0-ships:
-  "Impact vel" (which velocity a hit is measured in), "Crash energy" (how
-  permeable terrain is to a HULL), "Hull density" (how heavy the ship is) and
-  "Blast energy" (how much of a SHELL's energy becomes its blast).  The last
-  two are the pair worth reading together: hull density decides what a ram
-  spends, blast energy what a charge spends, and both are efficiencies over a
-  kinetic energy rather than authored damage numbers.
-- **The debug menu lives in the pause Player Menu** ("Debug Menu"
-  collapsible section) — the old floating top-left DBG button/panel is
-  gone.  The 'Overlays' row inside is the old master toggle (renderer
-  debug overlays only).  DBG **Weapons** rows (grant + equip per weapon,
-  `debugGrantWeapon`) are the wave-map test path for weapons now that
-  commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
-  feeds them.  DBG **Bosses** rows (`debugSpawnBoss`) warp a capstone in
-  with its full phase table, each click stacking another (the Dragon-menu
-  pattern).  Step 5 added four rows: Player ▸ **Gamepad** + **↳ axes** (a
-  live READOUT — the pad has nothing to switch, and what a hardware check
-  needs to see is whether the axes reach the sim), and Visual ▸
-  **Joystick** (Touch / Forced — the widget is touch-only by design, so
-  this is the only way to check its layout on a desktop), **Minimap mat**
-  (Flow / Dots / Off) and **Rock palette** (mixed / slate / rust /
-  mineral).  The fracture / grain rows have their OWN section — **Grain &
-  Fracture** — rather than living at the bottom of Visual's ~60 rows: it
-  holds the five GLOBAL knobs (Fracture A/B, Frac relax, Bnd strength,
-  Frac sep, Frac sites, Frac bias) and, under them, the PER-MATERIAL
-  block described below.
+- **DBG ▸ Player & Ship ▸ Impact Model carries the impact model's four
+  dials**, all index-0-ships: "Impact vel" (which velocity a hit is measured
+  in), "Crash energy" (how permeable terrain is to a HULL), "Hull density"
+  (how heavy the ship is) and "Blast energy" (how much of a SHELL's energy
+  becomes its blast).  The last two are the pair worth reading together: hull
+  density decides what a ram spends, blast energy what a charge spends, and
+  both are efficiencies over a kinetic energy rather than authored damage
+  numbers.
+- **THE DEBUG PANEL IS ONE COMPONENT, REACHABLE FROM EVERY SCREEN** (debug
+  overhaul, user call).  It used to be ~800 lines of hand-written sections
+  inside the pause menu — the only place most of it could be reached — plus a
+  map / enemy-test dropdown on the main menu, fed by ~140 one-line forwarding
+  handlers in App.  Now `components/DebugMenu.tsx` renders whatever
+  `components/debugSections.tsx` declares, over whichever screen is up.
+  Seven rules hold it up:
+  (1) **A SECTION IS ONE ENTRY.**  `DEBUG_GROUPS` lists eight task groups —
+  Player & Ship, Weapons & Modules, Economy, World & Maps, Enemies & Bosses,
+  Materials, Visual / HUD, Perf & Diagnostics — and `DEBUG_SECTIONS` holds
+  `{ id, label, group, rows, defaultOpen?, when? }` entries whose rows are
+  DATA built by `ctrl` / `stat` / `chips` / `custom` / `each`.  Adding a
+  section is one entry there: no JSX, no App handler, no UIOverlay prop.  A
+  row reads ONLY the stats payload (`c.s`) and acts through the engine handle
+  (`dbg(e => e.dbg.cycleX())`) — type-checked there, where the old 140-prop
+  chain through UIOverlay never was (the repo carries no React types, so
+  UIOverlay's props are effectively `any`).  App keeps exactly two actions
+  the panel cannot take itself, because they touch App state: the map
+  selection and the render-scale cap.  Rows render through PLAIN FUNCTIONS,
+  never components declared in a render, and every row carries
+  `data-debug-row` (its label) and `data-debug-kind` (its shape).
+  (2) **LABELS ARE IDENTITY.**  Suites, docs and muscle memory name rows by
+  label, so every row moved with its label, readout and tooltip intact —
+  byte for byte, the timing tree's no-break-space indents included — and
+  `tests/debugmenu.spec.ts` pins the full old set as a multiset.  Moving a row
+  between sections is free; renaming one is a deliberate edit to that list.
+  What moved where (old pause sections → new homes):
+  Stats → Perf & Diagnostics ▸ Stats; the top-level "Overlays" row →
+  Perf & Diagnostics ▸ Debug Overlays (with "Outlines", from Visual);
+  Player → split five ways (Thrust/Speed → Player & Ship ▸ Flight; the four
+  impact dials → ▸ Impact Model; Corrode/Disable → ▸ Status Effects; Gamepad
+  and its ↳ rows → ▸ Controls & Input, joined by Rumble and Joystick from
+  Visual; Snitch catch/spd → Enemies & Bosses ▸ Snitch; Enemy scale/↳ live,
+  Traits, Gnat move → ▸ Enemy Tuning; Sim rate, Substep cap, Render scale,
+  HUD rate → Perf & Diagnostics ▸ Sim & Render; Station → Economy); Ship
+  Tilt → Player & Ship ▸ Ship Tilt, beside ▸ Trail (Trail and Trail dir,
+  from Visual); Modules → Weapons & Modules ▸ Modules, except Salvage /
+  +1M Salv / Lock slots → Economy ▸ Salvage & Stations; Weapons → Weapons &
+  Modules ▸ Weapons;
+  Dragon, Rivals, Bosses → Enemies & Bosses (with the old dropdown's Enemy
+  Test chips); Portals and Flow Field → World & Maps (with the Maps and
+  Material Field Maps chips); Grain & Fracture, Nebula, Shards & Physics →
+  Materials, plus ▸ Material Look (Rock palette, the shade/palette/glow rows,
+  Goo bond/coat, from Visual); the rest of Visual → Visual / HUD ▸ Lighting,
+  ▸ Sky (the four star rows), ▸ Camera & HUD (Screen shake, Chevrons, HP
+  bars, Minimap mat, Scan off), ▸ Audio (Sound burst); Perf, Timing (ms),
+  Perf REC → Perf & Diagnostics.
+  (3) **IT FLOATS; A NEW SCREEN GETS IT FREE.**  DebugMenu is rendered LAST
+  in UIOverlay's root, the panel at `z-[60]` over the overlays' `z-50`.  The
+  LAUNCHER ("DBG", `DebugLauncher`) has two homes: in live play it is stacked
+  under PAUSE in the HUD's control column (`data-testid="hud-controls"` —
+  the readout row beside it is width-bound, so a fifth control there would
+  wrap the chips; the column costs only the top of the arrow band, which
+  `UI_CONSTANTS.INDICATORS.CONTROL_COLUMN_INSET` reserves), and over any
+  full-screen overlay it floats bottom-right, where every overlay pads its
+  scroll end clear of it (`OVERLAY_FAB_CLEARANCE`).  "Any full-screen
+  overlay" is UIOverlay's `overlayUp` predicate, which a new overlay has to
+  join anyway to hide the HUD — so joining it is the whole wiring.  The
+  panel docks to the BOTTOM 45% of the screen (▴ for 85%), leaving the ship
+  and the top half of the world in view, is `PANEL_OPAQUE`, scrolls, and has
+  a FILTER box that matches names first (row labels, chip labels, group and
+  section names) and tooltips second ("Mentioned in descriptions").
+  (4) **OPEN STATE IS THE ENGINE'S** (`GameEngine.debugPanelOpen`,
+  `toggleDebugPanel` / `setDebugPanelOpen`): three devices open it — the
+  launcher, the ` key (`INPUT_CONSTANTS.DEBUG_KEY`, a physical position, so
+  keyboard layouts do not move it) and a pad's Select / Share
+  (`GAMEPAD.BUTTONS.DEBUG`, bound to nothing else) — and three engine paths
+  read it: the freeze, the pad capture and the panel-only stats.  Escape and
+  the pad's BACK close it, and `menuBack()` dismisses the panel FIRST, so
+  backing out of a panel opened over the pause menu lands on the pause menu.
+  Everything else — open groups and sections, the filter text, the entity
+  counter's mode, a Perf REC report — is React state in DebugMenu, which
+  stays mounted on every screen: it survives closing the panel and changing
+  screens, and like everything here it does not survive a reload.
+  (5) **IT DOES NOT FREEZE THE GAME BY DEFAULT — THE FREEZE IS OPT-IN.**
+  Most rows are tuning knobs whose effect is only visible while the world
+  runs (a flow pattern, a lens, a tilt spring, a gravity well), so a
+  default freeze would hide the very thing being tuned.  "❄ Freeze"
+  (`GameEngine.debugFreeze`, remembered across closes) holds live play
+  while the panel is open, by the paused branch's recipe (a static frame, the
+  world's sound bed quiet).  `debugFreezeHolds()` is the whole rule: PLAYING,
+  not docked, not on stage-clear, and never while the ship is exploding, in
+  its death beat or on the summary — so DEATH KEEPS ITS LIVE SEMANTICS with
+  the freeze on (a freeze that caught the wreck would also hang the death
+  screen forever, since the beat that raises it is sim time).  The toggle is
+  only drawn over live play: every other screen already freezes, or must not.
+  (6) **PANEL-ONLY DATA RIDES ONLY WHILE THE PANEL IS OPEN.**  The weapon
+  catalog (which used to ride every paused frame, looked at or not) and the
+  Lock-slots readout (`debugSlotLock`) are published only while it is open,
+  on any screen.  What is always sent is `EngineStats.debugPanel` — four
+  scalars (open / freeze / holding / via).  No per-frame React state.
+  (7) **NOTHING DONE TO THE PANEL FLIES THE SHIP.**  Pointer: DOM targets
+  never reached the game (`shouldIgnoreEvent`), and a pointer resting on
+  `[data-debug-ui]` (the panel and its launcher) no longer AIMS it either —
+  without that, a phone TAP on a row swung the ship through the compatibility
+  mousemove the browser sends after a touch.  Keys: a keydown at a text field
+  or anywhere in `[data-debug-ui]` never reaches the held-key set
+  (`InputSystem.isUiKeyTarget`), so typing in the filter neither steers nor
+  docks, and every panel button takes `keepFocus` on mousedown so a MOUSE
+  click never leaves focus there to swallow WASD.  Pad: while the panel is
+  open it CAPTURES the pad (`InputSystem.setPadCaptured`, set by
+  `GameEngine.pollGamepad`) — no pad thrust, aim or fire, and the flight edges
+  drained rather than banked, SCAN included, since its Circle half is the
+  panel's BACK.  The keyboard and the canvas still fly the ship.
+  The individual rows keep their notes: DBG **Weapons** rows (grant + equip
+  per weapon, `debugGrantWeapon`) are the wave-map test path for weapons now
+  that commerce is station-only.  DBG **Bosses** chips (`debugSpawnBoss`) warp
+  a capstone in with its full phase table, each click stacking another (the
+  Dragon-menu pattern).  Step 5's rows: **Gamepad** + **↳ axes** (a live
+  READOUT — the pad has nothing to switch, and what a hardware check needs to
+  see is whether the axes reach the sim), **Joystick** (Touch / Forced — the
+  widget is touch-only by design, so this is the only way to check its layout
+  on a desktop), **Minimap mat** (Flow / Dots / Off) and **Rock palette**
+  (mixed / slate / rust / mineral).  **Grain & Fracture** holds the global
+  knobs (Fracture A/B, Frac relax, Bnd strength, Frac sep, Frac sites, Frac
+  bias) and, under them, the PER-MATERIAL block described below.
 - **PER-MATERIAL GRAIN KNOBS ARE A SELECTOR PLUS FIVE ROWS, NOT TWENTY
   ROWS.**  Six knobs across four materials is twenty-four values, and that many
-  rows would wreck a panel that already runs ~90.  Instead **Grain mat**
+  rows would wreck a panel that already runs ~200.  Instead **Grain mat**
   picks the material and the `↳` rows below it read and write whichever
-  one is selected — so the surface is a handful of rows and the existing
-  `ctrlRow` idiom is unchanged.  Four rules hold it up:
+  one is selected — so the surface is a handful of rows, each an ordinary
+  `ctrl` row.  Four rules hold it up:
   (1) **The key is the MATERIAL, not the variant.**  Writing `rock` moves
   rock-tile and rock-shard together, because a material's grain geometry
   is shared by its tile and its shard (see the grain-geometry rule above)
@@ -4664,7 +4784,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     whatever has focus and so needs no game knowledge; BACK is the one action
     that differs per screen and lives on `GameEngine.menuBack()`, which
     deliberately does NOTHING on the death and stage-clear screens (those are
-    decisions, and a button that quietly picks one is worse than no button).
+    decisions, and a button that quietly picks one is worse than no button)
+    — except close the debug panel, which BACK dismisses first on every
+    screen, since it floats above them all.
   - **The pad is POLLED once per rendered frame**, from
     `GameEngine.pollGamepad` at the top of `loop` — above every freeze
     short-circuit, so the pause button works from inside the paused state.
@@ -4859,13 +4981,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   (user call): the top and bottom edges clear the HUD's two bands
   (`INDICATORS.TOP_INSET`, plus `BOSS_BAR_INSET` while a capstone bar is up
   and `WRAP_INSET` below `NARROW_WIDTH` where the readout row wraps to two
-  lines; `BOTTOM_INSET` for the loadout strip + minimap), because a symmetric
-  inset put every near-vertical bearing — which is "directly ahead" and
-  "directly behind" — underneath the chip stack.  Each band is the MEASURED
-  widget height plus ~`SIZE_NEAR`, since an arrow is centred on the rect
-  edge.  `RenderSystem.bossBarActive` is the one input from the sim (a
-  boolean, set in `GameEngine.draw`); the canvas layer must never start
-  measuring React's layout.  DISTANCE is carried by SIZE
+  lines — the top band being the DEEPER of that and
+  `CONTROL_COLUMN_INSET`, the pause-over-DBG control column, which is the
+  deeper of the two at every width today; `BOTTOM_INSET` for the loadout
+  strip + minimap), because a symmetric inset put every near-vertical bearing
+  — which is "directly ahead" and "directly behind" — underneath the chip
+  stack.  Each band is the MEASURED widget height plus ~`SIZE_NEAR`, since an
+  arrow is centred on the rect edge.  `RenderSystem.bossBarActive` is the one
+  input from the sim (a boolean, set in `GameEngine.draw`); the canvas layer
+  must never start measuring React's layout.  DISTANCE is carried by SIZE
   (`SIZE_NEAR`→`SIZE_FAR` ramped over `NEAR_DIST`→`FAR_DIST`), which is why
   ordinary enemies no longer print a distance number: a dozen little
   "1234m" strings were most of the old clutter, and the glyph already says
@@ -4930,8 +5054,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   2. **Material is a FLOW LAYER, not dots.**  `renderMinimapFlow` traces
      short streamlines through the asteroid flow field
      (`MINIMAP_CONSTANTS.FLOW`); the old per-shard dots are still
-     available behind the DBG cycle Visual ▸ "Minimap mat"
-     (Flow / Dots / Off), and in any mode but `dots` mobile shards are
+     available behind the DBG cycle Visual / HUD ▸ Camera & HUD ▸ "Minimap
+     mat" (Flow / Dots / Off), and in any mode but `dots` mobile shards are
      not even collected into `_minimapBuffer`.  The SCAN is the second
      gate (§5) and BOTH have to say yes — the cycle picks WHICH layer
      draws, the scan decides whether there is anything to draw it for —
@@ -4970,9 +5094,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   font size, so it's ONE `measureText`, not a binary search in a draw path.
   Any new canvas string built from authored/variable content should go
   through it rather than hardcoding a px size.
-- **The DOM overlay has ONE NAMED CLASS VOCABULARY** (gauntlet 5d, U2), at
-  module scope in `components/UIOverlay.tsx` alongside `OVERLAY_SCRIM` and
-  `PANEL_OPAQUE`, which set the pattern: when more than one surface has to
+- **The DOM overlay has ONE NAMED CLASS VOCABULARY** (gauntlet 5d, U2), in
+  `components/uiClasses.ts` alongside `OVERLAY_SCRIM` and `PANEL_OPAQUE`,
+  which set the pattern: when more than one surface has to
   look like the same thing, the class string becomes a constant so the
   surfaces cannot drift apart.  Type scale `T_MICRO`/`T_NOTE`/`T_BODY`/
   `T_ROW` — named for what each step is FOR rather than how big it is,
@@ -4980,12 +5104,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `PANEL` / `PANEL_ROW` / `panelAccent()` (an accent panel keeps the neutral
   body and swaps only the BORDER), `HEADING` / `SCREEN_TITLE` /
   `OUTCOME_TITLE`, `BTN_PRIMARY` / `BTN_SECONDARY` / `BTN_COMPACT`,
-  `CHIP_BASE` / `CHIP_OFF`, `HUD_CHIP`, `SECTION_TOGGLE`, and `TAP` (the
-  40px tap floor).  A constant is the DEFAULT and a call site that departs
+  `CHIP_BASE` / `CHIP_OFF`, `HUD_CHIP`, `SECTION_TOGGLE`, `TAP` (the
+  40px tap floor) and `OVERLAY_FAB_CLEARANCE` (the scroll-end room every
+  full-screen overlay leaves the floating debug launcher).  It lived at
+  UIOverlay's module scope until the debug panel became a second file that
+  needed it; a module of its own is what keeps the two from forking copies.
+  A constant is the DEFAULT and a call site that departs
   from it says why in a comment; there are three such departures today
   (START is the indigo `rounded-full` HERO rather than the shared emerald
   PRIMARY, and the debug menu takes a smaller 22–24px floor because a
-  developer surface of ~90 diagnostic rows trades reach for density).
+  developer surface of ~200 diagnostic rows trades reach for density).
 - **The top HUD bar is a COLUMN of two things, and the second is ONE ROW.**
   The boss capstone bar and the readout chips live in one flex column
   (`data-testid="hud-top"`) so the layout engine owns the band they share —
@@ -4997,12 +5125,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   inset has to clear.  Two consequences: the row is WIDTH-BOUND at 390px, so
   the chips are terse by necessity (`W1 · 6 · 12s`, and the vitals chip
   carries no word label — the bar under each number is the label, and the
-  pause menu keeps the spelled-out version); and the pause button lives
-  OUTSIDE the wrapping band with `shrink-0`, because an unshrinkable middle
-  pushes the last item off the screen, which is how the pause button left the
-  viewport at 320px.
+  pause menu keeps the spelled-out version); and the CONTROL COLUMN — PAUSE
+  with the DBG launcher stacked under it (`data-testid="hud-controls"`) —
+  lives OUTSIDE the wrapping band with `shrink-0`, because an unshrinkable
+  middle pushes the last item off the screen, which is how the pause button
+  left the viewport at 320px.  The launcher went UNDER pause rather than
+  beside it because the band is width-bound: a column costs the chips
+  nothing, and costs the arrows only `CONTROL_COLUMN_INSET`.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
-  `UIOverlay`'s module-scope `OVERLAY_SCRIM` (`bg-slate-950/55` +
+  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/55` +
   `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
   death, stage-clear — so the game never has two ideas of how much world
   shows through (user call: menus keep displaying the dynamic map).  Two
@@ -5019,7 +5150,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   under it, the DOM HUD is gated off while any overlay is up
   (`overlayUp`): a score chip ghosting through a run summary reads as
   double-vision, not depth.  The canvas-drawn minimap and loadout strip
-  stay — those are the game view, which is the point.
+  stay — those are the game view, which is the point.  `overlayUp` is also
+  what floats the debug launcher into the corner, so a new overlay that
+  joins it gets the debug panel with no further wiring.
 - **React re-renders only on the stats callback.** `GameEngine` calls
   `onStatsUpdate(stats)` which drives the HUD. Do not add per-frame
   React state updates for in-game data; pipe everything through
