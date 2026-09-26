@@ -4653,13 +4653,16 @@ export class GameEngine {
       this.shipSlots[4] = 'thrusters_mk3';
       this.shipSlots[5] = 'scanner_mk5';       // every detection tier — touches the hull core
 
-      // Weapon flower: two guns + the four mods around the center gun.
+      // Weapon flower: two guns + the three mods around the center gun.  Hex
+      // 5 stays EMPTY: it held the Penetration Mk III, and that family is
+      // deleted (unified impact physics, step 5 — Gunnery absorbed it), so
+      // writing its id here made `moduleDef` return undefined and this
+      // method threw halfway through the write.
       this.weaponSlots[0] = 'wpn_blaster';
       this.weaponSlots[1] = 'wpn_cannon';
       this.weaponSlots[2] = 'gunnery_mk3';
       this.weaponSlots[3] = 'autoloader_mk3';
       this.weaponSlots[4] = 'overcharge';
-      this.weaponSlots[5] = 'piercing_mk3';    // A3 — touches the centre gun
 
       const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
