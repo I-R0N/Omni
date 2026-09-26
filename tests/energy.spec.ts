@@ -704,6 +704,12 @@ test.describe('the weapons, fired into the world', () => {
         const s = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'nebula-shard'
           && x.mergeFadeTimer === undefined);
         (window as any).__s = s; (window as any).__max = 0; (window as any).__hp = s.health;
+        // An arc goes to the NEAREST conductor in its cone, which in a
+        // cloud bank may be a neighbouring puff rather than \`s\` — so the
+        // arc's claims are judged on whatever it actually struck.
+        const hp = new Map<string, number>();
+        for (const x of e.currentMap.entities) if (x.active) hp.set(x.id, x.health);
+        (window as any).__hpAll = hp;
         s.velocity.x = 0; s.velocity.y = 0;
         p.position.x = s.position.x - 90; p.position.y = s.position.y;
         p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
@@ -719,8 +725,12 @@ test.describe('the weapons, fired into the world', () => {
       return engine(page, e => {
         clearInterval((window as any).__iv);
         const s = (window as any).__s;
+        const hitId = e.energy.lastBeamHitId;
+        const h = hitId ? e.currentMap.entities.find((x: any) => x.id === hitId) : null;
         return { peak: (window as any).__max, active: s.active, lostHp: (window as any).__hp - s.health,
-                 energized: (s.energizedUntil ?? 0) > e.simClock };
+                 hit: h ? { variant: h.shardVariant, active: h.active,
+                            lostHp: ((window as any).__hpAll.get(h.id) ?? h.health) - h.health,
+                            energized: (h.energizedUntil ?? 0) > e.simClock } : null };
       });
     };
     const slug = await shoot('projectile+kinetic');
@@ -728,9 +738,11 @@ test.describe('the weapons, fired into the world', () => {
     expect(slug.active).toBe(true);
     expect(slug.lostHp).toBe(0);
     const arc = await shoot('beam+electric');
-    expect(arc.energized, 'an arc energises a gas').toBe(true);
-    expect(arc.active).toBe(true);
-    expect(arc.lostHp, 'and never damages it').toBe(0);
+    expect(arc.hit, 'the arc found a conductor in the cloud').not.toBeNull();
+    expect(arc.hit!.variant, 'and in a cloud bank that conductor is gas').toMatch(/^nebula-/);
+    expect(arc.hit!.energized, 'an arc energises a gas').toBe(true);
+    expect(arc.hit!.active).toBe(true);
+    expect(arc.hit!.lostHp, 'and never damages it').toBe(0);
     // A static cloud TILE: a round passes through and leaves it whole.
     const tile = await engine(page, e => {
       const p = e.player;

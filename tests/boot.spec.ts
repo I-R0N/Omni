@@ -15,10 +15,11 @@ test.describe('boot', () => {
   test('reaches the main menu with the debug handles live and the console clean', async ({ page }) => {
     const watch = await boot(page);
 
-    // The front door is three controls (CLAUDE.md §3): DIFFICULTY, START and
-    // a collapsed debug dropdown.  START is the one a player needs.
+    // The front door (CLAUDE.md §3): DIFFICULTY and START — the one a player
+    // needs — with the DEBUG launcher floating in the corner, as it does over
+    // every screen (it replaced the menu's own debug dropdown).
     await expect(page.getByTestId('menu-start')).toBeVisible();
-    await expect(page.getByTestId('menu-debug-toggle')).toBeVisible();
+    await expect(page.getByTestId('debug-launcher')).toBeVisible();
 
     // Handle 1: the stats payload the HUD renders from.
     const s = await stats(page);
