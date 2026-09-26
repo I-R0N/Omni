@@ -121,6 +121,18 @@ export class InputSystem {
   private padScanPresses: number = 0;
   private padCyclePresses: number = 0;
   private padPausePresses: number = 0;
+  /** DEBUG PANEL toggles — the pad's Select/Share, the ` key — and Escape,
+   *  which only ever closes it.  Latched like the pad edges and drained by
+   *  `GameEngine.pollGamepad`, above every freeze, so each works from any
+   *  screen. */
+  private padDebugPresses: number = 0;
+  private debugKeyPresses: number = 0;
+  private escapePresses: number = 0;
+  /** Set by the engine each frame while the debug panel is open: the pad
+   *  drives the PANEL (menu navigation) and not the ship.  See
+   *  `GameEngine.pollGamepad` for why the panel needs this and the other
+   *  overlays never did. */
+  private padCaptured: boolean = false;
   /** Connect / disconnect, drained once by the engine to raise a HUD hint. */
   private padConnectionEvent: { connected: boolean; id: string } | null = null;
 
@@ -193,15 +205,59 @@ export class InputSystem {
   };
 
   private handleKeyDown = (e: KeyboardEvent) => {
+    // The debug panel's shortcut is counted, never HELD, and never typed: it
+    // is spent as an edge by the engine (on any screen), and swallowing its
+    // default keeps a stray ` out of the panel's own filter box.
+    if (e.code === INPUT_CONSTANTS.DEBUG_KEY) {
+      if (!e.repeat) this.debugKeyPresses++;
+      e.preventDefault();
+      return;
+    }
+    if (e.code === 'Escape' && !e.repeat) this.escapePresses++;
+    if (this.isUiKeyTarget(e.target)) return;
     this.keys.add(e.code);
   };
 
+  // Key UP is never filtered: a key held before focus moved into the panel
+  // must still release, or the ship keeps thrusting on a key nobody holds.
   private handleKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
   };
 
+  /** Is this key being typed INTO the UI rather than at the ship?
+   *
+   *  Keyboard events go to the window whatever has focus, so without this a
+   *  key pressed on a focused control flies the ship too.  That never
+   *  mattered while every focusable panel froze the world; the debug panel can
+   *  be open over LIVE play, where typing "wasd" into its filter box would
+   *  steer, and an "e" would dock the ship at the station it spawned beside.
+   *  Two cases, then: a text field anywhere, and the debug UI (the panel
+   *  and its launcher).  Deliberately NOT "anything in any overlay" — E
+   *  undocks from the station screen however its buttons happen to hold
+   *  focus, and that must keep working. */
+  private isUiKeyTarget(t: EventTarget | null): boolean {
+    if (!(t instanceof HTMLElement)) return false;
+    if (t.isContentEditable) return true;
+    const tag = t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    return this.isDebugUiTarget(t);
+  }
+
+  /** Inside the debug panel or on its launcher (`[data-debug-ui]`). */
+  private isDebugUiTarget(t: EventTarget | null): boolean {
+    return t instanceof Element && t.closest('[data-debug-ui]') !== null;
+  }
+
   private handleMouseMove = (e: MouseEvent) => {
     if (!this.rules.pointerAims) return;
+    // A pointer resting on the DEBUG UI does not aim the ship.  The panel can
+    // be open over live play, and the pointer IS the aim, so without this the
+    // ship swings to face every row the cursor crosses — and on a phone a TAP
+    // on a row does it too, through the compatibility mousemove the browser
+    // sends after a touch it was not asked to suppress.  A drag that STARTED
+    // on the canvas keeps aiming as it crosses the panel: that is a game
+    // gesture, and a game gesture follows the finger.
+    if (!this.mouseDown && this.isDebugUiTarget(e.target)) return;
     this.mousePosition = { x: e.clientX, y: e.clientY };
   };
 
@@ -889,6 +945,7 @@ export class InputSystem {
     this.padNavHeld.y = 0;
     this.padConfirmPresses = 0;
     this.padBackPresses = 0;
+    this.padDebugPresses = 0;
     this.padFireDown = false;
     this.padPrev.length = 0;
     // A different pad may well support what the last one did not.
@@ -1082,6 +1139,14 @@ export class InputSystem {
     const G = INPUT_CONSTANTS.GAMEPAD;
     const ax = snap.axes;
 
+    // CAPTURED by the debug panel: the sticks and the D-pad move neither the
+    // ship nor its aim.  The button edges below are still counted — menu
+    // navigation needs them, and the engine drains the flight ones — and
+    // `fireEnabled` arrives false, so nothing here can shoot either.
+    if (this.padCaptured) {
+      this.padMove.x = 0;
+      this.padMove.y = 0;
+    } else {
     // 1. Left stick → thrust.  The vector is in the same screen-space
     //    convention as the pointer branch: +y is DOWN, which is already how
     //    the Gamepad API reports a stick pushed toward the player.
@@ -1173,6 +1238,7 @@ export class InputSystem {
         this.writePadPointer();
       }
     }
+    } // end of the not-captured movement / aim block
 
     // 3. Buttons.
     if (this.padGroupEdge(snap, G.BUTTONS.CONFIRM)) this.padConfirmPresses++;
@@ -1182,6 +1248,7 @@ export class InputSystem {
     if (this.padGroupEdge(snap, G.BUTTONS.SCAN)) this.padScanPresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.CYCLE_WEAPON)) this.padCyclePresses++;
     if (this.padGroupEdge(snap, G.BUTTONS.PAUSE)) this.padPausePresses++;
+    if (this.padGroupEdge(snap, G.BUTTONS.DEBUG)) this.padDebugPresses++;
 
     // FIRE ON PRESS (user directive, G13).  The pad used to mirror the
     // pointer's press-and-RELEASE model for consistency's sake, and that was
@@ -1208,7 +1275,7 @@ export class InputSystem {
     // scheme — the read is one array index, and gating it would mean the
     // value is stale on the frame a scheme change makes it live.
     const throttleRaw = this.padGroupValue(snap, G.BUTTONS.THROTTLE);
-    this.padThrottle = throttleRaw < G.THROTTLE_DEADZONE ? 0
+    this.padThrottle = this.padCaptured || throttleRaw < G.THROTTLE_DEADZONE ? 0
       : (throttleRaw - G.THROTTLE_DEADZONE) / (1 - G.THROTTLE_DEADZONE);
 
     // ANALOG, not the boolean: `pressed` goes true almost as soon as a
@@ -1365,6 +1432,35 @@ export class InputSystem {
     if (this.padPausePresses <= 0) return false;
     this.padPausePresses--;
     return true;
+  }
+
+  /** One latched Select/Share press — the pad's debug-panel toggle. */
+  public consumePadDebugPress(): boolean {
+    if (this.padDebugPresses <= 0) return false;
+    this.padDebugPresses--;
+    return true;
+  }
+
+  /** One latched press of the debug-panel key (`INPUT_CONSTANTS.DEBUG_KEY`). */
+  public consumeDebugKeyPress(): boolean {
+    if (this.debugKeyPresses <= 0) return false;
+    this.debugKeyPresses--;
+    return true;
+  }
+
+  /** One latched Escape press.  Only the debug panel spends it (to close);
+   *  the engine drains it every frame either way, so an Escape pressed with
+   *  the panel shut cannot close a panel opened later. */
+  public consumeEscapePress(): boolean {
+    if (this.escapePresses <= 0) return false;
+    this.escapePresses--;
+    return true;
+  }
+
+  /** Hand the pad to the debug panel (true) or back to the ship (false).
+   *  Called every frame by the engine, before `pollGamepad`. */
+  public setPadCaptured(on: boolean) {
+    this.padCaptured = on;
   }
 
   /** DBG readout, line 1: which pad is adopted.  Pad ids are long

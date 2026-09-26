@@ -1912,9 +1912,23 @@ export interface EngineStats {
     fullRepairCost: number;
     canRepair: boolean;
   };
-  /** Full weapon catalog for the pause-menu DEBUG weapons rows (built only
-   *  while paused).  `slot` = equipped loadout slot (0/1) or null. */
+  /** Full weapon catalog for the debug panel's Weapons rows (built only while
+   *  the panel is OPEN, on any screen).  `slot` = equipped loadout slot (0/1)
+   *  or null. */
   weaponCatalog?: { id: string; name: string; owned: boolean; slot: number | null }[];
+  /** The debug panel (components/DebugMenu.tsx).  `open` drives it; `freeze`
+   *  is its ❄ toggle; `holding` is whether that freeze is holding the sim
+   *  RIGHT NOW (never while the player is dying or dead, never on a screen
+   *  that freezes on its own); `via` is the device that last opened it. */
+  debugPanel?: {
+    open: boolean;
+    freeze: boolean;
+    holding: boolean;
+    via: 'pointer' | 'key' | 'pad';
+  };
+  /** DBG "Lock slots" readout — `unlocked/max` hexes of the ship flower.
+   *  Panel-only like `weaponCatalog`: absent while the panel is closed. */
+  debugSlotLock?: string;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

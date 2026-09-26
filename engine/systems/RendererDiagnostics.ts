@@ -43,6 +43,11 @@ export interface RendererDiagnostics {
   chevronsOffscreenOnly: boolean;
   damageTriggeredBars: boolean;
   bossBarActive: boolean;
+  /** Where the open DEBUG PANEL sits (CSS px), or null.  Pushed per frame by
+   *  GameEngine.draw; the screen-space HUD is clipped out from under it, since
+   *  the panel is see-through.  A second renderer may ignore it (the panel is
+   *  a debug surface). */
+  hudHole: { x: number; y: number; w: number; h: number } | null;
   /** Transit-warp progress 0->1 while a wormhole flight is in flight; null
    *  otherwise.  Pushed per frame by GameEngine.draw. */
   portalWarp: number | null;

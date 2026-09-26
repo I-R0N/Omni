@@ -33,6 +33,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { boot, engine, startRun, waitForStats, waitForEngine, dockAtStation } from './helpers';
 
+/** A screen rect, edges in CSS px. */
+type Box = { l: number; t: number; r: number; b: number };
+
 /** The tap-target floor, hard-coded rather than imported (harness rule 7 —
  *  a test that imports the value it checks asserts that a constant equals
  *  itself). Matches `screens.spec.ts` and the `TAP` class in UIOverlay. */
@@ -53,11 +56,12 @@ const VIEWPORTS = [
 
 /** Interactive elements below the tap floor, in the CURRENTLY-VISIBLE DOM.
  *
- *  The debug menu is excluded by construction rather than by a filter: it is
- *  collapsed by default and this suite never opens it. That exemption is
- *  deliberate and documented (5d D4) — a developer surface behind two
- *  dropdowns trades reach for density, and a 40px floor on ~90 diagnostic
- *  rows would add screens of scroll to a panel whose whole job is density. */
+ *  The debug PANEL is excluded by construction rather than by a filter: it
+ *  is closed by default and this suite never opens it. That exemption is
+ *  deliberate and documented (5d D4) — a developer surface trades reach for
+ *  density, and a 40px floor on ~200 diagnostic rows would add screens of
+ *  scroll to a panel whose whole job is density.  Its LAUNCHER is an
+ *  ordinary control on every screen and is held to the floor like any other. */
 async function smallTargets(page: Page) {
   return page.evaluate((floor: number) => {
     const out: { label: string; w: number; h: number }[] = [];
@@ -372,6 +376,128 @@ for (const vp of VIEWPORTS) {
       // And the band that is left is still worth drawing arrows in.
       expect(ind.bottom - ind.top, 'a usable vertical band survives')
         .toBeGreaterThanOrEqual(80);
+
+      watch.assertClean();
+    });
+
+    test('the debug launcher has a slot of its own, on every screen', async ({ page }) => {
+      /*  The top HUD row and both bottom corners were already full when the
+       *  launcher arrived, so it lives in two places: stacked under PAUSE in
+       *  live play, and floating bottom-right over a full-screen overlay —
+       *  where every overlay pads its scroll end clear of it.  Both homes are
+       *  asserted here because both are functions of the viewport. */
+      const watch = await boot(page);
+      const intersects = (a: Box, b: Box) =>
+        !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);
+
+      // ── Live play: under PAUSE, clear of everything else on the HUD ──
+      await startRun(page);
+      // Both joystick schemes, because each draws a FIRE button — the one
+      // piece of canvas furniture that can sit on the launcher's side.
+      for (const scheme of ['joystick-right', 'joystick-left']) {
+        await engine(page, (e, s: string) => e.setControlScheme(s), scheme);
+        await waitForEngine(page, e => !!e.input.getFireButtonState(), 'the fire button');
+        const g = await page.evaluate(() => {
+          const hud = (window as any).__omniHud;
+          const eng = (window as any).__omniEngine;
+          const W = window.innerWidth, H = window.innerHeight;
+          const box = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            return { l: r.left, t: r.top, r: r.right, b: r.bottom };
+          };
+          const launcher = document.querySelector('[data-testid="debug-launcher"]')!;
+          // Everything else in the top band — readout chips, status badges,
+          // the scan button, PAUSE — excluding only what contains the
+          // launcher (the band and its control column).
+          const band: { label: string; box: Box }[] = [];
+          for (const el of Array.from(document.querySelectorAll('[data-testid="hud-top"] *'))) {
+            if (el.contains(launcher) || launcher.contains(el)) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            band.push({
+              label: el.getAttribute('data-testid') || el.getAttribute('aria-label')
+                || (el.textContent || '').trim().slice(0, 24) || el.tagName,
+              box: box(el),
+            });
+          }
+          const mm = hud.computeMinimapRect(H, false);
+          const mmOpen = hud.computeMinimapRect(H, true);
+          const L = hud.computeLoadoutHUDLayout(W, H);
+          const fb = eng.input.getFireButtonState();
+          return {
+            W, H,
+            launcher: box(launcher),
+            band,
+            canvas: [
+              { label: 'minimap', box: { l: mm.x, t: mm.y, r: mm.x + mm.size, b: mm.y + mm.size } },
+              { label: 'minimap (open)', box: { l: mmOpen.x, t: mmOpen.y, r: mmOpen.x + mmOpen.size, b: mmOpen.y + mmOpen.size } },
+              ...L.slotXs.map((x: number, i: number) =>
+                ({ label: `loadout slot ${i}`, box: { l: x, t: L.startY, r: x + L.slotW, b: H } })),
+              { label: 'FIRE button', box: { l: fb.x - fb.radius, t: fb.y - fb.radius, r: fb.x + fb.radius, b: fb.y + fb.radius } },
+            ],
+            ind: hud.computeIndicatorRect(W, H),
+          };
+        });
+
+        const l = g.launcher;
+        expect(l.l, `${scheme}: launcher left edge`).toBeGreaterThanOrEqual(0);
+        expect(l.r, `${scheme}: launcher right edge`).toBeLessThanOrEqual(g.W + 0.5);
+        expect(Math.min(l.r - l.l, l.b - l.t), `${scheme}: launcher clears the tap floor`)
+          .toBeGreaterThanOrEqual(TAP_FLOOR);
+        const hits = [...g.band, ...g.canvas]
+          .filter(o => intersects(l, o.box)).map(o => o.label);
+        expect(hits, `${scheme}: what the launcher overlaps`).toEqual([]);
+        // Above the touch stick's zone, which starts 30% of the way down
+        // (INPUT_CONSTANTS.JOYSTICK.ZONE_TOP_FRAC) on whichever side it is.
+        expect(l.b, `${scheme}: launcher above the stick's zone`).toBeLessThanOrEqual(g.H * 0.30);
+        // And the off-screen arrows ride BELOW the control column, the band
+        // UI_CONSTANTS.INDICATORS.CONTROL_COLUMN_INSET reserves for it.
+        expect(g.ind.top, `${scheme}: arrows clear the launcher`).toBeGreaterThan(l.b);
+      }
+
+      // ── Over an overlay: floating, and every overlay's scroll end clears it ──
+      const fabClearOf = (overlay: string) => page.evaluate((sel: string) => {
+        const ov = document.querySelector(sel) as HTMLElement;
+        ov.scrollTop = ov.scrollHeight;
+        const f = document.querySelector('[data-testid="debug-launcher"]')!.getBoundingClientRect();
+        const W = window.innerWidth, H = window.innerHeight;
+        const out: string[] = [];
+        if (f.left < 0 || f.right > W + 0.5 || f.bottom > H + 0.5) out.push('launcher off screen');
+        for (const el of Array.from(ov.querySelectorAll('button, select, input, h2, p'))) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          if (!(r.right <= f.left || f.right <= r.left || r.bottom <= f.top || f.bottom <= r.top)) {
+            out.push((el.getAttribute('data-testid') || (el.textContent || '').trim().slice(0, 24)
+              || el.tagName).replace(/\s+/g, ' '));
+          }
+        }
+        return out;
+      }, overlay);
+
+      await engine(page, e => e.pauseGame());
+      await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+      expect(await fabClearOf('[data-overlay="pause"]'), 'pause: under the launcher').toEqual([]);
+      await engine(page, e => e.resumeGame());
+      await waitForStats(page, s => s.gameState === 'PLAYING', 'the run resumed');
+
+      await engine(page, e => e.addDebugCredits(200000));
+      await dockAtStation(page);
+      for (const tabId of ['shop', 'outfit', 'ship'] as const) {
+        const tab = page.getByTestId(`station-tab-${tabId}`);
+        if (!(await tab.count())) continue;
+        await tab.click();
+        expect(await fabClearOf('[data-overlay="station"]'), `station ${tabId}: under the launcher`).toEqual([]);
+      }
+      await engine(page, e => e.undock());
+      await waitForStats(page, s => !s.dock?.docked, 'undocked');
+
+      await engine(page, e => e.startExplosion(e.player));
+      await waitForStats(page, s => !!s.runSummary, 'the run summary');
+      expect(await fabClearOf('[data-overlay="death"]'), 'death: under the launcher').toEqual([]);
+
+      await engine(page, e => e.quitToMenu());
+      await waitForStats(page, s => s.gameState === 'MENU', 'the main menu');
+      expect(await fabClearOf('[data-overlay="menu"]'), 'main menu: under the launcher').toEqual([]);
 
       watch.assertClean();
     });
