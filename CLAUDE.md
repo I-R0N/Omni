@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  450 tests.  All run at
+                          whatever happened next).  451 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -3947,6 +3947,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     and scaled by transform.  Polygon-less hulls take the light only.  The glow is drawn in the world
     pass, not the lighting layer, so it reads at every lighting tier; fog,
     if switched on, covers it.
+    WHAT IS DRAWN IS EASED, NEVER RAW (user report: heat "flashed" fading
+    in and out).  Deposits, conduction transfers and the cold snap at
+    `HEAT_EPSILON` all move the true peak in STEPS, so the renderer reads
+    `heatShown` — the peak eased toward the real one in `tickHeat`
+    (`easeShownHeat`: `SHOW_RISE_SEC` 0.18 up, `SHOW_FALL_SEC` 0.9 down) —
+    and a body stays in the heated set with zero heat until that has faded
+    (`SHOW_MIN`).  That does not bend UNTRACKED MEANS COLD: every sim rule
+    still reads `heat`, which is already 0.  Conducted heat also lands as a
+    wide face (0.6 of the receiver's radius), since a pinpoint spot turned a
+    small transfer into a flare.  A BURN IS NOT A HIT: the thermal DoT calls
+    `damageBody` / `chipStructureAt` with `flash` 0, because the hit path
+    whitens a body for a blow and on the 5 Hz effect cadence that STROBED
+    every burning rock.  METAL HOLDS HEAT LONGEST (`coolingPerSec` 0.1,
+    half-life ~7 s — user call), which also keeps it weakened for longer.
 - **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
   the sharpest consequence of the bullet above — and the rule was drawn ONE
   VARIANT TOO WIDE at first, which is the part worth keeping.  Measured, the

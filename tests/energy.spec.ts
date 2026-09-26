@@ -385,6 +385,67 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
+  test('HEAT fades in and out, metal holds it longest, and a burn never flashes', async ({ page }) => {
+    // Two play-test reports.  A burning body STROBED: the thermal DoT went
+    // through the hit path, which whitens a body for a blow, on a 5 Hz
+    // cadence (rock is the material that burns and shows it).  And heat
+    // FLASHED as it faded in and out — deposits, conduction and the cold
+    // snap all step the true peak, and it was drawn raw.  The drawn value
+    // now eases toward the real one, and a burn is not a hit.
+    const watch = await boot(page);
+    const pure = await page.evaluate(() => {
+      const E = (window as any).__omniEnergy;
+      const up = E.easeShownHeat(0, 1, 0.05);
+      const down = 1 - E.easeShownHeat(1, 0, 0.05);
+      let h = 0.5, steps = 0;
+      while (h > 0 && steps < 100000) { h = E.easeShownHeat(h, 0, 1 / 120); steps++; }
+      const cool = (m: string) => E.responseOf(m).coolingPerSec;
+      return { up, down, faded: h, steps, metal: cool('metal'), rock: cool('rock'), glass: cool('glass') };
+    });
+    expect(pure.up).toBeGreaterThan(0);
+    expect(pure.up).toBeLessThan(1);                     // a step BLENDS in
+    expect(pure.down).toBeLessThan(pure.up);             // and fades out slower
+    expect(pure.faded).toBe(0);                          // but does reach cold
+    expect(pure.steps).toBeLessThan(120 * 10);
+    expect(pure.metal).toBeLessThan(pure.glass);         // metal holds heat longest
+    expect(pure.metal).toBeLessThan(pure.rock);
+
+    await onMap(page, 'ASTEROID_FIELD');
+    const id = await engine(page, e => {
+      const rocks = e.currentMap.entities.filter((o: any) => o.active && o.shardVariant === 'rock-shard');
+      rocks.sort((a: any, b: any) => b.size.x - a.size.x);
+      const t = rocks[0];
+      // Record every flash the body is given from here on.
+      let v = t.hitFlash;
+      (window as any).__flashes = 0;
+      Object.defineProperty(t, 'hitFlash', {
+        configurable: true,
+        get: () => v,
+        set: (x: number) => { if (x > 0) (window as any).__flashes++; v = x; },
+      });
+      e.debugHeat(t, 20, { x: t.position.x - 200, y: t.position.y });
+      return t.id;
+    });
+    const early = await engine(page, (e, id) => {
+      const t = e.currentMap.entities.find((o: any) => o.id === id);
+      return t.heatShown ?? 0;
+    }, id);
+    await advanceSim(page, 1);
+    const r = await engine(page, (e, id) => {
+      const t = e.currentMap.entities.find((o: any) => o.id === id);
+      return {
+        flashes: (window as any).__flashes, shown: t?.heatShown ?? 0, heat: t?.heat ?? 0,
+        // Health is DERIVED from the grain boundaries at first damage, so
+        // compare against the body's own max, not the authored spawn value.
+        burned: !t || !t.active || t.health < t.maxHealth,
+      };
+    }, id);
+    expect(r.burned, 'the burn really ran').toBe(true);
+    expect(r.flashes, 'a burn is not a hit').toBe(0);
+    expect(early, 'heat fades in, it does not pop').toBeLessThan(r.shown + 1e-9);
+    watch.assertClean();
+  });
+
   test('HEAT: only the active set carries heat — a full set refuses more, a map change leaves bodies cold', async ({ page }) => {
     // Cooling walks the active set and nothing else, so heat on a body
     // OUTSIDE it would never leave: permanently weakened, and breaking under

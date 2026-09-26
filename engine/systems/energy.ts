@@ -167,7 +167,7 @@ export const MATERIAL_RESPONSE: Readonly<Record<MaterialId, MaterialResponse>> =
   glass:   { heatWeakening: 1.0, heatAbsorb: 0.9, heatCapacity: 24, coolingPerSec: 0.15, conduct: 0,
              thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity,
              conductivity: 0.05, electricDamage: 0.2, magnetic: 0, thermalDiffusivity: 12 },
-  metal:   { heatWeakening: 2.5, heatAbsorb: 0.7, heatCapacity: 40, coolingPerSec: 0.35, conduct: 0.15,
+  metal:   { heatWeakening: 2.5, heatAbsorb: 0.7, heatCapacity: 40, coolingPerSec: 0.1, conduct: 0.15,
              thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity,
              conductivity: 1.0, electricDamage: 1.0, magnetic: 1.0, thermalDiffusivity: 160 },
   plastic: { heatWeakening: 0.5, heatAbsorb: 1.0, heatCapacity: 12, coolingPerSec: 0.2, conduct: 0,
@@ -203,6 +203,14 @@ export const ENERGY_CONSTANTS = {
   MAX_HEAT: 2.5,
   /** Below this a body is COLD and leaves the active-heated set. */
   HEAT_EPSILON: 0.02,
+  /** PRESENTATION: the drawn temperature eases toward the real one — this
+   *  fast when heating, this slowly when cooling (seconds, time constant).
+   *  Deposits, conduction and the cold snap all move the true peak in steps;
+   *  drawn raw, each step read as a flash (user report). */
+  SHOW_RISE_SEC: 0.18,
+  SHOW_FALL_SEC: 0.9,
+  /** A body whose drawn heat has faded below this leaves the set. */
+  SHOW_MIN: 0.01,
   /** Heat also caps mechanical weakening from running away with it. */
   MAX_WEAKENING: 4,
   /** Hard cap on how many bodies can be heated at once.  Past it, new
@@ -328,6 +336,19 @@ export function heatPeak(heat: number, spread: number, bodyR: number): number {
  *  T⁴ (Stefan–Boltzmann), measured above the ambient it already sits at, so
  *  warm reads as barely there and near-critical reads as a light source.
  *  0 at t = 0, 1 at t = 1. */
+/** One step of the DRAWN temperature easing toward `target` (presentation
+ *  only — no sim rule reads it).  Exponential in both directions, rising at
+ *  `SHOW_RISE_SEC` and falling at `SHOW_FALL_SEC`, so a jump in the true
+ *  peak becomes a blend instead of a flash, and a body cooling to exactly
+ *  zero fades out rather than vanishing. */
+export function easeShownHeat(shown: number, target: number, dt: number): number {
+  const s = Number.isFinite(shown) && shown > 0 ? shown : 0;
+  const t = Number.isFinite(target) && target > 0 ? target : 0;
+  const tau = t > s ? ENERGY_CONSTANTS.SHOW_RISE_SEC : ENERGY_CONSTANTS.SHOW_FALL_SEC;
+  const out = s + (t - s) * (1 - Math.exp(-Math.max(0, dt) / tau));
+  return out < ENERGY_CONSTANTS.SHOW_MIN && t <= 0 ? 0 : out;
+}
+
 export function heatRadiance(t: number): number {
   if (!(t > 0)) return 0;
   const T0 = 0.35;

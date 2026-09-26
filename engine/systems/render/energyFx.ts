@@ -15,7 +15,7 @@
  */
 import { GameEntity, CameraState } from '../../../types';
 import { shiftX, shiftY } from './drawUtils';
-import { heatPeak, heatRadiance, materialOf, type MaterialId } from '../energy';
+import { heatRadiance, materialOf, type MaterialId } from '../energy';
 
 export interface EnergyBeamView {
     x0: number; y0: number; x1: number; y1: number;
@@ -123,7 +123,7 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
 // allocation, one path fill + one fillRect per on-screen heated body, over a
 // set bounded by MAX_HEATED and culled to the view first.
 
-const HEAT_BUCKETS = 20;
+const HEAT_BUCKETS = 40;
 const PEAK_MAX = 1.6;
 const HEAT_MIN = 0.03;
 /** The gradient spans this many σ; the Gaussian is ~4% at the rim. */
@@ -256,14 +256,15 @@ function renderHeat(
         ctx.globalCompositeOperation = pass === 0 ? 'lighter' : 'source-over';
         for (let i = 0; i < heated.length; i++) {
             const e = heated[i];
-            const h = e.heat ?? 0;
-            if (!e.active || h < HEAT_MIN) continue;
+            // The DRAWN temperature (eased in the sim tick), never the raw
+            // peak: steps in the true value blend instead of flashing.
+            const peak = e.heatShown ?? 0;
+            if (!e.active || peak < HEAT_MIN) continue;
             const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
             if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
             const bodyR = Math.max(e.size.x, e.size.y) * 0.5;
             // No recorded spot (e.g. a burn with no contact): uniform.
             const sigma = Math.max(1, e.heatSpread ?? bodyR);
-            const peak = heatPeak(h, sigma, bodyR);
             // The spot, rotated into the world with the body.
             const rot = e.rotation || 0;
             const cs = Math.cos(rot), sn = Math.sin(rot);

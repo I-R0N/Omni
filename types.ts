@@ -590,6 +590,9 @@ export interface GameEntity {
   heatSpotX?: number;
   heatSpotY?: number;
   heatSpread?: number;
+  /** The DRAWN peak temperature, eased toward the true one (presentation;
+   *  `easeShownHeat`).  A body stays in the heated set until it fades. */
+  heatShown?: number;
   energizedTracked?: boolean;
   /** Sim-clock time until which a nebula body is electrically energised
    *  (steerable by magnetism). */

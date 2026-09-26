@@ -26,11 +26,11 @@ import { GameEntity, EntityType, Vector2, WeaponConfig } from '../types';
 import {
     ENERGY_CONSTANTS, materialOf, responseOf, heatGain, clampHeat, coolHeat,
     mechanicalScale, magneticSusceptibility, magneticDv, planChain, safeMag,
-    stampFractureProfile, diffuseSpread, mixHeatSpot, type ChainCaps, type EnergyDomain,
+    stampFractureProfile, diffuseSpread, mixHeatSpot, heatPeak, easeShownHeat, type ChainCaps, type EnergyDomain,
 } from './systems/energy';
 import {
     breakYieldsNothing, noteTraitDamage, markDamaged, hitReactStrength,
-    isCollectibleDrop, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
+    isCollectibleDrop, UI_CONSTANTS, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
 } from '../constants';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
@@ -199,7 +199,7 @@ function killBody(g: GameEngine, e: GameEntity, from: Vector2 | null, byPlayer: 
  *    shed a grain (the ordinary chip path); anything else loses health.
  */
 export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vector2 | null,
-                           domain: EnergyDomain, byPlayer: boolean, text = true): void {
+                           domain: EnergyDomain, byPlayer: boolean, text = true, flash = 0.12): void {
     if (!e.active || e.isExploding) return;
     let d = safeMag(dmg);
     if (d <= 0) return;
@@ -212,10 +212,10 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
     if (e.type === EntityType.STRUCTURE) {
         const at = contactOn(e, from);
         if (byPlayer && d >= e.health) e.killedByPlayer = true;
-        if (!g.chipStructureAt(e, at, d, from ?? undefined)) {
+        if (!g.chipStructureAt(e, at, d, from ?? undefined, flash)) {
             stampLocalImpact(e, at);
             if (!applyBoundaryDamage(e, d)) e.health -= d;
-            markDamaged(e, 0.12);
+            if (flash > 0) markDamaged(e, flash);
         }
         if (text) g.spawnDamageText(e.position, d, e);
         if (e.health <= 0) {
@@ -234,7 +234,8 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
     e.health -= d;
     if (e.type === EntityType.ENEMY) e.provoked = true;
     if (byPlayer) noteTraitDamage(e, d);
-    markDamaged(e, 0.12);
+    if (flash > 0) markDamaged(e, flash);
+    else e.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
     e.hitReact = hitReactStrength(d, e.maxHealth ?? e.health);
     if (text) g.spawnDamageText(e.position, d, e);
     if (e.health <= 0) killBody(g, e, from, byPlayer, d);
@@ -256,6 +257,7 @@ function dropHeat(e: GameEntity): void {
     e.heatSpotX = undefined;
     e.heatSpotY = undefined;
     e.heatSpread = undefined;
+    e.heatShown = undefined;
 }
 
 // ── Where the heat sits (presentation) ───────────────────────────────────────
@@ -271,7 +273,7 @@ function heatBodyR(e: GameEntity): number {
 /** Fold a deposit of `gain` landing at world point `at` (null = no direction:
  *  spread evenly) into the body's hot spot.  Must run BEFORE `e.heat` takes
  *  the gain, since the merge weights by the heat already there. */
-function addHeatSpot(e: GameEntity, gain: number, at: Vector2 | null): void {
+function addHeatSpot(e: GameEntity, gain: number, at: Vector2 | null, spotFrac = 0.2): void {
     const R = heatBodyR(e);
     let px = 0, py = 0, s0 = R;
     if (at) {
@@ -280,7 +282,7 @@ function addHeatSpot(e: GameEntity, gain: number, at: Vector2 | null): void {
         px = dx * cs - dy * sn;
         py = dx * sn + dy * cs;
         // The initial spot: small against the body, never a pinpoint.
-        s0 = Math.max(3, R * 0.2);
+        s0 = Math.max(3, R * spotFrac);
     }
     const h = e.heat ?? 0;
     if (!(h > 0) || e.heatSpread === undefined) {
@@ -398,12 +400,21 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
         if (heat > 0 && mat === 'nebula') agitateNebula(g, e, heat, dt);
         if (heat > 0 && doEffects && e.active) {
             if (r.thermalDps > 0) {
-                damageBody(g, e, r.thermalDps * heat * effDt, null, 'thermal', e.heatByPlayer === true, false);
+                // A burn is not a HIT (flash 0): the damage path whitens a body
+                // for a blow, and a DoT on this cadence strobed it at 5 Hz —
+                // the rock "flash".  The heat colour is the feedback.
+                damageBody(g, e, r.thermalDps * heat * effDt, null, 'thermal', e.heatByPlayer === true, false, 0);
             }
             if (e.active) applyHeatThresholds(g, e);
         }
         if (heat > 0.3 && doConduct && r.conduct > 0 && e.active) conductHeat(g, e, r.conduct);
-        if (!e.active || (heat <= 0 && !(e.burnTimer && e.burnTimer > 0))) {
+        // What is DRAWN eases toward the true peak, so every step in it — a
+        // deposit, a conduction transfer, the cold snap — blends instead of
+        // flashing, and a cooled body fades out rather than vanishing.
+        const R = heatBodyR(e);
+        const target = (e.heat ?? 0) > 0 ? heatPeak(e.heat!, e.heatSpread ?? R, R) : 0;
+        e.heatShown = easeShownHeat(e.heatShown ?? 0, target, dt);
+        if (!e.active || ((e.heat ?? 0) <= 0 && !(e.burnTimer && e.burnTimer > 0) && !(e.heatShown > 0))) {
             dropHeat(e);
             continue;
         }
@@ -428,7 +439,9 @@ function conductHeat(g: GameEngine, e: GameEntity, frac: number): void {
         if (!trackHeat(g.energy, o)) break;   // set full: nothing may take heat
         const q = diff * frac;
         // Heat crosses at the face that touches the source.
-        addHeatSpot(o, q, contactOn(o, e.position));
+        // Conducted heat arrives through a whole face, not a pinpoint — a
+        // tight spot here concentrated a small transfer into a bright flare.
+        addHeatSpot(o, q, contactOn(o, e.position), 0.6);
         e.heat = clampHeat((e.heat ?? 0) - q);
         o.heat = clampHeat((o.heat ?? 0) + q);
         if (e.heatByPlayer) o.heatByPlayer = true;

@@ -5764,12 +5764,13 @@ export class GameEngine {
    * the chip path, not a general damage entry point, and a caller that cannot
    * chip a body must not be able to plink its HP instead.
    */
-  chipStructureAt(target: GameEntity, worldPos: Vector2, damage: number, from?: Vector2): boolean {
+  chipStructureAt(target: GameEntity, worldPos: Vector2, damage: number, from?: Vector2, flash = 0.12): boolean {
       if (!this.currentMap) return false;
       if (!target.active || target.isExploding || (target.health ?? 0) <= 0) return false;
       stampLocalImpact(target, worldPos);
       if (!applyBoundaryDamage(target, damage)) return false;
-      markDamaged(target, 0.12);
+      // `flash` 0 = damage that is not a blow (a burn): no whiten.
+      if (flash > 0) markDamaged(target, flash);
       // A shatter reads its direction off the last impact, so point the
       // fragments AWAY from whatever bit it rather than leaving them the
       // stale velocity of some earlier hit.
