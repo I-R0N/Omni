@@ -47,7 +47,7 @@ import {
   DEBUG_BTN, DEBUG_OFF, DEBUG_ON, DEBUG_CHIP,
 } from './uiClasses';
 import {
-  DEBUG_GROUPS, DEBUG_SECTIONS, ROW_LABEL, STAT_ROW, keepFocus,
+  DEBUG_GROUPS, DEBUG_SECTIONS, ROW_LABEL, STAT_ROW, keepFocus, rowLeader,
   type DebugCtx, type DebugRow, type DebugSection, type DebugGroupId, type EntityCountMode,
 } from './debugSections';
 import { useRowHelp } from './debugHelp';
@@ -188,11 +188,15 @@ const HEAD_BUTTON = `${DEBUG_BTN} min-h-[32px] min-w-[32px]`;
 function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
   switch (row.kind) {
     case 'ctrl':
+      // Title, leader, button.  No gap on the row: the leader's own padding
+      // is that gap, so it only ever fills room that was already empty
+      // (ROW_LEADER).
       return (
         <div key={key} data-debug-row={row.label} data-debug-kind="ctrl"
           data-help={row.summary} data-help-title={row.label} data-help-detail={row.detail}
-          className="mt-1 flex items-center justify-between gap-2">
+          className="mt-1 flex items-center">
           <span className={`${ROW_LABEL} shrink-0`}>{row.label}</span>
+          {rowLeader()}
           <button
             onMouseDown={keepFocus}
             onClick={() => row.act(c)}
@@ -215,8 +219,9 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
       return (
         <div key={key} data-debug-row={row.label} data-debug-kind="buttons"
           data-help={row.summary} data-help-title={row.label} data-help-detail={row.detail}
-          className="mt-1 flex items-center justify-between gap-1">
+          className="mt-1 flex items-center">
           <span className={ROW_LABEL}>{row.label}</span>
+          {rowLeader()}
           <span className="flex gap-0.5">
             {row.buttons.map(b => (
               <button

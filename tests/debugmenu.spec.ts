@@ -27,6 +27,8 @@
  *  - SEE-THROUGH.  The panel ships see-through with a solid toggle, and the
  *    canvas HUD is clipped out from under it rather than ghosting beneath
  *    its rows.
+ *  - LEADERS.  A faint line runs from every control row's title to its
+ *    button, and it only fills room the row already had, so no row reflows.
  *
  *  Layout at six viewport sizes lives in `viewports.spec.ts`, with the rest
  *  of the viewport matrix.
@@ -1228,6 +1230,183 @@ test.describe('the registry', () => {
     await expect(page.locator('[data-debug-group]').first()).toBeVisible();
     await expect(filter, 'the caret stays for the next query').toBeFocused();
     await expect(page.getByTestId('debug-filter-clear'), 'nothing to clear, no ✕').toHaveCount(0);
+
+    watch.assertClean();
+  });
+
+  test('a faint line leads from every title to its button, in room the row already had', async ({ page }) => {
+    /*  User call: "add some faint lines from the titles to their respective
+     *  buttons".  A row's title sits at the panel's left edge and its button
+     *  at the right, and the leader (`rowLeader`, debugSections) runs between
+     *  them.  Three things are pinned:
+     *
+     *  - WHERE.  Every control row has exactly one: every `ctrl` and
+     *    `buttons` row, and the Entities row with its select.  No readout or
+     *    chip row has one, since there is no button to lead to.  Each fills
+     *    the whole gap between its title and its control, and draws its line
+     *    clear of both.
+     *  - FAINT.  A 1px line, level with the title, well under the strength
+     *    of the glass controls it points at.
+     *  - NOTHING MOVES.  The leader only fills room that was already empty.
+     *    With it taken out of the row and an 8px gap put back, every control
+     *    lands where it did.  At the design width no row is tight, so the
+     *    comparison is repeated with the rows squeezed until long values
+     *    wrap, which is the case the claim is really about. */
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    await expandAll(page);
+
+    const r = await page.evaluate(() => {
+      /** The alpha of a computed colour (Tailwind v4 mixes in oklab). */
+      const alpha = (c: string) => {
+        if (c === 'transparent') return 0;
+        const slash = c.lastIndexOf('/');
+        if (slash >= 0) return parseFloat(c.slice(slash + 1));
+        const m = c.match(/^rgba\(([^)]*)\)/);
+        return m ? parseFloat(m[1].split(',')[3]) : 1;
+      };
+      const body = document.querySelector<HTMLElement>('[data-testid="debug-body"]')!;
+      const rows = Array.from(body.querySelectorAll<HTMLElement>('[data-debug-row]'));
+      const leadersIn = (row: HTMLElement) => row.querySelectorAll<HTMLElement>('[data-debug-leader]');
+
+      const byKind: Record<string, { rows: number; led: number; multi: number }> = {};
+      for (const row of rows) {
+        const k = row.getAttribute('data-debug-kind') ?? '?';
+        const n = leadersIn(row).length;
+        const e = (byKind[k] ??= { rows: 0, led: 0, multi: 0 });
+        e.rows++;
+        if (n >= 1) e.led++;
+        if (n > 1) e.multi++;
+      }
+      const led = rows.filter(row => leadersIn(row).length === 1);
+
+      type Box = { x: number; w: number; h: number; rowH: number };
+      /** Where a leader's control landed.  Measured against the leader's
+       *  PARENT, the flex line it sits in: a custom row's hooks ride a
+       *  `display: contents` wrapper that has no box of its own. */
+      const boxOf = (l: HTMLElement): Box => {
+        const c = (l.nextElementSibling as HTMLElement).getBoundingClientRect();
+        return { x: c.left, w: c.width, h: c.height, rowH: l.parentElement!.getBoundingClientRect().height };
+      };
+
+      /** Every leader as laid out now: the room it fills, the line it draws
+       *  inside that room, and where its control landed. */
+      const measure = () => led.map(row => {
+        const l = leadersIn(row)[0];
+        const title = l.previousElementSibling as HTMLElement;
+        const lr = l.getBoundingClientRect();
+        const tr = title.getBoundingClientRect();
+        const cs = getComputedStyle(l);
+        // The fill is painted in the content box only when it is clipped
+        // there; otherwise it runs edge to edge of the leader.
+        const clipped = cs.backgroundClip === 'content-box';
+        const inL = clipped ? parseFloat(cs.paddingLeft) : 0;
+        const inR = clipped ? parseFloat(cs.paddingRight) : 0;
+        const box = boxOf(l);
+        return {
+          row: row.getAttribute('data-debug-row')!,
+          fromTitle: lr.left - tr.right,
+          toControl: box.x - lr.right,
+          clearTitle: inL,
+          clearControl: inR,
+          line: lr.width - inL - inR,
+          // At its floor: shrunk to its own padding, with no line left in it.
+          tight: lr.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) <= 0.5,
+          height: lr.height,
+          alpha: alpha(cs.backgroundColor),
+          ariaHidden: l.getAttribute('aria-hidden') === 'true',
+          level: Math.abs((lr.top + lr.height / 2) - (tr.top + tr.height / 2)),
+          box,
+        };
+      });
+
+      /** The same rows laid out WITHOUT their leaders: each one taken out of
+       *  the flow, and the 8px gap it stands in for put back. */
+      const measureBare = () => led.map(row => {
+        const l = leadersIn(row)[0];
+        const host = l.parentElement!;
+        l.style.display = 'none';
+        host.style.columnGap = '8px';
+        host.style.justifyContent = 'space-between';
+        const box = boxOf(l);
+        l.style.display = '';
+        host.style.columnGap = '';
+        host.style.justifyContent = '';
+        return box;
+      });
+
+      const drift = (a: Box[], b: Box[]) => {
+        let worst = 0, at = '';
+        a.forEach((x, i) => {
+          const y = b[i];
+          const d = Math.max(Math.abs(x.x - y.x), Math.abs(x.w - y.w), Math.abs(x.h - y.h), Math.abs(x.rowH - y.rowH));
+          if (d > worst) { worst = d; at = led[i].getAttribute('data-debug-row')!; }
+        });
+        return { worst, at };
+      };
+
+      const natural = measure();
+      const naturalDrift = drift(natural.map(m => m.box), measureBare());
+      // Squeeze the rows until the long values wrap (at 220px the tightest
+      // row still has room to spare).  All of this runs in one task, so
+      // nothing paints and React cannot re-render in between.
+      body.style.width = '160px';
+      const squeezed = measure();
+      const squeezedDrift = drift(squeezed.map(m => m.box), measureBare());
+      body.style.width = '';
+
+      const shortest = natural.reduce((w, m) => (m.line < w.line ? m : w), natural[0]);
+      return {
+        byKind,
+        custom: led.filter(row => row.getAttribute('data-debug-kind') === 'custom').map(row => row.getAttribute('data-debug-row')),
+        notHidden: natural.filter(m => !m.ariaHidden).map(m => m.row),
+        gap: Math.max(...natural.map(m => Math.max(Math.abs(m.fromTitle), Math.abs(m.toControl)))),
+        clear: {
+          min: Math.min(...natural.map(m => Math.min(m.clearTitle, m.clearControl))),
+          max: Math.max(...natural.map(m => Math.max(m.clearTitle, m.clearControl))),
+        },
+        shortest: { row: shortest.row, line: shortest.line },
+        height: { min: Math.min(...natural.map(m => m.height)), max: Math.max(...natural.map(m => m.height)) },
+        alpha: { min: Math.min(...natural.map(m => m.alpha)), max: Math.max(...natural.map(m => m.alpha)) },
+        level: Math.max(...natural.map(m => m.level)),
+        tightNatural: natural.filter(m => m.tight).length,
+        tightSqueezed: squeezed.filter(m => m.tight).length,
+        naturalDrift,
+        squeezedDrift,
+      };
+    });
+
+    // WHERE: every control row, and nothing else.
+    expect(r.byKind.ctrl.rows, 'CONTROL: the sweep reached the value rows').toBeGreaterThan(100);
+    expect(r.byKind.ctrl.led, 'every value row has a leader').toBe(r.byKind.ctrl.rows);
+    expect(r.byKind.buttons.rows, 'CONTROL: the sweep reached the Mk-grant rows').toBeGreaterThan(0);
+    expect(r.byKind.buttons.led, 'every button row has a leader').toBe(r.byKind.buttons.rows);
+    expect(r.custom, 'the one custom row with a control beside its title').toEqual(['Entities']);
+    expect(r.byKind.stat.led, 'a readout has no button to lead to').toBe(0);
+    expect(r.byKind.chips.led, 'nor does a chip row').toBe(0);
+    expect(Object.values(r.byKind).reduce((n, k) => n + k.multi, 0), 'one leader a row').toBe(0);
+    expect(r.notHidden, 'decorative, so hidden from screen readers').toEqual([]);
+
+    // Each fills the whole gap, draws its line clear of both ends, and at the
+    // design width every one of them has room for a real line.
+    expect(r.gap, 'the leader spans title to control').toBeLessThan(1);
+    expect(r.clear.min, 'the line stands clear of the title and the button').toBeGreaterThanOrEqual(2);
+    expect(r.clear.max, 'but close enough to point at them').toBeLessThanOrEqual(8);
+    expect(r.shortest.line, `every title has room for a line at 390px (shortest: "${r.shortest.row}")`).toBeGreaterThan(40);
+
+    // FAINT: a hairline, level with its title, well under a control's fill.
+    expect(r.height.min).toBeCloseTo(1, 1);
+    expect(r.height.max).toBeCloseTo(1, 1);
+    expect(r.alpha.min, 'present').toBeGreaterThan(0.05);
+    expect(r.alpha.max, 'and faint').toBeLessThanOrEqual(0.25);
+    expect(r.level, 'level with the title').toBeLessThanOrEqual(2);
+
+    // NOTHING MOVES, at the design width and squeezed until values wrap.
+    expect(r.tightNatural, 'no row is tight at the design width').toBe(0);
+    expect(r.tightSqueezed, 'CONTROL: the squeeze left some rows no room to spare').toBeGreaterThan(5);
+    expect(r.naturalDrift.worst, `a control moved at 390px ("${r.naturalDrift.at}")`).toBeLessThan(0.5);
+    expect(r.squeezedDrift.worst, `a control moved when squeezed ("${r.squeezedDrift.at}")`).toBeLessThan(0.5);
 
     watch.assertClean();
   });

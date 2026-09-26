@@ -152,6 +152,28 @@ export const ROW_LABEL = `text-slate-300/90 uppercase tracking-wider ${T_MICRO} 
 /** A read-only readout row. */
 export const STAT_ROW = 'flex justify-between gap-2';
 
+/** The faint LEADER from a row's title to its button (user call: "add some
+ *  faint lines from the titles to their respective buttons").  The title sits
+ *  at the panel's left edge and its button at the right, often with most of
+ *  the panel's width empty between them, so the line helps the eye across
+ *  from one to the other, like the dotted line in a table of contents.
+ *
+ *  IT ONLY FILLS ROOM THE ROW ALREADY HAD.  A row holding a leader drops its
+ *  own gap and the leader's padding stands in for it: `px-1` is the 8px a
+ *  value row's `gap-2` was, and `bg-clip-content` paints the line inside that
+ *  padding only.  So with room to spare the line runs 4px clear of the title
+ *  and of the button; when a long value leaves no room the leader shrinks to
+ *  exactly that 8px, and the value wraps at the width it always did.  (The
+ *  Mk-grant rows and the Entities row had a 4px gap.  They have far more room
+ *  than 8px at every supported width, so nothing moves there either.)
+ *
+ *  Faint on purpose, about as strong as the rules between groups: it is a
+ *  guide to a control, not a control, and must not out-shout the glass
+ *  buttons it points at.  Decorative, so it is hidden from screen readers;
+ *  `data-debug-leader` is the hook the suite reads. */
+export const ROW_LEADER = 'flex-1 self-center h-px px-1 bg-clip-content bg-white/15';
+export const rowLeader = () => <span aria-hidden="true" data-debug-leader="" className={ROW_LEADER} />;
+
 /** `onMouseDown` for every button in the panel.  A MOUSE click must not move
  *  keyboard focus into the panel: keys pressed at a focused debug control
  *  never reach the ship (InputSystem.isUiKeyTarget), so over live play a
@@ -1137,8 +1159,9 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
           : mode === 'active' ? Math.max(0, total - asleep)
           : total;
         return (
-          <div className="mt-1 flex items-center justify-between gap-1">
+          <div className="mt-1 flex items-center">
             <span className={ROW_LABEL}>Entities</span>
+            {rowLeader()}
             <span className="flex items-center gap-1">
               <span className="text-white">{value}</span>
               <select
