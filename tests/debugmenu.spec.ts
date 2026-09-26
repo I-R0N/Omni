@@ -970,8 +970,8 @@ test.describe('the see-through backing', () => {
      *  from under it instead of ghosting beneath its rows.  Read off the
      *  canvas, because that is the only place the claim exists.  The minimap
      *  region is compared against ITSELF a few frames apart: with the panel
-     *  shut, frames differ only by the minimap's own animation; opening the
-     *  panel takes the whole widget away. */
+     *  shut, frames differ only by the minimap's own animation and what
+     *  moves under it; opening the panel takes the whole widget away. */
     const watch = await boot(page);
     await startRun(page);
     const grab = () => page.evaluate(() => new Promise<number[]>(resolve => {
@@ -985,17 +985,45 @@ test.describe('the see-through backing', () => {
         resolve(Array.from(img));
       }));
     }));
-    const changed = (a: number[], b: number[]) => {
-      let n = 0;
-      for (let i = 0; i < a.length; i += 4) {
-        if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 12) n++;
+    /*  JUDGED ONLY WHERE THE MINIMAP CAN BE SEEN.  Its ground
+     *  (MINIMAP_CONSTANTS.BG_COLOR) is a translucent dark slate, so taking it
+     *  away moves a pixel by 0.55 × |ground − world|: plenty over black sky,
+     *  and less than the threshold over world that is already near that
+     *  colour, such as a faint blue nebula haze.  A plain count of changed
+     *  pixels therefore measures the scene as much as the clip.  One CI run
+     *  read 43% against a bar of 80% with the hole in place, and on the
+     *  nebula field the plain count fell to 78% on one load in fifteen
+     *  while 99% of the pixels that could show the minimap had changed.
+     *  In a frame WITH the minimap a pixel is 0.45 × world + 0.55 × ground,
+     *  so a pixel near the ground colour sits over world near it too, and
+     *  nothing done to the minimap can move it far.  Visibility is read off
+     *  the frame that has the minimap, never the frame being judged, so a
+     *  clip that failed cannot shrink its own sample. */
+    const GROUND = [15, 23, 42], ALPHA = 0.55;
+    const changedWhereVisible = (withMap: number[], other: number[]) => {
+      let visible = 0, changed = 0;
+      for (let i = 0; i < withMap.length; i += 4) {
+        const off = Math.abs(withMap[i] - GROUND[0]) + Math.abs(withMap[i + 1] - GROUND[1])
+          + Math.abs(withMap[i + 2] - GROUND[2]);
+        // What removing the ground would move this pixel by: at least twice
+        // the change threshold, or the pixel cannot testify either way.
+        if (off * ALPHA / (1 - ALPHA) <= 24) continue;
+        visible++;
+        if (Math.abs(withMap[i] - other[i]) + Math.abs(withMap[i + 1] - other[i + 1])
+          + Math.abs(withMap[i + 2] - other[i + 2]) > 12) changed++;
       }
-      return n / (a.length / 4);
+      return { visible: visible / (withMap.length / 4), changed: visible ? changed / visible : 0 };
     };
 
+    // CONTROL, in the same terms.  With the panel shut, two frames differ
+    // only by the minimap's own animation and whatever moves under it: a
+    // shard drifting across the corner changed a quarter of it in one run
+    // (measured 0.244 on the plain count; 0.107 at most over forty hub
+    // loads).  Nowhere near all of it, which is what the panel does.
     const shut1 = await grab();
     const shut2 = await grab();
-    expect(changed(shut1, shut2), 'CONTROL: the shut panel leaves the minimap in place').toBeLessThan(0.2);
+    expect(changedWhereVisible(shut1, shut2).changed, 'CONTROL: the shut panel leaves the minimap in place')
+      .toBeLessThan(0.5);
 
     await openPanel(page);
     const box = (await page.getByTestId('debug-panel').boundingBox())!;
@@ -1006,12 +1034,16 @@ test.describe('the see-through backing', () => {
     expect(hole!.w).toBeCloseTo(box.width, 0);
     expect(hole!.h).toBeCloseTo(box.height, 0);
     const open = await grab();
-    expect(changed(shut2, open), 'the minimap is gone from under the open panel').toBeGreaterThan(0.8);
+    const opened = changedWhereVisible(shut2, open);
+    expect(opened.visible, 'CONTROL: enough of the minimap stands out from the world to judge').toBeGreaterThan(0.05);
+    expect(opened.changed, 'the minimap is gone from under the open panel').toBeGreaterThan(0.9);
 
     await closePanel(page);
     await waitForEngine(page, e => e.renderer.hudHole === null, 'the hole to close with the panel');
     const back = await grab();
-    expect(changed(open, back), 'and it is back once the panel shuts').toBeGreaterThan(0.8);
+    const shutAgain = changedWhereVisible(back, open);
+    expect(shutAgain.visible, 'CONTROL: enough of it stands out again to judge').toBeGreaterThan(0.05);
+    expect(shutAgain.changed, 'and it is back once the panel shuts').toBeGreaterThan(0.9);
 
     watch.assertClean();
   });
