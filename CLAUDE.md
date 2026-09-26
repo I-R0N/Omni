@@ -76,8 +76,9 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           device flies the ship through it, the
                           panel-only payload, every old row label, the
                           description popup on mouse / touch / focus,
-                          and the see-through backing with the canvas
-                          HUD clipped out from under it),
+                          the see-through backing with the canvas HUD
+                          clipped out from under it, the glass controls
+                          on it, and the filter at its foot),
                           modules (Gunnery, Scanner, hex slots, and
                           that the deleted Penetration family is gone
                           from every surface), weapons (what a SHOT
@@ -93,7 +94,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  465 tests.  All run at
+                          whatever happened next).  467 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -112,12 +113,14 @@ components/
   uiClasses.ts            The named DOM class vocabulary (T_*, PANEL*,
                           BTN_*, CHIP_*, HUD_CHIP, SECTION_TOGGLE, the
                           overlay scrim, the debug panel's see-through
-                          backing) — shared by UIOverlay and the debug
-                          panel, so neither can drift (see §8)
+                          backing and its glass DEBUG_* controls) —
+                          shared by UIOverlay and the debug panel, so
+                          neither can drift (see §8)
   DebugMenu.tsx           THE DEBUG PANEL — one component on every
                           screen: the DBG launcher, the ❄ freeze, the
-                          ◐ backing toggle, the filter box, and a
-                          renderer for whatever debugSections declares
+                          ◐ backing toggle, the filter box at its foot,
+                          and a renderer for whatever debugSections
+                          declares
                           (see §8)
   debugSections.tsx       The debug panel's REGISTRY — every group,
                           section and row as data, each row with a
@@ -4295,10 +4298,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   join anyway to hide the HUD — so joining it is the whole wiring.  The
   panel docks to the BOTTOM 45% of the screen (▴ for 85%), leaving the ship
   and the top half of the world in view, is see-through over live play and
-  solid over an overlay (rule 9), scrolls, and has a FILTER box that matches
-  names first (row labels, chip labels, group and section names) and
-  descriptions second ("Mentioned in descriptions" — every row's summary and
-  detail).
+  solid over an overlay (rule 9), scrolls, and has a FILTER box at its FOOT
+  (user call — the panel docks to the bottom of the screen, so that is where
+  a thumb already is, and it keeps the header to one row) that matches names
+  first (row labels, chip labels, group and section names) and descriptions
+  second ("Mentioned in descriptions" — every row's summary and detail).
+  Every new query shows its results from the TOP: the eye is at the bottom of
+  a list whose best hit is first, and a body left scrolled deep into the
+  groups would otherwise keep that offset over the results.
   (4) **OPEN STATE IS THE ENGINE'S** (`GameEngine.debugPanelOpen`,
   `toggleDebugPanel` / `setDebugPanelOpen`): three devices open it — the
   launcher, the ` key (`INPUT_CONSTANTS.DEBUG_KEY`, a physical position, so
@@ -4380,7 +4387,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   through.  The rect is REPORTED by the panel (`GameEngine.setDebugPanelRect`,
   on open and on resize) rather than measured by the canvas, and it is a hole
   rather than a skip, so a widget only half under the panel keeps its other
-  half.
+  half.  THE CONTROLS ARE GLASS TOO (user call: "update the button styles to
+  better fit the new UI") — `DEBUG_BTN` (shape) + `DEBUG_OFF` (a faint LIGHT
+  fill, a hairline border, bright text) or a `DEBUG_ON` accent (a TINT, never
+  a saturated slab) in `uiClasses.ts`, and `DEBUG_CHIP` for the 40px chips.
+  A control wears exactly ONE colour part and SWAPS it to toggle: two
+  utilities setting the same property on one element are an ordering
+  coin-flip in the generated CSS.  The suite pins the rule by its effect —
+  no control's computed fill, at rest or switched on, is more than 35%
+  opaque — so a new row that brings its own opaque style fails there.
   The individual rows keep their notes: DBG **Weapons** rows (grant + equip
   per weapon, `debugGrantWeapon`) are the wave-map test path for weapons now
   that commerce is station-only.  DBG **Bosses** chips (`debugSpawnBoss`) warp

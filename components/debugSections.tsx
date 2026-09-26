@@ -29,7 +29,7 @@
 import React from 'react';
 import type { GameEngine } from '../engine/GameEngine';
 import { EngineStats, MapType, EnemySubtype, TrailShape, TrailEmitMode } from '../types';
-import { T_MICRO, T_NOTE, CHIP_BASE } from './uiClasses';
+import { T_MICRO, T_NOTE, DEBUG_BTN, DEBUG_CHIP, DEBUG_OFF, DEBUG_ON } from './uiClasses';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -151,11 +151,6 @@ export interface DebugSection {
 export const ROW_LABEL = `text-slate-300/90 uppercase tracking-wider ${T_MICRO} whitespace-pre`;
 /** A read-only readout row. */
 export const STAT_ROW = 'flex justify-between gap-2';
-/** A chip's resting state INSIDE the debug panel.  Departs from the shared
- *  `CHIP_OFF` (an opaque slate-800) on purpose: on the see-through panel an
- *  opaque chip is a solid block punched through the view.  Same border, same
- *  text, same hover — only the fill is translucent. */
-export const DEBUG_CHIP_OFF = 'bg-slate-800/55 border-slate-700 text-slate-300 hover:text-white';
 
 /** `onMouseDown` for every button in the panel.  A MOUSE click must not move
  *  keyboard focus into the panel: keys pressed at a focused debug control
@@ -369,7 +364,7 @@ const mapChips = (label: string, maps: readonly MapChoice[], detail: string): De
     detail,
     act: (cc: DebugCtx) => cc.app.setMapType(m.type),
     active: c.app.mapType === m.type,
-    on: 'bg-indigo-600 border-indigo-400 text-white shadow-lg',
+    on: DEBUG_ON.indigo,
     hover: 'hover:border-indigo-400',
   })));
 
@@ -676,7 +671,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         summary: opt.summary, detail: ENEMY_TEST_DETAIL,
         act: dbg(e => e.setForcedTestEnemy(opt.type)),
         active: (c.s.forcedEnemy ?? null) === (opt.type ?? null),
-        on: 'bg-rose-600 border-rose-400 text-white shadow-lg', hover: 'hover:border-rose-400',
+        on: DEBUG_ON.rose, hover: 'hover:border-rose-400',
       }))),
     ],
   },
@@ -1149,7 +1144,10 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
               <select
                 value={mode}
                 onChange={ev => c.ui.setEntityCountMode(ev.target.value as EntityCountMode)}
-                className={`bg-slate-800/70 border border-slate-600/60 rounded ${T_MICRO} font-bold text-slate-200 px-0.5 outline-none hover:border-amber-400/70`}
+                /* Glass like every control here; the OPTIONS keep an opaque
+                   fill, since a native picker draws them over whatever the
+                   platform likes and translucent-on-white is unreadable. */
+                className={`${DEBUG_BTN} ${DEBUG_OFF} ${T_MICRO} font-bold px-1 py-0.5 hover:border-amber-300/60 [&>option]:bg-slate-900 [&>option]:text-slate-100`}
                 aria-label="Entity-count filter"
               >
                 <option value="total">total</option>
@@ -1257,10 +1255,10 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
             <button
               onMouseDown={keepFocus}
               onClick={() => c.engine()?.perfRecToggle()}
-              className={`${CHIP_BASE} ${
+              className={`${DEBUG_CHIP} ${
                 c.s.perfRecording
-                  ? 'bg-red-600/80 border-red-400 text-white animate-pulse'
-                  : `${DEBUG_CHIP_OFF} hover:border-red-400`
+                  ? `${DEBUG_ON.red} animate-pulse`
+                  : `${DEBUG_OFF} hover:border-red-400`
               }`}
             >
               {c.s.perfRecording ? '● REC' : '○ REC'}
@@ -1268,7 +1266,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
             <button
               onMouseDown={keepFocus}
               onClick={() => c.engine()?.perfRecCycleScene()}
-              className={`${CHIP_BASE} capitalize ${DEBUG_CHIP_OFF} hover:border-amber-400`}
+              className={`${DEBUG_CHIP} capitalize ${DEBUG_OFF} hover:border-amber-400`}
             >
               {c.s.perfRecScene ?? 'baseline'}
             </button>
@@ -1276,7 +1274,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
               onMouseDown={keepFocus}
               onClick={() => c.ui.copyPerfReport()}
               disabled={(c.s.perfRecSamples ?? 0) === 0}
-              className={`${CHIP_BASE} ${DEBUG_CHIP_OFF} hover:border-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed`}
+              className={`${DEBUG_CHIP} ${DEBUG_OFF} hover:border-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               {c.ui.perfCopied ? 'Copied ✓' : 'Copy'}
             </button>
@@ -1291,13 +1289,13 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
                 value={c.ui.perfCopyText}
                 onFocus={ev => ev.currentTarget.select()}
                 rows={7}
-                className={`w-full bg-slate-950/80 border border-slate-700 rounded ${T_MICRO} leading-tight text-slate-200 font-mono p-1.5 resize-y select-all`}
+                className={`w-full bg-black/40 border border-white/15 rounded-md ${T_MICRO} leading-tight text-slate-200 font-mono p-1.5 resize-y select-all focus:outline-none focus:border-amber-300/60`}
                 aria-label="Perf report — tap to select all, then copy"
               />
               <button
                 onMouseDown={keepFocus}
                 onClick={() => c.ui.dismissPerfReport()}
-                className={`self-end px-2 py-0.5 rounded ${T_MICRO} text-slate-400 hover:text-white`}
+                className={`self-end px-2 py-0.5 rounded-md ${T_MICRO} text-slate-400 hover:text-white hover:bg-white/10 transition-colors`}
               >
                 dismiss
               </button>

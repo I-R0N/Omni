@@ -1013,6 +1013,50 @@ test.describe('the see-through backing', () => {
 
     watch.assertClean();
   });
+
+  test('no control on it is an opaque block — at rest or switched on', async ({ page }) => {
+    /*  The controls are GLASS (uiClasses `DEBUG_BTN` / `DEBUG_OFF` /
+     *  `DEBUG_ON`): an opaque button on a see-through panel is a dark box cut
+     *  through the view the backing opened up, which is what the user asked
+     *  to have restyled.  Read as the COMPUTED fill of every control with
+     *  every group and section open, so a new row that brings its own opaque
+     *  style fails here without anyone having to remember the rule.  ON
+     *  states are in the sweep — ❄ Freeze on, the selected map chip, the
+     *  Enemy Test "Off" chip — because a saturated fill is the easy way to
+     *  say "on", and the rule is about both. */
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    await page.getByTestId('debug-freeze').click();
+    await waitForStats(page, s => s.debugPanel?.freeze === true, 'freeze on, for its ON state');
+    await expandAll(page);
+
+    const fills = await page.evaluate(() => {
+      /** The alpha of a computed colour, whichever syntax the engine picks —
+       *  Tailwind v4 mixes in oklab, so it is usually `oklab(… / a)`. */
+      const alpha = (c: string) => {
+        if (c === 'transparent') return 0;
+        const slash = c.lastIndexOf('/');
+        if (slash >= 0) return parseFloat(c.slice(slash + 1));
+        const m = c.match(/^rgba\(([^)]*)\)/);
+        return m ? parseFloat(m[1].split(',')[3]) : 1;
+      };
+      const panel = document.querySelector('[data-testid="debug-panel"]')!;
+      return Array.from(panel.querySelectorAll<HTMLElement>('button, select, input'))
+        .map(el => ({
+          what: (el.textContent || el.getAttribute('aria-label') || el.tagName).trim().slice(0, 30),
+          a: alpha(getComputedStyle(el).backgroundColor),
+          on: el.getAttribute('aria-pressed') === 'true',
+        }));
+    });
+    expect(fills.length, 'the sweep reached the controls').toBeGreaterThan(200);
+    const worst = fills.reduce((w, f) => (f.a > w.a ? f : w), fills[0]);
+    expect(worst.a, `the most opaque control is "${worst.what}"`).toBeLessThanOrEqual(0.35);
+    // The sweep did include ON states, so the bound covers them too.
+    expect(fills.some(f => f.on && f.a > 0), 'an ON control was measured').toBe(true);
+
+    watch.assertClean();
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1135,6 +1179,55 @@ test.describe('the registry', () => {
     const was = (await stats(page)).screenShakeEnabled;
     await page.locator('[data-debug-row="Screen shake"] button').click();
     await waitForStatsKeyChange(page, 'screenShakeEnabled', was, 'the filtered row to act');
+
+    watch.assertClean();
+  });
+
+  test('the filter sits at the foot of the panel, and its results start from the top', async ({ page }) => {
+    /*  User call: the filter moved from under the title to the panel's
+     *  FOOT — the panel docks to the bottom of the screen, so that is where
+     *  a thumb already is.  Two things follow and both are pinned: the box is
+     *  below every row (the list scrolls ABOVE it, the box never scrolls
+     *  away), and a new query shows its results from the top — the eye is at
+     *  the bottom of a list whose best hit is first, and a body left
+     *  scrolled deep into the groups would otherwise keep that offset. */
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    const panel = (await page.getByTestId('debug-panel').boundingBox())!;
+    const body = page.getByTestId('debug-body');
+    const filter = page.getByTestId('debug-filter');
+
+    const f = (await filter.boundingBox())!;
+    const b = (await body.boundingBox())!;
+    expect(f.y, 'the filter is below the scrolling rows').toBeGreaterThanOrEqual(b.y + b.height - 1);
+    expect(panel.y + panel.height - (f.y + f.height), 'and at the panel\'s foot').toBeLessThan(16);
+
+    // Scroll deep into a long list, then filter with a query broad enough
+    // that its results are LONGER than the body — so the offset cannot be
+    // cleared by the browser clamping a scroll that no longer fits.
+    await expandAll(page);
+    await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
+    expect(await body.evaluate(el => el.scrollTop), 'CONTROL: the body scrolled').toBeGreaterThan(500);
+    await filter.fill('e');
+    // The results view has replaced the groups.
+    await expect(page.locator('[data-debug-group]')).toHaveCount(0);
+    const after = await body.evaluate(el => ({ top: el.scrollTop, room: el.scrollHeight - el.clientHeight }));
+    expect(after.room, 'CONTROL: the results overflow the body').toBeGreaterThan(500);
+    expect(after.top, 'the results start from the top').toBe(0);
+    // Still pinned below the rows while it holds a query.
+    const f2 = (await filter.boundingBox())!;
+    expect(f2.y).toBeCloseTo(f.y, 0);
+
+    // The panel's own ✕ (the browser's clear glyph is hidden — blue in
+    // WebKit, absent in Firefox) empties it and brings the groups back,
+    // leaving the caret in the box for the next query.
+    await expect(filter).toBeFocused();
+    await page.getByTestId('debug-filter-clear').click();
+    await expect(filter).toHaveValue('');
+    await expect(page.locator('[data-debug-group]').first()).toBeVisible();
+    await expect(filter, 'the caret stays for the next query').toBeFocused();
+    await expect(page.getByTestId('debug-filter-clear'), 'nothing to clear, no ✕').toHaveCount(0);
 
     watch.assertClean();
   });

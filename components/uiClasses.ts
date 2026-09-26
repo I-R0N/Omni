@@ -37,7 +37,8 @@ export const OVERLAY_SCRIM = 'bg-slate-950/55 backdrop-blur-[3px]';
  * Backing for content that must stay readable REGARDLESS of what is on the
  * map behind it — dense, small, information-bearing panels where the scrim's
  * legibility floor isn't enough.  Today: the Controls & Basics help panels,
- * and the debug menu's SOLID mode (its default is `PANEL_SEE_THROUGH`, below).
+ * and the debug menu's SOLID mode (its default is `PANEL_SEE_THROUGH`, below;
+ * its controls are the glass `DEBUG_BTN` family further down).
  * Nearly opaque plus its own blur, so it reads like a panel sitting ON the
  * scrim rather than more transparency stacked on transparency.
  */
@@ -66,6 +67,53 @@ export const PANEL_OPAQUE = 'bg-slate-950/95 backdrop-blur-md';
  */
 export const PANEL_SEE_THROUGH =
   'bg-slate-950/40 [text-shadow:0_1px_2px_rgb(0_0_0/0.95),0_0_1px_rgb(0_0_0/0.9)]';
+
+/* ── The DEBUG PANEL's controls: GLASS (user call: "update the button styles
+ * to better fit the new UI") ──────────────────────────────────────────────
+ *
+ * The panel went see-through and its controls did not: they were still the
+ * dark slate boxes of the solid panel it replaced (55% slate at rest, and
+ * fully opaque indigo / rose / red slabs when ON), which over the world read
+ * as holes punched through the view the backing had just opened.
+ * So a control here is glass — a faint LIGHT fill that lifts it off whatever
+ * is behind, a hairline border, a top highlight, and the TEXT carrying it —
+ * which is `PANEL_SEE_THROUGH`'s own rule (the fill goes translucent, the
+ * marks carry the legibility) applied one level down.  Over an overlay, where
+ * the panel turns solid, the same glass reads as ordinary raised controls.
+ *
+ * The rule a suite pins (`tests/debugmenu.spec.ts`): NO control in the panel
+ * has a computed fill more than 35% opaque — not at rest, and not in its ON
+ * state either, which is why the accents below are TINTS rather than the
+ * saturated fills the shared chip vocabulary uses on the solid overlays.
+ *
+ * THREE PARTS, and a control wears exactly one COLOUR part.  `DEBUG_BTN` is
+ * the shape and behaviour and names no colour; `DEBUG_OFF` is the resting
+ * glass; `DEBUG_ON` is the pressed / selected tint.  Kept apart because two
+ * utilities setting one property on one element (`bg-white/5` beside
+ * `bg-sky-400/20`) are an ordering coin-flip in the generated CSS — so a
+ * toggle SWAPS its colour part rather than stacking one over the other.  For
+ * the same reason `DEBUG_OFF` names no hover BORDER or hover TEXT: the caller
+ * adds its own accent (a boss chip hovers rose, a value button amber).  A
+ * chip keeps the shared `CHIP_BASE` shape (40px floor and all) and takes its
+ * colour from here. */
+export const DEBUG_BTN =
+  'rounded-md border shadow-[inset_0_1px_0_rgb(255_255_255/0.07)] transition-colors ' +
+  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300/80 ' +
+  'disabled:opacity-40 disabled:cursor-not-allowed';
+/** The resting glass: a faint light fill, a hairline border, bright text. */
+export const DEBUG_OFF =
+  'bg-white/5 border-white/15 text-slate-100 hover:bg-white/10 active:bg-white/20';
+/** A glass control's ON state, by accent — a tint, a brighter border of the
+ *  same hue and near-white text, so "on" is legible without turning into a
+ *  solid slab.  Written out in full per accent because Tailwind only emits
+ *  class names it can see whole in the source. */
+export const DEBUG_ON = {
+  sky: 'bg-sky-400/20 border-sky-300/70 text-sky-50',
+  indigo: 'bg-indigo-400/25 border-indigo-300/70 text-indigo-50',
+  rose: 'bg-rose-400/20 border-rose-300/70 text-rose-50',
+  red: 'bg-red-500/30 border-red-300/80 text-red-50',
+  slate: 'bg-slate-200/15 border-slate-200/60 text-white',
+} as const;
 
 /** The overlay fade-in.  Death and stage-clear both interrupt live play, so
  *  both ease in rather than snapping over the frame the fight ended. */
@@ -150,6 +198,11 @@ export const BTN_COMPACT =
 export const CHIP_BASE =
   `px-3 py-2 rounded-lg ${T_ROW} font-bold border transition-all active:scale-95 ${TAP}`;
 export const CHIP_OFF = 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white';
+/** A CHIP in the DEBUG panel: this shape with the glass's top highlight,
+ *  coloured by `DEBUG_OFF` or a `DEBUG_ON` accent like every other control
+ *  there (see the glass block above).  Declared here, after `CHIP_BASE`,
+ *  because a module-scope template reads it at load. */
+export const DEBUG_CHIP = `${CHIP_BASE} shadow-[inset_0_1px_0_rgb(255_255_255/0.07)]`;
 
 /** A HUD CHIP — the top-right readout stack.  One padding for the whole
  *  column; the audit found the status badges at `px-3 py-1` against

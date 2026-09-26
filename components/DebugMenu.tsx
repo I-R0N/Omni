@@ -42,9 +42,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { GameEngine } from '../engine/GameEngine';
 import { EngineStats, MapType } from '../types';
-import { PANEL_OPAQUE, PANEL_SEE_THROUGH, T_MICRO, T_NOTE, T_BODY, TAP, CHIP_BASE } from './uiClasses';
 import {
-  DEBUG_GROUPS, DEBUG_SECTIONS, ROW_LABEL, STAT_ROW, DEBUG_CHIP_OFF, keepFocus,
+  PANEL_OPAQUE, PANEL_SEE_THROUGH, T_MICRO, T_NOTE, T_BODY, TAP,
+  DEBUG_BTN, DEBUG_OFF, DEBUG_ON, DEBUG_CHIP,
+} from './uiClasses';
+import {
+  DEBUG_GROUPS, DEBUG_SECTIONS, ROW_LABEL, STAT_ROW, keepFocus,
   type DebugCtx, type DebugRow, type DebugSection, type DebugGroupId, type EntityCountMode,
 } from './debugSections';
 import { useRowHelp } from './debugHelp';
@@ -160,14 +163,21 @@ function filterSections(query: string, c: DebugCtx): { names: Hit[]; description
 // tree instead, and the row DATA is module-scope, so nothing here gets a new
 // identity per frame.
 
-/** The value BUTTON of a control row.  The 22px floor is the debug menu's
+/** The value BUTTON of a control row — glass (`DEBUG_BTN`, see uiClasses),
+ *  so it reads as a control lifted off the world behind the panel rather
+ *  than a dark box cut through it.  The 22px floor is the debug menu's
  *  deliberate exception to the 40px tap floor (5d, D4): a developer surface
- *  of ~150 rows trades reach for density.  Its fill is translucent like the
- *  panel's (the see-through backing), and its border and text carry it. */
+ *  of ~150 rows trades reach for density. */
 const CTRL_BUTTON =
-  `bg-slate-800/55 border border-slate-600/60 rounded px-1.5 py-1 min-h-[22px] ${T_MICRO} ` +
-  'font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors ' +
-  'text-right break-all';
+  `${DEBUG_BTN} ${DEBUG_OFF} px-2 py-0.5 min-h-[22px] ${T_MICRO} font-bold ` +
+  'hover:border-amber-300/60 hover:text-amber-100 text-right break-all';
+/** A small button in a `buttons` row (the module Mk grants): the value
+ *  button's glass, sized to sit three to a row. */
+const SMALL_BUTTON =
+  `${DEBUG_BTN} ${DEBUG_OFF} px-1.5 py-0.5 min-h-[22px] ${T_MICRO} font-bold ` +
+  'hover:border-amber-300/60 hover:text-amber-100';
+/** A header control (❄ / ◐ / ▴ / ✕): the same glass at the header's 32px. */
+const HEAD_BUTTON = `${DEBUG_BTN} min-h-[32px] min-w-[32px]`;
 
 /** Every row carries two hooks: `data-debug-row` (its label — the row's
  *  identity, which suites address it by) and `data-debug-kind` (which of the
@@ -213,7 +223,7 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
                 key={b.label}
                 onMouseDown={keepFocus}
                 onClick={() => b.act(c)}
-                className={`bg-slate-800/55 border border-slate-600/60 rounded px-1 py-0.5 min-h-[22px] ${T_MICRO} font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors`}
+                className={SMALL_BUTTON}
               >
                 {b.label}
               </button>
@@ -234,8 +244,8 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
               data-help={ch.summary}
               data-help-title={ch.label}
               data-help-detail={ch.detail}
-              className={`${CHIP_BASE} ${ch.capitalize ? 'capitalize ' : ''}${
-                ch.active ? (ch.on ?? '') : `${DEBUG_CHIP_OFF} ${ch.hover}`
+              className={`${DEBUG_CHIP} ${ch.capitalize ? 'capitalize ' : ''}${
+                ch.active ? (ch.on ?? DEBUG_ON.slate) : `${DEBUG_OFF} ${ch.hover}`
               }`}
             >
               {ch.label}
@@ -306,6 +316,7 @@ export default function DebugMenu({
   const [perfCopied, setPerfCopied] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   // The description popup: hover, long-press or focus an item to read it.
   const help = useRowHelp(panelRef, open);
 
@@ -399,6 +410,28 @@ export default function DebugMenu({
    *  the toggle, like ❄ Freeze, is only offered over live play. */
   const seeThrough = live && !solid;
 
+  /** Every change to the query shows its results FROM THE TOP.  The filter
+   *  sits at the panel's foot, so the eye starts at the bottom of a list whose
+   *  first hit is at the top — and a body scrolled deep into the groups would
+   *  otherwise open a long results list at that same depth. */
+  const setFilter = (q: string) => {
+    help.dismiss();
+    setQuery(q);
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  };
+
+  /** A group or section header: a full-width row that lights up under the
+   *  pointer, with a chevron that turns as it opens.  Wider than the rows by
+   *  its own padding, so its label still lines up with theirs. */
+  const HEADER_ROW =
+    '-mx-1 w-[calc(100%+0.5rem)] px-1 rounded-md flex items-center justify-between ' +
+    'hover:bg-white/5 transition-colors focus-visible:outline-none ' +
+    'focus-visible:ring-1 focus-visible:ring-amber-300/80';
+  const chevron = (isOpen: boolean) => (
+    <span aria-hidden="true"
+      className={`inline-block text-slate-500 transition-transform ${isOpen ? 'rotate-90' : ''}`}>▸</span>
+  );
+
   const sectionHeader = (s: DebugSection) => (
     <button
       key={`h:${s.id}`}
@@ -407,11 +440,11 @@ export default function DebugMenu({
       onClick={() => flip(`s:${s.id}`, s.defaultOpen)}
       aria-expanded={isOpen(`s:${s.id}`, s.defaultOpen)}
       /* Same deliberate density exception as the rows (5d, D4). */
-      className={`mt-1 w-full min-h-[24px] flex items-center justify-between text-slate-300/80 hover:text-amber-300 uppercase tracking-wider ${T_MICRO} transition-colors`}
+      className={`mt-1 min-h-[24px] ${HEADER_ROW} text-slate-300/80 hover:text-amber-300 uppercase tracking-wider ${T_MICRO}`}
       title={`Toggle ${s.label} section`}
     >
       <span>{s.label}</span>
-      <span className="text-slate-500">{isOpen(`s:${s.id}`, s.defaultOpen) ? '▾' : '▸'}</span>
+      {chevron(isOpen(`s:${s.id}`, s.defaultOpen))}
     </button>
   );
 
@@ -458,96 +491,69 @@ export default function DebugMenu({
       }`}
     >
       {/* ── Header: never scrolls ── */}
-      <div className="flex-none flex flex-col gap-1.5 px-2 pt-2 pb-1.5 border-b border-slate-700/60">
-        <div className="flex items-center gap-1.5">
-          <span className={`font-mono font-bold ${T_BODY} tracking-[0.2em] text-amber-300 mr-auto`}>DEBUG</span>
-          {live && (
-            <button
-              data-testid="debug-freeze"
-              onMouseDown={keepFocus}
-              onClick={() => engine()?.setDebugFreeze(!panel?.freeze)}
-              aria-pressed={panel?.freeze === true}
-              data-help="Hold the game while this panel is open, like pause."
-              data-help-title="❄ Freeze"
-              data-help-detail="Off (default) keeps the world running so a setting can be watched taking effect. Never holds a dying or dead ship — the death screen always runs live."
-              className={`min-h-[32px] px-2 rounded border ${T_NOTE} font-bold uppercase tracking-wider transition-colors ${
-                panel?.freeze
-                  ? 'bg-sky-600/40 border-sky-400/70 text-sky-100'
-                  : 'bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-sky-400/70'
-              }`}
-            >
-              ❄ Freeze {panel?.freeze ? 'On' : 'Off'}
-            </button>
-          )}
-          {live && (
-            <button
-              data-testid="debug-solid"
-              onMouseDown={keepFocus}
-              onClick={() => setSolid(v => !v)}
-              aria-pressed={solid}
-              aria-label={solid ? 'See-through debug panel' : 'Solid debug panel'}
-              data-help={solid
-                ? 'The panel has a solid backing. Tap for see-through, to watch the world behind it.'
-                : 'The world shows through the panel. Tap for a solid backing, for reading over a bright scene.'}
-              data-help-title="Backing"
-              data-help-detail="Only offered over live play. Over a menu, pause, a station, death or stage-clear the panel is always solid: what would show through there is that screen's own text, not the world."
-              className={`min-h-[32px] min-w-[32px] rounded border ${T_BODY} transition-colors ${
-                solid
-                  ? 'bg-slate-700/80 border-slate-400/70 text-slate-100'
-                  : 'bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-amber-400/70'
-              }`}
-            >
-              {solid ? '●' : '◐'}
-            </button>
-          )}
+      <div className="flex-none flex items-center gap-1.5 px-2 pt-2 pb-1.5 border-b border-white/10">
+        <span className={`font-mono font-bold ${T_BODY} tracking-[0.2em] text-amber-300 mr-auto`}>DEBUG</span>
+        {live && (
           <button
-            data-testid="debug-size"
+            data-testid="debug-freeze"
             onMouseDown={keepFocus}
-            onClick={() => { help.dismiss(); setTall(t => !t); }}
-            aria-label={tall ? 'Shorter debug panel' : 'Taller debug panel'}
-            data-help={tall ? 'Shorter — see more of the world.' : 'Taller — see more rows.'}
-            data-help-title="Panel size"
-            className={`min-h-[32px] min-w-[32px] rounded border bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-amber-400/70 ${T_BODY}`}
+            onClick={() => engine()?.setDebugFreeze(!panel?.freeze)}
+            aria-pressed={panel?.freeze === true}
+            data-help="Hold the game while this panel is open, like pause."
+            data-help-title="❄ Freeze"
+            data-help-detail="Off (default) keeps the world running so a setting can be watched taking effect. Never holds a dying or dead ship — the death screen always runs live."
+            className={`${HEAD_BUTTON} px-2.5 ${T_NOTE} font-bold uppercase tracking-wider ${
+              panel?.freeze ? DEBUG_ON.sky : `${DEBUG_OFF} hover:border-sky-300/60`
+            }`}
           >
-            {tall ? '▾' : '▴'}
+            ❄ Freeze {panel?.freeze ? 'On' : 'Off'}
           </button>
+        )}
+        {live && (
           <button
-            data-testid="debug-close"
+            data-testid="debug-solid"
             onMouseDown={keepFocus}
-            onClick={close}
-            aria-label="Close debug menu"
-            title="Close (Esc, the ` key, or the pad's BACK / Select)"
-            className={`min-h-[32px] min-w-[32px] rounded border bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-rose-400/70 hover:text-rose-200 ${T_BODY}`}
+            onClick={() => setSolid(v => !v)}
+            aria-pressed={solid}
+            aria-label={solid ? 'See-through debug panel' : 'Solid debug panel'}
+            data-help={solid
+              ? 'The panel has a solid backing. Tap for see-through, to watch the world behind it.'
+              : 'The world shows through the panel. Tap for a solid backing, for reading over a bright scene.'}
+            data-help-title="Backing"
+            data-help-detail="Only offered over live play. Over a menu, pause, a station, death or stage-clear the panel is always solid: what would show through there is that screen's own text, not the world."
+            className={`${HEAD_BUTTON} ${T_BODY} ${solid ? DEBUG_ON.slate : `${DEBUG_OFF} hover:border-amber-300/60`}`}
           >
-            ✕
+            {solid ? '●' : '◐'}
           </button>
-        </div>
-        <input
-          ref={filterRef}
-          type="search"
-          data-testid="debug-filter"
-          value={query}
-          onChange={e => { help.dismiss(); setQuery(e.target.value); }}
-          /* Escape in a filter with text in it CLEARS the filter and stops
-             there — the engine closes the panel on an Escape that reaches
-             the window, and a query typed to find one row should not cost
-             the panel.  The next Escape, on an empty box, closes it. */
-          onKeyDown={e => {
-            if (e.key === 'Escape' && query) {
-              e.preventDefault();
-              e.stopPropagation();
-              setQuery('');
-            }
-          }}
-          placeholder="Filter rows — e.g. neb bond, portal, warden"
-          aria-label="Filter debug rows"
-          className={`w-full min-h-[32px] bg-slate-900/70 border border-slate-600 rounded px-2 ${T_BODY} text-white placeholder:text-slate-500 focus:border-amber-400 focus:outline-none`}
-        />
+        )}
+        <button
+          data-testid="debug-size"
+          onMouseDown={keepFocus}
+          onClick={() => { help.dismiss(); setTall(t => !t); }}
+          aria-label={tall ? 'Shorter debug panel' : 'Taller debug panel'}
+          data-help={tall ? 'Shorter — see more of the world.' : 'Taller — see more rows.'}
+          data-help-title="Panel size"
+          className={`${HEAD_BUTTON} ${T_BODY} ${DEBUG_OFF} hover:border-amber-300/60`}
+        >
+          {tall ? '▾' : '▴'}
+        </button>
+        <button
+          data-testid="debug-close"
+          onMouseDown={keepFocus}
+          onClick={close}
+          aria-label="Close debug menu"
+          title="Close (Esc, the ` key, or the pad's BACK / Select)"
+          className={`${HEAD_BUTTON} ${T_BODY} ${DEBUG_OFF} hover:border-rose-300/70 hover:text-rose-100`}
+        >
+          ✕
+        </button>
       </div>
 
       {/* ── Body: the groups, or the filter's results.  Scrolling moves
              every row out from under an open description, so it closes it. ── */}
       <div
+        ref={bodyRef}
+        data-testid="debug-body"
         onScroll={help.scrolled}
         className={`flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 font-mono ${T_MICRO} leading-tight text-slate-300/90`}
       >
@@ -559,7 +565,7 @@ export default function DebugMenu({
               {hitList(results.names, 'n')}
               {results.descriptions.length > 0 && (
                 <>
-                  <div className={`mt-3 pt-2 border-t border-slate-700/60 ${T_MICRO} uppercase tracking-wider text-slate-500`}>
+                  <div className={`mt-3 pt-2 border-t border-white/10 ${T_MICRO} uppercase tracking-wider text-slate-500`}>
                     Mentioned in descriptions
                   </div>
                   {hitList(results.descriptions, 'd')}
@@ -573,16 +579,16 @@ export default function DebugMenu({
             if (sections.length === 0) return null;
             const gOpen = isOpen(`g:${g.id}`);
             return (
-              <div key={g.id} className="border-b border-slate-700/40 last:border-0">
+              <div key={g.id} className="border-b border-white/10 last:border-0">
                 <button
                   data-debug-group={g.id}
                   onMouseDown={keepFocus}
                   onClick={() => flip(`g:${g.id}`)}
                   aria-expanded={gOpen}
-                  className={`w-full min-h-[32px] flex items-center justify-between font-sans ${T_BODY} font-bold uppercase tracking-widest text-amber-300/90 hover:text-amber-200 transition-colors`}
+                  className={`min-h-[32px] ${HEADER_ROW} font-sans ${T_BODY} font-bold uppercase tracking-widest text-amber-300/90 hover:text-amber-200`}
                 >
                   <span>{g.label}</span>
-                  <span className="text-slate-500">{gOpen ? '▾' : '▸'}</span>
+                  {chevron(gOpen)}
                 </button>
                 {gOpen && (
                   <div className="pb-2">
@@ -603,6 +609,56 @@ export default function DebugMenu({
             );
           })
         )}
+      </div>
+
+      {/* ── Footer: the FILTER, at the panel's foot (user call).  The panel
+             docks to the bottom of the screen, so this is where a thumb
+             already is on a phone — and it leaves the header one row, which
+             is one more row of the list in view. ── */}
+      <div className="flex-none px-2 pt-1.5 pb-2 border-t border-white/10">
+        <div className="relative">
+          <svg aria-hidden="true" viewBox="0 0 16 16"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400">
+            <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M10.4 10.4 14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+          <input
+            ref={filterRef}
+            type="search"
+            data-testid="debug-filter"
+            value={query}
+            onChange={e => setFilter(e.target.value)}
+            /* Escape in a filter with text in it CLEARS the filter and stops
+               there — the engine closes the panel on an Escape that reaches
+               the window, and a query typed to find one row should not cost
+               the panel.  The next Escape, on an empty box, closes it. */
+            onKeyDown={e => {
+              if (e.key === 'Escape' && query) {
+                e.preventDefault();
+                e.stopPropagation();
+                setFilter('');
+              }
+            }}
+            placeholder="Filter rows — e.g. neb bond, portal, warden"
+            aria-label="Filter debug rows"
+            /* The engine's own clear control is hidden: it is a blue glyph
+               in WebKit and absent in Firefox.  The ✕ below is the panel's. */
+            className={`w-full min-h-[34px] pl-8 pr-9 rounded-lg bg-white/5 border border-white/15 shadow-[inset_0_1px_0_rgb(255_255_255/0.07)] ${T_BODY} text-white placeholder:text-slate-400 transition-colors hover:bg-white/10 focus:bg-white/10 focus:border-amber-300/70 focus:outline-none [&::-webkit-search-cancel-button]:hidden`}
+          />
+          {query && (
+            <button
+              data-testid="debug-filter-clear"
+              /* keepFocus: clearing leaves the caret in the box, ready for
+                 the next query. */
+              onMouseDown={keepFocus}
+              onClick={() => setFilter('')}
+              aria-label="Clear the filter"
+              className={`absolute right-1 top-1/2 -translate-y-1/2 min-h-[28px] min-w-[28px] rounded-md ${T_NOTE} text-slate-300 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300/80`}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
     </div>
     {help.popup}
