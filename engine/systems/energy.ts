@@ -31,18 +31,18 @@ import type { GameEntity } from '../../types';
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 
 /** HOW energy arrives.  A gun module IS one of these. */
-export type Delivery = 'projectile' | 'beam' | 'spread' | 'homing' | 'radial';
-export const DELIVERIES: readonly Delivery[] = ['projectile', 'beam', 'spread', 'homing', 'radial'];
+export type Delivery = 'projectile' | 'beam' | 'spread' | 'homing' | 'cannon';
+export const DELIVERIES: readonly Delivery[] = ['projectile', 'beam', 'spread', 'homing', 'cannon'];
 
 /** WHAT KIND of energy a delivery carries.  An energy MODIFIER module is one
  *  of these; an unmodified delivery fires plain (weak) kinetic energy. */
-export type EnergyModifier = 'kinetic' | 'electric' | 'thermal' | 'magnetic' | 'explosive';
-export const ENERGY_MODIFIERS: readonly EnergyModifier[] =
-  ['kinetic', 'electric', 'thermal', 'magnetic', 'explosive'];
+export type EnergyModifier = 'kinetic' | 'electric' | 'thermal';
+export const ENERGY_MODIFIERS: readonly EnergyModifier[] = ['kinetic', 'electric', 'thermal'];
 
-/** The four PHYSICAL domains a material answers to.  Explosive is not one —
- *  it is a COMPOSITE that emits a mechanical and a thermal packet (§5). */
-export type EnergyDomain = 'mechanical' | 'thermal' | 'electric' | 'magnetic';
+/** The PHYSICAL domains a material answers to.  (Magnetic and the explosive
+ *  composite were removed — user call; the BLAST now belongs to the Cannon
+ *  DELIVERY rather than to an energy.) */
+export type EnergyDomain = 'mechanical' | 'thermal' | 'electric';
 
 /** A weapon's identity: a delivery, optionally modified.  `'projectile'` or
  *  `'projectile+thermal'`.  A string key rather than an object so it can sit
@@ -80,11 +80,20 @@ export const LEGACY_WEAPON_MAP: Readonly<Record<string, WeaponKey>> = {
   BOUNCER:   'beam+thermal',          // "Laser" — a laser is heat
   LIGHTNING: 'projectile+electric',
   HOMING:    'homing+kinetic',
-  CANNON:    'projectile+explosive',
+  CANNON:    'cannon',                // the Plasma Cannon IS the bare cannon delivery
   // Catalog ids of the retired gun modules.
   wpn_blaster: 'projectile', wpn_burst: 'projectile+kinetic', wpn_shotgun: 'spread+kinetic',
   wpn_bouncer: 'beam+thermal', wpn_lightning: 'projectile+electric',
-  wpn_homing: 'homing+kinetic', wpn_cannon: 'projectile+explosive',
+  wpn_homing: 'homing+kinetic', wpn_cannon: 'cannon',
+  // Keys of the removed PULSE delivery and the removed MAGNETIC / EXPLOSIVE
+  // energies.  The shell that was `projectile+explosive` is the cannon now;
+  // everything else falls back to the bare delivery it rode on.
+  'projectile+explosive': 'cannon', 'projectile+magnetic': 'projectile',
+  'beam+explosive': 'beam', 'beam+magnetic': 'beam',
+  'spread+explosive': 'spread', 'spread+magnetic': 'spread',
+  'homing+explosive': 'homing', 'homing+magnetic': 'homing',
+  radial: 'cannon', 'radial+kinetic': 'cannon+kinetic', 'radial+electric': 'cannon+electric',
+  'radial+thermal': 'cannon+thermal', 'radial+magnetic': 'cannon', 'radial+explosive': 'cannon',
 };
 
 /** Normalise any id — new key, old enum name, old catalog id — to a key. */
@@ -115,20 +124,37 @@ export function materialOf(e: GameEntity): MaterialId {
 }
 
 export interface MaterialResponse {
-  /** MECHANICAL.  How much weaker a HOT body is to kinetic energy:
+  // ── STATE ─────────────────────────────────────────────────────────────────
+  /** A GAS is not a solid: it takes no damage from any energy (it is
+   *  displaced, heated, energised instead), has no fracture profile, is not
+   *  stamped with impact points, and beams pass through it.  One flag, so a
+   *  second gas material needs no code. */
+  gas: boolean;
+
+  // ── MECHANICAL ────────────────────────────────────────────────────────────
+  /** How much weaker a HOT body is to kinetic energy:
    *  damage × (1 + heatWeakening × heat).  This is the threshold drop —
    *  under the grain model a body's HP is its boundary total, so scaling
    *  what a hit spends on the boundaries IS lowering the threshold. */
   heatWeakening: number;
-  /** THERMAL.  Fraction of a thermal packet that becomes heat, and how much
-   *  energy (damage units) one unit of normalised heat costs. */
+
+  // ── THERMAL ───────────────────────────────────────────────────────────────
+  /** Fraction of a thermal packet that becomes heat. */
   heatAbsorb: number;
-  heatCapacity: number;
+  /** SPECIFIC HEAT, J/(g·K), roughly the real material's.  The one number
+   *  behind two derived ones (user call): how much energy a unit of heat
+   *  costs (`heatCapacityOf`) and how hot the body can get (`maxHeatOf`).
+   *  So plastic, with the highest real specific heat, is the SLOWEST solid
+   *  to heat and the one that can hold the most. */
+  specificHeat: number;
   /** Fraction of heat lost per second (exponential cooling). */
   coolingPerSec: number;
-  /** Fraction of heat passed to each nearby same-material body per conduct
-   *  tick (metal only in practice). */
-  conduct: number;
+  /** THERMAL CONDUCTIVITY, 0..1 — real-world ORDER (steel ≈ 50, granite ≈ 2.5,
+   *  glass ≈ 1, plastic ≈ 0.2 W/m·K), compressed so the low end still reads.
+   *  Drives BOTH how fast a hot spot spreads through the body
+   *  (`thermalDiffusivityOf`) and how much heat crosses to a neighbour
+   *  (`conductShare`, harmonic mean of the two conductivities). */
+  thermalConductivity: number;
   /** Boundary damage per second at heat 1 — thermal cracking / softening /
    *  burning.  0 = heat never damages on its own. */
   thermalDps: number;
@@ -137,51 +163,61 @@ export interface MaterialResponse {
   thermalFailAt: number;
   /** Heat above which cohesion bonds let go (plastic). Infinity = never. */
   bondReleaseAt: number;
-  /** ELECTRIC.  0..1: 1 conducts perfectly, <CHAIN_MIN_CONDUCTIVITY is a
-   *  terminal (the arc lands, nothing propagates). */
+  /** GAS response to heat: how hard a drifting body is stirred per unit of
+   *  heat (0 = not at all), and the heat at which a STATIC gas body
+   *  disperses (Infinity = never). */
+  agitation: number;
+  disperseAt: number;
+
+  // ── ELECTRIC ──────────────────────────────────────────────────────────────
+  /** 0..1: 1 conducts perfectly, <CHAIN_MIN_CONDUCTIVITY is a terminal (the
+   *  arc lands, nothing propagates). */
   conductivity: number;
   /** Fraction of an arc's magnitude that becomes damage. */
   electricDamage: number;
-  /** MAGNETIC.  0..1 susceptibility; only metal is non-zero (nebula borrows
-   *  a value while ENERGIZED — see `magneticSusceptibility`). */
-  magnetic: number;
-  /** THERMAL DIFFUSIVITY (world units² / s) — how fast a hot spot spreads
-   *  through the body from where the heat went in.  Presentation only: the
-   *  sim still reads the body's one `heat` value.  Metal smears a spot across
-   *  a whole plate in well under a second; glass, rock and plastic hold it
-   *  where it landed. */
-  thermalDiffusivity: number;
+  /** Seconds an arc leaves the body ENERGISED (the cyan rim) instead of
+   *  damaging it.  0 = never energised. */
+  energizeSec: number;
 }
 
 /**
  * THE MATERIAL TABLE (§8).  Coefficients live here; BEHAVIOUR lives in the
- * paths that read them (glass fails under the thermal PROFILE, plastic lets
- * its bonds go, metal conducts and gets dragged, nebula is energised and then
- * steerable).  Read it as "what is this stuff", not as a damage chart.
+ * paths that read them, and those paths branch on these PROPERTIES, never on
+ * a material's name — so a new material, or a changed behaviour, is a row
+ * edit rather than new code.  Read it as "what is this stuff", not as a
+ * damage chart.
  */
 export const MATERIAL_RESPONSE: Readonly<Record<MaterialId, MaterialResponse>> = {
-  //            weak   abs   cap  cool  cond  dps   fail      bonds     cond. eDmg  mag
-  rock:    { heatWeakening: 1.5, heatAbsorb: 0.8, heatCapacity: 30, coolingPerSec: 0.25, conduct: 0,
-             thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 0.15, electricDamage: 0.3, magnetic: 0, thermalDiffusivity: 30 },
-  glass:   { heatWeakening: 1.0, heatAbsorb: 0.9, heatCapacity: 24, coolingPerSec: 0.15, conduct: 0,
-             thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity,
-             conductivity: 0.05, electricDamage: 0.2, magnetic: 0, thermalDiffusivity: 12 },
-  metal:   { heatWeakening: 2.5, heatAbsorb: 0.7, heatCapacity: 40, coolingPerSec: 0.1, conduct: 0.15,
-             thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 1.0, electricDamage: 1.0, magnetic: 1.0, thermalDiffusivity: 160 },
-  plastic: { heatWeakening: 0.5, heatAbsorb: 1.0, heatCapacity: 12, coolingPerSec: 0.2, conduct: 0,
-             thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3,
-             conductivity: 0.03, electricDamage: 0.1, magnetic: 0, thermalDiffusivity: 8 },
-  nebula:  { heatWeakening: 0, heatAbsorb: 1.0, heatCapacity: 8, coolingPerSec: 0.5, conduct: 0,
-             thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 0.7, electricDamage: 0, magnetic: 0, thermalDiffusivity: 60 },
+  rock:    { gas: false, heatWeakening: 1.5,
+             heatAbsorb: 0.8, specificHeat: 0.8,  coolingPerSec: 0.25, thermalConductivity: 0.12,
+             thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+             conductivity: 0.15, electricDamage: 0.3, energizeSec: 0 },
+  glass:   { gas: false, heatWeakening: 1.0,
+             heatAbsorb: 0.9, specificHeat: 0.84, coolingPerSec: 0.15, thermalConductivity: 0.08,
+             thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+             conductivity: 0.05, electricDamage: 0.2, energizeSec: 0 },
+  metal:   { gas: false, heatWeakening: 2.5,
+             heatAbsorb: 0.7, specificHeat: 0.45, coolingPerSec: 0.1, thermalConductivity: 1.0,
+             thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+             conductivity: 1.0, electricDamage: 1.0, energizeSec: 0 },
+  plastic: { gas: false, heatWeakening: 0.5,
+             heatAbsorb: 1.0, specificHeat: 1.5, coolingPerSec: 0.2, thermalConductivity: 0.03,
+             thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3, agitation: 0, disperseAt: Infinity,
+             conductivity: 0.03, electricDamage: 0.1, energizeSec: 0 },
+  // Gas: stirred by heat, energised (not damaged) by arcs, passed through by
+  // beams, never fractured.
+  nebula:  { gas: true, heatWeakening: 0,
+             heatAbsorb: 1.0, specificHeat: 1.0, coolingPerSec: 0.5, thermalConductivity: 0.05,
+             thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0.4, disperseAt: 1.0,
+             conductivity: 0.7, electricDamage: 0, energizeSec: 3.5 },
   // Enemies, the player, indestructible terrain, anything unknown: a hull.
-  // Conducts (ships are machines — the old Lightning chained through them),
-  // burns (heat is a DoT), not magnetic until something declares `metal`.
-  generic: { heatWeakening: 0.5, heatAbsorb: 0.8, heatCapacity: 20, coolingPerSec: 0.4, conduct: 0,
-             thermalDps: 5, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 0.8, electricDamage: 1.0, magnetic: 0, thermalDiffusivity: 40 },
+  // Electrically it IS metal (user call: an arc on a metal tile must be able
+  // to jump to the ship beside it at full strength); thermally a little less
+  // conductive, and it burns (heat is a DoT).
+  generic: { gas: false, heatWeakening: 0.5,
+             heatAbsorb: 0.8, specificHeat: 0.5, coolingPerSec: 0.4, thermalConductivity: 0.8,
+             thermalDps: 5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+             conductivity: 1.0, electricDamage: 1.0, energizeSec: 0 },
 };
 
 export function responseOf(mat: MaterialId | string | undefined): MaterialResponse {
@@ -200,7 +236,7 @@ export const ENERGY_CONSTANTS = {
   /** Hard ceiling on one packet's magnitude (damage units). */
   MAX_PACKET: 500,
   /** Heat is clamped here — no runaway temperature. */
-  MAX_HEAT: 2.5,
+  MAX_HEAT: 5,
   /** Below this a body is COLD and leaves the active-heated set. */
   HEAT_EPSILON: 0.02,
   /** PRESENTATION: the drawn temperature eases toward the real one — this
@@ -232,25 +268,19 @@ export const ENERGY_CONSTANTS = {
   CHAIN_MIN_CONDUCTIVITY: 0.3, // below: the arc lands but does not propagate
   CHAIN_MIN_MAGNITUDE: 0.25,   // below: the chain has run out
   CHAIN_CANDIDATES: 48,        // max bodies considered per hop query
-  /** How long a nebula body stays ENERGISED (steerable by magnetism). */
-  ENERGIZE_SEC: 3.5,
 
-  // MAGNETIC caps.
-  MAG_MAX_TARGETS: 40,
-  MAG_MAX_RADIUS: 360,
-  /** Max velocity change one pulse may add to any body (no runaway force). */
-  MAG_MAX_DV: 14,
-  /** Susceptibility an ENERGISED nebula body borrows. */
-  MAG_NEBULA_ENERGIZED: 0.6,
-  /** A static metal tile at or below this health fraction is LOOSE: a strong
-   *  enough pull drags a grain free (through the ordinary chip path). */
-  MAG_LOOSE_HEALTH_FRAC: 0.6,
-  MAG_LOOSE_MIN_PULL: 4,
-
-  // EXPLOSIVE composite: of a detonation's magnitude, this fraction arrives as
-  // HEAT on each body the blast reaches, beside the existing mechanical ring.
-  EXPLOSIVE_THERMAL_FRAC: 0.3,
-  EXPLOSIVE_MAX_TARGETS: 48,
+  // MATERIAL → HEAT DERIVATIONS.  Each is calibrated so ROCK is unchanged
+  // from the hand-set table these replaced (capacity 30, ceiling 2.5).
+  /** Energy per unit of normalised heat, per J/(g·K) of specific heat. */
+  HEAT_CAPACITY_PER_SPECIFIC: 37.5,
+  /** A material's heat ceiling, per J/(g·K) of specific heat. */
+  MAX_HEAT_PER_SPECIFIC: 3.125,
+  /** Hot-spot spreading speed (world units²/s) per unit of thermal
+   *  conductivity.  Presentation only. */
+  SPREAD_PER_CONDUCTIVITY: 400,
+  /** Share of the heat DIFFERENCE crossing to one neighbour per conduct tick,
+   *  per unit of the pair's (harmonic-mean) thermal conductivity. */
+  CONDUCT_PER_CONDUCTIVITY: 0.15,
 } as const;
 
 // ── Heat ─────────────────────────────────────────────────────────────────────
@@ -259,21 +289,51 @@ export const ENERGY_CONSTANTS = {
 export function heatGain(mat: MaterialId, magnitude: number): number {
   const r = responseOf(mat);
   const m = safeMag(magnitude);
-  if (!(r.heatCapacity > 0)) return 0;
-  return (m * r.heatAbsorb) / r.heatCapacity;
+  const cap = heatCapacityOf(mat);
+  if (!(cap > 0)) return 0;
+  return (m * r.heatAbsorb) / cap;
 }
 
-/** Clamp heat into [0, MAX_HEAT]; NaN → 0. */
-export function clampHeat(h: number): number {
+/** Energy (damage units) one unit of normalised heat costs — derived from the
+ *  material's specific heat. */
+export function heatCapacityOf(mat: MaterialId | string | undefined): number {
+  return responseOf(mat).specificHeat * ENERGY_CONSTANTS.HEAT_CAPACITY_PER_SPECIFIC;
+}
+
+/** The hottest this material can get — derived from its specific heat, and
+ *  never above the global MAX_HEAT. */
+export function maxHeatOf(mat: MaterialId | string | undefined): number {
+  return Math.min(ENERGY_CONSTANTS.MAX_HEAT,
+    responseOf(mat).specificHeat * ENERGY_CONSTANTS.MAX_HEAT_PER_SPECIFIC);
+}
+
+/** How fast a hot spot spreads through a body of this material. */
+export function thermalDiffusivityOf(mat: MaterialId | string | undefined): number {
+  return responseOf(mat).thermalConductivity * ENERGY_CONSTANTS.SPREAD_PER_CONDUCTIVITY;
+}
+
+/** Share of the heat difference that crosses between two touching bodies per
+ *  conduct tick.  The HARMONIC mean of their conductivities — two materials in
+ *  series — so metal↔metal is fast, metal↔rock slow and rock↔rock barely
+ *  moves, and an insulator on either side throttles the pair. */
+export function conductShare(a: MaterialId | string | undefined, b: MaterialId | string | undefined): number {
+  const ka = responseOf(a).thermalConductivity, kb = responseOf(b).thermalConductivity;
+  if (!(ka > 0) || !(kb > 0)) return 0;
+  return ENERGY_CONSTANTS.CONDUCT_PER_CONDUCTIVITY * (2 * ka * kb) / (ka + kb);
+}
+
+/** Clamp heat into [0, ceiling]; NaN → 0.  Pass the body's material
+ *  ceiling (`maxHeatOf`); the default is the global one. */
+export function clampHeat(h: number, ceiling: number = ENERGY_CONSTANTS.MAX_HEAT): number {
   if (!Number.isFinite(h) || h <= 0) return 0;
-  return Math.min(h, ENERGY_CONSTANTS.MAX_HEAT);
+  return Math.min(h, ceiling);
 }
 
 /** One cooling step.  Exponential, and snaps to 0 below HEAT_EPSILON so a
  *  body actually becomes COLD (and leaves the active set) in finite time. */
 export function coolHeat(mat: MaterialId, heat: number, dt: number): number {
   const r = responseOf(mat);
-  const h = clampHeat(heat) * Math.exp(-r.coolingPerSec * Math.max(0, dt));
+  const h = clampHeat(heat, maxHeatOf(mat)) * Math.exp(-r.coolingPerSec * Math.max(0, dt));
   return h < ENERGY_CONSTANTS.HEAT_EPSILON ? 0 : h;
 }
 
@@ -296,7 +356,7 @@ export function coolHeat(mat: MaterialId, heat: number, dt: number): number {
 /** σ after `dt` seconds of diffusion, capped at `cap` (the spot has filled
  *  the body — past that it is uniform and further growth means nothing). */
 export function diffuseSpread(mat: MaterialId, spread: number, dt: number, cap: number): number {
-  const a = responseOf(mat).thermalDiffusivity;
+  const a = thermalDiffusivityOf(mat);
   const s = Number.isFinite(spread) && spread > 0 ? spread : 0;
   const out = Math.sqrt(s * s + 4 * Math.max(0, a) * Math.max(0, dt));
   return Math.min(Number.isFinite(cap) && cap > 0 ? cap : out, out);
@@ -363,32 +423,6 @@ export function mechanicalScale(mat: MaterialId, heat: number | undefined): numb
   if (h <= 0) return 1;
   return Math.min(ENERGY_CONSTANTS.MAX_WEAKENING, 1 + responseOf(mat).heatWeakening * Math.min(h, 1));
 }
-
-// ── Magnetic ─────────────────────────────────────────────────────────────────
-
-/** 0..1.  Metal always; nebula only while energised; everything else 0. */
-export function magneticSusceptibility(e: GameEntity, simClock: number): number {
-  const mat = materialOf(e);
-  if (mat === 'nebula') {
-    return (e.energizedUntil ?? -Infinity) > simClock ? ENERGY_CONSTANTS.MAG_NEBULA_ENERGIZED : 0;
-  }
-  return responseOf(mat).magnetic;
-}
-
-/** Velocity change for a body under a pulse of `strength` at distance `d`
- *  of `radius`.  Linear falloff, divided by mass relative to a reference so
- *  a boulder moves less than a chip, and capped (MAG_MAX_DV). */
-export function magneticDv(strength: number, d: number, radius: number, mass: number, susceptibility: number): number {
-  const s = safeMag(strength, 100);
-  if (!(radius > 0) || !(susceptibility > 0) || !(d >= 0) || d >= radius) return 0;
-  const fall = 1 - d / radius;
-  const m = Number.isFinite(mass) && mass > 0 ? mass : Infinity;
-  if (m === Infinity) return 0;
-  const massFactor = Math.min(3, Math.sqrt(MAG_REFERENCE_MASS / m));
-  return Math.min(ENERGY_CONSTANTS.MAG_MAX_DV, s * fall * susceptibility * massFactor);
-}
-/** A mid-size metal shard, in scaled mass units. */
-const MAG_REFERENCE_MASS = 60;
 
 // ── Electric chain planner ───────────────────────────────────────────────────
 
@@ -521,7 +555,7 @@ export function planChain(
 // bookkeeping, and it is also the MINING hook: violent → the material's small
 // grains, controlled thermal → big pieces.
 //
-// NEBULA HAS NO PROFILE — it is not a solid and never enters the solid
+// A GAS (nebula) HAS NO PROFILE — it is not a solid and never enters the solid
 // fracture path (§8).  A profile never changes a material's TOUGHNESS: the
 // boundary model rescales a thermal pattern's bond strength to keep derived
 // HP (fractureCache `profileBondScale`).
@@ -551,12 +585,11 @@ const FRACTURE_BASE: Readonly<Record<SolidMaterial, Record<'mechanical' | 'therm
              thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
 };
 
-/** Resolve a profile.  Electric and magnetic resolve as MECHANICAL — a
- *  conducted arc cracks like an impact, a magnetically driven slam IS an
- *  impact.  A bigger mechanical hit flings its pieces a little harder;
+/** Resolve a profile.  Electric resolves as MECHANICAL — a conducted arc
+ *  cracks like an impact.  A GAS has no profile.  A bigger mechanical hit flings its pieces a little harder;
  *  heat never does. */
 export function fractureProfile(mat: MaterialId, domain: EnergyDomain, magnitude: number): FractureProfile | null {
-  if (mat === 'nebula') return null;
+  if (responseOf(mat).gas) return null;
   const base = FRACTURE_BASE[mat as SolidMaterial] ?? FRACTURE_BASE.generic;
   const p = domain === 'thermal' ? base.thermal : base.mechanical;
   const bump = domain === 'thermal' ? 0 : Math.min(1, safeMag(magnitude) / 40);
@@ -581,32 +614,11 @@ function clamp(x: number, lo: number, hi: number): number {
   return Number.isFinite(x) ? Math.max(lo, Math.min(hi, x)) : lo;
 }
 
-// ── Explosive composite ──────────────────────────────────────────────────────
-
-export interface EnergyPacket {
-  domain: EnergyDomain;
-  magnitude: number;
-  x: number; y: number;
-  dirX: number; dirY: number;
-}
-
-/** A detonation's packets: the mechanical impulse (dominant) and a smaller
- *  thermal packet at the same point.  Materials then answer through their
- *  ordinary mechanical and thermal columns. */
-export function explosivePackets(x: number, y: number, magnitude: number): EnergyPacket[] {
-  const m = safeMag(magnitude);
-  return [
-    { domain: 'mechanical', magnitude: m, x, y, dirX: 0, dirY: 0 },
-    { domain: 'thermal', magnitude: m * ENERGY_CONSTANTS.EXPLOSIVE_THERMAL_FRAC, x, y, dirX: 0, dirY: 0 },
-  ];
-}
-
-/** The domain a modifier's packets arrive in (explosive → its dominant). */
+/** The domain a modifier's packets arrive in. */
 export function domainOf(mod: EnergyModifier | null | undefined): EnergyDomain {
   switch (mod) {
     case 'thermal': return 'thermal';
     case 'electric': return 'electric';
-    case 'magnetic': return 'magnetic';
     default: return 'mechanical';
   }
 }

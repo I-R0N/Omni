@@ -43,7 +43,7 @@ import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentD
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
-import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, acquireHomingTargets, depositHeat } from './energyEffects';
+import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
@@ -378,7 +378,7 @@ export class GameEngine {
   /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
   energy: EnergyState = new EnergyState();
   /** The render view of it — one object, refilled per frame (no allocation). */
-  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, simClock: 0 };
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, simClock: 0, locks: [] };
   private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
@@ -4341,7 +4341,7 @@ export class GameEngine {
     this.updateLightningGravity(dt);
     this.updateProjectileFuses(dt);
     // Energy modules: queued arcs/attractors from this step's hits, the
-    // bounded heated set, magnetic fields and the live beam.
+    // bounded heated set, energised gas and the live beam.
     tickEnergy(this, dt);
     this.updateProjectileTrails(dt);
 
@@ -4595,9 +4595,9 @@ export class GameEngine {
     }
 
     // ENERGY PAYLOAD (energy modules): heat lands now; an electric
-    // discharge (the charged bolt's chain) or a magnetic attractor is queued
-    // for after the physics step, since both read the grids.
-    if (proj.energyHeat || proj.energyBurnSeconds || proj.energyElectric || proj.energyMagnetic) {
+    // discharge (the charged bolt's chain) is queued for after the physics
+    // step, since it reads the grids.
+    if (proj.energyHeat || proj.energyBurnSeconds || proj.energyElectric) {
         applyProjectilePayload(this, impactPos, proj, target);
     }
 
@@ -4671,16 +4671,16 @@ export class GameEngine {
       // Weapon flower: two guns + the four mods around the center gun.
       // Centre gun (0) touches every hex and takes the FIRST modifier in hex
       // order (the thermal at 5); the second gun (1) touches 0/2/6 and so
-      // takes the explosive at 6 — a projector+thermal and a beam+explosive.
+      // takes the electric at 6 — a projector+thermal and a beam+electric.
       this.weaponSlots[0] = 'dlv_projectile';
       this.weaponSlots[1] = 'dlv_beam';
       this.weaponSlots[2] = 'gunnery_mk3';
       this.weaponSlots[3] = 'autoloader_mk3';
       this.weaponSlots[4] = 'overcharge';
       this.weaponSlots[5] = 'nrg_thermal';
-      this.weaponSlots[6] = 'nrg_explosive';
+      this.weaponSlots[6] = 'nrg_electric';
 
-      const spareGuns = ['dlv_spread', 'dlv_homing', 'dlv_radial', 'nrg_kinetic', 'nrg_electric', 'nrg_magnetic'];
+      const spareGuns = ['dlv_spread', 'dlv_homing', 'dlv_cannon', 'nrg_kinetic', 'nrg_thermal'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
       syncLoadoutFromSlots(this);
       this.player.shield = this.player.maxShield ?? 0;
@@ -6295,6 +6295,20 @@ export class GameEngine {
       v.heated = this.energy.heated;
       v.energized = this.energy.energized;
       v.simClock = this.simClock;
+      // SEEKER LOCKS: the distinct enemies the player's homing rounds hold
+      // (refill idiom — no per-frame allocation; a handful of rounds at most).
+      const locks = v.locks;
+      let nl = 0;
+      const projs = this.entityIndex.projectiles;
+      for (let i = 0; i < projs.length; i++) {
+          const p = projs[i];
+          const t = p.homingTarget;
+          if (!p.active || !p.homing || !t || p.ownerType !== EntityType.PLAYER) continue;
+          let dup = false;
+          for (let k = 0; k < nl; k++) if (locks[k] === t) { dup = true; break; }
+          if (!dup && nl < 16) locks[nl++] = t;
+      }
+      if (locks.length !== nl) locks.length = nl;
       const b = this.energy.beam;
       if (b) {
           const bv = this._beamView;
@@ -6314,18 +6328,19 @@ export class GameEngine {
    *  rather than new assets (the audio pass is out of scope). */
   private static readonly ENERGY_SFX: Record<string, string> = {
       electric: 'weapon.lightning.fire', thermal: 'weapon.bouncer.fire',
-      explosive: 'weapon.cannon.fire', magnetic: 'weapon.homing.fire',
   };
   private static readonly DELIVERY_SFX: Record<string, string> = {
       projectile: 'weapon.blaster.fire', beam: 'weapon.bouncer.fire', spread: 'weapon.shotgun.fire',
-      homing: 'weapon.homing.fire', radial: 'weapon.cannon.fire',
+      homing: 'weapon.homing.fire', cannon: 'weapon.cannon.fire',
   };
 
   /** Fired by WeaponSystem once per player shot.  A charged shot LAYERS
    *  `weapon.charged.release` over the family voice (SFX_INVENTORY §4.1). */
   private playWeaponSfx = (weapon: WeaponConfig, isCharged: boolean, _subShot: number) => {
       const pos = this.player.position;
-      const id = (weapon.energy && weapon.energy !== 'kinetic' && GameEngine.ENERGY_SFX[weapon.energy])
+      // A shell sounds like a cannon whatever it carries.
+      const id = (weapon.delivery === 'cannon' ? GameEngine.DELIVERY_SFX.cannon : undefined)
+          || (weapon.energy && weapon.energy !== 'kinetic' && GameEngine.ENERGY_SFX[weapon.energy])
           || (weapon.energy === 'kinetic' && weapon.delivery === 'projectile' ? 'weapon.burst.fire' : undefined)
           || GameEngine.DELIVERY_SFX[weapon.delivery];
       if (id) this.audio.play(id, { x: pos.x, y: pos.y });
@@ -6396,7 +6411,6 @@ export class GameEngine {
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
-      acquireHomingTargets(this);
       this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, this.player, dt);
   }
 

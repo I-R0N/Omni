@@ -1,9 +1,9 @@
 /** ENERGY MODULES — delivery × energy × material.
  *
  *  Weapons are a DELIVERY module (projectile / beam / spread / homing /
- *  radial) plus an optional ENERGY MODIFIER (kinetic / electric / thermal /
- *  magnetic / explosive), and what they deliver is answered by the MATERIAL
- *  it lands in.  Two halves, two kinds of test:
+ *  cannon) plus an optional ENERGY MODIFIER (kinetic / electric / thermal),
+ *  and what they deliver is answered by the MATERIAL it lands in — through
+ *  its PROPERTIES, never its name.  Two halves, two kinds of test:
  *
  *   - PURE (`window.__omniEnergy`): the tables, the heat arithmetic, the
  *     bounded chain planner, the fracture profiles.  Each of these can be
@@ -17,8 +17,8 @@
 import { test, expect } from '@playwright/test';
 import { advanceSim, boot, engine, quietScene, startRun, waitForStats } from './helpers';
 
-const DELIVERIES = ['projectile', 'beam', 'spread', 'homing', 'radial'];
-const ENERGIES = ['kinetic', 'electric', 'thermal', 'magnetic', 'explosive'];
+const DELIVERIES = ['projectile', 'beam', 'spread', 'homing', 'cannon'];
+const ENERGIES = ['kinetic', 'electric', 'thermal'];
 /** The retired Blaster: a 4 bite every 0.14 s. */
 const OLD_BASE_DPS = 4 / 0.14;
 
@@ -30,11 +30,12 @@ async function onMap(page: any, map: string) {
 }
 
 test.describe('the weapon module table', () => {
-  test('all 30 weapons exist, and every bare delivery is weaker than the old base', async ({ page }) => {
+  test('all 20 weapons exist, and every bare delivery is weaker than the old base', async ({ page }) => {
     const watch = await boot(page);
     const r = await page.evaluate(([ds, es]) => {
       const E = (window as any).__omniEnergy;
-      const out: any = { missing: [], bare: {}, keys: Object.keys(E.WEAPONS).length };
+      const out: any = { missing: [], bare: {}, keys: Object.keys(E.WEAPONS).length,
+                         cannonBlast: E.WEAPONS.cannon.explosionRadius ?? 0 };
       for (const d of ds) {
         out.bare[d] = E.nominalDps(E.WEAPONS[d]);
         for (const e of es) {
@@ -45,12 +46,14 @@ test.describe('the weapon module table', () => {
       return out;
     }, [DELIVERIES, ENERGIES]);
     expect(r.missing).toEqual([]);
-    expect(r.keys).toBe(30);
+    expect(r.keys).toBe(20);
     for (const d of DELIVERIES) {
       // ~60% of the old base, and clearly below it.
       expect(r.bare[d], d).toBeLessThan(OLD_BASE_DPS * 0.7);
-      expect(r.bare[d], d).toBeGreaterThan(OLD_BASE_DPS * 0.5);
+      // The CANNON's direct bite sits lower: its blast carries the rest.
+      if (d !== 'cannon') expect(r.bare[d], d).toBeGreaterThan(OLD_BASE_DPS * 0.5);
     }
+    expect(r.cannonBlast).toBeGreaterThan(0);
     watch.assertClean();
   });
 
@@ -60,7 +63,7 @@ test.describe('the weapon module table', () => {
       const E = (window as any).__omniEnergy;
       // The payload SHAPE: which energy channels a weapon carries.
       const shape = (c: any) => [
-        c.heat ? 'heat' : '', c.electric ? 'electric' : '', c.magnetic ? 'magnetic' : '',
+        c.heat || c.blastHeat ? 'heat' : '', c.electric ? 'electric' : '',
         c.explosionRadius ? 'blast' : '', c.damage > 0 ? 'bite' : '',
       ].filter(Boolean).join('|');
       const out: Record<string, string[]> = {};
@@ -68,8 +71,8 @@ test.describe('the weapon module table', () => {
       return out;
     }, [DELIVERIES, ENERGIES]);
     for (const d of DELIVERIES) {
-      // Five modifiers → five distinct payload shapes on every delivery.
-      expect(new Set(sigs[d]).size, `${d}: ${sigs[d].join(', ')}`).toBe(5);
+      // Three modifiers → three distinct payload shapes on every delivery.
+      expect(new Set(sigs[d]).size, `${d}: ${sigs[d].join(', ')}`).toBe(3);
     }
   });
 
@@ -78,7 +81,8 @@ test.describe('the weapon module table', () => {
     const r = await page.evaluate(() => {
       const E = (window as any).__omniEnergy;
       return {
-        map: ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON', 'wpn_cannon']
+        map: ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON', 'wpn_cannon',
+              'projectile+explosive', 'radial', 'radial+thermal', 'beam+magnetic']
           .map(id => [id, E.resolveWeaponKey(id)]),
         cannonFuse: E.weaponConfig('CANNON').fuseSeconds,
         cannonDamage: E.weaponConfig('CANNON').damage,
@@ -89,9 +93,13 @@ test.describe('the weapon module table', () => {
     expect(Object.fromEntries(r.map)).toEqual({
       BLASTER: 'projectile', BURST: 'projectile+kinetic', SHOTGUN: 'spread+kinetic',
       BOUNCER: 'beam+thermal', LIGHTNING: 'projectile+electric', HOMING: 'homing+kinetic',
-      CANNON: 'projectile+explosive', wpn_cannon: 'projectile+explosive',
+      CANNON: 'cannon', wpn_cannon: 'cannon',
+      // Removed keys: the old shell is the cannon; the Pulse became the cannon;
+      // a removed energy falls back to its bare delivery.
+      'projectile+explosive': 'cannon', radial: 'cannon', 'radial+thermal': 'cannon+thermal',
+      'beam+magnetic': 'beam',
     });
-    // The Cannon's combination IS the old Cannon.
+    // The bare Cannon IS the old Plasma Cannon.
     expect(r.cannonFuse).toBe(0.42);
     expect(r.cannonDamage).toBe(18);
     expect(r.garbage).toBe('projectile');
@@ -110,7 +118,8 @@ test.describe('energy arithmetic (pure)', () => {
       while (h > 0 && steps < 100000) { h = E.coolHeat('metal', h, 1 / 120); steps++; }
       return {
         first, cooledTo: h, steps,
-        huge: E.clampHeat(1e9), nan: E.clampHeat(NaN), neg: E.heatGain('glass', -5),
+        huge: E.clampHeat(1e9), hugeMetal: E.clampHeat(1e9, E.maxHeatOf('metal')),
+        nan: E.clampHeat(NaN), neg: E.heatGain('glass', -5),
         nanGain: E.heatGain('rock', NaN), unknown: E.responseOf('unobtanium').conductivity,
         coldScale: E.mechanicalScale('metal', 0), hotMetal: E.mechanicalScale('metal', 1),
         hotRock: E.mechanicalScale('rock', 1), hotHuge: E.mechanicalScale('metal', 1e9),
@@ -119,7 +128,8 @@ test.describe('energy arithmetic (pure)', () => {
     expect(r.first).toBeGreaterThan(0);
     expect(r.cooledTo).toBe(0);                  // cold bodies leave the active set
     expect(r.steps).toBeLessThan(120 * 60);      // within a minute of sim time
-    expect(r.huge).toBeLessThanOrEqual(2.5);
+    expect(r.huge).toBeLessThanOrEqual(5);
+    expect(r.hugeMetal).toBeLessThan(1.5);       // metal's own ceiling (specific heat 0.45)
     expect(r.nan).toBe(0);
     expect(r.neg).toBe(0);
     expect(r.nanGain).toBe(0);
@@ -130,34 +140,48 @@ test.describe('energy arithmetic (pure)', () => {
     expect(r.hotHuge).toBeLessThanOrEqual(4);
   });
 
-  test('magnetism moves metal only, within its radius, and never without bound', async ({ page }) => {
+  test('MATERIAL PROPERTIES drive heat: specific heat sets capacity and ceiling, conductivity sets spread and transfer', async ({ page }) => {
+    // User calls, pinned as ORDERINGS that follow the real materials, not as
+    // the table's own numbers (a test that restates its constants pins
+    // nothing):  specific heat — plastic > glass > rock > metal; thermal
+    // conductivity — metal > rock > glass > plastic; and a hull conducts
+    // electricity exactly as well as metal, so an arc on a metal tile jumps
+    // to the ship beside it at full strength.
     await boot(page);
     const r = await page.evaluate(() => {
       const E = (window as any).__omniEnergy;
-      const body = (variant: string, extra: any = {}) => ({ shardVariant: variant, ...extra });
-      return {
-        metal: E.magneticSusceptibility(body('metal-shard'), 0),
-        glass: E.magneticSusceptibility(body('glass-shard'), 0),
-        plastic: E.magneticSusceptibility(body('plastic-shard'), 0),
-        rock: E.magneticSusceptibility(body('rock-shard'), 0),
-        nebulaCold: E.magneticSusceptibility(body('nebula-shard'), 10),
-        nebulaEnergized: E.magneticSusceptibility(body('nebula-shard', { energizedUntil: 20 }), 10),
-        beyond: E.magneticDv(10, 400, 300, 50, 1),
-        huge: E.magneticDv(1e9, 0, 300, 0.001, 1),
-        immovable: E.magneticDv(10, 10, 300, Infinity, 1),
-        nanMass: E.magneticDv(10, 10, 300, NaN, 1),
-      };
+      const mats = ['metal', 'rock', 'glass', 'plastic'];
+      const o: any = {};
+      for (const m of mats) {
+        o[m] = { cap: E.heatCapacityOf(m), max: E.maxHeatOf(m), spread: E.thermalDiffusivityOf(m),
+                 self: E.conductShare(m, m) };
+      }
+      o.metalRock = E.conductShare('metal', 'rock');
+      o.rockRock = E.conductShare('rock', 'rock');
+      o.gasSpread = E.thermalDiffusivityOf('nebula');
+      o.cond = { metal: E.responseOf('metal').conductivity, generic: E.responseOf('generic').conductivity };
+      // The same thermal packet heats metal more than plastic (real heat capacity).
+      o.gain = { metal: E.heatGain('metal', 10), plastic: E.heatGain('plastic', 10) };
+      o.nameFree = E.responseOf('nebula').gas === true && E.responseOf('metal').gas === false;
+      return o;
     });
-    expect(r.metal).toBe(1);
-    expect(r.glass).toBe(0);
-    expect(r.plastic).toBe(0);
-    expect(r.rock).toBe(0);
-    expect(r.nebulaCold).toBe(0);
-    expect(r.nebulaEnergized).toBeGreaterThan(0);
-    expect(r.beyond).toBe(0);
-    expect(r.huge).toBeLessThanOrEqual(14);
-    expect(r.immovable).toBe(0);
-    expect(r.nanMass).toBe(0);
+    // Specific heat → how much energy a unit of heat costs, and the ceiling.
+    expect(r.plastic.cap).toBeGreaterThan(r.glass.cap);
+    expect(r.glass.cap).toBeGreaterThan(r.rock.cap);
+    expect(r.rock.cap).toBeGreaterThan(r.metal.cap);
+    expect(r.plastic.max).toBeGreaterThan(r.rock.max);
+    expect(r.rock.max).toBeGreaterThan(r.metal.max);
+    expect(r.gain.metal).toBeGreaterThan(r.gain.plastic * 2);
+    // Thermal conductivity → hot-spot spreading and neighbour transfer.
+    expect(r.metal.spread).toBeGreaterThan(r.rock.spread);
+    expect(r.rock.spread).toBeGreaterThan(r.glass.spread);
+    expect(r.glass.spread).toBeGreaterThan(r.plastic.spread);
+    expect(r.metal.self).toBeGreaterThan(r.metalRock);     // an insulator throttles the pair
+    expect(r.metalRock).toBeGreaterThan(r.rockRock);
+    expect(r.rockRock).toBeGreaterThan(0);                   // every material conducts now
+    // Metal and a hull conduct electricity equally.
+    expect(r.cond.generic).toBe(r.cond.metal);
+    expect(r.nameFree).toBe(true);
   });
 
   test('an electric chain is bounded: hops, targets, radius, no repeats, loops end', async ({ page }) => {
@@ -210,7 +234,6 @@ test.describe('energy arithmetic (pure)', () => {
       }
       out.nebula = E.fractureProfile('nebula', 'mechanical', 10);
       out.crazy = E.fractureProfile('glass', 'mechanical', 1e12);
-      out.packets = E.explosivePackets(0, 0, 20).map((p: any) => [p.domain, p.magnitude]);
       // THE HOT-BREAK RULE: a body already hot breaks under the thermal
       // profile whatever lands the blow; a cold one keeps the mechanical.
       const cold: any = { shardVariant: 'glass-tile' };
@@ -248,10 +271,6 @@ test.describe('energy arithmetic (pure)', () => {
     expect(r.hotStamp.siteScale).toBe(g.heat.siteScale);
     for (const k of ['siteScale', 'impulse']) expect(Number.isFinite(r.crazy[k])).toBe(true);
     expect(r.crazy.impulse).toBeLessThanOrEqual(2.5);
-    // Explosive = a dominant mechanical packet plus a smaller thermal one.
-    expect(r.packets.map((p: any) => p[0])).toEqual(['mechanical', 'thermal']);
-    expect(r.packets[1][1]).toBeLessThan(r.packets[0][1]);
-    expect(r.packets[1][1]).toBeGreaterThan(0);
   });
 });
 
@@ -279,7 +298,7 @@ test.describe('the weapons, fired into the world', () => {
       }
       return { keys: keys.length, bad };
     }, [DELIVERIES, ENERGIES]);
-    expect(r.keys).toBe(30);
+    expect(r.keys).toBe(20);
     // Let the world run through every beam, arc, field, burn and blast.
     await page.waitForTimeout(3000);
     const nan = await engine(page, e => {
@@ -557,87 +576,160 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
-  test('MAGNETIC: a pulse moves metal and leaves glass exactly where it was', async ({ page }) => {
+  test('ELECTRIC: an arc on a metal tile jumps over the next tile to an enemy beyond it', async ({ page }) => {
+    // User call: a hull conducts exactly as well as metal, so an arc on a
+    // metal plate reaches the ship on the far side of the neighbouring plate.
+    // The enemy is placed PAST one hop's reach from the struck plate, so the
+    // only way to it is through the plate in between.
     const watch = await boot(page);
-    for (const [map, v, expectMove] of [['METAL_FIELD', 'metal', true], ['GLASS_FIELD', 'glass', false]] as const) {
-      await onMap(page, map);
-      // Break a cluster of tiles so there is loose debris of this material.
-      await engine(page, (e, mat: string) => {
-        const tiles = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === `${mat}-tile`);
-        const c = tiles[0].position;
-        const near = tiles.filter((t: any) => Math.hypot(t.position.x - c.x, t.position.y - c.y) < 200).slice(0, 10);
-        for (const t of near) {
-          t.health = 0; t.lastImpactVelocity = { x: 0, y: 0 };
-          e.physics.removeStaticEntity(t); e.handleEntityDeath(t); t.active = false;
-        }
-        (window as any).__debrisAt = { x: c.x, y: c.y };
-      }, v);
-      await page.waitForTimeout(250);   // a few substeps: the grids see the debris
-      const moved = await engine(page, (e, mat: string) => {
-        const p = e.player, at = (window as any).__debrisAt;
-        p.position.x = at.x; p.position.y = at.y + 60; p.velocity.x = 0; p.velocity.y = 0;
-        const shards = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === `${mat}-shard`);
-        const v0 = shards.map((s: any) => [s.velocity.x, s.velocity.y]);
-        p.currentWeapon = 'radial+magnetic'; p.weaponCooldown = 0;
-        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 10, y: p.position.y }, undefined, false);
-        let changed = 0;
-        shards.forEach((s: any, i: number) => {
-          if (Math.hypot(s.velocity.x - v0[i][0], s.velocity.y - v0[i][1]) > 1e-6) changed++;
-        });
-        return { changed, count: e.energy.lastMagneticCount, shards: shards.length };
-      }, v);
-      expect(moved.shards, `${v} debris`).toBeGreaterThan(0);
-      if (expectMove) {
-        expect(moved.count, `${v}: ${JSON.stringify(moved)}`).toBeGreaterThan(0);
-        expect(moved.count).toBeLessThanOrEqual(40);
-        expect(moved.changed).toBeGreaterThan(0);
-      } else {
-        expect(moved.changed).toBe(0);
-        expect(moved.count).toBe(0);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const all = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'metal-tile');
+      // A plate with a neighbour 30..60 away.
+      let t0: any = null, t1: any = null;
+      for (const a of all) {
+        const b = all.find((o: any) => o !== a
+          && Math.hypot(o.position.x - a.position.x, o.position.y - a.position.y) > 30
+          && Math.hypot(o.position.x - a.position.x, o.position.y - a.position.y) < 60);
+        if (b) { t0 = a; t1 = b; break; }
       }
-    }
+      // Clear everything else around them so the chain has one route.
+      for (const o of all) {
+        if (o === t0 || o === t1) continue;
+        if (Math.hypot(o.position.x - t0.position.x, o.position.y - t0.position.y) < 500) {
+          e.physics.removeStaticEntity(o); o.active = false;
+        }
+      }
+      const dx = t1.position.x - t0.position.x, dy = t1.position.y - t0.position.y;
+      const d = Math.hypot(dx, dy), ux = dx / d, uy = dy / d;
+      const foe = e.waves.spawnAt('RAMMER_1',
+        { x: t1.position.x + ux * 130, y: t1.position.y + uy * 130 }, e.waveContext(), false);
+      foe.velocity.x = 0; foe.velocity.y = 0;
+      const p = e.player;
+      p.position.x = t0.position.x - ux * 110; p.position.y = t0.position.y - uy * 110;
+      p.velocity.x = 0; p.velocity.y = 0; p.rotation = Math.atan2(uy, ux);
+      (window as any).__foe = foe;
+      (window as any).__hp = foe.health;
+      p.currentWeapon = 'beam+electric'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t0.position.x, y: t0.position.y }, undefined, false);
+      return { gap: Math.hypot(foe.position.x - t0.position.x, foe.position.y - t0.position.y) };
+    });
+    await page.waitForTimeout(400);
+    const after = await engine(page, e => {
+      const foe = (window as any).__foe;
+      return { hit: e.energy.lastBeamHitId, lost: (window as any).__hp - foe.health, chain: e.energy.lastChainSize };
+    });
+    expect(r.gap, 'the enemy is out of one hop from the struck plate').toBeGreaterThan(150);
+    expect(after.hit).not.toBeNull();
+    expect(after.chain).toBeGreaterThanOrEqual(3);
+    expect(after.lost, 'the arc reached the enemy through the next plate').toBeGreaterThan(0);
     watch.assertClean();
   });
 
-  test('NEBULA: only an ENERGISED cloud answers to a magnet', async ({ page }) => {
+  test('GAS: kinetic rounds displace a drifting cloud but never break it; an arc energises it', async ({ page }) => {
+    // Nebula is a GAS (`gas: true` in the material table): it takes no damage
+    // from any energy.  A kinetic round passing through a DRIFTING puff shoves
+    // it along the round's travel (as a kinetic beam always has); a STATIC
+    // cloud tile has nowhere to go and is left alone; an arc energises a
+    // puff rather than damaging it.
     const watch = await boot(page);
     await onMap(page, 'NEBULA_FIELD');
-    // Break a patch of cloud into drifting puffs.
+    // Break a patch of cloud into drifting puffs, well away from the ship.
     await engine(page, e => {
-      const tiles = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'nebula-tile');
+      const p = e.player;
+      const tiles = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'nebula-tile'
+        && Math.hypot(x.position.x - p.position.x, x.position.y - p.position.y) > 600);
       const c = tiles[0].position;
-      const near = tiles.filter((t: any) => Math.hypot(t.position.x - c.x, t.position.y - c.y) < 160).slice(0, 12);
-      for (const t of near) {
+      for (const t of tiles.filter((t: any) => Math.hypot(t.position.x - c.x, t.position.y - c.y) < 160).slice(0, 12)) {
         t.health = 0; t.lastImpactVelocity = { x: 0, y: 0 };
         e.physics.removeStaticEntity(t); e.handleEntityDeath(t); t.active = false;
       }
-      (window as any).__cloudAt = { x: c.x, y: c.y };
     });
-    // Past the puffs' fade-in (a fading body is kept out of the grid).
-    await page.waitForTimeout(1500);
-    // ONE evaluate: the puffs are measured where the grid already has them,
-    // so nothing can merge or drift between the setup and the pulse.
-    const out = await engine(page, e => {
-      const p = e.player, at = (window as any).__cloudAt;
-      p.position.x = at.x; p.position.y = at.y; p.velocity.x = 0; p.velocity.y = 0;
-      const puffs = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'nebula-shard'
-        && x.mergeFadeTimer === undefined
-        && Math.hypot(x.position.x - at.x, x.position.y - at.y) < 250);
-      const on = puffs.filter((_: any, i: number) => i % 2 === 0);
-      const off = puffs.filter((_: any, i: number) => i % 2 === 1);
-      for (const q of puffs) { q.velocity.x = 0; q.velocity.y = 0; q.energizedUntil = undefined; }
-      for (const q of on) q.energizedUntil = e.simClock + 10;
-      p.currentWeapon = 'radial+magnetic'; p.weaponCooldown = 0;
-      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 10, y: p.position.y }, undefined, false);
-      const sp = (q: any) => Math.hypot(q.velocity.x, q.velocity.y);
-      return { on: on.length, off: off.length,
-               onMoved: on.filter((q: any) => sp(q) > 0).length,
-               offMoved: off.filter((q: any) => sp(q) > 0).length };
+    await page.waitForTimeout(1500);   // past the puffs' fade-in
+    const shoot = async (key: string) => {
+      await engine(page, (e, k: string) => {
+        const p = e.player;
+        const s = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'nebula-shard'
+          && x.mergeFadeTimer === undefined);
+        (window as any).__s = s; (window as any).__max = 0; (window as any).__hp = s.health;
+        s.velocity.x = 0; s.velocity.y = 0;
+        p.position.x = s.position.x - 90; p.position.y = s.position.y;
+        p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+        p.currentWeapon = k; p.weaponCooldown = 0;
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: s.position.x, y: s.position.y }, undefined, false);
+        // The puff's own drag bleeds a shove off quickly, so watch its PEAK.
+        (window as any).__iv = setInterval(() => {
+          const v = Math.hypot(s.velocity.x, s.velocity.y);
+          if (v > (window as any).__max) (window as any).__max = v;
+        }, 4);
+      }, key);
+      await page.waitForTimeout(500);
+      return engine(page, e => {
+        clearInterval((window as any).__iv);
+        const s = (window as any).__s;
+        return { peak: (window as any).__max, active: s.active, lostHp: (window as any).__hp - s.health,
+                 energized: (s.energizedUntil ?? 0) > e.simClock };
+      });
+    };
+    const slug = await shoot('projectile+kinetic');
+    expect(slug.peak, 'a kinetic round shoves the puff it passes through').toBeGreaterThan(1.2);
+    expect(slug.active).toBe(true);
+    expect(slug.lostHp).toBe(0);
+    const arc = await shoot('beam+electric');
+    expect(arc.energized, 'an arc energises a gas').toBe(true);
+    expect(arc.active).toBe(true);
+    expect(arc.lostHp, 'and never damages it').toBe(0);
+    // A static cloud TILE: a round passes through and leaves it whole.
+    const tile = await engine(page, e => {
+      const p = e.player;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'nebula-tile'
+        && Math.hypot(x.position.x - p.position.x, x.position.y - p.position.y) > 400);
+      (window as any).__t = t;
+      p.position.x = t.position.x - 140; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'projectile+kinetic'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      return t.id;
     });
-    expect(out.on, 'energised puffs to test').toBeGreaterThan(0);
-    expect(out.off, 'plain puffs to test').toBeGreaterThan(0);
-    expect(out.onMoved, 'an energised cloud is steered').toBeGreaterThan(0);
-    expect(out.offMoved, 'a plain cloud is untouched').toBe(0);
+    await page.waitForTimeout(500);
+    const t = await engine(page, e => { const x = (window as any).__t; return { active: x.active, hp: x.health }; });
+    expect(t.active, `tile ${tile} survives a round`).toBe(true);
+    expect(t.hp).toBe(1);
+    watch.assertClean();
+  });
+
+  test('SEEKER: a homing round locks the nearest ENEMY, never terrain, and the lock is drawn', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player;
+      // An enemy 250 away, with metal plates nearer the ship than it is.
+      const foe = e.waves.spawnAt('RAMMER_1', { x: p.position.x + 250, y: p.position.y }, e.waveContext(), false);
+      foe.velocity.x = 0; foe.velocity.y = 0;
+      (window as any).__foe = foe;
+      p.velocity.x = 0; p.velocity.y = 0;
+      for (const k of ['homing', 'homing+electric']) {
+        p.currentWeapon = k; p.weaponCooldown = 0;
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 250, y: p.position.y - 150 }, undefined, false);
+      }
+      return true;
+    });
+    await page.waitForTimeout(120);
+    const lock = await engine(page, e => {
+      const foe = (window as any).__foe;
+      const seekers = e.entityIndex.projectiles.filter((x: any) => x.active && x.homing && x.ownerType === 'PLAYER');
+      return {
+        seekers: seekers.length,
+        lockedFoe: seekers.filter((x: any) => x.homingTarget === foe).length,
+        lockedOther: seekers.filter((x: any) => x.homingTarget && x.homingTarget.type !== 'ENEMY').length,
+        drawn: e._energyFx.locks.includes(foe),
+      };
+    });
+    expect(r).toBe(true);
+    expect(lock.seekers).toBeGreaterThan(0);
+    expect(lock.lockedOther, 'never terrain').toBe(0);
+    expect(lock.lockedFoe).toBe(lock.seekers);
+    expect(lock.drawn, 'the renderer is handed the lock').toBe(true);
     watch.assertClean();
   });
 
@@ -661,11 +753,9 @@ test.describe('the weapons, fired into the world', () => {
     const r = await engine(page, (e, id: string) => {
       const s = e.currentMap.entities.find((x: any) => x.id === id);
       const before = e.shards.liveBonds.filter((b: any) => b.a === s || b.b === s).length;
-      // A thermal radial pulse centred on it.
-      const p = e.player;
-      p.position.x = s.position.x; p.position.y = s.position.y + 40;
-      p.currentWeapon = 'radial+thermal'; p.weaponCooldown = 0;
-      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: s.position.x, y: s.position.y }, undefined, false);
+      // Heat it past its release point (the rule under test is the
+      // material's `bondReleaseAt`, whatever delivers the heat).
+      e.debugHeat(s, 40, { x: s.position.x - 30, y: s.position.y });
       const after = e.shards.liveBonds.filter((b: any) => b.a === s || b.b === s).length;
       return { before, after, heat: s.heat };
     }, bonded.id);
@@ -675,24 +765,34 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
-  test('EXPLOSIVE: a blast is impulse AND heat, and reaches a capped set', async ({ page }) => {
+  test('CANNON: an incendiary shell heats what its blast reaches, on a capped set', async ({ page }) => {
+    // The blast belongs to the CANNON delivery now (the Pulse became it);
+    // heat on the blast is a property of the thermal shell (`blastHeat`),
+    // not of every explosion — so the bare cannon's blast leaves nothing hot.
     const watch = await boot(page);
     await onMap(page, 'GLASS_FIELD');
-    await engine(page, e => {
-      const p = e.player;
-      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile');
-      p.position.x = t.position.x - 60; p.position.y = t.position.y;
-      p.currentWeapon = 'radial+explosive'; p.weaponCooldown = 0;
-      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
-    });
-    await page.waitForTimeout(200);
-    const r = await engine(page, e => {
-      const rings = e.currentMap.entities.filter((x: any) => x.isExplosionRing && x.validHitIds && x.validHitIds.size > 0);
-      const heated = e.energy.heated.length;
-      return { maxRing: Math.max(0, ...rings.map((x: any) => x.validHitIds.size)), heated };
-    });
-    expect(r.maxRing).toBeLessThanOrEqual(64);
-    expect(r.heated).toBeGreaterThan(0);
+    const fire = async (key: string) => {
+      await engine(page, (e, k: string) => {
+        for (const h of [...e.energy.heated]) { h.heat = 0; }
+        const p = e.player;
+        const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile');
+        p.position.x = t.position.x - 90; p.position.y = t.position.y;
+        p.velocity.x = 0; p.velocity.y = 0;
+        p.currentWeapon = k; p.weaponCooldown = 0;
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      }, key);
+      await advanceSim(page, 0.9);   // the fuse (0.42 s) and the ring's whole life
+      return engine(page, e => {
+        const rings = e.currentMap.entities.filter((x: any) => x.isExplosionRing && x.validHitIds);
+        const hot = e.energy.heated.filter((x: any) => (x.heat ?? 0) > 0.01).length;
+        return { maxRing: Math.max(0, ...rings.map((x: any) => x.validHitIds.size)), hot };
+      });
+    };
+    const bare = await fire('cannon');
+    const hot = await fire('cannon+thermal');
+    expect(bare.hot, 'a plain blast is not a fire').toBe(0);
+    expect(hot.hot, 'the incendiary shell heats what it reaches').toBeGreaterThan(0);
+    expect(hot.maxRing).toBeLessThanOrEqual(64);
     watch.assertClean();
   });
 
@@ -703,16 +803,14 @@ test.describe('the weapons, fired into the world', () => {
       const start = e.player.currentWeapon;
       e.debugGrantWeapon('beam+thermal');
       const afterBeam = [...e.equippedWeapons];
-      e.debugGrantWeapon('CANNON');   // an OLD id: the projector gets the explosive modifier
+      e.debugGrantWeapon('CANNON');   // an OLD id: resolves to the Cannon delivery
       const afterCannon = [...e.equippedWeapons];
       return { start, afterBeam, afterCannon, current: e.player.currentWeapon };
     });
     expect(r.start).toBe('projectile');
     expect(r.afterBeam).toContain('beam+thermal');
     expect(r.afterBeam).toContain('projectile');    // the modifier did NOT bleed onto the other gun
-    expect(r.afterCannon).toContain('projectile+explosive');
-    expect(r.afterCannon).toContain('beam+thermal');
-    expect(r.current).toBe('projectile+explosive');  // still firing the same gun, now modified
+    expect(r.afterCannon).toContain('cannon');
     watch.assertClean();
   });
 
@@ -727,13 +825,13 @@ test.describe('the weapons, fired into the world', () => {
       e.debugAddWeaponModule('nrg_electric');
       const afterAdd = [...e.equippedWeapons];
       // A third gun is over the 2-gun cap, so it goes to cargo.
-      e.debugAddWeaponModule('dlv_radial');
-      const radial = cat().find((m: any) => m.id === 'dlv_radial');
+      e.debugAddWeaponModule('dlv_cannon');
+      const cannon = cat().find((m: any) => m.id === 'dlv_cannon');
       // Remove takes the installed copy first.
       e.debugRemoveWeaponModule('nrg_electric');
       const afterRemove = [...e.equippedWeapons];
       // Away from any drydock, installing is refused... until the toggle.
-      const inv = e.inventory.indexOf('dlv_radial');
+      const inv = e.inventory.indexOf('dlv_cannon');
       const beamAt = e.weaponSlots.indexOf('dlv_beam');
       const refused = e.moveModule({ area: 'weapon', idx: beamAt }, { area: 'inventory', idx: e.inventory.indexOf(null) });
       e.debugToggleOutfitAnywhere();
@@ -744,19 +842,19 @@ test.describe('the weapons, fired into the world', () => {
       // Clear strips every delivery and modifier; weaponless flight is legal.
       e.debugClearWeaponModules();
       const left = cat().reduce((n: number, m: any) => n + m.installed + m.stored, 0);
-      return { ten, afterAdd, radial, afterRemove, refused, freed, mounted, afterMove,
+      return { ten, afterAdd, cannon, afterRemove, refused, freed, mounted, afterMove,
                left, current: e.player.currentWeapon ?? null };
     });
-    expect([...r.ten].sort()).toEqual(['dlv_beam', 'dlv_homing', 'dlv_projectile', 'dlv_radial', 'dlv_spread',
-      'nrg_electric', 'nrg_explosive', 'nrg_kinetic', 'nrg_magnetic', 'nrg_thermal']);
+    expect([...r.ten].sort()).toEqual(['dlv_beam', 'dlv_cannon', 'dlv_homing', 'dlv_projectile', 'dlv_spread',
+      'nrg_electric', 'nrg_kinetic', 'nrg_thermal']);
     expect(r.afterAdd.some((k: string | null) => k?.includes('+electric'))).toBe(true);
     expect(r.afterAdd.some((k: string | null) => k?.startsWith('beam'))).toBe(true);
-    expect(r.radial).toMatchObject({ installed: 0, stored: 1 });
+    expect(r.cannon).toMatchObject({ installed: 0, stored: 1 });
     expect(r.afterRemove.some((k: string | null) => k?.includes('+electric'))).toBe(false);
     expect(r.refused, 'no drydock, no toggle: the flower stays committed').toBe(false);
     expect(r.freed).toBe(true);
     expect(r.mounted).toBe(true);
-    expect(r.afterMove).toContain('radial');
+    expect(r.afterMove).toContain('cannon');
     expect(r.left).toBe(0);
     expect(r.current).toBeNull();
     watch.assertClean();

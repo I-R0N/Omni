@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  451 tests.  All run at
+                          whatever happened next).  452 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -127,15 +127,16 @@ engine/
                           reach it — see §8).  Every damaging ring is
                           capped at 64 bodies, ticks only its own spawn-
                           time snapshot of them (never the whole map), and
-                          an OWNED ring also deposits the EXPLOSIVE
-                          composite's heat (see §8, energy)
+                          a ring that says so (`heatFrac`, the incendiary
+                          shell) also deposits heat (see §8, energy)
   energyEffects.ts        ENERGY MODULES, the side-effect half: the
                           bounded heated set (cooling, burn latch, glass
-                          thermal failure, plastic bond release, metal
-                          conduction, nebula agitation), bounded electric
-                          discharge, capped magnetic pulses + attractors,
-                          beams, radial pulses, instant cones, and the
-                          single `damageBody` entry point.  See §8
+                          thermal failure, plastic bond release,
+                          conduction between ANY materials, gas
+                          agitation), bounded electric discharge, beams,
+                          instant cones, and the single `damageBody`
+                          entry point.  Every branch reads a MATERIAL
+                          PROPERTY, never a material's name.  See §8
   outfitting.ts           Hex-slot machinery: the adjacency fixpoint,
                           the fold into player stats, the derived gun
                           loadout, tile move/swap, pricing,
@@ -278,13 +279,13 @@ engine/
                           targets), lightning gravity, pierce
     WeaponSystem.ts       Fire-rate, the generic charged variant,
                           Gunnery fold, dispatch by DELIVERY (rounds →
-                          ProjectileSystem, beam/radial/instant cone →
+                          ProjectileSystem, beam/instant cone →
                           `onInstantFire`, the energy layer)
     energy.ts             ENERGY MODULES, the PURE half: delivery / energy
                           / material vocabulary, the legacy weapon-id map,
-                          MATERIAL_RESPONSE, heat arithmetic, the bounded
-                          chain planner, magnetic falloff, fracture
-                          profiles, explosive packets.  Published as
+                          MATERIAL_RESPONSE (and the heat quantities
+                          DERIVED from it), heat arithmetic, the bounded
+                          chain planner, fracture profiles.  Published as
                           `window.__omniEnergy`
     DropSystem.ts         Salvage + health drop spawn / collection
     WaveSystem.ts         Completion-wave spawn scheduler + grace
@@ -1397,20 +1398,33 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `ENERGY_COLORS` / `WEAPON_LIST` (= the deliveries) / `WEAPON_TRIGGERS`
   (keyed on DELIVERY).  **WEAPONS ARE MODULES** (energy modules): a gun
   module IS a DELIVERY (`dlv_projectile` / `dlv_beam` / `dlv_spread` /
-  `dlv_homing` / `dlv_radial`), and an ENERGY MODIFIER module (`nrg_kinetic`
-  / `nrg_electric` / `nrg_thermal` / `nrg_magnetic` / `nrg_explosive`,
-  family `'energy'`, requires a gun) touching it in the weapon flower
+  `dlv_homing` / `dlv_cannon`), and an ENERGY MODIFIER module (`nrg_kinetic`
+  / `nrg_electric` / `nrg_thermal`, family `'energy'`, requires a gun) touching it in the weapon flower
   decides what it fires — per GUN, unlike Gunnery/Autoloader (a modifier
   touching two guns modifies both; a gun touching several takes the first
   in hex order, `outfitting.energyForGunSlot`).  A weapon's identity is a
   `WeaponKey` string (`'projectile'`, `'beam+thermal'`); `WEAPONS` holds all
-  30 keys, precomputed from `DELIVERY_BASE` + `COMBOS`.  UNMODIFIED
+  20 keys, precomputed from `DELIVERY_BASE` + `COMBOS`.  UNMODIFIED
   deliveries are the weak base: plain kinetic at ~60% of the retired
-  Blaster's 28.6 dmg/s (all five sit at 16.7).  The OLD roster maps onto
+  Blaster's 28.6 dmg/s (four sit at 16.7; the Cannon's direct bite is 12.9,
+  its blast carrying the rest).  MAGNETIC AND EXPLOSIVE ENERGIES ARE REMOVED
+  and the PULSE delivery BECAME THE CANNON (user call): the bare `cannon` IS
+  the old Plasma Cannon (shell, fuse, derived blast), and its three
+  combinations are PLACEHOLDERS pending delivery feedback — Heavy Shell
+  (kinetic), Arc Shell (electric: the chain starts at the BLAST, wherever it
+  goes off — `queueElectric`) and Incendiary Shell (thermal: `blastHeat`, so
+  heat on a blast is a property of that shell, never of every explosion).
+  Removed keys resolve through `LEGACY_WEAPON_MAP` (the old shell and every
+  `radial*` key → the cannon; any other `*+magnetic` / `*+explosive` → its
+  bare delivery).  EVERY SEEKER LOCKS THE NEAREST ENEMY (user call —
+  `homingPrefers` is gone): `ProjectileSystem.updateHoming` holds the lock on
+  `GameEntity.homingTarget` while the target lives and stays inside 1.5×
+  the acquire range, and `render/energyFx.ts` draws a small turning bracket
+  on each locked enemy, fading in on lock and out when it ends.  The OLD roster maps onto
   the combinations it already was (`LEGACY_WEAPON_MAP` in energy.ts:
   BLASTER→projectile, BURST→projectile+kinetic, SHOTGUN→spread+kinetic,
   BOUNCER→beam+thermal, LIGHTNING→projectile+electric,
-  HOMING→homing+kinetic, CANNON→projectile+explosive, and the `wpn_*`
+  HOMING→homing+kinetic, CANNON→cannon, and the `wpn_*`
   catalog ids likewise) and those combinations inherit the old gun's
   tuning, so `weaponConfig('CANNON')` IS the old Cannon.  Old ids resolve
   anywhere a key is read (`currentWeapon`, `debugGrantWeapon`); unknown
@@ -3873,22 +3887,36 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     carried through a portal arrives cold instead of permanently weakened.
     The energized-nebula set follows the same rule.  Glass FAILS at heat 1 under the THERMAL fracture
     profile; plastic RELEASES its cohesion bonds (`ShardSystem.releaseBondsOf`
-    — the existing physics pulls the goo apart); metal CONDUCTS to ≤3 cooler
-    metal neighbours on a cadence; nebula is AGITATED (and a tile at full
-    heat disperses through the ordinary nebula break-up).
+    — the existing physics pulls the goo apart); HEAT CONDUCTS between ANY
+    two materials (≤3 cooler neighbours on a cadence) at the pair's
+    `conductShare` — the HARMONIC mean of their thermal conductivities, so
+    an insulator on either side throttles it; a GAS is AGITATED (and a static
+    one disperses at its `disperseAt` heat through the ordinary break-up).
+  - **MATERIAL PROPERTIES DRIVE EVERY RULE, NEVER A MATERIAL'S NAME** (user
+    call).  `MATERIAL_RESPONSE` holds what a material IS; the energy paths
+    read those columns, so a behaviour change or a new material is a row
+    edit.  `gas` (nebula) means not a solid: no damage from any energy, no
+    fracture profile, no impact stamp, beams pass through it, and kinetic
+    ROUNDS shove a drifting gas body along their travel (`GAS_DISPLACE_*` in
+    PhysicsSystem) — as a kinetic beam always did; a static cloud tile is
+    untouched.  `agitation` / `disperseAt` are how a gas answers heat,
+    `energizeSec` how long an arc energises instead of damaging.  THREE HEAT
+    QUANTITIES ARE DERIVED, not authored: `specificHeat` (J/g·K, roughly
+    the real material's) gives both the energy a unit of heat costs
+    (`heatCapacityOf`) and the heat CEILING (`maxHeatOf`) — so plastic, the
+    highest real specific heat, is the slowest solid to heat and holds the
+    most, while metal heats fastest and tops out lowest; and
+    `thermalConductivity` (0..1, real-world order compressed) gives both the
+    hot-spot spreading speed (`thermalDiffusivityOf`) and the neighbour
+    transfer.  Each derivation is calibrated so ROCK is unchanged.  A hull
+    (`generic`) conducts ELECTRICITY exactly as well as metal (user call), so
+    an arc on a metal plate reaches the ship beyond the next plate.
   - **ELECTRIC is instantaneous and planned by `planChain`** under hop /
     target / origin-radius / hop-range caps, per-hop attenuation and a
     visited set — no recursion, cycles cannot recur.  Candidates are
     conductivity-weighted; a body below `CHAIN_MIN_CONDUCTIVITY` (glass,
-    plastic, rock) is a TERMINAL.  Nebula is ENERGISED (`energizedUntil`)
-    rather than damaged, and only an energised cloud answers to a magnet.
-  - **MAGNETIC does no damage itself**: a capped radius pulse (≤ 40 bodies,
-    ≤ `MAG_MAX_DV` each) on metal (+ energised nebula).  What it does comes
-    from the force: slams go through the ordinary collision/crash energy, and
-    a LOOSE (≤ 60% health) static metal tile has a grain dragged free through
-    `chipStructureAt`.
-  - **EXPLOSIVE is a composite, not a column**: every damaging ring also
-    deposits `EXPLOSIVE_THERMAL_FRAC` of its hit as heat.
+    plastic, rock) is a TERMINAL.  A material with `energizeSec` (nebula)
+    is ENERGISED (`energizedUntil`, the cyan rim) rather than damaged.
   - **FRACTURE PROFILES drive the existing Voronoi through three existing
     knobs**: `siteScale` (the pattern's site count, applied after the
     material clamp, bounded to [2, 1.5×max]), `bias` (impact bias) and
@@ -3909,7 +3937,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     within ~1-2% of the material's own).  Heat's own weakening is
     `mechanicalScale`, deliberately a separate knob.
   - **Anything that reads a grid is QUEUED out of the collision step**: a
-    projectile's electric/magnetic payload is resolved in `tickEnergy`
+    projectile's (or a shell blast's) electric payload is resolved in `tickEnergy`
     after physics, because the dynamic grid is only safe between substeps.
     Every query is a grid radius walk with a hard cap; `nearestK` makes an
     overflowing cap drop the FAR bodies.
@@ -4362,12 +4390,12 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   debug overlays only).  DBG **Weapons** rows (grant + equip per weapon,
   `debugGrantWeapon`) are the wave-map test path for weapons now that
   commerce is station-only; `EngineStats.weaponCatalog` (paused-only)
-  feeds them.  DBG **Weapon Modules** is the shop-free path for the ten energy-module
+  feeds them.  DBG **Weapon Modules** is the shop-free path for the eight energy-module
   items: a `+` / `−` per delivery and energy module
   (`debugAddWeaponModule` mounts on the first free weapon hex — a gun only
   under the 2-gun cap — else drops to cargo; `debugRemoveWeaponModule`
   takes the installed copy first), an EQUIP COMBO grid (delivery × bare /
-  K / E / T / M / X, through `debugGrantWeapon`'s deterministic layout),
+  K / E / T, through `debugGrantWeapon`'s deterministic layout),
   `Clear`, and **Outfit anywhere** (`dbgOutfitAnywhere`): lifts
   `moveModule`'s drydock guard and makes the pause menu's flowers the
   station's editable ones, so the loadout can be rearranged mid-field.

@@ -26,6 +26,8 @@ export interface EnergyFxView {
     energized: readonly GameEntity[];
     beam: EnergyBeamView | null;
     simClock: number;
+    /** Enemies a player seeker has LOCKED (distinct, ≤ 16). */
+    locks: GameEntity[];
 }
 
 const CULL = 1400;
@@ -33,6 +35,7 @@ const CULL = 1400;
 export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView | null, camera: CameraState): void {
     if (!view) return;
     const camX = camera.position.x, camY = camera.position.y;
+    renderLocks(ctx, view.locks, camX, camY);
     const { heated, energized, beam } = view;
     if (heated.length === 0 && energized.length === 0 && !beam) return;
     ctx.save();
@@ -62,28 +65,84 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
         const x0 = shiftX(camX, beam.x0), y0 = shiftY(camY, beam.y0);
         const x1 = x0 + (shiftX(beam.x0, beam.x1) - beam.x0);
         const y1 = y0 + (shiftY(beam.y0, beam.y1) - beam.y0);
-        const magnetic = beam.energy === 'magnetic';
         ctx.lineCap = 'round';
-        ctx.globalAlpha = magnetic ? 0.25 : 0.45;
+        ctx.globalAlpha = 0.45;
         ctx.strokeStyle = beam.color;
-        ctx.lineWidth = beam.width * (magnetic ? 1 : 2.2);
-        if (magnetic) ctx.setLineDash([10, 12]);
+        ctx.lineWidth = beam.width * 2.2;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        ctx.setLineDash([]);
-        if (!magnetic) {
-            ctx.globalAlpha = 0.9;
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = Math.max(1, beam.width * 0.5);
-            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-            // A thermal beam's contact reads through the body it heats (the
-            // heat pass above), so it draws no contact disc of its own.
-            if (beam.hit && beam.energy !== 'thermal') {
-                ctx.globalAlpha = 0.6;
-                ctx.fillStyle = beam.color;
-                ctx.beginPath(); ctx.arc(x1, y1, beam.width * 1.6 + 3, 0, Math.PI * 2); ctx.fill();
-            }
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = Math.max(1, beam.width * 0.5);
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        // A thermal beam's contact reads through the body it heats (the
+        // heat pass above), so it draws no contact disc of its own.
+        if (beam.hit && beam.energy !== 'thermal') {
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = beam.color;
+            ctx.beginPath(); ctx.arc(x1, y1, beam.width * 1.6 + 3, 0, Math.PI * 2); ctx.fill();
         }
     }
+    ctx.restore();
+}
+
+// ── SEEKER LOCK BRACKETS ────────────────────────────────────────────────────
+//
+// A lightweight target cursor over every enemy a player seeker has locked:
+// four corner ticks around the body, slowly turning, fading IN on lock and
+// OUT when the lock is gone (so a round that re-targets never pops).  State
+// is a tiny parallel pair of arrays (≤ 16 locks) — no per-frame allocation.
+
+const LOCK_COLOR = '#fbbf24';
+const LOCK_FADE_IN = 0.12;   // seconds
+const LOCK_FADE_OUT = 0.25;
+const _lockEnt: GameEntity[] = [];
+const _lockA: number[] = [];
+let _lockT = 0;
+
+function renderLocks(ctx: CanvasRenderingContext2D, locks: readonly GameEntity[], camX: number, camY: number): void {
+    if (locks.length === 0 && _lockEnt.length === 0) { _lockT = 0; return; }
+    const now = performance.now() / 1000;
+    const dt = _lockT > 0 ? Math.min(0.1, now - _lockT) : 0;
+    _lockT = now;
+    // Admit new locks at alpha 0.
+    for (let i = 0; i < locks.length; i++) {
+        if (_lockEnt.indexOf(locks[i]) < 0 && _lockEnt.length < 24) { _lockEnt.push(locks[i]); _lockA.push(0); }
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = LOCK_COLOR;
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = 'round';
+    let n = 0;
+    for (let i = 0; i < _lockEnt.length; i++) {
+        const e = _lockEnt[i];
+        const held = locks.indexOf(e) >= 0;
+        let a = _lockA[i] + (held ? dt / LOCK_FADE_IN : -dt / LOCK_FADE_OUT);
+        a = Math.max(0, Math.min(1, a));
+        if (!e.active || e.isExploding || (!held && a <= 0)) continue;   // drop
+        _lockEnt[n] = e; _lockA[n] = a; n++;
+        if (a <= 0) continue;
+        const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
+        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
+        // Tighten onto the target as the lock takes hold.
+        const r = Math.max(e.size.x, e.size.y) * 0.5 + 6 + (1 - a) * 8;
+        const tick = Math.max(4, r * 0.35);
+        const spin = now * 0.8;
+        ctx.globalAlpha = 0.85 * a;
+        ctx.beginPath();
+        for (let k = 0; k < 4; k++) {
+            const ang = spin + k * (Math.PI / 2) + Math.PI / 4;
+            const cx = x + Math.cos(ang) * r, cy = y + Math.sin(ang) * r;
+            // Each corner is an L: two arms running back along the square's
+            // sides toward the neighbouring corners.
+            const a1 = ang + Math.PI * 0.75, a2 = ang - Math.PI * 0.75;
+            ctx.moveTo(cx + Math.cos(a1) * tick, cy + Math.sin(a1) * tick);
+            ctx.lineTo(cx, cy);
+            ctx.lineTo(cx + Math.cos(a2) * tick, cy + Math.sin(a2) * tick);
+        }
+        ctx.stroke();
+    }
+    _lockEnt.length = n; _lockA.length = n;
     ctx.restore();
 }
 

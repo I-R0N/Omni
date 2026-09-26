@@ -30,18 +30,17 @@ function chargedMass(config: WeaponConfig, k: number): number | undefined {
  * plus one per PAYLOAD — so all thirty combinations have a charge without
  * thirty authored entries, and the charge premium always reads as "more of
  * what this delivery does":
- *   projectile — a much heavier round (the old Blaster fireball); a shell
- *                gets the old Cannon charge (bigger, heavier blast)
+ *   projectile — a much heavier round (the old Blaster fireball)
+ *   cannon     — the old Cannon charge (a heavier shell, a much bigger blast)
  *   spread     — twice the rounds in a wider cone
  *   homing     — a three-round volley with looser tracking
- *   beam       — a longer, wider pulse; a tractor PUSHES instead of pulling
- *   radial     — a wider ring
- * and every payload rides along: more heat, a longer arc chain, a stronger
- * pull.  The mass bumps are expressed in AUTHORED units (`chargedMass`).
+ *   beam       — a longer, wider pulse
+ * and every payload rides along: more heat, a longer arc chain.  The mass bumps are expressed in AUTHORED units (`chargedMass`).
  */
 function chargedConfigOf(config: WeaponConfig): WeaponConfig {
   const out: WeaponConfig = { ...config };
   switch (config.delivery) {
+    case 'cannon':
     case 'projectile':
       if (config.explosionRadius) {
         out.mass = chargedMass(config, 1.5);
@@ -73,19 +72,11 @@ function chargedConfigOf(config: WeaponConfig): WeaponConfig {
       out.beamDuration = (config.beamDuration ?? 0) * 1.6;
       out.beamWidth = (config.beamWidth ?? 2) * 1.5;
       break;
-    case 'radial':
-      out.pulseRadius = (config.pulseRadius ?? 0) * 1.35;
-      if (config.explosionRadius) out.explosionRadius = config.explosionRadius * 1.35;
-      break;
   }
   if (config.heat) out.heat = config.heat * 1.75;
   if (config.electric) {
     out.electric = { ...config.electric, magnitude: config.electric.magnitude * 1.5,
       targets: config.electric.targets + 2, branches: config.electric.branches + 1 };
-  }
-  if (config.magnetic) {
-    out.magnetic = { ...config.magnetic, strength: config.magnetic.strength * 1.5,
-      mode: config.delivery === 'beam' ? 'push' : config.magnetic.mode };
   }
   return out;
 }
@@ -122,7 +113,7 @@ function withGunnery(config: WeaponConfig, player: GameEntity): WeaponConfig {
     ...config,
     damage: config.damage * mult,
     // Energy payloads are part of the round, so a denser round carries more
-    // of them.  Magnetic force is not — it is capped per body (MAG_MAX_DV).
+    // of them.
     heat: config.heat !== undefined ? config.heat * mult : undefined,
     electric: config.electric ? { ...config.electric, magnitude: config.electric.magnitude * mult } : undefined,
     // AUTHORED UNITS, because that is what `WeaponConfig.mass` means and
@@ -221,7 +212,7 @@ export class WeaponSystem {
     if (onShake) {
       if (config.explosionRadius && config.delivery !== 'beam') {
         onShake(isCharged ? COLLISION_CONFIG.SHAKE.HEAVY : COLLISION_CONFIG.SHAKE.MEDIUM, { rumble: 'trigger' });
-      } else if (config.delivery === 'spread' || config.delivery === 'radial') {
+      } else if (config.delivery === 'spread') {
         onShake(isCharged ? 8 : 5, { rumble: 'trigger' });
       } else if (isCharged) {
         onShake(COLLISION_CONFIG.SHAKE.MEDIUM, { rumble: 'trigger' });
@@ -232,10 +223,10 @@ export class WeaponSystem {
       onRumble(INPUT_CONSTANTS.RUMBLE.WEAPON_TICK, 'trigger');
     }
 
-    // DISPATCH BY DELIVERY.  Rounds go to the projectile system; a beam, a
-    // radial pulse and an instant-cone spread (electric forks, magnetic
-    // repulsor) are resolved by the energy layer, which owns the grids.
-    const instant = config.delivery === 'beam' || config.delivery === 'radial'
+    // DISPATCH BY DELIVERY.  Rounds (the cannon's shell included) go to the
+    // projectile system; a beam and an instant-cone spread (electric forks)
+    // are resolved by the energy layer, which owns the grids.
+    const instant = config.delivery === 'beam'
       || (config.delivery === 'spread' && config.coneHalfDeg !== undefined);
     if (instant) {
       this.onInstantFire?.(config, player, target);

@@ -15,18 +15,16 @@
  *    body leaves it the moment it is cold.  A cold shard costs nothing.
  *  - ELECTRIC is instantaneous and planned by `planChain` under hop, target,
  *    radius and attenuation caps with a visited set — no recursion, no cycles.
- *  - MAGNETIC is a capped radius pulse; an ATTRACTOR is a handful of such
- *    pulses over a bounded lifetime (≤ MAX_FIELDS alive).
- *  - Events raised INSIDE the collision step (a projectile's electric or
- *    magnetic payload) are QUEUED and resolved after physics: the dynamic
+ *  - Events raised INSIDE the collision step (a projectile's electric
+ *    payload, a shell's blast chain) are QUEUED and resolved after physics: the dynamic
  *    grid is only safe to read between substeps (CLAUDE.md §8).
  */
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../types';
 import {
     ENERGY_CONSTANTS, materialOf, responseOf, heatGain, clampHeat, coolHeat,
-    mechanicalScale, magneticSusceptibility, magneticDv, planChain, safeMag,
-    stampFractureProfile, diffuseSpread, mixHeatSpot, heatPeak, easeShownHeat, type ChainCaps, type EnergyDomain,
+    mechanicalScale, maxHeatOf, conductShare, planChain, safeMag,
+    stampFractureProfile, diffuseSpread, type MaterialId, mixHeatSpot, heatPeak, easeShownHeat, type ChainCaps, type EnergyDomain,
 } from './systems/energy';
 import {
     breakYieldsNothing, noteTraitDamage, markDamaged, hitReactStrength,
@@ -38,13 +36,11 @@ import { nextId } from './systems/IdAllocator';
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-interface MagField { x: number; y: number; radius: number; strength: number; mode: 'pull' | 'push'; time: number; acc: number }
 interface PendingEvent {
-    kind: 'electric' | 'field';
+    kind: 'electric';
     x: number; y: number;
     first: GameEntity | null;
     electric?: WeaponConfig['electric'];
-    magnetic?: WeaponConfig['magnetic'];
     color: string;
 }
 interface BeamState {
@@ -56,7 +52,6 @@ interface BeamState {
     x0: number; y0: number; x1: number; y1: number; hit: boolean;
 }
 
-const MAX_FIELDS = 8;
 const MAX_PENDING = 48;
 const MAX_ENERGIZED = 200;
 /** How often a heated body's slow effects (burn damage, bond release,
@@ -66,14 +61,11 @@ const HEAT_EFFECT_INTERVAL = 0.2;
 export class EnergyState {
     heated: GameEntity[] = [];
     energized: GameEntity[] = [];
-    fields: MagField[] = [];
     pending: PendingEvent[] = [];
     beam: BeamState | null = null;
     effectAcc = 0;
     conductAcc = 0;
-    /** Diagnostics (tests + DBG): how many bodies the last magnetic pulse
-     *  moved, and the size of the last electric chain. */
-    lastMagneticCount = 0;
+    /** Diagnostics (tests + DBG): the size of the last electric chain. */
     lastChainSize = 0;
     lastBeamHitId: string | null = null;
     /** Reused query buffers — never allocate per query. */
@@ -92,7 +84,6 @@ export class EnergyState {
         }
         this.heated.length = 0;
         this.energized.length = 0;
-        this.fields.length = 0;
         this.pending.length = 0;
         this.beam = null;
         this.effectAcc = 0;
@@ -189,8 +180,8 @@ function killBody(g: GameEngine, e: GameEntity, from: Vector2 | null, byPlayer: 
  * Put `dmg` (damage units) into a body by energy of `domain`.  The ONE damage
  * entry point for the energy layer, so every energy lands the same way:
  *
- *  - NEBULA takes no damage — it is not a solid (§8); callers displace or
- *    energise it instead.  Unbreakable bodies (indestructible) take none.
+ *  - A GAS takes no damage — it is not a solid (§8); callers displace,
+ *    heat or energise it instead.  Unbreakable bodies (indestructible) take none.
  *  - MECHANICAL energy is scaled by the body's heat (`mechanicalScale`): the
  *    threshold drop that makes heat-then-hit work, with no combo bookkeeping.
  *  - The event's FRACTURE PROFILE is stamped before the damage, so a break
@@ -204,7 +195,7 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
     let d = safeMag(dmg);
     if (d <= 0) return;
     const mat = materialOf(e);
-    if (mat === 'nebula') return;
+    if (responseOf(mat).gas) return;
     if (e.type === EntityType.STRUCTURE && breakYieldsNothing(e.shardVariant)) return;
     if (domain === 'mechanical') d *= mechanicalScale(mat, e.heat);
     stampFractureProfile(e, domain, d);
@@ -313,9 +304,9 @@ export function depositHeat(g: GameEngine, e: GameEntity, magnitude: number, fro
     if (!trackHeat(g.energy, e)) return;
     const at = from ? contactOn(e, from) : null;
     addHeatSpot(e, gain, at);
-    e.heat = clampHeat((e.heat ?? 0) + gain);
+    e.heat = clampHeat((e.heat ?? 0) + gain, maxHeatOf(mat));
     if (byPlayer) e.heatByPlayer = true;
-    if (at && e.type === EntityType.STRUCTURE && mat !== 'nebula') stampLocalImpact(e, at);
+    if (at && e.type === EntityType.STRUCTURE && !responseOf(mat).gas) stampLocalImpact(e, at);
     applyHeatThresholds(g, e);
 }
 
@@ -349,18 +340,21 @@ function applyHeatThresholds(g: GameEngine, e: GameEntity): void {
     }
 }
 
-/** NEBULA heated: agitation.  A drifting puff is stirred (random velocity,
- *  scaled by heat) and kept from condensing while hot; a static tile that
- *  reaches full heat DISPERSES through the ordinary nebula break-up — the
- *  same cloud path a ship flying through it takes, never the solid one. */
-function agitateNebula(g: GameEngine, e: GameEntity, heat: number, dt: number): void {
+/** A heated GAS agitates.  A drifting body is stirred (random velocity,
+ *  scaled by heat × the material's `agitation`) and kept from condensing
+ *  while hot; a static body that reaches its `disperseAt` heat DISPERSES
+ *  through the ordinary cloud break-up — the same path a ship flying through
+ *  it takes, never the solid one. */
+function agitateGas(g: GameEngine, e: GameEntity, heat: number, dt: number,
+                    agitation: number, disperseAt: number): void {
     if (e.mass !== Infinity) {
-        const k = 0.4 * Math.min(heat, 1.5) * dt * 60;
+        if (!(agitation > 0)) return;
+        const k = agitation * Math.min(heat, 1.5) * dt * 60;
         const a = Math.random() * Math.PI * 2;
         e.velocity.x += Math.cos(a) * k;
         e.velocity.y += Math.sin(a) * k;
         if (heat > 0.2) e.nebulaMergeCooldown = Math.max(e.nebulaMergeCooldown ?? 0, 0.5);
-    } else if (heat >= 1 && e.health > 0 && !e.deathDispatched) {
+    } else if (heat >= disperseAt && e.health > 0 && !e.deathDispatched) {
         // Mirrors the ship-through-cloud break-up in PhysicsSystem exactly —
         // out of the static grid, a FADE rather than a pop (the fade tick
         // retires it), and the ordinary nebula death — with no impact
@@ -389,7 +383,7 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
         const r = responseOf(mat);
         // Burn latch keeps feeding heat.
         if ((e.burnTimer ?? 0) > 0) {
-            e.heat = clampHeat((e.heat ?? 0) + heatGain(mat, (e.burnRate ?? 0) * dt));
+            e.heat = clampHeat((e.heat ?? 0) + heatGain(mat, (e.burnRate ?? 0) * dt), maxHeatOf(mat));
             e.burnTimer! -= dt;
             if (e.burnTimer! <= 0) { e.burnTimer = undefined; e.burnRate = undefined; }
         }
@@ -397,7 +391,7 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
         const heat = e.heat;
         // The hot spot spreads through the body at the material's own rate.
         if (e.heatSpread !== undefined) e.heatSpread = diffuseSpread(mat, e.heatSpread, dt, heatBodyR(e) * 2);
-        if (heat > 0 && mat === 'nebula') agitateNebula(g, e, heat, dt);
+        if (heat > 0 && r.gas) agitateGas(g, e, heat, dt, r.agitation, r.disperseAt);
         if (heat > 0 && doEffects && e.active) {
             if (r.thermalDps > 0) {
                 // A burn is not a HIT (flash 0): the damage path whitens a body
@@ -407,7 +401,7 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
             }
             if (e.active) applyHeatThresholds(g, e);
         }
-        if (heat > 0.3 && doConduct && r.conduct > 0 && e.active) conductHeat(g, e, r.conduct);
+        if (heat > 0.3 && doConduct && r.thermalConductivity > 0 && e.active) conductHeat(g, e, mat);
         // What is DRAWN eases toward the true peak, so every step in it — a
         // deposit, a conduction transfer, the cold snap — blends instead of
         // flashing, and a cooled body fades out rather than vanishing.
@@ -423,27 +417,34 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
     if (list.length !== n) list.length = n;
 }
 
-/** METAL conducts: share a fraction of heat with up to CONDUCT_NEIGHBOURS
- *  cooler metal bodies nearby.  Conserving (the source loses what it gives)
- *  and only for hot metal on a cadence. */
-function conductHeat(g: GameEngine, e: GameEntity, frac: number): void {
+/** Heat CONDUCTS between neighbours of ANY material: a hot body shares with
+ *  up to CONDUCT_NEIGHBOURS cooler bodies nearby, each at the pair's own rate
+ *  (`conductShare` — the harmonic mean of the two thermal conductivities, so
+ *  an insulator on either side throttles it).  Conserving (the source loses
+ *  what it gives) and on a cadence. */
+function conductHeat(g: GameEngine, e: GameEntity, mat: MaterialId): void {
     const C = ENERGY_CONSTANTS;
     const buf = g.energy.buf2;
     gather(g, e.position.x, e.position.y, C.CONDUCT_RADIUS, buf, 16);
     let given = 0;
     for (let i = 0; i < buf.length && given < C.CONDUCT_NEIGHBOURS; i++) {
         const o = buf[i];
-        if (o === e || materialOf(o) !== 'metal') continue;
+        if (o === e) continue;
+        const oMat = materialOf(o);
+        const share = conductShare(mat, oMat);
+        if (!(share > 0)) continue;
         const diff = (e.heat ?? 0) - (o.heat ?? 0);
         if (diff <= 0.05) continue;
         if (!trackHeat(g.energy, o)) break;   // set full: nothing may take heat
-        const q = diff * frac;
+        // Never more than the receiver can hold.
+        const q = Math.min(diff * share, Math.max(0, maxHeatOf(oMat) - (o.heat ?? 0)));
+        if (!(q > 0)) continue;
         // Heat crosses at the face that touches the source.
         // Conducted heat arrives through a whole face, not a pinpoint — a
         // tight spot here concentrated a small transfer into a bright flare.
         addHeatSpot(o, q, contactOn(o, e.position), 0.6);
-        e.heat = clampHeat((e.heat ?? 0) - q);
-        o.heat = clampHeat((o.heat ?? 0) + q);
+        e.heat = clampHeat((e.heat ?? 0) - q, maxHeatOf(mat));
+        o.heat = clampHeat((o.heat ?? 0) + q, maxHeatOf(oMat));
         if (e.heatByPlayer) o.heatByPlayer = true;
         given++;
     }
@@ -473,8 +474,8 @@ function fizzle(g: GameEngine, x: number, y: number, angle: number, color: strin
 /**
  * Discharge a BOUNDED electric chain.  `first` is the body the discharge
  * starts in (a bolt's impact) or null (a beam/nova arcing from `origin`).
- * Conductors carry it on; insulators end it where they stand; nebula is
- * ENERGISED (steerable by magnetism for a few seconds) rather than damaged.
+ * Conductors carry it on; insulators end it where they stand; a material
+ * with `energizeSec` (nebula) is ENERGISED rather than damaged.
  * Returns the number of bodies reached.
  */
 export function dischargeElectric(g: GameEngine, origin: Vector2, first: GameEntity | null,
@@ -504,123 +505,31 @@ export function dischargeElectric(g: GameEngine, origin: Vector2, first: GameEnt
         const fromPos = node.from ? node.from.position : origin;
         if (node.depth > 0 || !first) arcVisual(g, fromPos.x, fromPos.y, e.position.x, e.position.y, color);
         if (node.depth === 0 && !damageFirst) continue;
-        const mat = materialOf(e);
-        if (mat === 'nebula') {
+        const r = responseOf(materialOf(e));
+        if (r.energizeSec > 0) {
             // Same rule as heat: only a body in the set carries the state,
-            // so the magnet and the rim can never disagree about it.
+            // so the rim and the state can never disagree about it.
             if (!e.energizedTracked) {
                 if (g.energy.energized.length >= MAX_ENERGIZED) continue;
                 e.energizedTracked = true;
                 g.energy.energized.push(e);
             }
-            e.energizedUntil = now + C.ENERGIZE_SEC;
-            continue;
+            e.energizedUntil = now + r.energizeSec;
         }
-        const dmg = node.mag * responseOf(mat).electricDamage;
+        if (r.gas) continue;   // a gas is energised, never damaged
+        const dmg = node.mag * r.electricDamage;
         if (dmg > 0.05) damageBody(g, e, dmg, fromPos, 'electric', byPlayer);
         e.hitFlash = Math.max(e.hitFlash ?? 0, 0.12);
     }
     return nodes.length;
 }
 
-// ── Magnetic ─────────────────────────────────────────────────────────────────
-
-export interface MagOpts {
-    /** Point every body is pulled toward / pushed from (defaults to the
-     *  pulse centre).  The tractor beam pulls toward the ship. */
-    anchorX?: number; anchorY?: number;
-    /** Restrict to a cone around `coneDir` (radians) of `coneHalf`. */
-    coneDir?: number; coneHalf?: number;
-    color?: string;
-}
-
-/**
- * A MAGNETIC pulse: metal (and nebula while energised) within `radius` is
- * pulled toward, or pushed from, the anchor.  Capped at MAG_MAX_TARGETS and
- * MAG_MAX_DV per body.  It does no damage itself — what it does comes from
- * what the force does: metal slamming into things through the ordinary
- * collision/crash energy, and LOOSE (already weakened) static metal having a
- * grain dragged free through the ordinary chip path.
- * Returns how many bodies it moved.
- */
-export function magneticPulse(g: GameEngine, x: number, y: number, radius: number, strength: number,
-                              mode: 'pull' | 'push', opts?: MagOpts): number {
-    const C = ENERGY_CONSTANTS;
-    const R = Math.max(0, Math.min(radius, C.MAG_MAX_RADIUS));
-    const S = safeMag(strength, 60);
-    if (R <= 0 || S <= 0) return 0;
-    const ax = opts?.anchorX ?? x, ay = opts?.anchorY ?? y;
-    const buf = g.energy.buf;
-    gather(g, x, y, R, buf, C.MAG_MAX_TARGETS * 6);
-    nearestK(buf, x, y, C.MAG_MAX_TARGETS * 2);
-    let moved = 0, streaks = 0;
-    const color = opts?.color ?? ENERGY_COLORS.magnetic;
-    for (let i = 0; i < buf.length && moved < C.MAG_MAX_TARGETS; i++) {
-        const e = buf[i];
-        const sus = magneticSusceptibility(e, g.simClock);
-        if (sus <= 0) continue;
-        const ox = wrapDeltaX(x, e.position.x), oy = wrapDeltaY(y, e.position.y);
-        const d = Math.hypot(ox, oy);
-        if (d > R) continue;
-        if (opts?.coneHalf !== undefined && opts.coneDir !== undefined && d > 1) {
-            let da = Math.atan2(oy, ox) - opts.coneDir;
-            while (da > Math.PI) da -= Math.PI * 2;
-            while (da < -Math.PI) da += Math.PI * 2;
-            if (Math.abs(da) > opts.coneHalf) continue;
-        }
-        // Direction relative to the ANCHOR.
-        const tx = wrapDeltaX(e.position.x, ax), ty = wrapDeltaY(e.position.y, ay);
-        const td = Math.hypot(tx, ty);
-        if (td < 1) continue;
-        const sign = mode === 'pull' ? 1 : -1;
-        const ux = (tx / td) * sign, uy = (ty / td) * sign;
-        if (e.mass === Infinity) {
-            // Static metal: only LOOSE metal gives, and only to a real pull.
-            if (e.type !== EntityType.STRUCTURE || !(e.maxHealth > 0)) continue;
-            const frac = e.health / e.maxHealth;
-            const pull = S * (1 - d / R) * sus;
-            if (frac <= C.MAG_LOOSE_HEALTH_FRAC && pull >= C.MAG_LOOSE_MIN_PULL) {
-                const r = Math.max(e.size.x, e.size.y) * 0.45;
-                const at = { x: e.position.x + ux * r, y: e.position.y + uy * r };
-                g.chipStructureAt(e, at, pull * 0.5,
-                    { x: e.position.x - ux * 10, y: e.position.y - uy * 10 });
-                moved++;
-            }
-            continue;
-        }
-        const dv = magneticDv(S, d, R, e.mass, sus);
-        if (dv <= 0) continue;
-        e.velocity.x += ux * dv;
-        e.velocity.y += uy * dv;
-        moved++;
-        if (streaks < 10) {
-            streaks++;
-            g.spawnParticles(e.position, 1, color, {
-                speedMin: dv * 0.8, speedMax: dv * 1.2, sizeMin: 1, sizeMax: 1.8,
-                spreadAngle: Math.atan2(uy, ux), spreadCone: 0.2, lifetimeMin: 0.15, lifetimeMax: 0.3,
-            });
-        }
-    }
-    g.energy.lastMagneticCount = moved;
-    return moved;
-}
-
-/** Leave a short-lived ATTRACTOR at a point (magnetised slug, lodestone). */
-export function addMagField(g: GameEngine, x: number, y: number, spec: NonNullable<WeaponConfig['magnetic']>): void {
-    const s = g.energy;
-    const seconds = Math.min(3, spec.seconds ?? 0);
-    magneticPulse(g, x, y, spec.radius, spec.strength, spec.mode);
-    if (!(seconds > 0)) return;
-    if (s.fields.length >= MAX_FIELDS) s.fields.shift();
-    s.fields.push({ x, y, radius: spec.radius, strength: spec.strength * 0.4, mode: spec.mode, time: seconds, acc: 0 });
-    g.spawnShockwave({ x, y }, { radius: spec.radius * 0.5, damage: 0, knockback: 0, color: ENERGY_COLORS.magnetic, lifetime: 0.3 });
-}
-
 // ── Projectile payloads ──────────────────────────────────────────────────────
 
 /** A round carrying an energy payload has struck `target`.  Heat lands now
- *  (no query needed); electric and magnetic effects are QUEUED for after the
- *  physics step, because they read the grids. */
+ *  (no query needed); an electric chain is QUEUED for after the physics
+ *  step, because it reads the grids.  A SHELL's chain starts from its blast
+ *  instead (`queueElectric`, from the detonation), wherever that happens. */
 export function applyProjectilePayload(g: GameEngine, impactPos: Vector2, proj: GameEntity, target: GameEntity): void {
     const byPlayer = proj.ownerType === EntityType.PLAYER;
     if (proj.energyHeat && proj.energyHeat > 0) {
@@ -632,17 +541,20 @@ export function applyProjectilePayload(g: GameEngine, impactPos: Vector2, proj: 
         latchBurn(g, target, proj.energyBurnSeconds, proj.energyBurnRate, byPlayer);
     }
     const q = g.energy.pending;
-    if (proj.energyElectric && q.length < MAX_PENDING) {
+    if (proj.energyElectric && !(proj.explosionRadius && proj.explosionRadius > 0) && q.length < MAX_PENDING) {
         q.push({ kind: 'electric', x: impactPos.x, y: impactPos.y, first: target,
                  electric: proj.energyElectric, color: proj.color || ENERGY_COLORS.electric });
     }
-    if (proj.energyMagnetic && q.length < MAX_PENDING) {
-        q.push({ kind: 'field', x: impactPos.x, y: impactPos.y, first: null,
-                 magnetic: proj.energyMagnetic, color: ENERGY_COLORS.magnetic });
-    }
 }
 
-// ── Instant deliveries: beam, radial, cone ───────────────────────────────────
+/** Queue a bounded electric chain from a point (a detonating shell). */
+export function queueElectric(g: GameEngine, at: Vector2, spec: NonNullable<WeaponConfig['electric']>, color: string): void {
+    const q = g.energy.pending;
+    if (q.length >= MAX_PENDING) return;
+    q.push({ kind: 'electric', x: at.x, y: at.y, first: null, electric: spec, color });
+}
+
+// ── Instant deliveries: beam, cone ───────────────────────────────────────────
 
 /** WeaponSystem's sink for every delivery that is not a round. */
 export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, target: Vector2): void {
@@ -653,75 +565,14 @@ export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, 
                           x1: player.position.x, y1: player.position.y, hit: false };
         return;
     }
-    if (c.delivery === 'radial') { fireRadial(g, c, player); return; }
     fireCone(g, c, player, aim);
 }
 
-function fireRadial(g: GameEngine, c: WeaponConfig, player: GameEntity): void {
-    const px = player.position.x, py = player.position.y;
-    const R = c.pulseRadius ?? 150;
-    const color = c.color;
-    switch (c.energy) {
-        case 'electric': {
-            const n = dischargeElectric(g, { x: px, y: py }, null, c.electric!, color, true);
-            if (n === 0) fizzle(g, px, py, player.rotation, color);
-            g.spawnShockwave({ x: px, y: py }, { radius: R, damage: 0, knockback: 0, color, lifetime: 0.25 });
-            return;
-        }
-        case 'thermal': {
-            const buf = g.energy.buf;
-            gather(g, px, py, R, buf, ENERGY_CONSTANTS.EXPLOSIVE_MAX_TARGETS * 4);
-            nearestK(buf, px, py, ENERGY_CONSTANTS.EXPLOSIVE_MAX_TARGETS);
-            for (let i = 0; i < buf.length; i++) {
-                const e = buf[i];
-                const d = dist(px, py, e.position.x, e.position.y);
-                if (d > R) continue;
-                depositHeat(g, e, (c.heat ?? 0) * (1 - d / R), player.position, true);
-            }
-            // No ring and no sparks: the pulse is read through what it
-            // heats — each body changes colour and gives off light.
-            return;
-        }
-        case 'magnetic': {
-            magneticPulse(g, px, py, R, c.magnetic!.strength, c.magnetic!.mode);
-            g.spawnShockwave({ x: px, y: py }, { radius: R, damage: 0, knockback: 0, color, lifetime: 0.4 });
-            return;
-        }
-        case 'explosive': {
-            g.audio.play('impact.explosion.aoe', { x: px, y: py });
-            g.spawnParticles(player.position, 16, '#fb923c', { speedMin: 4, speedMax: 12, sizeMin: 1.5, sizeMax: 3 });
-            g.spawnShockwave({ x: px, y: py }, {
-                radius: c.explosionRadius ?? R, damage: c.explosionDamage ?? 0,
-                knockback: c.explosionKnockback ?? 0, color,
-                ownerType: EntityType.PLAYER, ownerId: 'player', excludeIds: ['player'],
-            });
-            return;
-        }
-        default: {
-            // Unmodified / kinetic: a shockwave ring.  The ring is the
-            // existing AoE primitive, so damage, knockback and the player's
-            // own immunity all come with it.
-            g.spawnShockwave({ x: px, y: py }, {
-                radius: R, damage: c.damage, knockback: c.push ?? 0, color,
-                ownerType: EntityType.PLAYER, ownerId: 'player', excludeIds: ['player'],
-            });
-        }
-    }
-}
-
-/** An instant cone (spread + electric forks, spread + magnetic repulsor). */
+/** An instant cone (spread + electric forks). */
 function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: number): void {
     const px = player.position.x, py = player.position.y;
     const R = c.pulseRadius ?? 200;
     const half = ((c.coneHalfDeg ?? 25) * Math.PI) / 180;
-    if (c.energy === 'magnetic' && c.magnetic) {
-        magneticPulse(g, px, py, R, c.magnetic.strength, c.magnetic.mode, { coneDir: aim, coneHalf: half });
-        for (let k = -1; k <= 1; k++) {
-            g.spawnParticles(player.position, 3, c.color, { speedMin: 6, speedMax: 10, sizeMin: 1, sizeMax: 2,
-                spreadAngle: aim + k * half * 0.7, spreadCone: 0.15, lifetimeMin: 0.2, lifetimeMax: 0.35 });
-        }
-        return;
-    }
     if (c.energy === 'electric' && c.electric) {
         const buf = g.energy.buf;
         gather(g, px, py, R, buf, ENERGY_CONSTANTS.CHAIN_CANDIDATES * 4);
@@ -757,7 +608,7 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
 // ── Beam ─────────────────────────────────────────────────────────────────────
 
 /** First solid body along a ray, by circle approximation.  Grid walk in
- *  steps along the ray; nebula never blocks (it is displaced / heated in
+ *  steps along the ray; a GAS never blocks (it is displaced / heated in
  *  passing and reported through `passed`).  Returns the hit and its t. */
 function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, range: number,
                  width: number, passed: GameEntity[]): { e: GameEntity | null; t: number } {
@@ -776,7 +627,7 @@ function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, 
             const perp = Math.abs(dx * uy - dy * ux);
             const rad = Math.max(e.size.x, e.size.y) * 0.5 + width * 0.5;
             if (perp > rad) continue;
-            if (materialOf(e) === 'nebula') {
+            if (responseOf(materialOf(e)).gas) {
                 if (passed.length < 6 && !passed.includes(e)) passed.push(e);
                 continue;
             }
@@ -852,28 +703,6 @@ function tickBeam(g: GameEngine, dt: number): void {
             }
             for (const n of passed) depositHeat(g, n, (c.heat ?? 0) * 0.5, from, true);
             break;
-        case 'magnetic': {
-            // TRACTOR: pulses along the line, every body pulled toward the ship
-            // (or pushed from it on a charged pulse).
-            const m = c.magnetic!;
-            let total = 0;
-            for (let t = 60; t <= range && total < ENERGY_CONSTANTS.MAG_MAX_TARGETS; t += 70) {
-                total += magneticPulse(g, ox + ux * t, oy + uy * t, m.radius, m.strength, m.mode,
-                    { anchorX: p.position.x, anchorY: p.position.y });
-            }
-            g.energy.lastMagneticCount = total;
-            b.x1 = ox + ux * range; b.y1 = oy + uy * range;
-            break;
-        }
-        case 'explosive':
-            g.spawnShockwave({ x: hx, y: hy }, {
-                radius: c.explosionRadius ?? 45, damage: c.explosionDamage ?? 0,
-                knockback: c.explosionKnockback ?? 0, color: c.color, lifetime: 0.25,
-                ownerType: EntityType.PLAYER, ownerId: 'player', excludeIds: ['player'],
-            });
-            g.spawnParticles({ x: hx, y: hy }, 6, '#fb923c', { speedMin: 3, speedMax: 8, sizeMin: 1, sizeMax: 2.5 });
-            g.audio.play('impact.explosion.aoe', { x: hx, y: hy, gain: 0.5 });
-            break;
         default: {
             // Unmodified / kinetic: a bite and a shove along the beam.
             if (hit.e) {
@@ -884,39 +713,11 @@ function tickBeam(g: GameEngine, dt: number): void {
                     hit.e.velocity.x += ux * k; hit.e.velocity.y += uy * k;
                 }
             }
-            // Mechanical energy DISPLACES nebula in its path — never fractures it.
+            // Mechanical energy DISPLACES a gas in its path — never fractures it.
             for (const n of passed) {
                 if (n.mass !== Infinity) { n.velocity.x += ux * 1.5; n.velocity.y += uy * 1.5; }
             }
         }
-    }
-}
-
-// ── Homing preference ────────────────────────────────────────────────────────
-
-/** Hand preference-homing rounds a target (electric → the best conductor,
- *  magnetic → metal).  Bounded: one capped grid query per round, re-run only
- *  when it has none. */
-export function acquireHomingTargets(g: GameEngine): void {
-    const list = g.entityIndex.projectiles;
-    for (let i = 0; i < list.length; i++) {
-        const p = list[i];
-        if (!p.homing || !p.homingPrefers || p.ownerType !== EntityType.PLAYER) continue;
-        if (p.homingTarget && p.homingTarget.active && !p.homingTarget.isExploding) continue;
-        const buf = g.energy.buf;
-        gather(g, p.position.x, p.position.y, HOMING_ACQUIRE_RANGE, buf, 48);
-        let best: GameEntity | null = null, bestS = Infinity;
-        for (let j = 0; j < buf.length; j++) {
-            const e = buf[j];
-            const mat = materialOf(e);
-            let w: number;
-            if (p.homingPrefers === 'metal') w = mat === 'metal' ? 1 : e.type === EntityType.ENEMY ? 0.35 : 0;
-            else w = responseOf(mat).conductivity >= 0.3 && mat !== 'nebula' ? responseOf(mat).conductivity : 0;
-            if (w <= 0) continue;
-            const s = dist(p.position.x, p.position.y, e.position.x, e.position.y) / w;
-            if (s < bestS) { bestS = s; best = e; }
-        }
-        p.homingTarget = best ?? undefined;
     }
 }
 
@@ -932,8 +733,6 @@ export function tickEnergy(g: GameEngine, dt: number): void {
             if (ev.kind === 'electric' && ev.electric) {
                 dischargeElectric(g, { x: ev.x, y: ev.y }, ev.first && ev.first.active ? ev.first : null,
                     ev.electric, ev.color, true);
-            } else if (ev.kind === 'field' && ev.magnetic) {
-                addMagField(g, ev.x, ev.y, ev.magnetic);
             }
         }
         s.pending.length = 0;
@@ -955,17 +754,6 @@ export function tickEnergy(g: GameEngine, dt: number): void {
             s.energized[n++] = e;
         }
         if (s.energized.length !== n) s.energized.length = n;
-    }
-    // Attractors.
-    if (s.fields.length > 0) {
-        let n = 0;
-        for (let i = 0; i < s.fields.length; i++) {
-            const f = s.fields[i];
-            f.time -= dt; f.acc += dt;
-            if (f.acc >= 0.1) { f.acc -= 0.1; magneticPulse(g, f.x, f.y, f.radius, f.strength, f.mode); }
-            if (f.time > 0) s.fields[n++] = f;
-        }
-        if (s.fields.length !== n) s.fields.length = n;
     }
     tickBeam(g, dt);
 }

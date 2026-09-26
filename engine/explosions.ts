@@ -30,8 +30,8 @@ import {
     noteTraitDamage, hitReactStrength, WEAPONS, markDamaged, markShieldDamaged,
     stampBubbleAggro, breakYieldsNothing } from '../constants';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
-import { ENERGY_CONSTANTS, materialOf, mechanicalScale, stampFractureProfile } from './systems/energy';
-import { depositHeat } from './energyEffects';
+import { materialOf, mechanicalScale, stampFractureProfile } from './systems/energy';
+import { depositHeat, queueElectric } from './energyEffects';
 import { nextId } from './systems/IdAllocator';
 
 /** Shared empty snapshot for COSMETIC explosion rings (damage 0 +
@@ -61,6 +61,9 @@ export interface ShockwaveOpts {
     ownerType?: GameEntity['ownerType'];
     ownerId?: string;
     excludeIds?: string[];
+    /** Fraction of the ring's damage that ALSO lands as heat on every body
+     *  it reaches (the incendiary shell).  Absent → no heat. */
+    heatFrac?: number;
 }
 
 export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts) {
@@ -124,6 +127,7 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
         explosionRadius: radius,
         explosionDamage: opts.damage,
         explosionKnockback: opts.knockback,
+        energyBlastHeat: opts.heatFrac,
         ownerType: opts.ownerType,
         ownerId: opts.ownerId,
         hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
@@ -217,14 +221,11 @@ export function updateExplosionRings(g: GameEngine) {
             const noBreak = e.type === EntityType.STRUCTURE
                 && breakYieldsNothing(e.shardVariant);
 
-            // THE EXPLOSIVE COMPOSITE (energy modules §5): a detonation is a
-            // mechanical impulse AND a smaller thermal packet at the same
-            // point.  The heat lands on everything the wave reaches — nebula
-            // included, which answers by agitating rather than breaking.
-            // Owned rings only: a detonation, not the shard→tile merge
-            // blow-back, which borrows the ring primitive for a shove.
-            if (dmg > 0 && ring.ownerType !== undefined) {
-                depositHeat(g, e, dmg * falloff * ENERGY_CONSTANTS.EXPLOSIVE_THERMAL_FRAC,
+            // AN INCENDIARY SHELL (cannon + thermal): the ring also lands
+            // HEAT on everything it reaches — a gas included, which answers
+            // by agitating rather than breaking.  Only a ring that says so.
+            if (dmg > 0 && ring.energyBlastHeat && ring.energyBlastHeat > 0) {
+                depositHeat(g, e, dmg * falloff * ring.energyBlastHeat,
                             ring.position, ring.ownerType === EntityType.PLAYER);
             }
 
@@ -363,11 +364,17 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         radius: proj.explosionRadius!,
         damage: proj.explosionDamage ?? 0,
         knockback: proj.explosionKnockback ?? 0,
-        color: proj.color || WEAPONS['projectile+explosive'].color,
+        color: proj.color || WEAPONS.cannon.color,
         ownerType: proj.ownerType,
         ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
         excludeIds: directTarget ? [directTarget.id, 'player'] : ['player'],
+        heatFrac: proj.energyBlastHeat,
     });
+    // A CHARGED SHELL (cannon + electric) starts its bounded chain at the
+    // blast, wherever it went off — an actor, the fuse, or a stop in terrain.
+    if (proj.energyElectric) {
+        queueElectric(g, impactPos, proj.energyElectric, proj.color || '#22d3ee');
+    }
 
     // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
     // Plasma Cannon, splash and all) must actually threaten the player —

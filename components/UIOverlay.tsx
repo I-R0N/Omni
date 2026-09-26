@@ -1764,11 +1764,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {/* Combination grid: one click lays out delivery + energy on
                     the flower (debugGrantWeapon's deterministic layout). */}
                 <div className="pointer-events-auto mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Equip combo</div>
-                {(['projectile', 'beam', 'spread', 'homing', 'radial'] as const).map(d => (
+                {(['projectile', 'beam', 'spread', 'homing', 'cannon'] as const).map(d => (
                   <div key={d} className="pointer-events-auto mt-0.5 flex items-center justify-between gap-1">
                     <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{d}</span>
                     <span className="flex gap-0.5">
-                      {([['', '—'], ['kinetic', 'K'], ['electric', 'E'], ['thermal', 'T'], ['magnetic', 'M'], ['explosive', 'X']] as const).map(([e, lbl]) => {
+                      {([['', '—'], ['kinetic', 'K'], ['electric', 'E'], ['thermal', 'T']] as const).map(([e, lbl]) => {
                         const key = e ? `${d}+${e}` : d;
                         return (
                           <button

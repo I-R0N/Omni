@@ -13,6 +13,10 @@ import { nextId } from './IdAllocator';
 import { enforceTypeCap } from './enforceCap';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
+/** A seeker keeps its lock until the target is this far outside the acquire
+ *  range (squared ratio), so a lock does not flicker at the rim. */
+const HOMING_LOCK_KEEP_SQ = 1.5 * 1.5;
+
 /**
  * ProjectileSystem — owns projectile lifecycle: spawning, homing steering,
  * lightning gravity attraction, and the hard cap on active projectiles.
@@ -71,9 +75,8 @@ export class ProjectileSystem {
     e.energyBurnSeconds = undefined;
     e.energyBurnRate = undefined;
     e.energyElectric = undefined;
-    e.energyMagnetic = undefined;
+    e.energyBlastHeat = undefined;
     e.speedRetain = undefined;
-    e.homingPrefers = undefined;
     e.homingTarget = undefined;
     e.homing = undefined;
     e.homingStrength = undefined;
@@ -230,9 +233,8 @@ export class ProjectileSystem {
         pooled.energyBurnSeconds = config.burnSeconds;
         pooled.energyBurnRate = config.burnRate;
         pooled.energyElectric = config.electric;
-        pooled.energyMagnetic = config.magnetic;
+        pooled.energyBlastHeat = config.blastHeat;
         pooled.speedRetain = config.speedRetain;
-        pooled.homingPrefers = config.homingPrefers;
         pooled.homingTarget = undefined;
         pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
         // Rival-shot flags (Stage 7) are stamped by GameEngine AFTER spawn, so a
@@ -282,9 +284,8 @@ export class ProjectileSystem {
           energyBurnSeconds: config.burnSeconds,
           energyBurnRate: config.burnRate,
           energyElectric: config.electric,
-          energyMagnetic: config.magnetic,
+          energyBlastHeat: config.blastHeat,
           speedRetain: config.speedRetain,
-          homingPrefers: config.homingPrefers,
           appliesEffect: config.appliesEffect,
         });
       }
@@ -336,32 +337,34 @@ export class ProjectileSystem {
           targetDy = wrapDeltaY(p.position.y, player.position.y);
           hasTarget = true;
         }
-      } else if (p.homingTarget) {
-        // A PREFERENCE-homing round (electric → conductors, magnetic →
-        // metal) was handed its target by GameEngine's bounded grid
-        // acquire; steer at it while it lives.
-        const t = p.homingTarget;
-        if (t.active && !t.isExploding) {
+      } else {
+        // PLAYER seeker: LOCK the nearest ENEMY in acquire range and hold it
+        // while it lives and stays within LOCK_KEEP × the acquire range —
+        // enemies only (user call), never terrain.  The lock is on the round
+        // (`homingTarget`), which is also what the target bracket draws.
+        let t = p.homingTarget;
+        if (t && (!t.active || t.isExploding || t.type !== EntityType.ENEMY)) t = undefined;
+        if (t) {
+          const dx = wrapDeltaX(p.position.x, t.position.x);
+          const dy = wrapDeltaY(p.position.y, t.position.y);
+          if (dx * dx + dy * dy > acquireRangeSq * HOMING_LOCK_KEEP_SQ) t = undefined;
+        }
+        if (!t) {
+          let minDist = acquireRangeSq;
+          for (let j = 0; j < enemies.length; j++) {
+            const e = enemies[j];
+            if (!e.active || e.isExploding) continue;
+            const dx = wrapDeltaX(p.position.x, e.position.x);
+            const dy = wrapDeltaY(p.position.y, e.position.y);
+            const d2 = dx * dx + dy * dy;
+            if (d2 < minDist) { minDist = d2; t = e; }
+          }
+        }
+        p.homingTarget = t;
+        if (t) {
           targetDx = wrapDeltaX(p.position.x, t.position.x);
           targetDy = wrapDeltaY(p.position.y, t.position.y);
           hasTarget = true;
-        } else {
-          p.homingTarget = undefined;
-        }
-      } else if (!p.homingPrefers) {
-        // Player homing weapon: steer toward the nearest enemy within range.
-        let minDist = acquireRangeSq;
-        for (let j = 0; j < enemies.length; j++) {
-          const e = enemies[j];
-          const dx = wrapDeltaX(p.position.x, e.position.x);
-          const dy = wrapDeltaY(p.position.y, e.position.y);
-          const d2 = dx * dx + dy * dy;
-          if (d2 < minDist) {
-            minDist = d2;
-            targetDx = dx;
-            targetDy = dy;
-            hasTarget = true;
-          }
         }
       }
 

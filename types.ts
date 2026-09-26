@@ -354,17 +354,15 @@ export interface WeaponConfig {
   /** Electric discharge from the contact point (or the ship, for beams and
    *  novas): magnitude plus the chain caps it is planned under. */
   electric?: { magnitude: number; hops: number; targets: number; hopRange: number; branches: number };
-  /** Magnetic pulse on contact (or from the ship): pull or push metal within
-   *  `radius`; `seconds` > 0 leaves a short-lived attractor behind. */
-  magnetic?: { strength: number; radius: number; mode: 'pull' | 'push'; seconds?: number };
-  /** Kinetic push added to a body struck by a beam tick / radial wave. */
+  /** SHELL (cannon): fraction of the blast's damage that also lands as HEAT
+   *  on every body the ring reaches (the incendiary shell). */
+  blastHeat?: number;
+  /** Kinetic push added to a body struck by a beam tick. */
   push?: number;
   /** Per-second velocity retention of the round in flight (1 = none).  A
    *  pellet that loses speed also loses damage — damage is measured from
    *  the speed a round still has — so range falloff needs no curve. */
   speedRetain?: number;
-  /** Homing target preference: conductive bodies, or metal. */
-  homingPrefers?: 'conductive' | 'metal';
   // ── Non-projectile deliveries ──
   /** BEAM: seconds a pulse lasts, how far it reaches, how wide it is, and
    *  the interval between applications along it. */
@@ -372,7 +370,7 @@ export interface WeaponConfig {
   beamRange?: number;
   beamWidth?: number;
   beamTick?: number;
-  /** RADIAL / SPREAD-instant: reach of the pulse, and the cone half-angle
+  /** SPREAD-instant: reach of the cone, and its half-angle
    *  (degrees) for a spread that resolves instantly rather than as rounds. */
   pulseRadius?: number;
   coneHalfDeg?: number;
@@ -610,10 +608,9 @@ export interface GameEntity {
   energyBurnSeconds?: number;
   energyBurnRate?: number;
   energyElectric?: WeaponConfig['electric'];
-  energyMagnetic?: WeaponConfig['magnetic'];
+  energyBlastHeat?: number;
   speedRetain?: number;
-  homingPrefers?: 'conductive' | 'metal';
-  /** The body a preference-homing round is steering at (bounded acquire). */
+  /** The ENEMY a player seeker has locked (drawn as the target bracket). */
   homingTarget?: GameEntity;
   weaponCooldown?: number;
   burstQueue?: number; // How many shots left in current burst

@@ -842,10 +842,10 @@ test.describe('the base bank, and the blast derived from it', () => {
         return out;
       };
       const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
-      // Every combination that fires ROUNDS (a beam or a radial pulse has no
-      // bank to scale).  The legacy-tuned ones are the old roster.
+      // Every combination that fires ROUNDS (a beam has no bank to scale).
+      // The legacy-tuned ones are the old roster.
       const types = ['projectile', 'projectile+kinetic', 'spread+kinetic', 'projectile+electric',
-                     'homing+kinetic', 'projectile+explosive', 'spread', 'homing'];
+                     'homing+kinetic', 'cannon', 'spread', 'homing'];
       return types.map(t => ({ type: t, base: fire(t, 1), gunned: fire(t, g3), g3 }));
     });
 
@@ -891,9 +891,9 @@ test.describe('the base bank, and the blast derived from it', () => {
         };
         const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
         return {
-          authored: M.WEAPONS['projectile+explosive'].explosionDamage ?? null,
-          authoredRadius: M.WEAPONS['projectile+explosive'].explosionRadius ?? null,
-          bite: M.WEAPONS['projectile+explosive'].damage,
+          authored: M.WEAPONS.cannon.explosionDamage ?? null,
+          authoredRadius: M.WEAPONS.cannon.explosionRadius ?? null,
+          bite: M.WEAPONS.cannon.damage,
           base: fire(1), gunned: fire(g3), g3,
           coupling: M.BLAST_ENERGY_COUPLING,
           perDamage: M.IMPACT_ENERGY_PER_DAMAGE,

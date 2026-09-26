@@ -6073,18 +6073,21 @@ export const BASE_BANK_DIVISOR = GUNNERY_MK3_TRIPLE_MULT / BASE_BANK_TRIM;   // 
 
 // ── WEAPONS ARE MODULES: a DELIVERY plus an optional ENERGY MODIFIER ─────────
 //
-// A gun module IS a delivery (projectile / beam / spread / homing / radial):
+// A gun module IS a delivery (projectile / beam / spread / homing / cannon):
 // it decides HOW energy arrives — cadence, count, speed, mass, spread, range,
-// duration, radius.  An energy MODIFIER module touching that gun in the weapon
-// flower decides WHAT KIND of energy it is (kinetic / electric / thermal /
-// magnetic / explosive) and gives the pair its behaviour.  The weapon that
-// fires is `weaponConfig(key)` for `key = 'delivery+energy'`, precomputed for
-// all 30 keys below so the hot path is a lookup.
+// duration, the cannon's blast.  An energy MODIFIER module touching that gun
+// in the weapon flower decides WHAT KIND of energy it is (kinetic / electric /
+// thermal) and gives the pair its behaviour.  The weapon that fires is
+// `weaponConfig(key)` for `key = 'delivery+energy'`, precomputed for all 20
+// keys below so the hot path is a lookup.  (Magnetic and explosive energies
+// were removed — user call; the blast belongs to the CANNON delivery, which
+// replaced the Pulse.)
 //
 // UNMODIFIED DELIVERIES ARE THE WEAK BASE (§9): plain kinetic at ~60% of the
 // retired Blaster's delivered damage per second.  The Blaster landed a 4 bite
 // every 0.14 s = 28.6/s; every entry in DELIVERY_BASE sits at 16-17/s
-// (`nominalDps`, pinned by tests/energy.spec.ts).  The MODIFIERS are what make
+// (`nominalDps`, pinned by tests/energy.spec.ts) — except the CANNON, whose
+// direct bite is 12.9/s because its blast carries the rest.  The MODIFIERS are what make
 // a weapon strong, which is why every combination that an OLD gun maps onto
 // inherits that gun's own tuning — the old roster survives as seven named
 // points in the new space (see LEGACY_WEAPON_MAP in engine/systems/energy.ts).
@@ -6103,15 +6106,16 @@ export const LEGACY_BASE_WEAPON = { damage: 4, cooldown: 0.14, dps: 4 / 0.14 } a
  *  unmodified base is slate.  Legacy-tuned combos keep their old gun's colour
  *  where it already said the same thing. */
 export const ENERGY_COLORS: Record<EnergyModifier | 'none', string> = {
-  none: '#94a3b8', kinetic: '#f97316', electric: '#22d3ee',
-  thermal: '#ef4444', magnetic: '#60a5fa', explosive: '#a855f7',
+  none: '#94a3b8', kinetic: '#f97316', electric: '#22d3ee', thermal: '#ef4444',
 };
+/** The Cannon's own colour — the old Plasma Cannon purple, which it keeps. */
+export const CANNON_COLOR = '#a855f7';
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
-  projectile: 'Projector', beam: 'Beam', spread: 'Scatter', homing: 'Seeker', radial: 'Pulse',
+  projectile: 'Projector', beam: 'Beam', spread: 'Scatter', homing: 'Seeker', cannon: 'Cannon',
 };
 const ENERGY_LABEL: Record<EnergyModifier, string> = {
-  kinetic: 'Kinetic', electric: 'Arc', thermal: 'Thermal', magnetic: 'Mag', explosive: 'Blast',
+  kinetic: 'Kinetic', electric: 'Arc', thermal: 'Thermal',
 };
 
 /** The five UNMODIFIED deliveries — plain kinetic, deliberately weak. */
@@ -6132,16 +6136,20 @@ const DELIVERY_BASE: Record<Delivery, WeaponConfig> = {
   homing: { delivery: 'homing', name: 'Seeker', cooldown: 0.3, speed: 11, damage: 5,
     lifetime: 2.5, color: ENERGY_COLORS.none, size: 6, count: 1, spread: 8, recoil: 0.3,
     mass: 2.6 / BASE_BANK_DIVISOR, homing: true, homingStrength: 0.8 },
-  // A ring of 7 per 0.42 s = 16.7/s against one body (more against a crowd).
-  radial: { delivery: 'radial', name: 'Pulse', cooldown: 0.42, speed: 0, damage: 7, lifetime: 0,
-    color: ENERGY_COLORS.none, size: 0, count: 1, spread: 0, recoil: 0,
-    pulseRadius: 140, push: 3 },
+  // THE PLASMA CANNON (user call: the Pulse became the Cannon).  The old
+  // Cannon verbatim: a heavy round with ONE blast at the end of it, tripped
+  // by an ACTOR, by its fuse, or by running out of travel energy in terrain;
+  // the blast is derived from the shell's own energy (`blastDamageFor`).
+  cannon: { delivery: 'cannon', name: 'Cannon', cooldown: 1.40, speed: 18, damage: 18, lifetime: 2.5,
+    color: CANNON_COLOR, size: 16, count: 1, spread: 0, recoil: 4.0,
+    mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
+    detonateOn: 'enemy', fuseSeconds: 0.42 },
 };
 
 /** What each MODIFIER does to each DELIVERY (§10).  Every entry is a real
  *  behaviour, not a multiplier: the payload fields are read by different
  *  paths (heat by the thermal state, `electric` by the bounded chain,
- *  `magnetic` by the pulse/attractor, `explosionRadius` by the blast). */
+ *  `explosionRadius` / `blastHeat` by the blast). */
 const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = {
   projectile: {
     // DENSE SLUG (was BURST).  A heavy 7-damage round with a three-bite bank:
@@ -6156,15 +6164,6 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // INCENDIARY — a light round that leaves heat and a short burn.
     thermal: { name: 'Incendiary', damage: 2, cooldown: 0.24, color: ENERGY_COLORS.thermal,
       heat: 8, burnSeconds: 1.5, burnRate: 5 },
-    // MAGNETISED SLUG — on impact, a brief attractor at the hit point.
-    magnetic: { name: 'Mag Slug', damage: 4, cooldown: 0.3, color: ENERGY_COLORS.magnetic,
-      magnetic: { strength: 7, radius: 220, mode: 'pull', seconds: 0.5 } },
-    // SHELL (was CANNON) — the old Plasma Cannon verbatim: heavy round, one
-    // blast, actor/fuse/stop detonation, derived charge.
-    explosive: { name: 'Shell', cooldown: 1.40, speed: 18, damage: 18, lifetime: 2.5,
-      color: ENERGY_COLORS.explosive, size: 16, spread: 0, recoil: 4.0,
-      mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
-      detonateOn: 'enemy', fuseSeconds: 0.42 },
   },
   beam: {
     // A WIDE, HEAVY beam with a strong shove — and a short uptime to pay for it.
@@ -6179,15 +6178,6 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // Almost no kinetic bite: its work is done by accumulation.
     thermal: { name: 'Heat Lance', damage: 0.3, cooldown: 0.55, beamDuration: 0.5, beamRange: 360,
       beamWidth: 4, beamTick: 0.05, heat: 2.2, color: ENERGY_COLORS.thermal },
-    // TRACTOR: pulls metal along the line toward the ship (a charged pulse
-    // pushes).  Does nothing to anything that is not metal.
-    magnetic: { name: 'Tractor', damage: 0, cooldown: 0.7, beamDuration: 0.6, beamRange: 380,
-      beamWidth: 10, beamTick: 0.1, color: ENERGY_COLORS.magnetic,
-      magnetic: { strength: 3.5, radius: 45, mode: 'pull' } },
-    // PULSED: a small detonation at the contact point on a fixed interval.
-    explosive: { name: 'Pulse Lance', damage: 0, cooldown: 1.0, beamDuration: 0.5, beamRange: 280,
-      beamWidth: 3, beamTick: 0.125, color: ENERGY_COLORS.explosive,
-      explosionRadius: 45, explosionDamage: 5, explosionKnockback: 2 },
   },
   spread: {
     // SHOTGUN (was SHOTGUN) — the old pellet cone, now losing speed (and so
@@ -6203,52 +6193,30 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     thermal: { name: 'Flamer', damage: 0.4, cooldown: 0.15, speed: 9, lifetime: 0.35, count: 6,
       spread: 36, size: 5, recoil: 0.2, color: ENERGY_COLORS.thermal, heat: 2.5,
       mass: 0.12 / BASE_BANK_DIVISOR, speedRetain: 0.2 },
-    // A CONE PULSE that shoves metal and metal debris outward.
-    magnetic: { name: 'Repulsor', damage: 0, cooldown: 0.6, pulseRadius: 260, coneHalfDeg: 35,
-      color: ENERGY_COLORS.magnetic, magnetic: { strength: 11, radius: 260, mode: 'push' } },
-    // BOMBLETS across the cone: small shells with a short fuse.
-    explosive: { name: 'Cluster', damage: 2, cooldown: 0.9, speed: 13, lifetime: 1.0, count: 5,
-      spread: 30, size: 7, recoil: 1.5, color: ENERGY_COLORS.explosive,
-      mass: 0.5 / BASE_BANK_DIVISOR, explosionRadius: 50, explosionKnockback: 2.5,
-      detonateOn: 'impact', fuseSeconds: 0.35 },
   },
   homing: {
     // SEEKER (was HOMING) — the old Seeker Missiles verbatim.
     kinetic: { name: 'Seeker', cooldown: 0.65, speed: 12, damage: 8, lifetime: 3.0,
       color: '#3b82f6', size: 8, spread: 10, recoil: 0.5, mass: 3.5556 / BASE_BANK_DIVISOR,
       homingStrength: 1 },
-    // Seeks the nearest CONDUCTOR and discharges a chain on arrival.
+    // Locks the nearest ENEMY (every seeker does) and discharges a chain on arrival.
     electric: { name: 'Arc Seeker', damage: 3, cooldown: 0.6, color: ENERGY_COLORS.electric,
-      homingPrefers: 'conductive',
       electric: { magnitude: 6, hops: 2, targets: 6, hopRange: 160, branches: 2 } },
     // LATCHES ON and heats its target over a short duration.
     thermal: { name: 'Leech', damage: 2, cooldown: 0.6, color: ENERGY_COLORS.thermal,
       heat: 4, burnSeconds: 2.5, burnRate: 8 },
-    // Prefers METAL; on arrival a brief attractor pulls nearby metal debris.
-    magnetic: { name: 'Lodestone', damage: 3, cooldown: 0.6, color: ENERGY_COLORS.magnetic,
-      homingPrefers: 'metal', magnetic: { strength: 8, radius: 240, mode: 'pull', seconds: 0.9 } },
-    // MISSILE with a radial blast on arrival.
-    explosive: { name: 'Missile', damage: 6, cooldown: 0.8, size: 8, color: ENERGY_COLORS.explosive,
-      mass: 3.2 / BASE_BANK_DIVISOR, explosionRadius: 80, explosionKnockback: 4,
-      detonateOn: 'impact', fuseSeconds: 2.0 },
   },
-  radial: {
-    // SHOCKWAVE ring pushing everything outward from the ship.
-    kinetic: { name: 'Shockwave', damage: 10, cooldown: 1.2, pulseRadius: 220, push: 8,
-      color: ENERGY_COLORS.kinetic },
-    // NOVA: discharges to up to N conductors in radius.
-    electric: { name: 'Nova', damage: 0, cooldown: 1.0, pulseRadius: 260, color: ENERGY_COLORS.electric,
-      electric: { magnitude: 7, hops: 1, targets: 8, hopRange: 260, branches: 8 } },
-    // HEAT PULSE with distance falloff.
-    thermal: { name: 'Heat Pulse', damage: 0, cooldown: 0.9, pulseRadius: 220, heat: 18,
-      color: ENERGY_COLORS.thermal },
-    // Pulls metal TOWARD the ship.
-    magnetic: { name: 'Magnet', damage: 0, cooldown: 0.8, pulseRadius: 360, color: ENERGY_COLORS.magnetic,
-      magnetic: { strength: 10, radius: 360, mode: 'pull' } },
-    // A BLAST centred on the ship.  The player is never in the ring's target
-    // list (the existing self-damage rule), so it cannot hurt its owner.
-    explosive: { name: 'Nova Blast', damage: 0, cooldown: 1.4, pulseRadius: 180,
-      color: ENERGY_COLORS.explosive, explosionRadius: 180, explosionDamage: 14, explosionKnockback: 7 },
+  // CANNON combinations — PLACEHOLDERS (user call: delivery and combination
+  // feedback is still to come).  Each reuses an existing effect.
+  cannon: {
+    // A heavier, slower shell with a bigger blast.
+    kinetic: { name: 'Heavy Shell', damage: 24, speed: 16, cooldown: 1.7, size: 18, recoil: 5.0,
+      mass: 5.3333 / BASE_BANK_DIVISOR, explosionRadius: 130, explosionKnockback: 8 },
+    // The blast point starts a bounded arc chain (`queueElectric`).
+    electric: { name: 'Arc Shell', damage: 14, color: ENERGY_COLORS.electric,
+      electric: { magnitude: 8, hops: 3, targets: 10, hopRange: 180, branches: 2 } },
+    // An incendiary shell: the blast also heats everything it reaches.
+    thermal: { name: 'Incendiary Shell', damage: 14, color: ENERGY_COLORS.thermal, blastHeat: 1.0 },
   },
 };
 
@@ -6266,7 +6234,7 @@ function composeWeapon(d: Delivery, e: EnergyModifier | null): WeaponConfig {
   };
 }
 
-/** Every weapon key (5 bare deliveries + 25 combinations) → its config. */
+/** Every weapon key (5 bare deliveries + 15 combinations) → its config. */
 export const WEAPONS: Readonly<Record<string, WeaponConfig>> = (() => {
   const out: Record<string, WeaponConfig> = {};
   for (const d of DELIVERIES) {
@@ -6293,7 +6261,6 @@ export function nominalDps(c: WeaponConfig): number {
     const ticks = Math.max(1, Math.round((c.beamDuration ?? 0) / Math.max(1e-3, c.beamTick ?? 1)));
     return (c.damage * ticks) / cd;
   }
-  if (c.delivery === 'radial') return c.damage / cd;
   return (c.damage * Math.max(1, c.count)) / cd;
 }
 
@@ -6322,8 +6289,8 @@ export const WEAPON_TRIGGERS: Record<Delivery, TriggerProfile> = {
   spread: { kind: 'weapon', start: 0.42, end: 0.62, strength: 0.80 },
   // Lock-and-release: the pull hardens as it goes.
   homing: { kind: 'slope', start: 0.30, end: 0.65, strength: 0.25, endStrength: 0.85 },
-  // The deepest pull: a ring around the whole ship.
-  radial: { kind: 'slope', start: 0.25, end: 0.75, strength: 0.35, endStrength: 1.0 },
+  // The deepest pull: a heavy shell, one commit per shot.
+  cannon: { kind: 'slope', start: 0.25, end: 0.75, strength: 0.35, endStrength: 1.0 },
 };
 
 // LEFT trigger under the trigger-thrust scheme.  A SLOPE that stiffens with
@@ -6428,7 +6395,7 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
   // cadence would be unsurvivable.  The splash is what makes hiding behind
   // cover (or hugging the hull) stop working.
   SIEGE: {
-    ...WEAPONS['projectile+explosive'],
+    ...WEAPONS.cannon,
     name: 'Bastion Siege Battery',
     cooldown: 3.2,          // vs the player's 1.40 — a slow, readable lob
     damage: 9,              // direct hit (player: 18)
@@ -6933,7 +6900,7 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'dlv_spread',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'spread',     label: 'Scatter',   desc: 'Fires a cone',        cost: 25000, weight: 1.4 },
   { id: 'dlv_homing',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'homing',     label: 'Seeker',    desc: 'Fires tracking rounds', cost: 32500, weight: 1.6 },
   { id: 'dlv_beam',       family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'beam',       label: 'Beam',      desc: 'Fires a timed beam',  cost: 40000, weight: 1.8 },
-  { id: 'dlv_radial',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'radial',     label: 'Pulse',     desc: 'Fires a ring around the ship', cost: 45000, weight: 2.0 },
+  { id: 'dlv_cannon',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'cannon',     label: 'Cannon',    desc: 'Fires a heavy shell that bursts', cost: 45000, weight: 2.2 },
   // ── Weapon group: ENERGY MODIFIERS (must touch a gun; modify the guns they
   // touch).  A modifier is per-GUN, unlike Gunnery/Autoloader: it decides what
   // KIND of energy the adjacent delivery carries.  A gun touching several takes
@@ -6941,8 +6908,6 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   { id: 'nrg_kinetic',   family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Kinetic',   desc: 'Dense, heavy impacts',        cost: 20000, effect: { energy: 'kinetic' },   weight: 0.6 },
   { id: 'nrg_electric',  family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Electric',  desc: 'Arcs that chain through conductors', cost: 30000, effect: { energy: 'electric' },  weight: 0.4 },
   { id: 'nrg_thermal',   family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Thermal',   desc: 'Heat that weakens and melts', cost: 30000, effect: { energy: 'thermal' },   weight: 0.4 },
-  { id: 'nrg_magnetic',  family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Magnetic',  desc: 'Pulls and pushes metal',      cost: 30000, effect: { energy: 'magnetic' },  weight: 0.5 },
-  { id: 'nrg_explosive', family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Explosive', desc: 'Blasts: impulse plus heat',   cost: 40000, effect: { energy: 'explosive' }, weight: 0.7 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
   // GUNNERY IS THE HEAVIER ROUND, and that is what absorbed the deleted
   // Penetration module (step 5).  `damageFrac` scales the bite AND the bank

@@ -113,6 +113,11 @@ const _dentPreSnapshot: Float64Array = new Float64Array(16);
 // composed / dies) the recovery pass / clear sites remove it.
 export const pendingPlasticDentEntities: Set<GameEntity> = new Set();
 
+/** A kinetic round passing through a drifting GAS body shoves it along the
+ *  round's travel by this fraction of the round's speed, capped. */
+const GAS_DISPLACE_PER_SPEED = 0.08;
+const GAS_DISPLACE_MAX_DV = 2.5;
+
 export class PhysicsSystem {
   // Dual-grid system:
   // staticGrid stores immovable geometry (Tiles) and is calculated ONLY on map load.
@@ -3806,6 +3811,25 @@ export class PhysicsSystem {
                   // Arm the striker's post-shatter cooldown.
                   other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
                   if (onDeath) onDeath(nebula);
+              }
+          }
+          // A ROUND THROUGH A GAS (energy modules, user call): mechanical
+          // energy DISPLACES a gas it passes through — never breaks it —
+          // exactly as a kinetic beam already does.  A drifting body takes a
+          // shove along the round's travel, once per round, capped; a static
+          // cloud tile has nowhere to go and is left alone.  The round is not
+          // charged for it: a gas takes no damage, so it absorbs no energy.
+          if (other.type === EntityType.PROJECTILE && nebula.mass !== Infinity
+              && nebula.velocity && other.velocity) {
+              const hit = other.hitEntityIds ?? (other.hitEntityIds = []);
+              if (!hit.includes(nebula.id)) {
+                  hit.push(nebula.id);
+                  const sp = Math.hypot(other.velocity.x, other.velocity.y);
+                  if (sp > 1e-6) {
+                      const dv = Math.min(GAS_DISPLACE_MAX_DV, sp * GAS_DISPLACE_PER_SPEED);
+                      nebula.velocity.x += (other.velocity.x / sp) * dv;
+                      nebula.velocity.y += (other.velocity.y / sp) * dv;
+                  }
               }
           }
           // No impulse / no positional correction regardless of outcome.
