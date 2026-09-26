@@ -27,6 +27,7 @@
  */
 
 import type { GameEntity } from '../../types';
+import type { GrainSpec } from './ShardSystem.types';
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 
@@ -105,22 +106,29 @@ export function resolveWeaponKey(id: string | null | undefined): WeaponKey | nul
 
 // ── Materials ────────────────────────────────────────────────────────────────
 
-/** A material is a small reusable property, not a tile flag: terrain derives
- *  it from its shard variant, and ANY entity may set `GameEntity.material`
- *  to opt in (a metal enemy is `material: 'metal'` away from a real metal
- *  response).  `generic` is the safe default for everything else. */
+/** A material is a small reusable property, not a tile flag: terrain gets
+ *  it from its shard variant's `material` field (SHARD_VARIANTS), and ANY
+ *  entity may set `GameEntity.material` to opt in (a metal enemy is
+ *  `material: 'metal'` away from a real metal response).  `generic` is the
+ *  safe default for everything else. */
 export type MaterialId = 'rock' | 'glass' | 'metal' | 'plastic' | 'nebula' | 'generic';
+export const MATERIAL_IDS: readonly MaterialId[] = ['rock', 'glass', 'metal', 'plastic', 'nebula', 'generic'];
+
+/** Shard variant → material, filled from SHARD_VARIANTS' own `material`
+ *  fields at load (`registerVariantMaterials`).  The variant table SAYS what
+ *  each row is made of; nothing parses a name. */
+const VARIANT_MATERIAL: Record<string, MaterialId> = {};
+export function registerVariantMaterials(table: Readonly<Record<string, { material?: MaterialId }>>): void {
+  for (const k of Object.keys(table)) {
+    const m = table[k].material;
+    if (m) VARIANT_MATERIAL[k] = m;
+  }
+}
 
 export function materialOf(e: GameEntity): MaterialId {
   if (e.material) return e.material;
   const v = e.shardVariant;
-  if (!v) return 'generic';
-  if (v.startsWith('rock')) return 'rock';
-  if (v.startsWith('glass')) return 'glass';
-  if (v.startsWith('metal')) return 'metal';
-  if (v.startsWith('plastic')) return 'plastic';
-  if (v.startsWith('nebula')) return 'nebula';
-  return 'generic';   // indestructible, unknown
+  return (v && VARIANT_MATERIAL[v]) || 'generic';
 }
 
 export interface MaterialResponse {
@@ -180,6 +188,38 @@ export interface MaterialResponse {
   energizeSec: number;
 }
 
+/** How a material LOOKS hot: `heatRamp` maps local temperature (0..1) to a
+ *  colour ([t, r, g, b] stops), `heatTint` caps how much of the body the heat
+ *  colour covers, `heatEmit` is the emissivity (how much of the T⁴ radiance
+ *  becomes visible light).  Presentation only (render/energyFx.ts). */
+export interface MaterialLook {
+  heatRamp: readonly (readonly [number, number, number, number])[];
+  heatTint: number;
+  heatEmit: number;
+}
+
+export interface FractureProfile { siteScale: number; bias?: number; impulse: number }
+
+/** EVERYTHING a material is, in one place (user call: a central material
+ *  table).  The energy response (MaterialResponse) plus:
+ *   - `grain`    the GRAIN geometry + bond strength its tile AND its shard
+ *                share (`radialSpeed` is per variant — how fast pieces fly
+ *                is about being mobile, not about the grain).  null = no
+ *                grain model.
+ *   - `density`  the impact density (mass per diameter²) its shard mass
+ *                ladders read; null for materials that are not shards.
+ *   - `fracture` break shape per domain; null = never fractures (a gas).
+ *   - `look`     how it looks hot.
+ *   - `sfx`      the impact / break voice suffix (`impact.tile.<sfx>`).
+ *  A new material is one entry here plus its shard rows naming it. */
+export interface MaterialDef extends MaterialResponse {
+  grain: Omit<GrainSpec, 'radialSpeed'> | null;
+  density: number | null;
+  fracture: { mechanical: FractureProfile; thermal: FractureProfile } | null;
+  look: MaterialLook;
+  sfx: string;
+}
+
 /**
  * THE MATERIAL TABLE (§8).  Coefficients live here; BEHAVIOUR lives in the
  * paths that read them, and those paths branch on these PROPERTIES, never on
@@ -187,38 +227,118 @@ export interface MaterialResponse {
  * edit rather than new code.  Read it as "what is this stuff", not as a
  * damage chart.
  */
-export const MATERIAL_RESPONSE: Readonly<Record<MaterialId, MaterialResponse>> = {
-  rock:    { gas: false, heatWeakening: 1.5,
-             heatAbsorb: 0.8, specificHeat: 0.8,  coolingPerSec: 0.25, thermalConductivity: 0.12,
-             thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-             conductivity: 0.15, electricDamage: 0.3, energizeSec: 0 },
-  glass:   { gas: false, heatWeakening: 1.0,
-             heatAbsorb: 0.9, specificHeat: 0.84, coolingPerSec: 0.15, thermalConductivity: 0.08,
-             thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-             conductivity: 0.05, electricDamage: 0.2, energizeSec: 0 },
-  metal:   { gas: false, heatWeakening: 2.5,
-             heatAbsorb: 0.7, specificHeat: 0.45, coolingPerSec: 0.1, thermalConductivity: 1.0,
-             thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-             conductivity: 1.0, electricDamage: 1.0, energizeSec: 0 },
-  plastic: { gas: false, heatWeakening: 0.5,
-             heatAbsorb: 1.0, specificHeat: 1.5, coolingPerSec: 0.2, thermalConductivity: 0.03,
-             thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3, agitation: 0, disperseAt: Infinity,
-             conductivity: 0.03, electricDamage: 0.1, energizeSec: 0 },
+export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
+  rock: {
+    gas: false, heatWeakening: 1.5,
+    heatAbsorb: 0.8, specificHeat: 0.8,  coolingPerSec: 0.25, thermalConductivity: 0.12,
+    thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+    conductivity: 0.15, electricDamage: 0.3, energizeSec: 0,
+    grain: { grainCountMin: 3, grainCountMax: 16, grainSize: 14, impactBias: 0.75, regularity: 0.5,
+             progressive: true, bondStrength: 0.4 },
+    density: 0.18,
+    // Chunky and localised, carrying real momentum.
+    fracture: { mechanical: { siteScale: 1, impulse: 1.15 },
+                thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
+    // Stays in magma reds and ambers; never whitens.
+    look: { heatRamp: [[0, 70, 26, 18], [0.35, 140, 34, 14], [0.7, 205, 70, 18], [1, 240, 145, 50]],
+            heatTint: 0.6, heatEmit: 0.5 },
+    sfx: 'rock',
+  },
+  glass: {
+    gas: false, heatWeakening: 1.0,
+    heatAbsorb: 0.9, specificHeat: 0.84, coolingPerSec: 0.15, thermalConductivity: 0.08,
+    thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+    conductivity: 0.05, electricDamage: 0.2, energizeSec: 0,
+    grain: { grainCountMin: 6, grainCountMax: 10, grainSize: 15, impactBias: 0.75, regularity: 0.5,
+             progressive: true, bondStrength: 0.4 },
+    density: 0.10,
+    // A violent mechanical SHATTER (flung hard) against a thermal STRESS
+    // failure (few, large, quiet pieces) — the headline contrast.
+    fracture: { mechanical: { siteScale: 1, impulse: 1.5 },
+                thermal:    { siteScale: 0.45, bias: 0.0, impulse: 0.2 } },
+    // Clear, so heat shows THROUGH it and covers less: soft amber to straw.
+    look: { heatRamp: [[0, 150, 80, 40], [0.4, 220, 120, 45], [0.75, 245, 175, 80], [1, 255, 225, 150]],
+            heatTint: 0.42, heatEmit: 0.55 },
+    sfx: 'glass',
+  },
+  metal: {
+    gas: false, heatWeakening: 2.5,
+    heatAbsorb: 0.7, specificHeat: 0.45, coolingPerSec: 0.1, thermalConductivity: 1.0,
+    thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+    conductivity: 1.0, electricDamage: 1.0, energizeSec: 0,
+    grain: { grainCountMin: 8, grainCountMax: 22, grainSize: 8, impactBias: 0.35, regularity: 0.95,
+             sizeSpread: 0, bondSpread: 0, grainDent: 0.05, progressive: true, bondStrength: 1.8 },
+    density: 0.30,
+    // Heavy and slow whatever broke it; the fewest, largest pieces of any
+    // solid once heat has had it.
+    fracture: { mechanical: { siteScale: 1, impulse: 0.4 },
+                thermal:    { siteScale: 0.35, bias: 0.1, impulse: 0.25 } },
+    // The incandescent ladder: cherry → orange → near-white.
+    look: { heatRamp: [[0, 90, 24, 18], [0.3, 170, 34, 16], [0.6, 235, 92, 28], [0.85, 250, 170, 70], [1, 255, 228, 175]],
+            heatTint: 0.62, heatEmit: 0.7 },
+    sfx: 'metal',
+  },
+  plastic: {
+    gas: false, heatWeakening: 0.5,
+    heatAbsorb: 1.0, specificHeat: 1.5, coolingPerSec: 0.2, thermalConductivity: 0.03,
+    thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3, agitation: 0, disperseAt: Infinity,
+    conductivity: 0.03, electricDamage: 0.1, energizeSec: 0,
+    grain: { grainCountMin: 8, grainCountMax: 16, grainSize: 6, impactBias: 0.5, regularity: 0.55,
+             sizeSpread: 0, bondSpread: 0, grainDent: 0.10, dentRecoverSeconds: 2.5,
+             progressive: true, bondStrength: 1.8 },
+    density: 0.13,
+    // Gives rather than shatters.
+    fracture: { mechanical: { siteScale: 1, impulse: 0.7 },
+                thermal:    { siteScale: 0.6, bias: 0.1, impulse: 0.3 } },
+    // SCORCHES — yellowing then browning, a dim ember at the very top.
+    look: { heatRamp: [[0, 150, 125, 55], [0.4, 120, 80, 32], [0.75, 70, 40, 22], [1, 150, 55, 20]],
+            heatTint: 0.58, heatEmit: 0.18 },
+    sfx: 'plastic',
+  },
   // Gas: stirred by heat, energised (not damaged) by arcs, passed through by
-  // beams, never fractured.
-  nebula:  { gas: true, heatWeakening: 0,
-             heatAbsorb: 1.0, specificHeat: 1.0, coolingPerSec: 0.5, thermalConductivity: 0.05,
-             thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0.4, disperseAt: 1.0,
-             conductivity: 0.7, electricDamage: 0, energizeSec: 3.5 },
+  // beams, shoved by kinetic rounds, never fractured.  It takes the voronoi
+  // GEOMETRY but no bondStrength (no damage model — CLAUDE.md §8).
+  nebula: {
+    gas: true, heatWeakening: 0,
+    heatAbsorb: 1.0, specificHeat: 1.0, coolingPerSec: 0.5, thermalConductivity: 0.05,
+    thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0.4, disperseAt: 1.0,
+    conductivity: 0.7, electricDamage: 0, energizeSec: 3.5,
+    grain: { grainCountMin: 3, grainCountMax: 14, grainSize: 20, impactBias: 0.5, regularity: 0.15,
+             sizeSpread: 0.6 },
+    density: null,
+    fracture: null,
+    // Warms to a rose-pink and takes light only (no hard outline to tint).
+    look: { heatRamp: [[0, 150, 60, 90], [0.5, 225, 110, 140], [1, 255, 190, 205]],
+            heatTint: 0, heatEmit: 0.35 },
+    sfx: 'nebula',
+  },
   // Enemies, the player, indestructible terrain, anything unknown: a hull.
   // Electrically it IS metal (user call: an arc on a metal tile must be able
   // to jump to the ship beside it at full strength); thermally a little less
-  // conductive, and it burns (heat is a DoT).
-  generic: { gas: false, heatWeakening: 0.5,
-             heatAbsorb: 0.8, specificHeat: 0.5, coolingPerSec: 0.4, thermalConductivity: 0.8,
-             thermalDps: 5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-             conductivity: 1.0, electricDamage: 1.0, energizeSec: 0 },
+  // conductive, and it burns (heat is a DoT).  It sounds like metal.
+  generic: {
+    gas: false, heatWeakening: 0.5,
+    heatAbsorb: 0.8, specificHeat: 0.5, coolingPerSec: 0.4, thermalConductivity: 0.8,
+    thermalDps: 5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
+    conductivity: 1.0, electricDamage: 1.0, energizeSec: 0,
+    grain: null,
+    density: null,
+    fracture: { mechanical: { siteScale: 1, impulse: 1 },
+                thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
+    // A hull is metal, dimmer.
+    look: { heatRamp: [[0, 90, 24, 18], [0.35, 160, 36, 16], [0.7, 220, 95, 30], [1, 245, 175, 90]],
+            heatTint: 0.5, heatEmit: 0.45 },
+    sfx: 'metal',
+  },
 };
+
+/** The energy-response view of the table (kept as its own name: every energy
+ *  path and the `__omniEnergy` suites read it). */
+export const MATERIAL_RESPONSE: Readonly<Record<MaterialId, MaterialResponse>> = MATERIALS;
+
+export function materialDef(mat: MaterialId | string | undefined): MaterialDef {
+  return MATERIALS[(mat ?? 'generic') as MaterialId] ?? MATERIALS.generic;
+}
 
 export function responseOf(mat: MaterialId | string | undefined): MaterialResponse {
   return MATERIAL_RESPONSE[(mat ?? 'generic') as MaterialId] ?? MATERIAL_RESPONSE.generic;
@@ -560,37 +680,15 @@ export function planChain(
 // boundary model rescales a thermal pattern's bond strength to keep derived
 // HP (fractureCache `profileBondScale`).
 
-export interface FractureProfile { siteScale: number; bias?: number; impulse: number }
-
 /** Heat at or above which a breaking body takes the thermal profile. */
 export const HOT_BREAK_HEAT = 0.5;
-
-type SolidMaterial = Exclude<MaterialId, 'nebula'>;
-const FRACTURE_BASE: Readonly<Record<SolidMaterial, Record<'mechanical' | 'thermal', FractureProfile>>> = {
-  // Glass: a violent mechanical SHATTER (flung hard) against a thermal
-  // STRESS failure (few, large, quiet pieces) — the headline contrast.
-  glass:   { mechanical: { siteScale: 1, impulse: 1.5 },
-             thermal:    { siteScale: 0.45, bias: 0.0, impulse: 0.2 } },
-  // Rock: chunky and localised, carrying real momentum.
-  rock:    { mechanical: { siteScale: 1, impulse: 1.15 },
-             thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
-  // Metal: heavy and slow whatever broke it; the fewest, largest pieces of
-  // any solid once heat has had it.
-  metal:   { mechanical: { siteScale: 1, impulse: 0.4 },
-             thermal:    { siteScale: 0.35, bias: 0.1, impulse: 0.25 } },
-  // Plastic: gives rather than shatters.
-  plastic: { mechanical: { siteScale: 1, impulse: 0.7 },
-             thermal:    { siteScale: 0.6, bias: 0.1, impulse: 0.3 } },
-  generic: { mechanical: { siteScale: 1, impulse: 1 },
-             thermal:    { siteScale: 0.7, bias: 0.25, impulse: 0.5 } },
-};
 
 /** Resolve a profile.  Electric resolves as MECHANICAL — a conducted arc
  *  cracks like an impact.  A GAS has no profile.  A bigger mechanical hit flings its pieces a little harder;
  *  heat never does. */
 export function fractureProfile(mat: MaterialId, domain: EnergyDomain, magnitude: number): FractureProfile | null {
-  if (responseOf(mat).gas) return null;
-  const base = FRACTURE_BASE[mat as SolidMaterial] ?? FRACTURE_BASE.generic;
+  const base = materialDef(mat).fracture;
+  if (!base) return null;
   const p = domain === 'thermal' ? base.thermal : base.mechanical;
   const bump = domain === 'thermal' ? 0 : Math.min(1, safeMag(magnitude) / 40);
   return {

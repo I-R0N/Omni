@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  452 tests.  All run at
+                          whatever happened next).  453 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -283,9 +283,11 @@ engine/
                           `onInstantFire`, the energy layer)
     energy.ts             ENERGY MODULES, the PURE half: delivery / energy
                           / material vocabulary, the legacy weapon-id map,
-                          MATERIAL_RESPONSE (and the heat quantities
-                          DERIVED from it), heat arithmetic, the bounded
-                          chain planner, fracture profiles.  Published as
+                          MATERIALS — the ONE material table (grain,
+                          density, energy response, break shapes, heat
+                          look, voice) and the heat quantities DERIVED
+                          from it — heat arithmetic, the bounded chain
+                          planner, fracture profiles.  Published as
                           `window.__omniEnergy`
     DropSystem.ts         Salvage + health drop spawn / collection
     WaveSystem.ts         Completion-wave spawn scheduler + grace
@@ -3893,9 +3895,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     an insulator on either side throttles it; a GAS is AGITATED (and a static
     one disperses at its `disperseAt` heat through the ordinary break-up).
   - **MATERIAL PROPERTIES DRIVE EVERY RULE, NEVER A MATERIAL'S NAME** (user
-    call).  `MATERIAL_RESPONSE` holds what a material IS; the energy paths
-    read those columns, so a behaviour change or a new material is a row
-    edit.  `gas` (nebula) means not a solid: no damage from any energy, no
+    call).  `MATERIALS` (energy.ts) is THE central material table — one entry
+    per material holding its GRAIN geometry + bond strength (shared by its
+    tile and shard rows, which spread it and add only their own
+    `radialSpeed`), its impact DENSITY (`IMPACT_DENSITY` reads it), its
+    energy response (`MATERIAL_RESPONSE` is the same object), its FRACTURE
+    shapes per domain (null = never fractures), its heat LOOK and its SFX
+    voice.  Every SHARD_VARIANTS row declares `material`, and
+    `materialOf` reads that (registered at load — nothing parses a variant
+    name), so a new material is one table entry plus the rows naming it, and
+    a behaviour change is a row edit.  Indestructible terrain is the
+    `generic` hull material, which sounds like metal (the energy layer and
+    the audio used to disagree about it).  `gas` (nebula) means not a solid: no damage from any energy, no
     fracture profile, no impact stamp, beams pass through it, and kinetic
     ROUNDS shove a drifting gas body along their travel (`GAS_DISPLACE_*` in
     PhysicsSystem) — as a kinetic beam always did; a static cloud tile is

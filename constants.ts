@@ -14,6 +14,7 @@ import { ASSETS } from './assets';
 import { TriggerProfile } from './engine/systems/DualSenseHID';
 import {
   type Delivery, type EnergyModifier, DELIVERIES, ENERGY_MODIFIERS, weaponKey, resolveWeaponKey,
+  MATERIALS, registerVariantMaterials,
 } from './engine/systems/energy';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
@@ -1494,10 +1495,12 @@ export const IMPACT_DENSITY = {
   // The MATERIAL reference, and the reason the scale has a unit at all: the
   // four shard spawn ladders ARE these numbers, so glass : rock : metal
   // stays 1 : 1.8 : 3 and every other class can be read against it.
-  GLASS:   0.10,
-  PLASTIC: 0.13,
-  ROCK:    0.18,
-  METAL:   0.30,
+  // Read from the central material table (MATERIALS, energy.ts): a
+  // material's density is part of what it IS.
+  GLASS:   MATERIALS.glass.density!,
+  PLASTIC: MATERIALS.plastic.density!,
+  ROCK:    MATERIALS.rock.density!,
+  METAL:   MATERIALS.metal.density!,
   // The player's hull.  25x glass and 8x rock, on purpose — see above.
   HULL:    2.50,
 } as const;
@@ -10077,25 +10080,9 @@ export function cycleNebulaDrain(): number {
 // flat 2-3 the old power-law budget produced.  `radialSpeed` is the
 // lowest of any material: cloud drifts apart, it does not spall.
 const NEBULA_GRAIN: GrainSpec = {
-  grainCountMin: 3,
-  grainCountMax: 14,
-  // 20, not the 14 this shipped at, and the number is MEASURED (user call).
-  // The voronoi shatter cost frame time through sheer entity count, and the
-  // cost is superlinear: on the `nebula-storm` perf scene sim/stp99 ran 3.60
-  // at 14 against 2.00 with the legacy shatter, for +25% entities.
-  //
-  // grainSize is the lever, NOT grainCountMax — the cap rarely binds, and
-  // dropping it 14 -> 8 recovered almost nothing.  At 20 the scene lands
-  // exactly on the legacy floor (2.00, 1358 ents) while keeping most of what
-  // the voronoi change bought: 3.95 children per tile and a 3.07x size
-  // spread, against 7.7 / 4.02x at 14 and ~2-3 children with no
-  // parent-related size variety at all on legacy.  26 buys nothing further,
-  // so 20 is the knee.  Size VARIETY — the thing actually asked for — lives
-  // in `sizeSpread` and `regularity` below and is untouched.
-  grainSize: 20,
-  impactBias: 0.5,        // crowd toward the striker that punched through
-  regularity: 0.15,       // the raggedest material in the game
-  sizeSpread: 0.6,        // a wide mix of coarse and fine puffs in one body
+  // The material's grain lives in MATERIALS.nebula (energy.ts); the numbers
+  // and their reasons are the notes above.
+  ...MATERIALS.nebula.grain!,
   radialSpeed: 0.5,       // drifts apart; every other material is 0.8..1.5
 };
 
@@ -10104,6 +10091,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    material: 'glass',
     // Re-emits half the light it receives (DBG "Emissive").  Glass is
     // translucent and scatters what passes into it; a pane that simply
     // absorbed every photon reaching it would read as slate.
@@ -10153,25 +10141,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // which is the radial look.  The legacy fan survives as the DBG
     // 'legacy' path until V7.
     grain: {
-      grainCountMin: 6,
-      grainCountMax: 10,
-      grainSize: 15,
-      impactBias: 0.75,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.glass.grain!,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.2,
       // V10 (user call): glass takes ROCK'S breaking behaviour — the
       // pattern is applied once and pieces break off as their
       // boundaries complete, instead of the pane surviving whole until
       // one final full break.
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // V15: glass is the brittler material — 0.16 against rock's 0.27,
       // so a 36px pane is ~20 damage (5 Blaster hits, its V9 HP).
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10186,6 +10170,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    material: 'plastic',
     // TRANSLUCENT, but the DULL end of it.  Plastic is the cloudy material of
     // the three: it passes light and re-emits its own colour like glass does,
     // at roughly half glass's strength, which is what "more opaque" means in
@@ -10227,32 +10212,24 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // override shatterVoronoiStyle reads from `dent`.  breakShards
     // stays as the DBG 'legacy' path until V7.
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.plastic.grain!,
       // LARGE grains (user call): a panel comes apart into a few big
       // irregular pieces, not gravel.  grainSize 5 -> 11 takes a 36px
       // tile from ~7 grains to ~3.
-      grainCountMin: 8,
-      grainCountMax: 16,
-      grainSize: 6,
-      impactBias: 0.5,
       // A3: PLASTIC — large grains, only loosely regular, with a wide
       // size mix, so a panel breaks into a few big irregular pieces
       // rather than gravel.  Tough per boundary but it DEFORMS first:
       // grainDent is what makes it read as plastic rather than as a
       // softer rock.
-      regularity: 0.55,
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.10,
       // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
       // springs slowly back to the shape its grain was cut at.  Metal
       // deliberately has no recovery — its dent is permanent.
-      dentRecoverSeconds: 2.5,
-      progressive: true,
       // 2.3x rock, but far FEWER boundaries than metal because the
       // grains are large — so plastic is tough per seam and moderate
       // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
       // the old 8.
-      bondStrength: 1.8,
       radialSpeed: 1.5,
     },
     shatter: {
@@ -10284,6 +10261,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    material: 'metal',
     // Re-emits half the light it receives (DBG "Emissive").  Metal is the
     // specular case: it does not scatter light so much as throw it back,
     // and a matte plate is the one thing it should never look like.
@@ -10320,21 +10298,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // break: a pale tier-0 plate is coarse and comes apart, a bright
     // dense one is fine-grained and very hard.
     grain: {
-      grainCountMin: 8,
-      grainCountMax: 22,
-      grainSize: 8,
-      impactBias: 0.35,     // metal cracks less radially than glass
-      regularity: 0.95,     // near-honeycomb: the look the lattice had
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.05,      // it deforms, but barely
-      progressive: true,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.metal.grain!,
       // The hardest boundaries in the game — 3.1x rock, 5.3x glass —
       // on top of having the most boundary per body.  Solved from a
       // measured 143px of boundary at tier 2: ~173 damage, or 43 base
       // Blaster hits, against the 48 the old flat HP gave.  A tier-5
       // plate reaches ~314 (78 hits), so density is felt.
-      bondStrength: 1.8,
       radialSpeed: 1.1,
     },
     shatter: {
@@ -10364,6 +10335,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    material: 'generic',
     // Glass-like: the deep violet reads as a solid crystal, and a crystal
     // that stopped every photon would be indistinguishable from rock.  A
     // shade under glass on both counts, because it is the denser-looking
@@ -10389,6 +10361,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    material: 'rock',
     // No rim line: the brittle dent silhouette reads cleaner against the
     // slate fill when nothing traces every notch.  (Was a hardcoded
     // `!== 'rock-tile'` in the draw branch; it is variant policy now, so
@@ -10432,21 +10405,18 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // creation goes away with the cells).  breakShards stays as the DBG
     // 'legacy' A/B config until V7.
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.rock.grain!,
       // V9: the glass-like radial pattern (user call) — more cells,
       // crowded toward the impact.
-      grainCountMin: 3,
-      grainCountMax: 16,
-      grainSize: 14,
-      impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.4,
       // V8: hits highlight the tile's cell boundaries; each piece whose
       // boundary completes breaks off, and the hit ceiling breaks the
       // remainder.  The gentle dent pull is skipped under voronoi (the
       // pattern must stay stable; the highlight is the damage read).
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
@@ -10454,7 +10424,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // material, tile and shard alike; a bigger body has more boundary
       // and is tougher for free.  0.27 puts a 36px tile at ~36 damage
       // (9 Blaster hits, its old hit ceiling) and a 15px chip at ~6.
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10497,6 +10466,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-tile': {
     id: 'nebula-tile',
+    material: 'nebula',
     // Re-emits half the light it receives (DBG "Emissive"), in its OWN
     // colour — a nebula is a glowing cloud, and the one material in the game
     // whose colour is per-BODY rather than per-variant (`nebulaBlendedHex`,
@@ -10560,6 +10530,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'rock-shard': {
     id: 'rock-shard',
+    material: 'rock',
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_ROCK,
     regen: { kind: 'none' },
@@ -10573,6 +10544,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // cell decomposition becomes the fragments.  The powerlaw fields
     // below STAY — they are the DBG 'legacy' A/B path until V7 calls it.
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.rock.grain!,
       // Site count ≈ the legacy rock count mapping (max(2, size/40),
       // cap 30), raised to mergeCount for composed boulders — so the
       // fragment-count REBALANCE at V2 is zero for rock-shard.
@@ -10580,24 +10554,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // voronoi look, not big angular chunks): denser sites, crowded
       // toward the impact.  grainSize 40 → 22 also gives mid-size
       // rocks enough edges for the progressive chip-off to read.
-      grainCountMin: 3,
-      grainCountMax: 16,
-      grainSize: 14,
-      impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.0,
       // V8: the pattern is applied once at first damage; boundaries
       // highlight with each hit and a fully-highlighted piece breaks
       // off.  See GrainSpec.progressive.
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // The same rock: strength is a material property, not a per-entity
       // HP.  ~6 damage on a 15px chip, rising with size and merge history.
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10637,6 +10604,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'glass-shard': {
     id: 'glass-shard',
+    material: 'glass',
     carrier: EntityType.STRUCTURE,
     emits: 0.5,                               // as the tile it broke off
     // Same translucency as the tile it broke off — see 'glass-tile'.
@@ -10655,20 +10623,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // defect this gauntlet exists to remove.  Powerlaw fields stay as
     // the DBG legacy path.
     grain: {
-      grainCountMin: 6,
-      grainCountMax: 10,
-      grainSize: 15,
-      impactBias: 0.75,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.glass.grain!,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.0,
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // The same glass; a small chip is ~2 damage, i.e. one bolt.
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10701,6 +10665,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'plastic-shard': {
     id: 'plastic-shard',
+    material: 'plastic',
     // Same as the tile it broke off — see plastic-tile.
     transmit: 0.28,
     emits: 0.25,
@@ -10789,6 +10754,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // recursion terminates the same way (children below the spawn
     // floor die clean via the mobile-parent guard).
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.plastic.grain!,
       // Shards were dying to almost nothing (user report).  A shard's
       // derived HP is the total length of its INTERNAL boundary, and at
       // grainSize 16 a 20px shard decomposed into ~2 grains with one
@@ -10796,25 +10764,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // a shard real internal structure to break through, without
       // touching the material's bondStrength (which must stay one number
       // per material, tile and shard alike).
-      grainCountMin: 8,
-      grainCountMax: 16,
-      grainSize: 6,
-      impactBias: 0.5,
       // The same plastic, at shard scale.
-      regularity: 0.55,
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.10,
       // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
       // springs slowly back to the shape its grain was cut at.  Metal
       // deliberately has no recovery — its dent is permanent.
-      dentRecoverSeconds: 2.5,
-      progressive: true,
       // 2.3x rock, but far FEWER boundaries than metal because the
       // grains are large — so plastic is tough per seam and moderate
       // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
       // the old 8.
-      bondStrength: 1.8,
       radialSpeed: 0.8,
     },
     shatter: {
@@ -10870,6 +10827,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'metal-shard': {
     id: 'metal-shard',
+    material: 'metal',
     carrier: EntityType.STRUCTURE,
     emits: 0.5,                               // as the tile it broke off
     spawn: SHARD_SPAWN_SHAPE_METAL,
@@ -10901,16 +10859,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // boundary and therefore almost no derived HP, which is what made
     // metal chips die instantly.
     grain: {
-      grainCountMin: 8,
-      grainCountMax: 22,
-      grainSize: 8,
-      impactBias: 0.35,
-      regularity: 0.95,
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.05,
-      progressive: true,
-      bondStrength: 1.8,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.metal.grain!,
       radialSpeed: 1.0,
     },
     shatter: {
@@ -10967,6 +10918,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-shard': {
     id: 'nebula-shard',
+    material: 'nebula',
     // Same as the tile it broke off, and for the same reason: a shard of a
     // glowing cloud is still glowing cloud.
     emits: 0.5,
@@ -11046,6 +10998,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
   },
 };
+// Every row says what it is made of; `materialOf` reads that, never the name.
+registerVariantMaterials(SHARD_VARIANTS);
 
 // ── WHAT A BREAK LEAVES BEHIND ──────────────────────────────────────
 //

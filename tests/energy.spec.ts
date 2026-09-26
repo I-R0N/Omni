@@ -184,6 +184,58 @@ test.describe('energy arithmetic (pure)', () => {
     expect(r.nameFree).toBe(true);
   });
 
+  test('ONE MATERIAL TABLE: every shard row names its material, tile and shard share its grain, and a new material needs no code', async ({ page }) => {
+    // The central table (MATERIALS, energy.ts) is where a material's grain,
+    // density, energy response, break shapes, heat look and voice live.  The
+    // variant rows point at it; nothing parses a variant's NAME.
+    await boot(page);
+    const r = await page.evaluate(() => {
+      const E = (window as any).__omniEnergy;
+      const M = (window as any).__omniMass;
+      const V = M.SHARD_VARIANTS;
+      const rows = Object.keys(V).map(id => ({ id, mat: V[id].material }));
+      const unnamed = rows.filter(x => !x.mat || !E.MATERIALS[x.mat]).map(x => x.id);
+      const misread = rows.filter(x => E.materialOf({ shardVariant: x.id }) !== x.mat).map(x => x.id);
+      // Tile and shard grain agree on everything but the scatter speed.
+      const grainDiff: string[] = [];
+      for (const m of ['rock', 'glass', 'plastic', 'metal']) {
+        const a = { ...V[`${m}-tile`].grain }, b = { ...V[`${m}-shard`].grain };
+        delete a.radialSpeed; delete b.radialSpeed;
+        if (JSON.stringify(a) !== JSON.stringify(b)) grainDiff.push(m);
+        for (const k of Object.keys(E.MATERIALS[m].grain)) {
+          if (a[k] !== E.MATERIALS[m].grain[k]) grainDiff.push(`${m}.${k}`);
+        }
+      }
+      const density = ['glass', 'plastic', 'rock', 'metal']
+        .map(m => M.IMPACT_DENSITY[m.toUpperCase()] === E.MATERIALS[m].density);
+      // A NEW material, added as data only: an insulating, fragile metal.
+      E.MATERIALS.test_ceramic = { ...E.MATERIALS.metal, conductivity: 0.02, specificHeat: 0.9 };
+      const body = { id: 'c1', active: true, material: 'test_ceramic', position: { x: 0, y: 0 }, size: { x: 10, y: 10 } };
+      const caps = { maxHops: 3, maxTargets: 6, maxRadius: 400, hopRange: 150, branches: 2 };
+      const chain = E.planChain(body, { x: 0, y: 0 }, 20, caps, () => {}, () => 0).length;
+      const newMax = E.maxHeatOf('test_ceramic'), metalMax = E.maxHeatOf('metal');
+      delete E.MATERIALS.test_ceramic;
+      return {
+        unnamed, misread, grainDiff, density, chain, newMax, metalMax,
+        indestructibleSfx: E.materialDef(E.materialOf({ shardVariant: 'indestructible-tile' })).sfx,
+        nebulaGas: E.materialDef('nebula').gas, nebulaFracture: E.materialDef('nebula').fracture,
+      };
+    });
+    expect(r.unnamed, 'every row names a real material').toEqual([]);
+    expect(r.misread, 'materialOf reads the row, not the name').toEqual([]);
+    expect(r.grainDiff, 'a material has ONE grain geometry').toEqual([]);
+    expect(r.density.every(Boolean), 'the density scale reads the table').toBe(true);
+    // The new material behaves by its properties: an insulator ends the arc
+    // where it lands, and its heat ceiling follows its specific heat.
+    expect(r.chain).toBe(1);
+    expect(r.newMax).toBeGreaterThan(r.metalMax);
+    // Indestructible terrain is the hull material — and sounds like it
+    // (it used to be `generic` to the energy layer and `metal` to audio).
+    expect(r.indestructibleSfx).toBe('metal');
+    expect(r.nebulaGas).toBe(true);
+    expect(r.nebulaFracture).toBeNull();
+  });
+
   test('an electric chain is bounded: hops, targets, radius, no repeats, loops end', async ({ page }) => {
     await boot(page);
     const r = await page.evaluate(() => {

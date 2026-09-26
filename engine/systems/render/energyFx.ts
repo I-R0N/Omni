@@ -15,7 +15,7 @@
  */
 import { GameEntity, CameraState } from '../../../types';
 import { shiftX, shiftY } from './drawUtils';
-import { heatRadiance, materialOf, type MaterialId } from '../energy';
+import { heatRadiance, materialOf, materialDef, MATERIAL_IDS, type MaterialId, type MaterialLook } from '../energy';
 
 export interface EnergyBeamView {
     x0: number; y0: number; x1: number; y1: number;
@@ -163,7 +163,7 @@ function renderLocks(ctx: CanvasRenderingContext2D, locks: readonly GameEntity[]
 //      centred on the spot, following the Gaussian profile: local temperature
 //      = peak × exp(−r²/2σ²), where the peak is the body's mean heat
 //      concentrated into that σ (energy.ts `heatPeak`).  Colour follows the
-//      MATERIAL's own ramp of the LOCAL temperature (`HEAT_LOOK` — metal
+//      MATERIAL's own ramp of the LOCAL temperature (`MATERIALS[m].look` — metal
 //      incandesces toward white, rock stays magma-red, glass glows amber,
 //      plastic scorches brown), so a tight fresh spot is the hottest step of
 //      that ramp at its core, and the same heat diffused reads cooler and
@@ -191,57 +191,28 @@ const SIGMAS = 2.5;
 const STOPS = [0, 0.2, 0.4, 0.6, 0.8, 1];
 const PROFILE = STOPS.map(u => Math.exp(-((SIGMAS * u) ** 2) / 2));
 
-/** HOW EACH MATERIAL LOOKS HOT.  One row per material, so the colour of heat
- *  says what is burning (user call):
+/** HOW EACH MATERIAL LOOKS HOT lives in the central material table
+ *  (`MATERIALS[m].look`, engine/systems/energy.ts), so the colour of heat says
+ *  what is burning and a new material brings its own look:
  *
- *   - `ramp`   local temperature (0..1) → colour.  Metal runs the classic
- *              incandescent ladder (cherry → orange → yellow-white); rock
- *              stays in magma reds and ambers and never whitens; glass
- *              glows a soft amber to pale straw; plastic SCORCHES — yellowing
- *              then browning — with only a dim ember at the very top; nebula
- *              (gas) warms to a rose-pink; a hull (generic) is metal, dimmer.
- *   - `tint`   the most the body's own colour is covered (0..1).  Glass is
- *              clear, so heat shows THROUGH it and covers less.
- *   - `emit`   emissivity — how much of the T⁴ radiance becomes visible light.
- *              Plastic chars rather than glows; metal and rock radiate.
+ *   - `heatRamp`  local temperature (0..1) → colour.  Metal runs the classic
+ *                 incandescent ladder (cherry → orange → yellow-white); rock
+ *                 stays in magma reds and ambers and never whitens; glass
+ *                 glows a soft amber to pale straw; plastic SCORCHES —
+ *                 yellowing then browning — with only a dim ember at the very
+ *                 top; nebula (gas) warms to a rose-pink; a hull is metal,
+ *                 dimmer.
+ *   - `heatTint`  the most the body's own colour is covered (0..1).  Glass is
+ *                 clear, so heat shows THROUGH it and covers less.
+ *   - `heatEmit`  emissivity — how much of the T⁴ radiance becomes visible
+ *                 light.  Plastic chars rather than glows.
  *
  *  Toned down on purpose (user call): tints stay translucent over the
  *  material and the glow is a warm spill, not a lamp. */
-interface HeatLook {
-    ramp: readonly (readonly [number, number, number, number])[];
-    tint: number;
-    emit: number;
-}
-const HEAT_LOOK: Readonly<Record<MaterialId, HeatLook>> = {
-    metal: {
-        ramp: [[0, 90, 24, 18], [0.3, 170, 34, 16], [0.6, 235, 92, 28], [0.85, 250, 170, 70], [1, 255, 228, 175]],
-        tint: 0.62, emit: 0.7,
-    },
-    rock: {
-        ramp: [[0, 70, 26, 18], [0.35, 140, 34, 14], [0.7, 205, 70, 18], [1, 240, 145, 50]],
-        tint: 0.6, emit: 0.5,
-    },
-    glass: {
-        ramp: [[0, 150, 80, 40], [0.4, 220, 120, 45], [0.75, 245, 175, 80], [1, 255, 225, 150]],
-        tint: 0.42, emit: 0.55,
-    },
-    plastic: {
-        ramp: [[0, 150, 125, 55], [0.4, 120, 80, 32], [0.75, 70, 40, 22], [1, 150, 55, 20]],
-        tint: 0.58, emit: 0.18,
-    },
-    nebula: {
-        ramp: [[0, 150, 60, 90], [0.5, 225, 110, 140], [1, 255, 190, 205]],
-        tint: 0, emit: 0.35,
-    },
-    generic: {
-        ramp: [[0, 90, 24, 18], [0.35, 160, 36, 16], [0.7, 220, 95, 30], [1, 245, 175, 90]],
-        tint: 0.5, emit: 0.45,
-    },
-};
-const MATERIALS = Object.keys(HEAT_LOOK) as MaterialId[];
+type HeatRamp = MaterialLook['heatRamp'];
 
 /** A material's ramp at local temperature t (0..1) → [r, g, b]. */
-function heatRgb(ramp: HeatLook['ramp'], t: number): [number, number, number] {
+function heatRgb(ramp: HeatRamp, t: number): [number, number, number] {
     const x = Math.min(1, Math.max(0, t));
     for (let i = 1; i < ramp.length; i++) {
         const a = ramp[i - 1], b = ramp[i];
@@ -272,8 +243,8 @@ function ensureHeatGradients(ctx: CanvasRenderingContext2D): void {
     _heatCtx = ctx;
     _bodyGrad.clear();
     _glowGrad.clear();
-    for (const mat of MATERIALS) {
-        const look = HEAT_LOOK[mat];
+    for (const mat of MATERIAL_IDS) {
+        const look = materialDef(mat).look;
         const bodies: CanvasGradient[] = [], glows: CanvasGradient[] = [];
         for (let i = 0; i < HEAT_BUCKETS; i++) {
             const peak = ((i + 0.5) / HEAT_BUCKETS) * PEAK_MAX;
@@ -283,14 +254,14 @@ function ensureHeatGradients(ctx: CanvasRenderingContext2D): void {
             const bg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
             for (let k = 0; k < STOPS.length; k++) {
                 const T = peak * PROFILE[k];
-                const [r, g, b] = heatRgb(look.ramp, T);
-                const a = k === STOPS.length - 1 ? 0 : look.tint * Math.min(1, T / 0.6);
+                const [r, g, b] = heatRgb(look.heatRamp, T);
+                const a = k === STOPS.length - 1 ? 0 : look.heatTint * Math.min(1, T / 0.6);
                 bg.addColorStop(STOPS[k], `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`);
             }
             bodies.push(bg);
             // Glow: light leaving the spot — the peak's colour on a soft
             // falloff to exactly zero, brightness carried by globalAlpha.
-            const [r, g, b] = heatRgb(look.ramp, peak);
+            const [r, g, b] = heatRgb(look.heatRamp, peak);
             const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
             gg.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.42)`);
             gg.addColorStop(0.25, `rgba(${r}, ${g}, ${b}, 0.2)`);
@@ -331,9 +302,9 @@ function renderHeat(
             const sx = x + cs * lx - sn * ly, sy = y + sn * lx + cs * ly;
             const b = peakBucket(peak);
             const mat = materialOf(e);
-            const look = HEAT_LOOK[mat];
+            const look = materialDef(mat).look;
             if (pass === 0) {
-                const rad = heatRadiance(peak) * look.emit;
+                const rad = heatRadiance(peak) * look.heatEmit;
                 if (rad < 0.01) continue;
                 // Light reaches past the hot region, further the hotter it is.
                 const R = SIGMAS * sigma + bodyR * (0.35 + 0.5 * Math.min(1, peak));
@@ -343,7 +314,7 @@ function renderHeat(
                 ctx.fillRect(-1, -1, 2, 2);
             } else {
                 const pts = e.polygonPoints;
-                if (!pts || pts.length < 3 || look.tint <= 0) continue;
+                if (!pts || pts.length < 3 || look.heatTint <= 0) continue;
                 // The outline, in the body's own rotated frame.
                 ctx.setTransform(A * cs + C * sn, B * cs + D * sn, -A * sn + C * cs, -B * sn + D * cs,
                                  A * x + C * y + E, B * x + D * y + F);

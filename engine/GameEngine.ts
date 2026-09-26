@@ -43,6 +43,7 @@ import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentD
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
+import { materialOf, materialDef } from './systems/energy';
 import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
@@ -3266,7 +3267,7 @@ export class GameEngine {
       // something ALIVE has its own voice.  Checked before the material
       // branch, since a segment is a real tile-variant STRUCTURE.
       if (entity.dragonSegment === true) {
-          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          const mat = GameEngine.materialSfx(entity);
           return { fx: GameEngine.MATERIAL_FX[mat] ?? null, sfx: 'destroy.dragon.segment' };
       }
       if (entity.type === EntityType.ENEMY) {
@@ -3285,7 +3286,7 @@ export class GameEngine {
               : { fx: EXPLOSION_PROFILES.STANDARD, sfx: 'destroy.enemy.standard' };
       }
       if (entity.type === EntityType.STRUCTURE) {
-          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          const mat = GameEngine.materialSfx(entity);
           if (!mat) return { fx: null, sfx: null };
           return {
               fx: GameEngine.MATERIAL_FX[mat] ?? null,
@@ -4492,19 +4493,16 @@ export class GameEngine {
     this.particles.spawnGlitterTrail(this.currentMap.entities, this.player);
   }
 
-  /** Shard variant → its material's impact / destruction SFX suffix.  One
-   *  table drives both `impact.tile.*` and `destroy.tile.*`/`destroy.shard.*`
-   *  so a material can never sound like one thing when chipped and another
-   *  when broken. */
-  private static readonly MATERIAL_SFX: Record<string, string> = {
-      'glass-tile': 'glass', 'glass-shard': 'glass',
-      'rock-tile': 'rock',   'rock-shard': 'rock',
-      'metal-tile': 'metal', 'metal-shard': 'metal',
-      'plastic-tile': 'plastic', 'plastic-shard': 'plastic',
-      'nebula-tile': 'nebula',   'nebula-shard': 'nebula',
-      // Indestructible tiles never die, but they DO get shot at.
-      'indestructible-tile': 'metal',
-  };
+  /** A structure's material → its impact / destruction SFX suffix, read from
+   *  the central material table (`MATERIALS[m].sfx`).  One source drives both
+   *  `impact.tile.*` and `destroy.tile.*`/`destroy.shard.*`, so a material
+   *  can never sound like one thing when chipped and another when broken —
+   *  and a new material brings its own voice.  (Indestructible tiles are the
+   *  `generic` hull material, which sounds like metal.) */
+  private static materialSfx(e: GameEntity): string | undefined {
+      return e.shardVariant ? materialDef(materialOf(e)).sfx : undefined;
+  }
+
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
     // Impact audio (SFX_INVENTORY §4.3).  This handler already switches on
@@ -4515,7 +4513,7 @@ export class GameEngine {
     } else if (target.type === EntityType.PLAYER) {
         this.audio.play('impact.hull.player', { x: impactPos.x, y: impactPos.y });
     } else if (target.type === EntityType.STRUCTURE) {
-        const mat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+        const mat = GameEngine.materialSfx(target);
         if (mat) this.audio.play(`impact.tile.${mat}`, { x: impactPos.x, y: impactPos.y });
     }
 
@@ -6092,9 +6090,9 @@ export class GameEngine {
           invalidateCollisionR(target);
           // The chip's own material, never a hardcoded one: progressive
           // fracture stopped being rock-only at V10, and a glass piece
-          // breaking off must not crack like stone.  Same MATERIAL_SFX
+          // breaking off must not crack like stone.  Same material
           // table `deathFx` reads; a detached cell is always a mobile shard.
-          const chipMat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+          const chipMat = GameEngine.materialSfx(target);
           this.audio.play(`destroy.shard.${chipMat ?? 'rock'}`, {
               x: target.position.x, y: target.position.y });
 
