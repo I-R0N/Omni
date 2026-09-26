@@ -15,7 +15,7 @@
  */
 import { GameEntity, CameraState } from '../../../types';
 import { shiftX, shiftY } from './drawUtils';
-import { heatPeak, heatRadiance } from '../energy';
+import { heatPeak, heatRadiance, materialOf, type MaterialId } from '../energy';
 
 export interface EnergyBeamView {
     x0: number; y0: number; x1: number; y1: number;
@@ -103,18 +103,22 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
 //   1. INCANDESCENCE — the body's own outline filled with a radial gradient
 //      centred on the spot, following the Gaussian profile: local temperature
 //      = peak × exp(−r²/2σ²), where the peak is the body's mean heat
-//      concentrated into that σ (energy.ts `heatPeak`).  Colour follows a
-//      black-body ramp of the LOCAL temperature, so a tight fresh spot is a
-//      white-hot core fading through orange to a dull-red fringe, and the
-//      same heat diffused reads as a cooler, even glow.  Clipped to the real
-//      polygon, so it is never a shape laid over the body.
+//      concentrated into that σ (energy.ts `heatPeak`).  Colour follows the
+//      MATERIAL's own ramp of the LOCAL temperature (`HEAT_LOOK` — metal
+//      incandesces toward white, rock stays magma-red, glass glows amber,
+//      plastic scorches brown), so a tight fresh spot is the hottest step of
+//      that ramp at its core, and the same heat diffused reads cooler and
+//      even.  Clipped to the real polygon, so it is never a shape laid over
+//      the body, and translucent, so the material still shows.
 //   2. EMISSION — an additive glow around the spot whose brightness follows
-//      T⁴ radiance (`heatRadiance`): warm is barely visible, near-critical
-//      is a light source.
+//      T⁴ radiance (`heatRadiance`) × the material's emissivity: warm is
+//      barely visible, near-critical metal is a soft light source, and
+//      plastic hardly glows at all.
 //
-// Nebula (no hard outline) and polygon-less hulls take the emission only.
+// Nebula (no hard outline, tint 0) and polygon-less hulls take the emission
+// only.
 //
-// COST.  Gradients are built ONCE per peak-temperature bucket at UNIT radius
+// COST.  Gradients are built ONCE per material × peak-temperature bucket at UNIT radius
 // and cached per context; each body scales one by transform — no per-frame
 // allocation, one path fill + one fillRect per on-screen heated body, over a
 // set bounded by MAX_HEATED and culled to the view first.
@@ -128,18 +132,60 @@ const SIGMAS = 2.5;
 const STOPS = [0, 0.2, 0.4, 0.6, 0.8, 1];
 const PROFILE = STOPS.map(u => Math.exp(-((SIGMAS * u) ** 2) / 2));
 
-/** Black-body-ish ramp, t in 0..1 → [r, g, b]. */
-function heatRgb(t: number): [number, number, number] {
-    const stops: [number, number, number, number][] = [
-        [0.0, 110, 14, 6],
-        [0.3, 200, 40, 10],
-        [0.6, 255, 110, 22],
-        [0.85, 255, 185, 70],
-        [1.0, 255, 240, 190],
-    ];
+/** HOW EACH MATERIAL LOOKS HOT.  One row per material, so the colour of heat
+ *  says what is burning (user call):
+ *
+ *   - `ramp`   local temperature (0..1) → colour.  Metal runs the classic
+ *              incandescent ladder (cherry → orange → yellow-white); rock
+ *              stays in magma reds and ambers and never whitens; glass
+ *              glows a soft amber to pale straw; plastic SCORCHES — yellowing
+ *              then browning — with only a dim ember at the very top; nebula
+ *              (gas) warms to a rose-pink; a hull (generic) is metal, dimmer.
+ *   - `tint`   the most the body's own colour is covered (0..1).  Glass is
+ *              clear, so heat shows THROUGH it and covers less.
+ *   - `emit`   emissivity — how much of the T⁴ radiance becomes visible light.
+ *              Plastic chars rather than glows; metal and rock radiate.
+ *
+ *  Toned down on purpose (user call): tints stay translucent over the
+ *  material and the glow is a warm spill, not a lamp. */
+interface HeatLook {
+    ramp: readonly (readonly [number, number, number, number])[];
+    tint: number;
+    emit: number;
+}
+const HEAT_LOOK: Readonly<Record<MaterialId, HeatLook>> = {
+    metal: {
+        ramp: [[0, 90, 24, 18], [0.3, 170, 34, 16], [0.6, 235, 92, 28], [0.85, 250, 170, 70], [1, 255, 228, 175]],
+        tint: 0.62, emit: 0.7,
+    },
+    rock: {
+        ramp: [[0, 70, 26, 18], [0.35, 140, 34, 14], [0.7, 205, 70, 18], [1, 240, 145, 50]],
+        tint: 0.6, emit: 0.5,
+    },
+    glass: {
+        ramp: [[0, 150, 80, 40], [0.4, 220, 120, 45], [0.75, 245, 175, 80], [1, 255, 225, 150]],
+        tint: 0.42, emit: 0.55,
+    },
+    plastic: {
+        ramp: [[0, 150, 125, 55], [0.4, 120, 80, 32], [0.75, 70, 40, 22], [1, 150, 55, 20]],
+        tint: 0.58, emit: 0.18,
+    },
+    nebula: {
+        ramp: [[0, 150, 60, 90], [0.5, 225, 110, 140], [1, 255, 190, 205]],
+        tint: 0, emit: 0.35,
+    },
+    generic: {
+        ramp: [[0, 90, 24, 18], [0.35, 160, 36, 16], [0.7, 220, 95, 30], [1, 245, 175, 90]],
+        tint: 0.5, emit: 0.45,
+    },
+};
+const MATERIALS = Object.keys(HEAT_LOOK) as MaterialId[];
+
+/** A material's ramp at local temperature t (0..1) → [r, g, b]. */
+function heatRgb(ramp: HeatLook['ramp'], t: number): [number, number, number] {
     const x = Math.min(1, Math.max(0, t));
-    for (let i = 1; i < stops.length; i++) {
-        const a = stops[i - 1], b = stops[i];
+    for (let i = 1; i < ramp.length; i++) {
+        const a = ramp[i - 1], b = ramp[i];
         if (x <= b[0]) {
             const f = (x - a[0]) / (b[0] - a[0]);
             return [
@@ -149,13 +195,14 @@ function heatRgb(t: number): [number, number, number] {
             ];
         }
     }
-    const l = stops[stops.length - 1];
+    const l = ramp[ramp.length - 1];
     return [l[1], l[2], l[3]];
 }
 
 let _heatCtx: CanvasRenderingContext2D | null = null;
-const _bodyGrad: (CanvasGradient | null)[] = new Array(HEAT_BUCKETS).fill(null);
-const _glowGrad: (CanvasGradient | null)[] = new Array(HEAT_BUCKETS).fill(null);
+/** Per material, per peak-temperature bucket. */
+const _bodyGrad = new Map<MaterialId, CanvasGradient[]>();
+const _glowGrad = new Map<MaterialId, CanvasGradient[]>();
 
 function peakBucket(p: number): number {
     return Math.min(HEAT_BUCKETS - 1, Math.max(0, Math.floor((p / PEAK_MAX) * HEAT_BUCKETS)));
@@ -164,27 +211,36 @@ function peakBucket(p: number): number {
 function ensureHeatGradients(ctx: CanvasRenderingContext2D): void {
     if (_heatCtx === ctx) return;
     _heatCtx = ctx;
-    for (let i = 0; i < HEAT_BUCKETS; i++) {
-        const peak = ((i + 0.5) / HEAT_BUCKETS) * PEAK_MAX;
-        // Body: each stop wears the colour of its OWN local temperature, and
-        // the tint fades in with temperature — cold rim, hot core.
-        const bg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-        for (let k = 0; k < STOPS.length; k++) {
-            const T = peak * PROFILE[k];
-            const [r, g, b] = heatRgb(T);
-            const a = k === STOPS.length - 1 ? 0 : Math.min(0.9, T / 0.35 * 0.9);
-            bg.addColorStop(STOPS[k], `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`);
+    _bodyGrad.clear();
+    _glowGrad.clear();
+    for (const mat of MATERIALS) {
+        const look = HEAT_LOOK[mat];
+        const bodies: CanvasGradient[] = [], glows: CanvasGradient[] = [];
+        for (let i = 0; i < HEAT_BUCKETS; i++) {
+            const peak = ((i + 0.5) / HEAT_BUCKETS) * PEAK_MAX;
+            // Body: each stop wears the colour of its OWN local temperature,
+            // fading in with temperature and capped by the material's tint —
+            // cold rim, hot core, the material still visible underneath.
+            const bg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+            for (let k = 0; k < STOPS.length; k++) {
+                const T = peak * PROFILE[k];
+                const [r, g, b] = heatRgb(look.ramp, T);
+                const a = k === STOPS.length - 1 ? 0 : look.tint * Math.min(1, T / 0.6);
+                bg.addColorStop(STOPS[k], `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`);
+            }
+            bodies.push(bg);
+            // Glow: light leaving the spot — the peak's colour on a soft
+            // falloff to exactly zero, brightness carried by globalAlpha.
+            const [r, g, b] = heatRgb(look.ramp, peak);
+            const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+            gg.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.42)`);
+            gg.addColorStop(0.25, `rgba(${r}, ${g}, ${b}, 0.2)`);
+            gg.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, 0.06)`);
+            gg.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            glows.push(gg);
         }
-        _bodyGrad[i] = bg;
-        // Glow: light leaving the spot — the peak's colour on a soft falloff
-        // to exactly zero, brightness carried by globalAlpha (T⁴).
-        const [r, g, b] = heatRgb(peak);
-        const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-        gg.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.6)`);
-        gg.addColorStop(0.2, `rgba(${r}, ${g}, ${b}, 0.34)`);
-        gg.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.1)`);
-        gg.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-        _glowGrad[i] = gg;
+        _bodyGrad.set(mat, bodies);
+        _glowGrad.set(mat, glows);
     }
 }
 
@@ -214,18 +270,20 @@ function renderHeat(
             const lx = e.heatSpotX ?? 0, ly = e.heatSpotY ?? 0;
             const sx = x + cs * lx - sn * ly, sy = y + sn * lx + cs * ly;
             const b = peakBucket(peak);
+            const mat = materialOf(e);
+            const look = HEAT_LOOK[mat];
             if (pass === 0) {
-                const rad = heatRadiance(peak);
+                const rad = heatRadiance(peak) * look.emit;
                 if (rad < 0.01) continue;
                 // Light reaches past the hot region, further the hotter it is.
-                const R = SIGMAS * sigma + bodyR * (0.5 + 0.8 * Math.min(1, peak));
+                const R = SIGMAS * sigma + bodyR * (0.35 + 0.5 * Math.min(1, peak));
                 ctx.setTransform(A * R, B * R, C * R, D * R, A * sx + C * sy + E, B * sx + D * sy + F);
                 ctx.globalAlpha = Math.min(1, rad);
-                ctx.fillStyle = _glowGrad[b]!;
+                ctx.fillStyle = _glowGrad.get(mat)![b];
                 ctx.fillRect(-1, -1, 2, 2);
             } else {
                 const pts = e.polygonPoints;
-                if (!pts || pts.length < 3 || e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') continue;
+                if (!pts || pts.length < 3 || look.tint <= 0) continue;
                 // The outline, in the body's own rotated frame.
                 ctx.setTransform(A * cs + C * sn, B * cs + D * sn, -A * sn + C * cs, -B * sn + D * cs,
                                  A * x + C * y + E, B * x + D * y + F);
@@ -239,7 +297,7 @@ function renderHeat(
                 const R = SIGMAS * sigma;
                 ctx.setTransform(A * R, B * R, C * R, D * R, A * sx + C * sy + E, B * sx + D * sy + F);
                 ctx.globalAlpha = 1;
-                ctx.fillStyle = _bodyGrad[b]!;
+                ctx.fillStyle = _bodyGrad.get(mat)![b];
                 ctx.fill();
             }
         }

@@ -3931,13 +3931,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     rock stays where it landed; conduction between metal bodies lands on the
     receiver's face nearest the source.  The render is the same Gaussian:
     the body's own polygon filled with a radial gradient centred on the
-    spot, each stop coloured by its LOCAL temperature on a black-body ramp
-    (peak = mean heat concentrated into σ, `heatPeak`), plus an additive
-    glow whose brightness follows T⁴ radiance above ambient
-    (`heatRadiance`).  Cost is one path fill + one fillRect per on-screen
-    heated body, from unit-radius gradients cached per peak-temperature
-    bucket and scaled by transform.  Nebula (no hard outline) and
-    polygon-less hulls take the light only.  The glow is drawn in the world
+    spot, each stop coloured by its LOCAL temperature on the MATERIAL'S OWN
+    ramp (peak = mean heat concentrated into σ, `heatPeak`), plus an
+    additive glow whose brightness follows T⁴ radiance above ambient
+    (`heatRadiance`) × the material's emissivity.  `HEAT_LOOK` in
+    `energyFx.ts` is that table (user call: colours correspond to the
+    material, and the whole effect is toned down): metal incandesces cherry
+    → orange → near-white, rock stays magma-red → amber, glass glows soft
+    amber → straw and covers less of the body because it is clear, plastic
+    SCORCHES yellow → brown with barely any glow, nebula warms rose-pink
+    and takes light only, hulls are a dimmer metal.  `tint` caps how much
+    of the body's own colour the heat covers, `emit` scales the glow.
+    Cost is one path fill + one fillRect per on-screen heated body, from
+    unit-radius gradients cached per material × peak-temperature bucket
+    and scaled by transform.  Polygon-less hulls take the light only.  The glow is drawn in the world
     pass, not the lighting layer, so it reads at every lighting tier; fog,
     if switched on, covers it.
 - **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
