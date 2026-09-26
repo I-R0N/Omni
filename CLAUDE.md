@@ -257,7 +257,8 @@ engine/
                           joystick, fitFontPx
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
-      energyFx.ts         Energy feedback: heat glow over the heated set,
+      energyFx.ts         Energy feedback: heat colour + emitted light on
+                          the heated set,
                           the energised-nebula rim, the live beam line
       shardBlend.ts   The bonded-pair "goo" layer: one metaball
                       connector per live cohesion bond, filled
@@ -3915,6 +3916,18 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   - **Beams** are timed pulses (one per trigger pull — there is no hold-to-
     fire), aimed at the pull, ticking a capped raycast; an electric beam
     arcs to the nearest conductor in a forward cone or fizzles.
+  - **HEAT SHOWS IN THE MATERIAL AND NOWHERE ELSE** (user call).  A heated
+    body CHANGES COLOUR — its own polygon filled with a radial gradient on a
+    black-body ramp (dull red → orange → yellow-white), hottest at the core
+    — and EMITS LIGHT, an additive glow falling smoothly to zero around it
+    (`render/energyFx.ts` `renderHeat`).  There is deliberately NO thermal
+    ring, contact disc or spark spray anywhere: the radial pulse, the beam
+    contact and a round's impact all read through the bodies they heat.
+    Cost is one path fill + one fillRect per on-screen heated body, from
+    unit-radius gradients cached per heat bucket and scaled by transform.
+    Nebula (no hard outline) and polygon-less hulls take the light only.
+    The glow is drawn in the world pass, not the lighting layer, so it
+    reads at every lighting tier; fog, if switched on, covers it.
 - **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
   the sharpest consequence of the bullet above — and the rule was drawn ONE
   VARIANT TOO WIDE at first, which is the part worth keeping.  Measured, the

@@ -569,10 +569,9 @@ export function addMagField(g: GameEngine, x: number, y: number, spec: NonNullab
 export function applyProjectilePayload(g: GameEngine, impactPos: Vector2, proj: GameEntity, target: GameEntity): void {
     const byPlayer = proj.ownerType === EntityType.PLAYER;
     if (proj.energyHeat && proj.energyHeat > 0) {
+        // No spark spray: heat reads through the body it lands on (its
+        // colour and its light — render/energyFx.ts), and nothing else.
         depositHeat(g, target, proj.energyHeat, impactPos, byPlayer);
-        g.spawnParticles(impactPos, 4, ENERGY_COLORS.thermal, {
-            speedMin: 1, speedMax: 3, sizeMin: 1.5, sizeMax: 3, lifetimeMin: 0.3, lifetimeMax: 0.6,
-        });
     }
     if (proj.energyBurnSeconds && proj.energyBurnRate) {
         latchBurn(g, target, proj.energyBurnSeconds, proj.energyBurnRate, byPlayer);
@@ -624,9 +623,8 @@ function fireRadial(g: GameEngine, c: WeaponConfig, player: GameEntity): void {
                 if (d > R) continue;
                 depositHeat(g, e, (c.heat ?? 0) * (1 - d / R), player.position, true);
             }
-            g.spawnShockwave({ x: px, y: py }, { radius: R, damage: 0, knockback: 0, color, lifetime: 0.45 });
-            g.spawnParticles(player.position, 18, color, { speedMin: 3, speedMax: 8, sizeMin: 2, sizeMax: 4,
-                lifetimeMin: 0.3, lifetimeMax: 0.6 });
+            // No ring and no sparks: the pulse is read through what it
+            // heats — each body changes colour and gives off light.
             return;
         }
         case 'magnetic': {
@@ -796,8 +794,6 @@ function tickBeam(g: GameEngine, dt: number): void {
             if (hit.e) {
                 depositHeat(g, hit.e, c.heat ?? 0, from, true);
                 if (c.damage > 0) damageBody(g, hit.e, c.damage, from, 'mechanical', true, false);
-                g.spawnParticles({ x: hx, y: hy }, 2, '#fdba74', { speedMin: 1, speedMax: 3, sizeMin: 1.5, sizeMax: 3,
-                    spreadAngle: ang + Math.PI, spreadCone: 1.2, lifetimeMin: 0.2, lifetimeMax: 0.4 });
             }
             for (const n of passed) depositHeat(g, n, (c.heat ?? 0) * 0.5, from, true);
             break;
