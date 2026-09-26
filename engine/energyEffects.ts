@@ -26,7 +26,7 @@ import { GameEntity, EntityType, Vector2, WeaponConfig } from '../types';
 import {
     ENERGY_CONSTANTS, materialOf, responseOf, heatGain, clampHeat, coolHeat,
     mechanicalScale, magneticSusceptibility, magneticDv, planChain, safeMag,
-    stampFractureProfile, type ChainCaps, type EnergyDomain,
+    stampFractureProfile, diffuseSpread, mixHeatSpot, type ChainCaps, type EnergyDomain,
 } from './systems/energy';
 import {
     breakYieldsNothing, noteTraitDamage, markDamaged, hitReactStrength,
@@ -253,6 +253,42 @@ function dropHeat(e: GameEntity): void {
     e.burnRate = undefined;
     e.heatByPlayer = undefined;
     e.heatTracked = undefined;
+    e.heatSpotX = undefined;
+    e.heatSpotY = undefined;
+    e.heatSpread = undefined;
+}
+
+// ── Where the heat sits (presentation) ───────────────────────────────────────
+
+const _spot = { x: 0, y: 0, spread: 0 };
+
+/** Body radius the hot spot diffuses within (and caps at twice, by which
+ *  point it is uniform across the body). */
+function heatBodyR(e: GameEntity): number {
+    return Math.max(e.size.x, e.size.y) * 0.5;
+}
+
+/** Fold a deposit of `gain` landing at world point `at` (null = no direction:
+ *  spread evenly) into the body's hot spot.  Must run BEFORE `e.heat` takes
+ *  the gain, since the merge weights by the heat already there. */
+function addHeatSpot(e: GameEntity, gain: number, at: Vector2 | null): void {
+    const R = heatBodyR(e);
+    let px = 0, py = 0, s0 = R;
+    if (at) {
+        const dx = wrapDeltaX(e.position.x, at.x), dy = wrapDeltaY(e.position.y, at.y);
+        const cs = Math.cos(-(e.rotation || 0)), sn = Math.sin(-(e.rotation || 0));
+        px = dx * cs - dy * sn;
+        py = dx * sn + dy * cs;
+        // The initial spot: small against the body, never a pinpoint.
+        s0 = Math.max(3, R * 0.2);
+    }
+    const h = e.heat ?? 0;
+    if (!(h > 0) || e.heatSpread === undefined) {
+        e.heatSpotX = px; e.heatSpotY = py; e.heatSpread = s0;
+        return;
+    }
+    mixHeatSpot(h, e.heatSpotX ?? 0, e.heatSpotY ?? 0, e.heatSpread, gain, px, py, s0, _spot);
+    e.heatSpotX = _spot.x; e.heatSpotY = _spot.y; e.heatSpread = _spot.spread;
 }
 
 function trackHeat(s: EnergyState, e: GameEntity): boolean {
@@ -273,9 +309,11 @@ export function depositHeat(g: GameEngine, e: GameEntity, magnitude: number, fro
     const gain = heatGain(mat, magnitude);
     if (gain <= 0) return;
     if (!trackHeat(g.energy, e)) return;
+    const at = from ? contactOn(e, from) : null;
+    addHeatSpot(e, gain, at);
     e.heat = clampHeat((e.heat ?? 0) + gain);
     if (byPlayer) e.heatByPlayer = true;
-    if (from && e.type === EntityType.STRUCTURE && mat !== 'nebula') stampLocalImpact(e, contactOn(e, from));
+    if (at && e.type === EntityType.STRUCTURE && mat !== 'nebula') stampLocalImpact(e, at);
     applyHeatThresholds(g, e);
 }
 
@@ -355,6 +393,8 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
         }
         e.heat = coolHeat(mat, e.heat ?? 0, dt);
         const heat = e.heat;
+        // The hot spot spreads through the body at the material's own rate.
+        if (e.heatSpread !== undefined) e.heatSpread = diffuseSpread(mat, e.heatSpread, dt, heatBodyR(e) * 2);
         if (heat > 0 && mat === 'nebula') agitateNebula(g, e, heat, dt);
         if (heat > 0 && doEffects && e.active) {
             if (r.thermalDps > 0) {
@@ -387,6 +427,8 @@ function conductHeat(g: GameEngine, e: GameEntity, frac: number): void {
         if (diff <= 0.05) continue;
         if (!trackHeat(g.energy, o)) break;   // set full: nothing may take heat
         const q = diff * frac;
+        // Heat crosses at the face that touches the source.
+        addHeatSpot(o, q, contactOn(o, e.position));
         e.heat = clampHeat((e.heat ?? 0) - q);
         o.heat = clampHeat((o.heat ?? 0) + q);
         if (e.heatByPlayer) o.heatByPlayer = true;

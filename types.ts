@@ -583,6 +583,13 @@ export interface GameEntity {
   /** Bookkeeping for the bounded active sets (engine/energyEffects.ts). */
   heatTracked?: boolean;
   heatByPlayer?: boolean;
+  /** WHERE the heat sits (presentation only): a Gaussian hot spot centred at
+   *  (heatSpotX, heatSpotY) in the body's LOCAL unrotated frame — the frame
+   *  `polygonPoints` use — with spread σ = heatSpread.  Set where heat goes
+   *  in, grown by diffusion (energy.ts `diffuseSpread`), cleared with heat. */
+  heatSpotX?: number;
+  heatSpotY?: number;
+  heatSpread?: number;
   energizedTracked?: boolean;
   /** Sim-clock time until which a nebula body is electrically energised
    *  (steerable by magnetism). */

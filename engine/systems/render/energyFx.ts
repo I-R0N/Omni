@@ -15,6 +15,7 @@
  */
 import { GameEntity, CameraState } from '../../../types';
 import { shiftX, shiftY } from './drawUtils';
+import { heatPeak, heatRadiance } from '../energy';
 
 export interface EnergyBeamView {
     x0: number; y0: number; x1: number; y1: number;
@@ -89,43 +90,58 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
 // ── HEAT ────────────────────────────────────────────────────────────────────
 //
 // Heat is shown two ways and only two (user call): the MATERIAL CHANGES
-// COLOUR and it EMITS LIGHT.  Both are radial gradients, so neither has an
-// edge of its own:
+// COLOUR and it EMITS LIGHT — and both radiate from WHERE THE HEAT WENT IN,
+// not from the body's centre.
+//
+// The sim keeps one `heat` number per body.  energyEffects.ts carries beside
+// it a Gaussian HOT SPOT (centre in the body's local frame + spread σ): set at
+// the contact point, merged by moment-matching when more heat lands, and
+// DIFFUSED at the material's own rate (σ² += 4αt), so a spot on metal smears
+// across the plate in a fraction of a second while one on glass or rock stays
+// where it landed.  Rendering is then physical in two places:
 //
 //   1. INCANDESCENCE — the body's own outline filled with a radial gradient
-//      in the heat colour, hottest at the core.  The outline is the body's
-//      real polygon, so the colour change is the shape of the thing that is
-//      hot, never a circle laid over it.  Bodies with no polygon (enemy
-//      hulls) and nebula (a cloud has no hard outline to fill) skip this and
-//      take only the light.
-//   2. EMISSION — an additive glow falling smoothly to zero around the body,
-//      reaching further and brighter as it heats.
+//      centred on the spot, following the Gaussian profile: local temperature
+//      = peak × exp(−r²/2σ²), where the peak is the body's mean heat
+//      concentrated into that σ (energy.ts `heatPeak`).  Colour follows a
+//      black-body ramp of the LOCAL temperature, so a tight fresh spot is a
+//      white-hot core fading through orange to a dull-red fringe, and the
+//      same heat diffused reads as a cooler, even glow.  Clipped to the real
+//      polygon, so it is never a shape laid over the body.
+//   2. EMISSION — an additive glow around the spot whose brightness follows
+//      T⁴ radiance (`heatRadiance`): warm is barely visible, near-critical
+//      is a light source.
 //
-// COST.  Gradients are built ONCE per heat bucket at UNIT radius and cached
-// per context; each body scales one by transform, so a frame allocates
-// nothing and costs one fillRect (glow) plus one path fill (body) per
-// on-screen heated body.  The heated set is bounded (MAX_HEATED) and culled
-// to the view first.
+// Nebula (no hard outline) and polygon-less hulls take the emission only.
 //
-// COLOUR follows a black-body ramp: dull red → red-orange → orange →
-// yellow-white, so a body reads as heating up before it reads as failing.
+// COST.  Gradients are built ONCE per peak-temperature bucket at UNIT radius
+// and cached per context; each body scales one by transform — no per-frame
+// allocation, one path fill + one fillRect per on-screen heated body, over a
+// set bounded by MAX_HEATED and culled to the view first.
 
-const HEAT_BUCKETS = 16;
-const HEAT_MIN = 0.05;
+const HEAT_BUCKETS = 20;
+const PEAK_MAX = 1.6;
+const HEAT_MIN = 0.03;
+/** The gradient spans this many σ; the Gaussian is ~4% at the rim. */
+const SIGMAS = 2.5;
+/** Gradient stop positions (fraction of the rim) and the Gaussian there. */
+const STOPS = [0, 0.2, 0.4, 0.6, 0.8, 1];
+const PROFILE = STOPS.map(u => Math.exp(-((SIGMAS * u) ** 2) / 2));
 
 /** Black-body-ish ramp, t in 0..1 → [r, g, b]. */
 function heatRgb(t: number): [number, number, number] {
-    // Four stops, linearly blended.
     const stops: [number, number, number, number][] = [
-        [0.0, 120, 18, 8],
-        [0.35, 215, 55, 12],
-        [0.7, 255, 135, 28],
-        [1.0, 255, 228, 160],
+        [0.0, 110, 14, 6],
+        [0.3, 200, 40, 10],
+        [0.6, 255, 110, 22],
+        [0.85, 255, 185, 70],
+        [1.0, 255, 240, 190],
     ];
+    const x = Math.min(1, Math.max(0, t));
     for (let i = 1; i < stops.length; i++) {
         const a = stops[i - 1], b = stops[i];
-        if (t <= b[0]) {
-            const f = (t - a[0]) / (b[0] - a[0]);
+        if (x <= b[0]) {
+            const f = (x - a[0]) / (b[0] - a[0]);
             return [
                 Math.round(a[1] + (b[1] - a[1]) * f),
                 Math.round(a[2] + (b[2] - a[2]) * f),
@@ -141,31 +157,32 @@ let _heatCtx: CanvasRenderingContext2D | null = null;
 const _bodyGrad: (CanvasGradient | null)[] = new Array(HEAT_BUCKETS).fill(null);
 const _glowGrad: (CanvasGradient | null)[] = new Array(HEAT_BUCKETS).fill(null);
 
-function heatBucket(h: number): number {
-    const t = Math.min(1, Math.max(0, h));
-    return Math.min(HEAT_BUCKETS - 1, Math.floor(t * HEAT_BUCKETS));
+function peakBucket(p: number): number {
+    return Math.min(HEAT_BUCKETS - 1, Math.max(0, Math.floor((p / PEAK_MAX) * HEAT_BUCKETS)));
 }
 
 function ensureHeatGradients(ctx: CanvasRenderingContext2D): void {
     if (_heatCtx === ctx) return;
     _heatCtx = ctx;
     for (let i = 0; i < HEAT_BUCKETS; i++) {
-        const t = (i + 0.5) / HEAT_BUCKETS;
-        const [r, g, b] = heatRgb(t);
-        const [er, eg, eb] = heatRgb(t * 0.55);
-        // Body: hottest at the core, cooler toward the rim, never fully
-        // transparent — the whole body changes colour, the core most.
+        const peak = ((i + 0.5) / HEAT_BUCKETS) * PEAK_MAX;
+        // Body: each stop wears the colour of its OWN local temperature, and
+        // the tint fades in with temperature — cold rim, hot core.
         const bg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-        bg.addColorStop(0, `rgba(${r}, ${g}, ${b}, 1)`);
-        bg.addColorStop(0.55, `rgba(${Math.round((r + er) / 2)}, ${Math.round((g + eg) / 2)}, ${Math.round((b + eb) / 2)}, 0.8)`);
-        bg.addColorStop(1, `rgba(${er}, ${eg}, ${eb}, 0.55)`);
+        for (let k = 0; k < STOPS.length; k++) {
+            const T = peak * PROFILE[k];
+            const [r, g, b] = heatRgb(T);
+            const a = k === STOPS.length - 1 ? 0 : Math.min(0.9, T / 0.35 * 0.9);
+            bg.addColorStop(STOPS[k], `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`);
+        }
         _bodyGrad[i] = bg;
-        // Glow: a smooth falloff to exactly zero at the unit radius, with
-        // most of the energy close in — light, not a disc.
+        // Glow: light leaving the spot — the peak's colour on a soft falloff
+        // to exactly zero, brightness carried by globalAlpha (T⁴).
+        const [r, g, b] = heatRgb(peak);
         const gg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-        gg.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.55)`);
-        gg.addColorStop(0.25, `rgba(${r}, ${g}, ${b}, 0.3)`);
-        gg.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, 0.09)`);
+        gg.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.6)`);
+        gg.addColorStop(0.2, `rgba(${r}, ${g}, ${b}, 0.34)`);
+        gg.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.1)`);
         gg.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
         _glowGrad[i] = gg;
     }
@@ -175,54 +192,57 @@ function renderHeat(
     ctx: CanvasRenderingContext2D, heated: readonly GameEntity[], camX: number, camY: number,
 ): void {
     ensureHeatGradients(ctx);
-    // The world transform the renderer set up; each body composes onto it.
     const m = ctx.getTransform();
     const A = m.a, B = m.b, C = m.c, D = m.d, E = m.e, F = m.f;
 
-    // 1. EMISSION (additive), then 2. INCANDESCENCE over the body, so the
-    // body's own colour reads clearly on top of the light it gives off.
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < heated.length; i++) {
-        const e = heated[i];
-        const h = e.heat ?? 0;
-        if (!e.active || h < HEAT_MIN) continue;
-        const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
-        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
-        const t = Math.min(1, h);
-        const R = Math.max(e.size.x, e.size.y) * (0.9 + 0.9 * t);
-        ctx.setTransform(A * R, B * R, C * R, D * R, A * x + C * y + E, B * x + D * y + F);
-        ctx.globalAlpha = Math.min(1, 0.15 + 0.85 * t);
-        ctx.fillStyle = _glowGrad[heatBucket(h)]!;
-        ctx.fillRect(-1, -1, 2, 2);
-    }
-
-    ctx.globalCompositeOperation = 'source-over';
-    for (let i = 0; i < heated.length; i++) {
-        const e = heated[i];
-        const h = e.heat ?? 0;
-        if (!e.active || h < HEAT_MIN) continue;
-        const pts = e.polygonPoints;
-        if (!pts || pts.length < 3 || e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') continue;
-        const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
-        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
-        const t = Math.min(1, h);
-        // The outline, in the body's own rotated frame.
-        const rot = e.rotation || 0;
-        const cs = Math.cos(rot), sn = Math.sin(rot);
-        ctx.setTransform(A * cs + C * sn, B * cs + D * sn, -A * sn + C * cs, -B * sn + D * cs,
-                         A * x + C * y + E, B * x + D * y + F);
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
-        ctx.closePath();
-        // The gradient is read in the transform current AT FILL time, so the
-        // path (already fixed in device space) is filled with the unit
-        // gradient scaled to the body.
-        const R = Math.max(e.size.x, e.size.y) * 0.6;
-        ctx.setTransform(A * R, B * R, C * R, D * R, A * x + C * y + E, B * x + D * y + F);
-        ctx.globalAlpha = Math.min(0.85, 0.2 + 0.65 * t);
-        ctx.fillStyle = _bodyGrad[heatBucket(h)]!;
-        ctx.fill();
+    for (let pass = 0; pass < 2; pass++) {
+        // Pass 0: EMISSION (additive).  Pass 1: INCANDESCENCE over the body.
+        ctx.globalCompositeOperation = pass === 0 ? 'lighter' : 'source-over';
+        for (let i = 0; i < heated.length; i++) {
+            const e = heated[i];
+            const h = e.heat ?? 0;
+            if (!e.active || h < HEAT_MIN) continue;
+            const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
+            if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
+            const bodyR = Math.max(e.size.x, e.size.y) * 0.5;
+            // No recorded spot (e.g. a burn with no contact): uniform.
+            const sigma = Math.max(1, e.heatSpread ?? bodyR);
+            const peak = heatPeak(h, sigma, bodyR);
+            // The spot, rotated into the world with the body.
+            const rot = e.rotation || 0;
+            const cs = Math.cos(rot), sn = Math.sin(rot);
+            const lx = e.heatSpotX ?? 0, ly = e.heatSpotY ?? 0;
+            const sx = x + cs * lx - sn * ly, sy = y + sn * lx + cs * ly;
+            const b = peakBucket(peak);
+            if (pass === 0) {
+                const rad = heatRadiance(peak);
+                if (rad < 0.01) continue;
+                // Light reaches past the hot region, further the hotter it is.
+                const R = SIGMAS * sigma + bodyR * (0.5 + 0.8 * Math.min(1, peak));
+                ctx.setTransform(A * R, B * R, C * R, D * R, A * sx + C * sy + E, B * sx + D * sy + F);
+                ctx.globalAlpha = Math.min(1, rad);
+                ctx.fillStyle = _glowGrad[b]!;
+                ctx.fillRect(-1, -1, 2, 2);
+            } else {
+                const pts = e.polygonPoints;
+                if (!pts || pts.length < 3 || e.shardVariant === 'nebula-tile' || e.shardVariant === 'nebula-shard') continue;
+                // The outline, in the body's own rotated frame.
+                ctx.setTransform(A * cs + C * sn, B * cs + D * sn, -A * sn + C * cs, -B * sn + D * cs,
+                                 A * x + C * y + E, B * x + D * y + F);
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
+                ctx.closePath();
+                // The gradient is read in the transform current AT FILL time:
+                // the path is already fixed in device space, so this scales the
+                // unit Gaussian to σ around the spot (radial, so no rotation).
+                const R = SIGMAS * sigma;
+                ctx.setTransform(A * R, B * R, C * R, D * R, A * sx + C * sy + E, B * sx + D * sy + F);
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = _bodyGrad[b]!;
+                ctx.fill();
+            }
+        }
     }
     ctx.setTransform(A, B, C, D, E, F);
     ctx.globalAlpha = 1;

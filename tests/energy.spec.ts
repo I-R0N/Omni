@@ -15,7 +15,7 @@
  *  rule: a test that imports the constant it checks pins nothing).
  */
 import { test, expect } from '@playwright/test';
-import { boot, engine, quietScene, startRun, waitForStats } from './helpers';
+import { advanceSim, boot, engine, quietScene, startRun, waitForStats } from './helpers';
 
 const DELIVERIES = ['projectile', 'beam', 'spread', 'homing', 'radial'];
 const ENERGIES = ['kinetic', 'electric', 'thermal', 'magnetic', 'explosive'];
@@ -327,6 +327,61 @@ test.describe('the weapons, fired into the world', () => {
     });
     expect(r.cold).toBeGreaterThan(0);
     expect(r.hot).toBeGreaterThan(r.cold * 2);
+    watch.assertClean();
+  });
+
+  test('HEAT radiates from where it went in, and spreads at the material\'s own rate', async ({ page }) => {
+    // Presentation state, but it is physics: heat lands at the contact
+    // point, a new deposit merges by moment matching (heat-weighted centre,
+    // second moment kept), and the spot diffuses as sigma^2 += 4*alpha*t —
+    // so metal smears across a plate while glass holds the spot where it
+    // landed.  Each half below fails on the old centre-of-mass rendering.
+    const watch = await boot(page);
+    const pure = await page.evaluate(() => {
+      const E = (window as any).__omniEnergy;
+      const out = { x: 0, y: 0, spread: 0 };
+      // Equal heat at two points: centre is the midpoint, spread widens.
+      E.mixHeatSpot(1, -10, 0, 3, 1, 10, 0, 3, out);
+      const mid = { ...out };
+      // A tiny deposit barely moves a big spot.
+      E.mixHeatSpot(10, 0, 0, 5, 0.1, 20, 0, 3, out);
+      const small = { ...out };
+      return {
+        mid, small,
+        metal: E.diffuseSpread('metal', 3, 0.5, 1e9), glass: E.diffuseSpread('glass', 3, 0.5, 1e9),
+        capped: E.diffuseSpread('metal', 3, 100, 40),
+        peakTight: E.heatPeak(0.5, 3, 18), peakWide: E.heatPeak(0.5, 36, 18),
+        radCold: E.heatRadiance(0), radWarm: E.heatRadiance(0.3), radHot: E.heatRadiance(1),
+      };
+    });
+    expect(pure.mid.x).toBeCloseTo(0, 6);
+    expect(pure.mid.spread).toBeGreaterThan(10);         // sqrt(9 + 100)
+    expect(pure.small.x).toBeLessThan(1);
+    expect(pure.metal).toBeGreaterThan(pure.glass * 2);  // metal spreads far faster
+    expect(pure.capped).toBe(40);
+    expect(pure.peakTight).toBeGreaterThan(pure.peakWide);
+    expect(pure.peakWide).toBeCloseTo(0.5, 6);           // a filled spot is the mean
+    expect(pure.radCold).toBe(0);
+    expect(pure.radWarm).toBeLessThan(0.15);             // T^4: warm barely glows
+    expect(pure.radHot).toBeCloseTo(1, 6);
+
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const t = e.currentMap.entities.find((o: any) => o.active
+        && o.shardVariant === 'metal-tile' && o.mass === Infinity);
+      // Heat arriving from due LEFT of the plate.
+      e.debugHeat(t, 10, { x: t.position.x - 80, y: t.position.y });
+      const cs = Math.cos(t.rotation || 0);
+      return { spotX: t.heatSpotX * cs, spotY: t.heatSpotY, s0: t.heatSpread, id: t.id };
+    });
+    expect(r.spotX).toBeLessThan(-5);                    // on the side it came from
+    expect(Math.abs(r.spotY)).toBeLessThan(3);
+    await advanceSim(page, 0.5);
+    const later = await engine(page, (e, id) => {
+      const t = e.currentMap.entities.find((o: any) => o.id === id);
+      return t.heatSpread;
+    }, r.id);
+    expect(later).toBeGreaterThan(r.s0 * 2);             // it diffused
     watch.assertClean();
   });
 

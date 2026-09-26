@@ -145,6 +145,12 @@ export interface MaterialResponse {
   /** MAGNETIC.  0..1 susceptibility; only metal is non-zero (nebula borrows
    *  a value while ENERGIZED — see `magneticSusceptibility`). */
   magnetic: number;
+  /** THERMAL DIFFUSIVITY (world units² / s) — how fast a hot spot spreads
+   *  through the body from where the heat went in.  Presentation only: the
+   *  sim still reads the body's one `heat` value.  Metal smears a spot across
+   *  a whole plate in well under a second; glass, rock and plastic hold it
+   *  where it landed. */
+  thermalDiffusivity: number;
 }
 
 /**
@@ -157,25 +163,25 @@ export const MATERIAL_RESPONSE: Readonly<Record<MaterialId, MaterialResponse>> =
   //            weak   abs   cap  cool  cond  dps   fail      bonds     cond. eDmg  mag
   rock:    { heatWeakening: 1.5, heatAbsorb: 0.8, heatCapacity: 30, coolingPerSec: 0.25, conduct: 0,
              thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 0.15, electricDamage: 0.3, magnetic: 0 },
+             conductivity: 0.15, electricDamage: 0.3, magnetic: 0, thermalDiffusivity: 30 },
   glass:   { heatWeakening: 1.0, heatAbsorb: 0.9, heatCapacity: 24, coolingPerSec: 0.15, conduct: 0,
              thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity,
-             conductivity: 0.05, electricDamage: 0.2, magnetic: 0 },
+             conductivity: 0.05, electricDamage: 0.2, magnetic: 0, thermalDiffusivity: 12 },
   metal:   { heatWeakening: 2.5, heatAbsorb: 0.7, heatCapacity: 40, coolingPerSec: 0.35, conduct: 0.15,
              thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 1.0, electricDamage: 1.0, magnetic: 1.0 },
+             conductivity: 1.0, electricDamage: 1.0, magnetic: 1.0, thermalDiffusivity: 160 },
   plastic: { heatWeakening: 0.5, heatAbsorb: 1.0, heatCapacity: 12, coolingPerSec: 0.2, conduct: 0,
              thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3,
-             conductivity: 0.03, electricDamage: 0.1, magnetic: 0 },
+             conductivity: 0.03, electricDamage: 0.1, magnetic: 0, thermalDiffusivity: 8 },
   nebula:  { heatWeakening: 0, heatAbsorb: 1.0, heatCapacity: 8, coolingPerSec: 0.5, conduct: 0,
              thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 0.7, electricDamage: 0, magnetic: 0 },
+             conductivity: 0.7, electricDamage: 0, magnetic: 0, thermalDiffusivity: 60 },
   // Enemies, the player, indestructible terrain, anything unknown: a hull.
   // Conducts (ships are machines — the old Lightning chained through them),
   // burns (heat is a DoT), not magnetic until something declares `metal`.
   generic: { heatWeakening: 0.5, heatAbsorb: 0.8, heatCapacity: 20, coolingPerSec: 0.4, conduct: 0,
              thermalDps: 5, thermalFailAt: Infinity, bondReleaseAt: Infinity,
-             conductivity: 0.8, electricDamage: 1.0, magnetic: 0 },
+             conductivity: 0.8, electricDamage: 1.0, magnetic: 0, thermalDiffusivity: 40 },
 };
 
 export function responseOf(mat: MaterialId | string | undefined): MaterialResponse {
@@ -261,6 +267,72 @@ export function coolHeat(mat: MaterialId, heat: number, dt: number): number {
   const r = responseOf(mat);
   const h = clampHeat(heat) * Math.exp(-r.coolingPerSec * Math.max(0, dt));
   return h < ENERGY_CONSTANTS.HEAT_EPSILON ? 0 : h;
+}
+
+// ── Heat distribution (presentation) ─────────────────────────────────────────
+//
+// A body's `heat` is one number and every SIM rule reads only that.  Where the
+// heat sits INSIDE the body is carried separately as a single Gaussian hot
+// spot — a centre in the body's local frame and a spread σ — which is all the
+// renderer needs to draw heat radiating from where it went in.
+//
+// Two exact results for a Gaussian are all it takes:
+//   - DIFFUSION: a Gaussian stays Gaussian, with σ² growing by 4αt (2D), so
+//     spreading is one sqrt per tick and needs no grid.
+//   - A NEW DEPOSIT merges by MOMENT MATCHING: the combined centre is the
+//     heat-weighted mean of the two centres, and the combined σ² keeps the
+//     same second moment (each σ² plus its centre's squared offset from the
+//     new mean).  Heat-weighted, so a big old spot drifts only slightly toward
+//     a small new one.
+
+/** σ after `dt` seconds of diffusion, capped at `cap` (the spot has filled
+ *  the body — past that it is uniform and further growth means nothing). */
+export function diffuseSpread(mat: MaterialId, spread: number, dt: number, cap: number): number {
+  const a = responseOf(mat).thermalDiffusivity;
+  const s = Number.isFinite(spread) && spread > 0 ? spread : 0;
+  const out = Math.sqrt(s * s + 4 * Math.max(0, a) * Math.max(0, dt));
+  return Math.min(Number.isFinite(cap) && cap > 0 ? cap : out, out);
+}
+
+/** Merge a new deposit of `gain` at (px, py) with spot size `s0` into an
+ *  existing spot (x, y, spread) that holds `heat`.  Writes into `out`
+ *  (x, y, spread) so the hot path allocates nothing. */
+export function mixHeatSpot(
+  heat: number, x: number, y: number, spread: number,
+  gain: number, px: number, py: number, s0: number,
+  out: { x: number; y: number; spread: number },
+): void {
+  const w0 = heat > 0 && Number.isFinite(heat) ? heat : 0;
+  const w1 = gain > 0 && Number.isFinite(gain) ? gain : 0;
+  const W = w0 + w1;
+  if (W <= 0) { out.x = px; out.y = py; out.spread = s0; return; }
+  const mx = (w0 * x + w1 * px) / W, my = (w0 * y + w1 * py) / W;
+  const d0 = (x - mx) * (x - mx) + (y - my) * (y - my);
+  const d1 = (px - mx) * (px - mx) + (py - my) * (py - my);
+  const v = (w0 * (spread * spread + d0) + w1 * (s0 * s0 + d1)) / W;
+  out.x = mx; out.y = my; out.spread = Math.sqrt(Math.max(v, 0));
+}
+
+/** Peak normalised temperature of a spot: the body's MEAN heat concentrated
+ *  into a Gaussian of σ = `spread` over a body of radius `bodyR`.  Never
+ *  below the mean (a spot that has filled the body is uniform), and capped
+ *  so a pinpoint deposit cannot read as infinitely hot. */
+export function heatPeak(heat: number, spread: number, bodyR: number): number {
+  if (!(heat > 0)) return 0;
+  const s = Math.max(spread, 1e-3);
+  const concentrated = heat * (bodyR * bodyR) / (2 * s * s);
+  return Math.min(ENERGY_CONSTANTS.MAX_HEAT, Math.max(heat, concentrated));
+}
+
+/** Visible radiance of a spot at normalised temperature `t`.  A body glows by
+ *  T⁴ (Stefan–Boltzmann), measured above the ambient it already sits at, so
+ *  warm reads as barely there and near-critical reads as a light source.
+ *  0 at t = 0, 1 at t = 1. */
+export function heatRadiance(t: number): number {
+  if (!(t > 0)) return 0;
+  const T0 = 0.35;
+  const hi = (1 + T0) ** 4 - T0 ** 4;
+  return Math.min(1.5, ((t + T0) ** 4 - T0 ** 4) / hi);
 }
 
 /** Multiplier on MECHANICAL energy for a body at `heat` — how heat lowers the

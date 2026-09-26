@@ -5385,9 +5385,10 @@ export class GameEngine {
   }
 
   /** DBG / test seam: put a THERMAL packet into a body through the real
-   *  energy path (the same call every thermal weapon makes). */
-  public debugHeat(target: GameEntity, magnitude: number) {
-      depositHeat(this, target, magnitude, null, true);
+   *  energy path (the same call every thermal weapon makes).  `from` is where
+   *  the heat arrives from — omit it for heat with no direction. */
+  public debugHeat(target: GameEntity, magnitude: number, from?: Vector2) {
+      depositHeat(this, target, magnitude, from ?? null, true);
   }
 
   /** Weapon catalog for the pause-menu DEBUG weapons rows (built only

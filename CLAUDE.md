@@ -88,7 +88,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  449 tests.  All run at
+                          whatever happened next).  450 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -3916,18 +3916,30 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   - **Beams** are timed pulses (one per trigger pull — there is no hold-to-
     fire), aimed at the pull, ticking a capped raycast; an electric beam
     arcs to the nearest conductor in a forward cone or fizzles.
-  - **HEAT SHOWS IN THE MATERIAL AND NOWHERE ELSE** (user call).  A heated
-    body CHANGES COLOUR — its own polygon filled with a radial gradient on a
-    black-body ramp (dull red → orange → yellow-white), hottest at the core
-    — and EMITS LIGHT, an additive glow falling smoothly to zero around it
-    (`render/energyFx.ts` `renderHeat`).  There is deliberately NO thermal
-    ring, contact disc or spark spray anywhere: the radial pulse, the beam
-    contact and a round's impact all read through the bodies they heat.
-    Cost is one path fill + one fillRect per on-screen heated body, from
-    unit-radius gradients cached per heat bucket and scaled by transform.
-    Nebula (no hard outline) and polygon-less hulls take the light only.
-    The glow is drawn in the world pass, not the lighting layer, so it
-    reads at every lighting tier; fog, if switched on, covers it.
+  - **HEAT SHOWS IN THE MATERIAL AND NOWHERE ELSE, AND IT RADIATES FROM
+    WHERE IT WENT IN** (user call).  A heated body CHANGES COLOUR and EMITS
+    LIGHT (`render/energyFx.ts` `renderHeat`); there is deliberately NO
+    thermal ring, contact disc or spark spray anywhere.  The sim still reads
+    ONE `heat` per body; beside it rides a presentation-only Gaussian HOT
+    SPOT — `heatSpotX/Y` in the body's local unrotated frame and a spread
+    `heatSpread` — set at the contact point (`contactOn`), MERGED by moment
+    matching when more heat lands (heat-weighted centre, second moment kept:
+    `mixHeatSpot`), and DIFFUSED at the material's
+    `MATERIAL_RESPONSE.thermalDiffusivity` as σ² += 4αt (`diffuseSpread`,
+    capped at twice the body radius, where it is uniform).  So a spot on
+    metal smears across the plate in ~half a second while one on glass or
+    rock stays where it landed; conduction between metal bodies lands on the
+    receiver's face nearest the source.  The render is the same Gaussian:
+    the body's own polygon filled with a radial gradient centred on the
+    spot, each stop coloured by its LOCAL temperature on a black-body ramp
+    (peak = mean heat concentrated into σ, `heatPeak`), plus an additive
+    glow whose brightness follows T⁴ radiance above ambient
+    (`heatRadiance`).  Cost is one path fill + one fillRect per on-screen
+    heated body, from unit-radius gradients cached per peak-temperature
+    bucket and scaled by transform.  Nebula (no hard outline) and
+    polygon-less hulls take the light only.  The glow is drawn in the world
+    pass, not the lighting layer, so it reads at every lighting tier; fog,
+    if switched on, covers it.
 - **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
   the sharpest consequence of the bullet above — and the rule was drawn ONE
   VARIANT TOO WIDE at first, which is the part worth keeping.  Measured, the
