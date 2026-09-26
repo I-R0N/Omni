@@ -20,10 +20,10 @@
  *  not known at design time.
  */
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType, JoystickHUDState, FireButtonHUDState } from '../../../types';
+import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, JoystickHUDState, FireButtonHUDState } from '../../../types';
 import {
     COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS,
-    LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
+    LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, weaponConfig, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
     INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
@@ -545,8 +545,8 @@ export function renderLoadoutHUD(
     const { SLOT_H, SLOT_RADIUS: RADIUS } = LOADOUT_HUD_CONSTANTS;
     const H = UI_CONSTANTS.HUD;
     const { startY, slotW, slotXs } = computeLoadoutHUDLayout(width, height);
-    const activeWeapon = player.currentWeapon ?? WeaponType.BLASTER;
-    const equipped = player.equippedWeapons ?? [WeaponType.BLASTER, null];
+    const activeWeapon = player.currentWeapon ?? null;
+    const equipped = player.equippedWeapons ?? [null, null];
 
     ctx.save();
     ctx.textAlign  = 'center';
@@ -573,7 +573,7 @@ export function renderLoadoutHUD(
             continue;
         }
 
-        const wCfg   = WEAPONS[wType];
+        const wCfg   = weaponConfig(wType);
         const active = wType === activeWeapon;
 
         // The FILL is the transparent half of the widget (user call: HUD
@@ -608,7 +608,13 @@ export function renderLoadoutHUD(
         ctx.font        = `bold ${Math.max(H.TEXT.MICRO, Math.min(H.TEXT.ROW, slotW * 0.115))}px monospace`;
         ctx.globalAlpha = active ? 1.0 : 0.65;
         ctx.fillStyle   = active ? '#ffffff' : H.MUTED_COLOR;
-        ctx.fillText(wCfg.name.toUpperCase(), x + slotW / 2, y + SLOT_H - 16);
+        ctx.fillText(wCfg.name.toUpperCase(), x + slotW / 2, y + SLOT_H - 18);
+        // The COMBINATION it is: delivery · energy modifier (energy modules).
+        ctx.font        = `${H.TEXT.MICRO}px monospace`;
+        ctx.globalAlpha = active ? 0.8 : 0.45;
+        ctx.fillStyle   = H.MUTED_COLOR;
+        ctx.fillText(`${wCfg.delivery}${wCfg.energy ? ' · ' + wCfg.energy : ''}`.toUpperCase(),
+                     x + slotW / 2, y + SLOT_H - 6);
     }
 
     ctx.globalAlpha = 1;

@@ -35,7 +35,7 @@ export function renderTrails(
         } else if ((entity.type === EntityType.PROJECTILE || entity.isSnitch) && entity.trail.length >= 2) {
             // Snitch comet tail reuses the projectile strip — entity.color
             // is the snitch's gold core colour.
-            drawTrailStrip(r, ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
+            drawTrailStrip(r, ctx, entity.trail, 'projectile', camera, entity.color);
         }
     });
 }
@@ -210,7 +210,6 @@ export function drawTrailStrip(
     mode: 'projectile',
     camera: CameraState,
     entityColor?: string,
-    isBouncer?: boolean
 ) {
     // Pre-shift every trail point into the camera's wrap zone so a trail
     // that spans a seam (emitter just wrapped) renders as one continuous
@@ -280,13 +279,7 @@ export function drawTrailStrip(
     // so the trail dims uniformly as its newest point ages out.
     const head = t[t.length - 1];
     const headRatio = Math.max(0, Math.min(1, head.lifetime / head.maxLifetime));
-    if (isBouncer) {
-        // Bouncer beam: solid pure-green line with no fade along the trail.
-        // The short lifetime already makes the beam self-limiting; we want
-        // it sharp while it's visible.
-        const [r, g, b] = hexToRgb(entityColor || '#22c55e');
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
-    } else {
+    {
         const grad = ctx.createLinearGradient(sx[0], sy[0], sx[t.length - 1], sy[t.length - 1]);
         const [r, g, b] = hexToRgb(entityColor || '#facc15');
         grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);

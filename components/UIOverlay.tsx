@@ -234,6 +234,12 @@ interface UIOverlayProps {
   // DBG: grant + equip a weapon (pause-menu debug Weapons rows) and
   // teleport the player to the station's doorstep (Overworld only).
   onGrantWeapon?: (id: string) => void;
+  // DBG: the ten weapon modules — add / remove / clear — and the toggle that
+  // lets the flowers be edited away from a drydock.
+  onAddWeaponModule?: (id: string) => void;
+  onRemoveWeaponModule?: (id: string) => void;
+  onClearWeaponModules?: () => void;
+  onToggleOutfitAnywhere?: () => void;
   onTeleportStation?: () => void;
   onToggleFFOverlayVectors?: () => void;
   onToggleFFOverlayCells?: () => void;
@@ -553,6 +559,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onUndock,
   onRepairHull,
   onGrantWeapon,
+  onAddWeaponModule,
+  onRemoveWeaponModule,
+  onClearWeaponModules,
+  onToggleOutfitAnywhere,
   onTeleportStation,
   onToggleFFOverlayVectors,
   onToggleFFOverlayCells,
@@ -580,7 +590,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   // refresh resets), which is fine for a dev panel.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => ({
     // 'stats' stays open by default; every other section starts collapsed.
-    player: true, tilt: true, modules: true, weapons: true, visual: true, shardsphys: true, flowfield: true,
+    player: true, tilt: true, modules: true, weapons: true, wmods: true, visual: true, shardsphys: true, flowfield: true,
     perf: true, timing: true, dragon: true, rival: true, boss: true, perfrec: true,
     portal: true, nebula: true,
     // Map menus — controlled (not native <details>) so the dropdown state
@@ -697,7 +707,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const dockedSvc = stats.dock?.docked ? stats.dock.services : undefined;
   // Installed hexes are drydock-only; the inventory is the player's cargo
   // hold — reorderable (and scrappable) from anywhere on the map.
-  const canEditInstalled = dockedSvc?.drydock === true;
+  // DBG "Outfit anywhere" lifts the drydock rule for the pause-menu flowers.
+  const canEditInstalled = dockedSvc?.drydock === true || stats.outfitAnywhere === true;
   /* HEX SIZING IS RESPONSIVE (5d, U2 — audit finding A2).
    *
    * The flowers used to be a fixed 200px-wide box in a `grid-cols-2` column
@@ -1720,6 +1731,60 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
                     `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then mounts it on a gun hex (first empty, else the inactive one). S1/S2 = gun hex.`)}
                 </React.Fragment>)}
+
+              {/* ── Weapon modules (DBG: the 5 deliveries + 5 energies) ── */}
+              {renderSectionHeader('wmods', 'Weapon Modules')}
+              {!collapsed.wmods && (<>
+                {ctrlRow('Outfit anywhere', onToggleOutfitAnywhere,
+                  stats.outfitAnywhere ? 'On' : 'Off',
+                  'DBG: edit the ship and weapon flowers from this pause menu anywhere on the map — drag, install and unmount work without a drydock. Off restores the station-only rule.')}
+                {(stats.weaponModuleCatalog ?? []).map(m => (
+                  <div key={m.id} className="pointer-events-auto mt-1 flex items-center justify-between gap-1">
+                    <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">
+                      {m.kind === 'delivery' ? '◆' : '⚡'} {m.name}
+                      <span className="ml-1 text-slate-500 normal-case tracking-normal tabular-nums">
+                        {m.installed > 0 ? `on ${m.installed}` : ''}{m.installed > 0 && m.stored > 0 ? ' · ' : ''}{m.stored > 0 ? `cargo ${m.stored}` : ''}
+                      </span>
+                    </span>
+                    <span className="flex gap-0.5">
+                      <button
+                        onClick={() => onAddWeaponModule?.(m.id)}
+                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[9px] font-bold text-slate-200 hover:border-emerald-400/70 hover:text-emerald-300 transition-colors"
+                        title={`Add ${m.name} (DBG): mounts it on the first free weapon hex${m.kind === 'delivery' ? ' (while under the 2-gun cap)' : ''}, else puts it in cargo.`}
+                      >+</button>
+                      <button
+                        disabled={m.installed + m.stored === 0}
+                        onClick={() => onRemoveWeaponModule?.(m.id)}
+                        className="bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-0.5 text-[9px] font-bold text-slate-200 hover:border-red-400/70 hover:text-red-300 transition-colors disabled:opacity-30"
+                        title={`Remove one ${m.name} (DBG): the installed copy first, else one from cargo.`}
+                      >−</button>
+                    </span>
+                  </div>
+                ))}
+                {/* Combination grid: one click lays out delivery + energy on
+                    the flower (debugGrantWeapon's deterministic layout). */}
+                <div className="pointer-events-auto mt-1 text-slate-400/80 uppercase tracking-wider text-[8px]">Equip combo</div>
+                {(['projectile', 'beam', 'spread', 'homing', 'radial'] as const).map(d => (
+                  <div key={d} className="pointer-events-auto mt-0.5 flex items-center justify-between gap-1">
+                    <span className="text-slate-400/80 uppercase tracking-wider text-[8px]">{d}</span>
+                    <span className="flex gap-0.5">
+                      {([['', '—'], ['kinetic', 'K'], ['electric', 'E'], ['thermal', 'T'], ['magnetic', 'M'], ['explosive', 'X']] as const).map(([e, lbl]) => {
+                        const key = e ? `${d}+${e}` : d;
+                        return (
+                          <button
+                            key={lbl}
+                            onClick={() => onGrantWeapon?.(key)}
+                            className="bg-slate-800/70 border border-slate-600/60 rounded px-1 py-0.5 text-[8px] font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors"
+                            title={`Equip ${key} (DBG): mounts the ${d} delivery${e ? ` with a ${e} modifier touching it` : ' bare'}; the other gun and its modifier are kept.`}
+                          >{lbl}</button>
+                        );
+                      })}
+                    </span>
+                  </div>
+                ))}
+                {ctrlRow('Clear', onClearWeaponModules, 'All',
+                  'Remove every delivery and energy module from the flower and cargo (DBG). Gunnery, Autoloader and Overcharge stay.')}
+              </>)}
 
               {/* ── Dragon mini-boss summon (DBG) ──────────────────── */}
               {renderSectionHeader('dragon', 'Dragon')}
@@ -3249,11 +3314,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {stats.outfitting && (
               <div className={`${PANEL} flex flex-col gap-2`}>
                 <div className="grid grid-cols-2 gap-2 justify-items-center">
-                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', false)}
-                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', false)}
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', stats.outfitAnywhere === true)}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', stats.outfitAnywhere === true)}
                 </div>
                 {renderInventoryHex(false)}
-                {renderModuleDetail('pause')}
+                {/* DBG "Outfit anywhere": the pause panel behaves like a
+                    drydock — drag, install and unmount all work here. */}
+                {renderModuleDetail(stats.outfitAnywhere === true ? 'station' : 'pause')}
               </div>
             )}
 

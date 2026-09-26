@@ -186,15 +186,15 @@ export enum EnemyRole {
   SHOOTING = 'SHOOTING',
 }
 
-export enum WeaponType {
-  BLASTER   = 'BLASTER',
-  BURST     = 'BURST',
-  SHOTGUN   = 'SHOTGUN',
-  BOUNCER   = 'BOUNCER',
-  LIGHTNING = 'LIGHTNING',
-  HOMING    = 'HOMING',
-  CANNON    = 'CANNON',
-}
+// ── Weapons are MODULES now: a DELIVERY plus an optional ENERGY MODIFIER ────
+// A weapon's identity is a `WeaponKey` — `'projectile'`, `'beam+thermal'` —
+// built and parsed in engine/systems/energy.ts, which also carries the map
+// from the retired enum names (BLASTER, CANNON, …) to the combination each
+// one became.  `WeaponType` survives only as the name of that key type so the
+// loadout fields below read as they always did.
+import type { Delivery, EnergyModifier, MaterialId, FractureProfile } from './engine/systems/energy';
+export type { Delivery, EnergyModifier, MaterialId, FractureProfile };
+export type WeaponType = string;
 
 // ── Status effects ────────────────────────────────────────────────────────────
 // Generic player debuff framework.  Today: 'corrosion' (a stacking
@@ -280,7 +280,11 @@ export interface StatusEffect {
 }
 
 export interface WeaponConfig {
-  type: WeaponType;
+  /** How the energy arrives — the gun module. */
+  delivery: Delivery;
+  /** What kind of energy it is — the modifier module.  Absent = plain,
+   *  unmodified kinetic (the weak base). */
+  energy?: EnergyModifier;
   name: string;
   cooldown: number; // Time between shots (seconds)
   speed: number;
@@ -302,9 +306,6 @@ export interface WeaponConfig {
   // NOTE (pivot 1b): ammo is deleted as a system — there is no per-shot
   // resource cost.  Weapon pressure = cooldown + the 2-slot loadout
   // commitment; charged shots cost only the charge-time hold.
-  // Maximum tile-bounces for a bouncer projectile.  Bouncer is the only
-  // weapon that uses this today; absent on other configs.
-  bounceCount?: number;
   // Cannon AoE-on-impact primitive.  When set, every entity within
   // `explosionRadius` of the impact (toroidal-corrected) takes
   // `explosionDamage` and a knockback impulse with magnitude scaling from
@@ -331,13 +332,6 @@ export interface WeaponConfig {
   // bloom (used to telegraph heavy / status enemy shots — Tank, Orbiter,
   // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
   glow?: boolean;
-  // Lightning chain overrides — when set, replaces the default
-  // LIGHTNING_CHAIN_COUNT / LIGHTNING_CHAIN_RANGE / LIGHTNING_CHAIN_BRANCHES
-  // constants for the chain triggered by this projectile's impact.  Used
-  // by the charged Lightning variant to amplify all three.
-  chainCount?: number;
-  chainRange?: number;
-  chainBranches?: number;
   // Charged-shot render hint — ProjectileSystem.spawn copies this onto
   // the projectile so RenderSystem can pick a custom visual (today only
   // the charged Blaster fireball uses it).
@@ -345,18 +339,43 @@ export interface WeaponConfig {
   // Status effect this shot applies to the player on hit (e.g. corrosion).
   // ProjectileSystem.spawn copies it onto the projectile.
   appliesEffect?: EffectPayload;
-  // When set with count > 1, ProjectileSystem.spawn distributes the
-  // projectiles in an equal-angle ring around the aim direction (every
-  // 360°/count) instead of a forward-cone fan.  Used by the charged
-  // Bouncer's omnidirectional nova.
-  omniDirectional?: boolean;
   homing?: boolean; // Does it track targets?
   // Per-weapon homing turn-rate multiplier (1.0 = full tracking).  Charged
   // Homing volleys reduce this so the missiles fan out rather than all
   // converging on the same target.
   homingStrength?: number;
-  burstCount?: number; // How many shots in a burst sequence
-  burstDelay?: number; // Time between burst shots
+  // ── Energy payloads (the modifier's half of a combination) ──────────────
+  /** Heat (damage-equivalent units) a hit deposits. */
+  heat?: number;
+  /** After a hit, keep heating the target at `burnRate` heat/s for this long
+   *  (incendiary rounds, the thermal seeker's latch). */
+  burnSeconds?: number;
+  burnRate?: number;
+  /** Electric discharge from the contact point (or the ship, for beams and
+   *  novas): magnitude plus the chain caps it is planned under. */
+  electric?: { magnitude: number; hops: number; targets: number; hopRange: number; branches: number };
+  /** Magnetic pulse on contact (or from the ship): pull or push metal within
+   *  `radius`; `seconds` > 0 leaves a short-lived attractor behind. */
+  magnetic?: { strength: number; radius: number; mode: 'pull' | 'push'; seconds?: number };
+  /** Kinetic push added to a body struck by a beam tick / radial wave. */
+  push?: number;
+  /** Per-second velocity retention of the round in flight (1 = none).  A
+   *  pellet that loses speed also loses damage — damage is measured from
+   *  the speed a round still has — so range falloff needs no curve. */
+  speedRetain?: number;
+  /** Homing target preference: conductive bodies, or metal. */
+  homingPrefers?: 'conductive' | 'metal';
+  // ── Non-projectile deliveries ──
+  /** BEAM: seconds a pulse lasts, how far it reaches, how wide it is, and
+   *  the interval between applications along it. */
+  beamDuration?: number;
+  beamRange?: number;
+  beamWidth?: number;
+  beamTick?: number;
+  /** RADIAL / SPREAD-instant: reach of the pulse, and the cone half-angle
+   *  (degrees) for a spread that resolves instantly rather than as rounds. */
+  pulseRadius?: number;
+  coneHalfDeg?: number;
 }
 
 // ── Nebula colour composition ────────────────────────────────────────────────
@@ -553,6 +572,46 @@ export interface GameEntity {
 
   // Player Weapon State
   currentWeapon?: WeaponType;
+  // ── Energy state (energy modules) — set only on bodies that have any ──
+  /** Opt-in material; terrain derives it from `shardVariant`. */
+  material?: MaterialId;
+  /** Normalised heat (1 = the material's critical heat).  Absent = cold. */
+  heat?: number;
+  /** Seconds of latched burn left, and its heat rate. */
+  burnTimer?: number;
+  burnRate?: number;
+  /** Bookkeeping for the bounded active sets (engine/energyEffects.ts). */
+  heatTracked?: boolean;
+  heatByPlayer?: boolean;
+  /** WHERE the heat sits (presentation only): a Gaussian hot spot centred at
+   *  (heatSpotX, heatSpotY) in the body's LOCAL unrotated frame — the frame
+   *  `polygonPoints` use — with spread σ = heatSpread.  Set where heat goes
+   *  in, grown by diffusion (energy.ts `diffuseSpread`), cleared with heat. */
+  heatSpotX?: number;
+  heatSpotY?: number;
+  heatSpread?: number;
+  energizedTracked?: boolean;
+  /** Sim-clock time until which a nebula body is electrically energised
+   *  (steerable by magnetism). */
+  energizedUntil?: number;
+  /** The fracture profile of the last energy event that touched this body:
+   *  read at first decomposition (site scale + bias) and at shatter
+   *  (impulse), so the break takes the character of what broke it. */
+  fractureProfile?: FractureProfile;
+  /** Unscaled ÷ profile-scaled site count of the CURRENT pattern (fracture
+   *  profiles); the boundary model uses it to keep the material's derived
+   *  toughness when a profile coarsens or refines the grain. */
+  fractureSiteRatio?: number;
+  /** Projectile carrying an energy payload (copied from its WeaponConfig). */
+  energyHeat?: number;
+  energyBurnSeconds?: number;
+  energyBurnRate?: number;
+  energyElectric?: WeaponConfig['electric'];
+  energyMagnetic?: WeaponConfig['magnetic'];
+  speedRetain?: number;
+  homingPrefers?: 'conductive' | 'metal';
+  /** The body a preference-homing round is steering at (bounded acquire). */
+  homingTarget?: GameEntity;
   weaponCooldown?: number;
   burstQueue?: number; // How many shots left in current burst
   burstTimer?: number; // Timer for next burst shot
@@ -1157,6 +1216,9 @@ export interface GameEntity {
   // salvage drops because each newborn shard rolled the asteroid drop
   // table when the wave killed it.
   validHitIds?: Set<string>;
+  // The same snapshot as ENTITIES, so the per-step ring tick walks only the
+  // bodies it may reach (≤ the blast cap) instead of the whole map.
+  validHitEntities?: GameEntity[];
 
   // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
   isLightningProjectile?: boolean;
@@ -1164,12 +1226,6 @@ export interface GameEntity {
   // When true, handleEntityDeath skips drop spawning (e.g. explosion kills)
   suppressDrops?: boolean;
 
-  // Marks a projectile as a bouncer (thin green laser that reflects off tiles)
-  isBouncer?: boolean;
-  // Remaining tile-bounces for a bouncer projectile (decremented on each
-  // reflection in PhysicsSystem; the projectile is deactivated when it
-  // would bounce past 0).  Absent on non-bouncer projectiles.
-  bouncesRemaining?: number;
   // Cannon AoE-on-impact: copied from WeaponConfig at spawn.  PhysicsSystem
   // raises an onExplosion callback for any projectile with explosionRadius
   // > 0 after the direct-hit damage resolves.
@@ -1185,10 +1241,6 @@ export interface GameEntity {
   // Homing / Cannon) leave this unset and render with the standard
   // weapon-color gradient.
   isCharged?: boolean;
-  // Lightning chain overrides on the projectile (charged-shot only).
-  chainCount?: number;
-  chainRange?: number;
-  chainBranches?: number;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
   homingStrength?: number;
 
@@ -1915,6 +1967,10 @@ export interface EngineStats {
   /** Full weapon catalog for the pause-menu DEBUG weapons rows (built only
    *  while paused).  `slot` = equipped loadout slot (0/1) or null. */
   weaponCatalog?: { id: string; name: string; owned: boolean; slot: number | null }[];
+  /** DBG (paused only): the ten weapon modules and where each copy is. */
+  weaponModuleCatalog?: { id: string; name: string; kind: 'delivery' | 'energy'; installed: number; stored: number }[];
+  /** DBG: outfitting is allowed away from a drydock. */
+  outfitAnywhere?: boolean;
   debugMode?: boolean;
   trailShape?: TrailShape;
   trailEmitMode?: TrailEmitMode;

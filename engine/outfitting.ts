@@ -26,12 +26,13 @@
  */
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EngineStats, WeaponType } from '../types';
+import { weaponKey, type EnergyModifier } from './systems/energy';
 import {
     MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot,
     MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT,
     INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS,
     slotUnlockCost,
-    HEX_ADJACENCY, WEAPONS, WEAPON_LIST, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
+    HEX_ADJACENCY, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
     SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
   massFor, hullDensity, SPRITE_CONSTANTS,
 } from '../constants';
@@ -52,11 +53,15 @@ export function computeActiveSlots(g: GameEngine, slots: (string | null)[], out:
         for (let i = 0; i < slots.length; i++) {
             const id = slots[i];
             if (id === null || out[i]) continue;
-            const req = MODULE_REQUIREMENTS[moduleDef(id)!.family];
+            // An id the catalog does not know (a retired module) is inert
+            // rather than a crash — unknown modules fail SAFE.
+            const def = moduleDef(id);
+            const req = def ? MODULE_REQUIREMENTS[def.family] : undefined;
             if (!req) continue;
             for (const n of HEX_ADJACENCY[i]) {
                 const nid = slots[n];
-                if (nid !== null && out[n] && req.includes(moduleDef(nid)!.family)) {
+                const nfam = nid !== null ? moduleDef(nid)?.family : undefined;
+                if (nfam !== undefined && out[n] && req.includes(nfam)) {
                     out[i] = true;
                     changed = true;
                     break;
@@ -170,20 +175,40 @@ export function syncUnlocksToPlayer(g: GameEngine) {
     if (cur === undefined || !g.equippedWeapons.includes(cur)) {
         const first = g.equippedWeapons.find((w): w is WeaponType => w !== null);
         g.player.currentWeapon = first;
-        g.player.burstQueue = 0;
-        g.currentWeaponIndex = first !== undefined ? WEAPON_LIST.indexOf(first) : 0;
+        g.currentWeaponIndex = 0;
     }
+}
+
+const _activeScratch: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+
+/** The ENERGY MODIFIER a gun at weapon-hex `gunIdx` carries: the first ACTIVE
+ *  energy module touching it, in hex order, or null (the unmodified
+ *  delivery).  A modifier touching two guns modifies both — it is adjacency,
+ *  the same rule every weapon-mod already lives by. */
+export function energyForGunSlot(slots: (string | null)[], active: boolean[], gunIdx: number): EnergyModifier | null {
+    const adj = HEX_ADJACENCY[gunIdx];
+    if (!adj) return null;
+    for (const n of adj) {
+        const id = slots[n];
+        if (id === null || !active[n]) continue;
+        const e = moduleDef(id)?.effect?.energy;
+        if (e) return e;
+    }
+    return null;
 }
 
 /** Rebuild the derived weapon loadout from the mounted guns (any
  *  weapon hex, slot order; ≤ MAX_INSTALLED_GUNS by the move guard),
  *  then re-sync the player entity + recompute activity/effects. */
 export function syncLoadoutFromSlots(g: GameEngine) {
+    // Energy modifiers are per GUN, so the loadout needs activity first.
+    const active = _activeScratch;
+    computeActiveSlots(g, g.weaponSlots, active);
     const guns: WeaponType[] = [];
     for (let i = 0; i < g.weaponSlots.length; i++) {
         const id = g.weaponSlots[i];
         const def = id !== null ? moduleDef(id) : undefined;
-        if (def?.weapon !== undefined) guns.push(def.weapon);
+        if (def?.weapon !== undefined) guns.push(weaponKey(def.weapon, energyForGunSlot(g.weaponSlots, active, i)));
     }
     for (let i = 0; i < g.equippedWeapons.length; i++) {
         g.equippedWeapons[i] = guns[i] ?? null;

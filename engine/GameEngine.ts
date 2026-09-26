@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
@@ -42,12 +42,14 @@ import { randomRockNebulaComposition } from './NebulaColor';
 import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentDeath } from './roamers/dragons';
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
+import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
+import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, acquireHomingTargets, depositHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
 import { ShockwaveOpts, spawnShockwave as emitShockwave, updateExplosionRings, applyExplosionAoE,
          applyBlastToPlayer, applyKamikazeBlastToPlayer } from './explosions';
-import { computeActiveSlots, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
+import { computeActiveSlots, energyForGunSlot, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
          firstFreeSlotFor, areaSlots, resaleValue, statBreakdown,
          moveModuleInternal as moveModuleTiles, modulePrice as catalogPrice,
          outfittingSnapshot as buildOutfittingSnapshot } from './outfitting';
@@ -372,7 +374,12 @@ export class GameEngine {
   credits: number = 0;
   // 2-slot equip loadout (pivot 1b) — DERIVED from the weapon-group GUN
   // hexes via syncLoadoutFromSlots (WeaponSystem is untouched).
-  equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
+  equippedWeapons: (WeaponType | null)[] = ['projectile', null];
+  /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
+  energy: EnergyState = new EnergyState();
+  /** The render view of it — one object, refilled per frame (no allocation). */
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, simClock: 0 };
+  private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
   // land in `inventory` (tile grid, duplicates allowed); outfitting moves
@@ -390,7 +397,7 @@ export class GameEngine {
   })();
   weaponSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
-      s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
+      s[0] = 'dlv_projectile'; // run starts with the starter delivery mounted center
       return s;
   })();
   inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
@@ -518,6 +525,11 @@ export class GameEngine {
   // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
   // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
   screenShakeEnabled: boolean = true;
+  /** DBG ▸ Weapon modules ▸ "Outfit anywhere": lifts `moveModule`'s drydock
+   *  guard so the flowers are editable from the pause menu anywhere on the
+   *  map.  A test affordance, not a rule change — off by default, and it
+   *  survives restarts like the other DBG toggles. */
+  dbgOutfitAnywhere: boolean = false;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
   // When `shardFlowEnabled` is false, the per-asteroid / per-drop
@@ -973,6 +985,8 @@ export class GameEngine {
     this.projectiles = new ProjectileSystem();
     this.weapons = new WeaponSystem(this.projectiles);
     this.weapons.onEnemyFire = (id, x, y) => this.audio.play(id, { x, y });
+    // Beams, radial pulses and instant cones resolve in the energy layer.
+    this.weapons.onInstantFire = (c, p, t) => fireInstant(this, c, p, t);
     this.drops = new DropSystem(this.particles);
     this.drops.sfx = (id, x, y) => this.audio.play(id, { x, y });
     this.waves = new WaveSystem();
@@ -1036,7 +1050,7 @@ export class GameEngine {
       health: 100,
       maxHealth: 100,
       mass: PHYSICS_CONSTANTS.PLAYER_MASS,
-      currentWeapon: WeaponType.BLASTER,
+      currentWeapon: 'projectile',
       weaponCooldown: 0,
       burstQueue: 0,
       burstTimer: 0,
@@ -1159,7 +1173,7 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || '',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
+      currentWeapon: this.player.currentWeapon !== undefined ? weaponConfig(this.player.currentWeapon).name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -1227,6 +1241,7 @@ export class GameEngine {
       shardLodEnabled: this.renderer.shardLodEnabled,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      outfitAnywhere: this.dbgOutfitAnywhere,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
@@ -1389,6 +1404,7 @@ export class GameEngine {
    *  what makes run state carry across a portal (decision #39d). */
   private loadMapFresh(type: MapType) {
       this.shards.reset();
+      this.energy.reset();
       this.perfController.reset();
       this.activeDrops = [];
       this.portalTransit.length = 0;
@@ -2399,7 +2415,7 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
+      currentWeapon: this.player.currentWeapon !== undefined ? weaponConfig(this.player.currentWeapon).name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -2455,6 +2471,7 @@ export class GameEngine {
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
       weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
+      weaponModuleCatalog: this.gameState === GameState.PAUSED ? this.weaponModuleSnapshot() : undefined,
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2475,6 +2492,7 @@ export class GameEngine {
       shardLodEnabled: this.renderer.shardLodEnabled,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      outfitAnywhere: this.dbgOutfitAnywhere,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
@@ -4294,7 +4312,7 @@ export class GameEngine {
       : this.input.usesFaceFire() ? TRIGGER_OFF
       : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
       : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
-      : WEAPON_TRIGGERS[this.player.currentWeapon]);
+      : WEAPON_TRIGGERS[weaponConfig(this.player.currentWeapon).delivery]);
 
     // The LEFT trigger is the throttle under the trigger-thrust scheme, and
     // its resistance reports what the engine is doing: it stiffens as the
@@ -4310,8 +4328,7 @@ export class GameEngine {
     // EMP-disabled (Stage 3c) so an in-flight burst halts too.
     const tWeapons = performance.now();
     if (this.currentMap && !this.player.systemsDisabled) {
-        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt,
-                                     this.handleScreenShake, this.playWeaponSfx);
+        this.weapons.tickPlayerCooldown(this.player, dt);
     }
     this.lastWeaponsMs = performance.now() - tWeapons;
 
@@ -4323,6 +4340,9 @@ export class GameEngine {
     this.updateHomingProjectiles(dt);
     this.updateLightningGravity(dt);
     this.updateProjectileFuses(dt);
+    // Energy modules: queued arcs/attractors from this step's hits, the
+    // bounded heated set, magnetic fields and the live beam.
+    tickEnergy(this, dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup.  Expired texts return to the pool for reuse
@@ -4574,16 +4594,11 @@ export class GameEngine {
         break;
     }
 
-    // PENETRATION FALLOFF reaches the on-hit effects too, so every weapon is
-    // affected equally (user call): a bolt's fourth blast is as weakened as
-    // its fourth direct bite.  The factor is the one PhysicsSystem actually
-    // used for this hit — read, never re-derived, because the grain bore may
-    // have advanced `pierceHits` since.  1 when nothing pierced.
-    const hitFalloff = proj.hitFalloff ?? 1;
-
-    // Lightning projectile: chain to nearby entities on impact
-    if (proj.isLightningProjectile) {
-        this.fireLightningChainFromImpact(impactPos, target, proj, hitFalloff);
+    // ENERGY PAYLOAD (energy modules): heat lands now; an electric
+    // discharge (the charged bolt's chain) or a magnetic attractor is queued
+    // for after the physics step, since both read the grids.
+    if (proj.energyHeat || proj.energyBurnSeconds || proj.energyElectric || proj.energyMagnetic) {
+        applyProjectilePayload(this, impactPos, proj, target);
     }
 
     // Cannon AoE: every entity within proj.explosionRadius takes
@@ -4654,14 +4669,18 @@ export class GameEngine {
       this.shipSlots[5] = 'scanner_mk5';       // every detection tier — touches the hull core
 
       // Weapon flower: two guns + the four mods around the center gun.
-      this.weaponSlots[0] = 'wpn_blaster';
-      this.weaponSlots[1] = 'wpn_cannon';
+      // Centre gun (0) touches every hex and takes the FIRST modifier in hex
+      // order (the thermal at 5); the second gun (1) touches 0/2/6 and so
+      // takes the explosive at 6 — a projector+thermal and a beam+explosive.
+      this.weaponSlots[0] = 'dlv_projectile';
+      this.weaponSlots[1] = 'dlv_beam';
       this.weaponSlots[2] = 'gunnery_mk3';
       this.weaponSlots[3] = 'autoloader_mk3';
       this.weaponSlots[4] = 'overcharge';
-      this.weaponSlots[5] = 'piercing_mk3';    // A3 — touches the centre gun
+      this.weaponSlots[5] = 'nrg_thermal';
+      this.weaponSlots[6] = 'nrg_explosive';
 
-      const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
+      const spareGuns = ['dlv_spread', 'dlv_homing', 'dlv_radial', 'nrg_kinetic', 'nrg_electric', 'nrg_magnetic'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
       syncLoadoutFromSlots(this);
       this.player.shield = this.player.maxShield ?? 0;
@@ -4677,8 +4696,8 @@ export class GameEngine {
       this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
       this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
       this.shipSlots[0] = 'hull_base';
-      this.weaponSlots[0] = 'wpn_blaster';
-      this.player.currentWeapon = WeaponType.BLASTER;
+      this.weaponSlots[0] = 'dlv_projectile';
+      this.player.currentWeapon = 'projectile';
       this.currentWeaponIndex = 0;
       syncLoadoutFromSlots(this);
   }
@@ -5062,7 +5081,7 @@ export class GameEngine {
       to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ): boolean {
       const cargoOnly = from.area === 'inventory' && to.area === 'inventory';
-      if (!cargoOnly && !this.dockedServices()?.drydock) {
+      if (!cargoOnly && !this.dockedServices()?.drydock && !this.dbgOutfitAnywhere) {
           // Outfitting away from a drydock is the single most common thing
           // a player tries and cannot do — it needs an audible "no".
           this.audio.play('poi.reject');
@@ -5199,29 +5218,177 @@ export class GameEngine {
    *  weapon is not in; a displaced gun drops to the inventory if there
    *  is room (else it is scrapped — DBG only). */
   public debugGrantWeapon(id: string) {
-      const mDef = MODULE_DEFS.find(m => m.weapon === (id as WeaponType));
-      if (!mDef) return;
-      if (this.weaponSlots.includes(mDef.id)) return; // already mounted
-      const gunSlots = this.weaponSlots
-          .map((s, i) => ({ s, i }))
-          .filter(e => e.s !== null && moduleDef(e.s)?.kind === 'weapon');
-      let slot: number;
-      if (gunSlots.length < MAX_INSTALLED_GUNS) {
-          slot = this.weaponSlots.indexOf(null);
-          if (slot === -1) slot = gunSlots.length > 0 ? gunSlots[gunSlots.length - 1].i : 0;
-      } else {
-          // At the gun limit — replace the mounted gun the ACTIVE weapon is
-          // not, so the weapon under test doesn't yank the one being fired.
-          const victim = gunSlots.find(e => moduleDef(e.s!)?.weapon !== this.player.currentWeapon) ?? gunSlots[0];
-          slot = victim.i;
+      // Accepts a delivery ('beam'), a combination ('beam+thermal') or an
+      // OLD id ('CANNON', 'wpn_cannon') — resolved through the legacy map.
+      const parsed = parseWeaponKey(resolveWeaponKey(id));
+      if (!parsed) return;
+      const want = MODULE_DEFS.find(m => m.weapon === parsed.delivery);
+      const wantE = parsed.energy ? MODULE_DEFS.find(m => m.effect?.energy === parsed.energy) : undefined;
+      if (!want) return;
+      const prevDelivery = parseWeaponKey(this.player.currentWeapon)?.delivery;
+
+      // Take the flower apart: guns (with the modifier each one touches) and
+      // everything else.  A DBG grant then lays it out DETERMINISTICALLY so a
+      // modifier touches only the gun it is for — the granted gun on hex 1
+      // with its modifier on 2, the kept gun on 4 with its modifier on 5, and
+      // the shared mods on 0 / 3 / 6, where they touch a gun.  (In play the
+      // player arranges the flower; the adjacency rule is the same.)
+      const active = new Array(MODULE_SLOT_COUNT).fill(false);
+      computeActiveSlots(this, this.weaponSlots, active);
+      const guns: { gun: string; energy: string | null }[] = [];
+      const rest: string[] = [];
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const sid = this.weaponSlots[i];
+          const d = sid !== null ? moduleDef(sid) : undefined;
+          if (sid === null || !d) continue;
+          if (d.kind === 'weapon') {
+              const e = energyForGunSlot(this.weaponSlots, active, i);
+              guns.push({ gun: sid, energy: e ? MODULE_DEFS.find(m => m.effect?.energy === e)!.id : null });
+          } else if (d.family !== 'energy') {
+              rest.push(sid);
+          }
       }
-      const displaced = this.weaponSlots[slot];
-      if (displaced !== null) {
+      // The gun kept beside the granted one: the active weapon's, if it is a
+      // different delivery; else any other.
+      const others = guns.filter(g => moduleDef(g.gun)?.weapon !== parsed.delivery);
+      const kept = others.find(g => moduleDef(g.gun)?.weapon === prevDelivery) ?? others[0];
+      // Everything leaving the flower goes to the inventory (DBG: dropped if full).
+      const stow = (mid: string | null) => {
+          if (!mid) return;
           const inv = this.inventory.indexOf(null);
-          if (inv !== -1) this.inventory[inv] = displaced;
+          if (inv !== -1) this.inventory[inv] = mid;
+      };
+      for (const g of guns) {
+          if (g !== kept && moduleDef(g.gun)?.weapon !== parsed.delivery) stow(g.gun);
+          if (g !== kept && g.energy && g.energy !== wantE?.id) stow(g.energy);
       }
-      this.weaponSlots[slot] = mDef.id;
+      this.weaponSlots.fill(null);
+      this.weaponSlotsUnlocked = Math.max(this.weaponSlotsUnlocked, MODULE_SLOT_COUNT);
+      this.weaponSlots[1] = want.id;
+      if (wantE) this.weaponSlots[2] = wantE.id;
+      if (kept) {
+          this.weaponSlots[4] = kept.gun;
+          if (kept.energy) this.weaponSlots[5] = kept.energy;
+      }
+      const free = [0, 3, 6];
+      for (const mid of rest) {
+          const at = free.shift();
+          if (at === undefined) { stow(mid); continue; }
+          this.weaponSlots[at] = mid;
+      }
       syncLoadoutFromSlots(this);
+      // Keep firing what was being fired (its key may have changed if its
+      // modifier did); the grant does not grab the trigger.
+      const keep = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === prevDelivery);
+      if (keep) this.player.currentWeapon = keep;
+  }
+
+  // ── DBG: the ten weapon modules (5 deliveries + 5 energy modifiers) ──
+  //
+  // The quick path for testing combinations without the shop: add a module
+  // straight onto the weapon flower (or into cargo when the flower has no
+  // room), take one off again, or clear them all.  Every path ends in
+  // `syncLoadoutFromSlots`, so the loadout, the adjacency fixpoint and the
+  // per-gun modifier are exactly what the real outfitting would produce.
+
+  /** The ten ids, deliveries first, in catalog order. */
+  private weaponModuleIds(): string[] {
+      return MODULE_DEFS
+          .filter(d => d.weapon !== undefined || d.family === 'energy')
+          .map(d => d.id);
+  }
+
+  /** DBG: add one weapon module.  Installs it on the first free weapon hex
+   *  when it can function there (a gun only below the mounted cap); else it
+   *  goes to cargo; no-op when both are full. */
+  public debugAddWeaponModule(id: string): boolean {
+      const def = moduleDef(id);
+      if (!def || !this.weaponModuleIds().includes(id)) return false;
+      const gunsMounted = this.weaponSlots.filter(s => s !== null && moduleDef(s)?.kind === 'weapon').length;
+      const canMount = def.kind !== 'weapon' || gunsMounted < MAX_INSTALLED_GUNS;
+      const free = canMount ? firstFreeSlotFor(this, def) : -1;
+      if (free !== -1) {
+          this.weaponSlots[free] = id;
+      } else {
+          const inv = this.inventory.indexOf(null);
+          if (inv === -1) return false;
+          this.inventory[inv] = id;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+      return true;
+  }
+
+  /** DBG: remove one copy of a weapon module — the INSTALLED one first (the
+   *  last hex holding it), else one from cargo. */
+  public debugRemoveWeaponModule(id: string): boolean {
+      let at = this.weaponSlots.lastIndexOf(id);
+      if (at !== -1) {
+          this.weaponSlots[at] = null;
+      } else {
+          at = this.inventory.lastIndexOf(id);
+          if (at === -1) return false;
+          this.inventory[at] = null;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+      return true;
+  }
+
+  /** DBG: strip every delivery and energy module from the flower and cargo
+   *  (other weapon mods — Gunnery, Autoloader, Overcharge — stay). */
+  public debugClearWeaponModules() {
+      const ids = this.weaponModuleIds();
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const s = this.weaponSlots[i];
+          if (s !== null && ids.includes(s)) this.weaponSlots[i] = null;
+      }
+      for (let i = 0; i < this.inventory.length; i++) {
+          const s = this.inventory[i];
+          if (s !== null && ids.includes(s)) this.inventory[i] = null;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+  }
+
+  /** DBG: toggle outfitting away from a drydock (see `dbgOutfitAnywhere`). */
+  public debugToggleOutfitAnywhere() {
+      this.dbgOutfitAnywhere = !this.dbgOutfitAnywhere;
+  }
+
+  /** After a DBG edit: keep firing the current weapon if it is still on the
+   *  flower, else take the first equipped one (or none — weaponless flight
+   *  is legal). */
+  private ensureCurrentWeapon() {
+      const cur = this.player.currentWeapon;
+      if (cur !== undefined && this.equippedWeapons.includes(cur)) return;
+      const cd = cur !== undefined ? parseWeaponKey(cur)?.delivery : undefined;
+      const same = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === cd);
+      const next = same ?? this.equippedWeapons.find(k => k !== null) ?? undefined;
+      this.player.currentWeapon = next ?? undefined;
+      this.currentWeaponIndex = next ? this.equippedWeapons.indexOf(next) : 0;
+  }
+
+  /** DBG snapshot (paused only): each weapon module with how many are on
+   *  the flower and in cargo. */
+  private weaponModuleSnapshot() {
+      return this.weaponModuleIds().map(id => {
+          const d = moduleDef(id)!;
+          return {
+              id,
+              name: d.label,
+              kind: (d.weapon !== undefined ? 'delivery' : 'energy') as 'delivery' | 'energy',
+              installed: this.weaponSlots.filter(s => s === id).length,
+              stored: this.inventory.filter(s => s === id).length,
+          };
+      });
+  }
+
+  /** DBG / test seam: put a THERMAL packet into a body through the real
+   *  energy path (the same call every thermal weapon makes).  `from` is where
+   *  the heat arrives from — omit it for heat with no direction. */
+  public debugHeat(target: GameEntity, magnitude: number, from?: Vector2) {
+      depositHeat(this, target, magnitude, from ?? null, true);
   }
 
   /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
@@ -5232,7 +5399,7 @@ export class GameEngine {
           name: d.label,
           owned: this.weaponSlots.includes(d.id) || this.inventory.includes(d.id),
           slot: (() => {
-              const i = d.weapon !== undefined ? this.equippedWeapons.indexOf(d.weapon) : -1;
+              const i = this.equippedWeapons.findIndex(k => parseWeaponKey(k)?.delivery === d.weapon);
               return i === -1 ? null : i;
           })(),
       }));
@@ -6119,39 +6286,47 @@ export class GameEngine {
           this.audio.play('weapon.reject');
       }
 
-      // Keep the HUD weapon index aligned with the player's current weapon in
-      // case WeaponSystem auto-fell back to blaster on an empty mag.
-      if (fired) {
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
-      }
   }
 
-  /** WeaponType → SFX_INVENTORY §4.1 id.  A plain table rather than a
-   *  switch so adding a weapon is a row, matching how ENEMY_BEHAVIOR and
-   *  SHARD_VARIANTS dispatch. */
-  private static readonly WEAPON_SFX: Record<WeaponType, string> = {
-      [WeaponType.BLASTER]:   'weapon.blaster.fire',
-      [WeaponType.BURST]:     'weapon.burst.fire',
-      [WeaponType.SHOTGUN]:   'weapon.shotgun.fire',
-      [WeaponType.BOUNCER]:   'weapon.bouncer.fire',
-      [WeaponType.LIGHTNING]: 'weapon.lightning.fire',
-      [WeaponType.HOMING]:    'weapon.homing.fire',
-      [WeaponType.CANNON]:    'weapon.cannon.fire',
+  /** Hand the renderer this frame's energy view (bounded lists by reference). */
+  private pushEnergyFx() {
+      const v = this._energyFx;
+      v.heated = this.energy.heated;
+      v.energized = this.energy.energized;
+      v.simClock = this.simClock;
+      const b = this.energy.beam;
+      if (b) {
+          const bv = this._beamView;
+          bv.x0 = b.x0; bv.y0 = b.y0; bv.x1 = b.x1; bv.y1 = b.y1;
+          bv.width = b.config.beamWidth ?? 3; bv.color = b.config.color;
+          bv.energy = b.config.energy; bv.hit = b.hit;
+          v.beam = bv;
+      } else {
+          v.beam = null;
+      }
+      this.renderer.energyFx = v;
+  }
+
+  /** Weapon → SFX_INVENTORY §4.1 id.  Keyed on the ENERGY first (a
+   *  thermal weapon sounds like heat whatever delivers it), then on the
+   *  delivery for plain / kinetic fire — the existing voices, re-pointed
+   *  rather than new assets (the audio pass is out of scope). */
+  private static readonly ENERGY_SFX: Record<string, string> = {
+      electric: 'weapon.lightning.fire', thermal: 'weapon.bouncer.fire',
+      explosive: 'weapon.cannon.fire', magnetic: 'weapon.homing.fire',
+  };
+  private static readonly DELIVERY_SFX: Record<string, string> = {
+      projectile: 'weapon.blaster.fire', beam: 'weapon.bouncer.fire', spread: 'weapon.shotgun.fire',
+      homing: 'weapon.homing.fire', radial: 'weapon.cannon.fire',
   };
 
-  /** Fired by WeaponSystem once per spawned player shot.  A charged shot
-   *  LAYERS `weapon.charged.release` over the family voice so every weapon
-   *  reads as the same supercharged gesture (SFX_INVENTORY §4.1). */
-  private playWeaponSfx = (weapon: WeaponType, isCharged: boolean, subShot: number) => {
+  /** Fired by WeaponSystem once per player shot.  A charged shot LAYERS
+   *  `weapon.charged.release` over the family voice (SFX_INVENTORY §4.1). */
+  private playWeaponSfx = (weapon: WeaponConfig, isCharged: boolean, _subShot: number) => {
       const pos = this.player.position;
-      if (subShot > 0) {
-          // Rising triplet: a semitone (×2^(1/12)) per sub-shot.
-          this.audio.play('weapon.burst.sub', {
-              x: pos.x, y: pos.y, pitch: Math.pow(2, subShot / 12),
-          });
-          return;
-      }
-      const id = GameEngine.WEAPON_SFX[weapon];
+      const id = (weapon.energy && weapon.energy !== 'kinetic' && GameEngine.ENERGY_SFX[weapon.energy])
+          || (weapon.energy === 'kinetic' && weapon.delivery === 'projectile' ? 'weapon.burst.fire' : undefined)
+          || GameEngine.DELIVERY_SFX[weapon.delivery];
       if (id) this.audio.play(id, { x: pos.x, y: pos.y });
       if (isCharged) this.audio.play('weapon.charged.release', { x: pos.x, y: pos.y });
   };
@@ -6183,6 +6358,13 @@ export class GameEngine {
           // A shell detonates AT MOST ONCE.  A round that already went off on
           // an actor is not blasted again by the stop rule below.
           if (p.detonated) continue;
+          // Range falloff for rounds that SLOW in flight (spread pellets,
+          // flame): damage is measured from the speed a round still has, so
+          // bleeding speed is bleeding damage — no curve authored anywhere.
+          if (p.speedRetain !== undefined && p.speedRetain < 1 && p.active) {
+              const k = Math.pow(p.speedRetain, dt);
+              p.velocity.x *= k; p.velocity.y *= k;
+          }
           // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
           // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
           // wherever a round can go no further — its bank ran dry, the grain
@@ -6213,6 +6395,7 @@ export class GameEngine {
 
   private updateHomingProjectiles(dt: number) {
       if (!this.currentMap) return;
+      acquireHomingTargets(this);
       this.projectiles.updateHoming(this.entityIndex.projectiles, this.entityIndex.enemies, this.player, dt);
   }
 
@@ -6229,170 +6412,6 @@ export class GameEngine {
   private updateProjectileTrails(dt: number) {
       if (!this.currentMap) return;
       this.trails.updateProjectileTrails(this.currentMap.entities, dt);
-  }
-
-  // ─── Lightning chain (triggered on projectile impact) ───────────────────
-
-  /** `pierceFalloff` is the PENETRATION factor already applied to this hit's
-   *  direct damage — passed in so the chain is weakened equally on a pierced
-   *  shot (user call: every weapon affected equally by the rate).  1 when
-   *  nothing pierced. */
-  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity, pierceFalloff: number = 1) {
-      // One trigger for the whole chain: every arc in a chain lands within
-      // this id's retrigger window, so the collapse rule turns a five-link
-      // chain into one bigger crackle instead of five thin ones.
-      this.audio.play('impact.lightning.arc', { x: impactPos.x, y: impactPos.y });
-      if (!this.currentMap) return;
-
-      // Per-projectile chain overrides (set by ProjectileSystem.spawn from
-      // WeaponConfig.chainCount/chainRange/chainBranches — populated by
-      // the charged Lightning variant).  Fall back to the global
-      // LIGHTNING_CHAIN_* constants for normal shots.
-      const hopBudget = proj?.chainCount    ?? LIGHTNING_CHAIN_COUNT;
-      const hopRange  = proj?.chainRange    ?? LIGHTNING_CHAIN_RANGE;
-      const branches  = proj?.chainBranches ?? LIGHTNING_CHAIN_BRANCHES;
-      const hopRangeSq = hopRange * hopRange;
-
-      // Build a branching chain (tree, not list).  Each frontier node forks
-      // to up to `branches` nearest unhit targets within `hopRange`.  Damage
-      // falls off by depth (preserving the existing 1-d/maxDepth feel from
-      // the old linear chain).  hitSet is shared globally so two parents at
-      // the same depth never compete for the same child.
-      // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
-      // full entity array.  Exploding entities are still skipped since the
-      // index holds `active` entities that may be mid-animation.
-      const enemies = this.entityIndex.enemies;
-      const asteroids = this.entityIndex.shardCandidates;
-      const nodesByDepth: GameEntity[][] = [[firstTarget]];
-      const edges: { from: GameEntity; to: GameEntity }[] = [];
-      const hitSet = new Set<string>([firstTarget.id]);
-
-      // Reused candidate buffer.  Cleared at the top of each pickNearestK
-      // call so repeated picks within a single chain don't pile allocations.
-      const candidates: { e: GameEntity; d2: number }[] = [];
-
-      const pickNearestK = (parent: GameEntity, k: number): GameEntity[] => {
-          candidates.length = 0;
-          for (let i = 0; i < enemies.length; i++) {
-              const e = enemies[i];
-              if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(parent.position.x, e.position.x);
-              const dy = wrapDeltaY(parent.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < hopRangeSq) candidates.push({ e, d2 });
-          }
-          for (let i = 0; i < asteroids.length; i++) {
-              const e = asteroids[i];
-              if (e.isExploding || hitSet.has(e.id)) continue;
-              // Filter inert / dielectric shard variants out of the chain.
-              // See LIGHTNING_CHAIN_EXCLUDED_VARIANTS for the table and
-              // for the plastic-/metal-shard note (Phase 1 g2).
-              if (e.shardVariant && LIGHTNING_CHAIN_EXCLUDED_VARIANTS.has(e.shardVariant)) continue;
-              const dx = wrapDeltaX(parent.position.x, e.position.x);
-              const dy = wrapDeltaY(parent.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < hopRangeSq) candidates.push({ e, d2 });
-          }
-          candidates.sort((a, b) => a.d2 - b.d2);
-          const picked: GameEntity[] = [];
-          for (let i = 0; i < candidates.length && picked.length < k; i++) {
-              const c = candidates[i];
-              if (hitSet.has(c.e.id)) continue; // race-resilient (shouldn't happen — defensive)
-              picked.push(c.e);
-              hitSet.add(c.e.id);
-          }
-          return picked;
-      };
-
-      const parentOf = new Map<GameEntity, GameEntity>();
-      for (let depth = 1; depth <= hopBudget; depth++) {
-          const prev = nodesByDepth[depth - 1];
-          const next: GameEntity[] = [];
-          for (let p = 0; p < prev.length; p++) {
-              const parent = prev[p];
-              const picked = pickNearestK(parent, branches);
-              for (let c = 0; c < picked.length; c++) {
-                  edges.push({ from: parent, to: picked[c] });
-                  // Who the arc jumped FROM — the contact side for the
-                  // grain model's boundary spend (V15).
-                  parentOf.set(picked[c], parent);
-                  next.push(picked[c]);
-              }
-          }
-          if (next.length === 0) break;
-          nodesByDepth.push(next);
-      }
-
-      // Apply chain damage by depth.  Depth 0 is the direct-hit target
-      // (already damaged upstream by the projectile collision).  Damage at
-      // depth d = baseDmg * (1 - d/maxDepth) — same falloff curve as the
-      // pre-branching linear chain so balance per-target stays consistent.
-      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage * pierceFalloff;
-      const maxDepth = nodesByDepth.length - 1;
-      for (let d = 1; d <= maxDepth; d++) {
-          const factor = maxDepth > 0 ? Math.max(0, 1 - d / maxDepth) : 1;
-          const dmg = baseDmg * factor;
-          const tier = nodesByDepth[d];
-          for (let i = 0; i < tier.length; i++) {
-              const target = tier[i];
-              if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
-
-              // A chain arrives at the body's nearest face, so stamp the
-              // arc's origin as the contact and let the grain model spend
-              // it on boundaries like any other hit (V15).
-              stampLocalImpact(target, parentOf.get(target)?.position);
-              if (!applyBoundaryDamage(target, dmg)) target.health -= dmg;
-              // (h) regen: chain damage feeds the burst bucket like a pellet
-              // does.  Note the chain deliberately BYPASSES the front-shield
-              // plate — it never travels as a projectile, which is exactly why
-              // Lightning is a §7 answer to a directional defence.
-              noteTraitDamage(target, dmg);
-              markDamaged(target, 0.15);
-              target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
-              this.spawnDamageText(target.position, dmg, target);
-
-              if (target.health <= 0 && !target.isExploding) {
-                  target.lastImpactDamage = dmg;
-                  // Lightning is a player-only weapon — chain kills are
-                  // player-attributed for shard/tile scoring.
-                  target.killedByPlayer = true;
-                  this.handleEntityDeath(target);
-              }
-          }
-      }
-
-      // Only spawn arc visuals if at least one hop landed.
-      if (edges.length === 0) return;
-
-      // Spawn one PARTICLE arc entity per edge in the tree.  Each arc is a
-      // 2-point polyline (parent.position → child.position).  RenderSystem's
-      // existing isLightningArc branch handles the rest.  Cap loosely at
-      // MAX_PARTICLES via ParticleSystem's own bookkeeping; a fully-saturated
-      // default tree (branches=2, depth=2) produces 6 arcs per impact.
-      const arcColor = WEAPONS[WeaponType.LIGHTNING].color;
-      for (let i = 0; i < edges.length; i++) {
-          const { from, to } = edges[i];
-          this.currentMap.entities.push({
-              id: nextId('lightning'),
-              type: EntityType.PARTICLE,
-              position: { x: from.position.x, y: from.position.y },
-              velocity: { x: 0, y: 0 },
-              size: { x: 1, y: 1 },
-              rotation: 0,
-              color: arcColor,
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: LIGHTNING_ARC_LIFETIME,
-              maxLifetime: LIGHTNING_ARC_LIFETIME,
-              mass: 0,
-              isLightningArc: true,
-              arcPoints: [
-                  { x: from.position.x, y: from.position.y },
-                  { x: to.position.x,   y: to.position.y   },
-              ],
-          });
-      }
   }
 
   // ─── Cannon AoE — radial damage on projectile impact ───────────────────
@@ -7385,6 +7404,7 @@ export class GameEngine {
       this.renderer.autoPingRadius = this.autoPingRadius;
       this.renderer.autoPingMax = this.autoPingMax;
       this.renderer.simClock = this.simClock;
+      this.pushEnergyFx();
       this.renderer.materialRevealAt = this.materialRevealAt;
       this.renderer.materialRevealRadius = this.materialRevealRadius;
       this.renderer.materialRevealX = this.materialRevealX;

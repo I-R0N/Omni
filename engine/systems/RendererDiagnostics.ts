@@ -63,6 +63,8 @@ export interface RendererDiagnostics {
   autoPingRadius: number;
   autoPingMax: number;
   simClock: number;
+  /** Energy-module feedback view (render/energyFx.ts). */
+  energyFx: import('./render/energyFx').EnergyFxView | null;
   materialRevealAt: number;
   materialRevealRadius: number;
   materialRevealX: number;

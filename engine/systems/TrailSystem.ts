@@ -10,11 +10,6 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 export class TrailSystem {
   private static readonly PROJECTILE_TRAIL_LIFETIME = 0.25;
   private static readonly PROJECTILE_TRAIL_SCALE = 0.5;
-  // Bouncer beams are visualized entirely by their trail, which fades
-  // almost instantly so the beam reads as a short moving line segment.
-  // Target visible beam length ≈ 50 units at speed 9 ≈ 540 units/sec.
-  private static readonly BOUNCER_TRAIL_LIFETIME = 0.09;
-  private static readonly BOUNCER_TRAIL_SCALE = 0.55;
 
   /**
    * Tick a trail array: decrement each point's lifetime, apply per-point
@@ -50,8 +45,8 @@ export class TrailSystem {
       const p = entities[i];
       if (!p.active || p.type !== EntityType.PROJECTILE) continue;
 
-      const lifetime = p.isBouncer ? TrailSystem.BOUNCER_TRAIL_LIFETIME : TrailSystem.PROJECTILE_TRAIL_LIFETIME;
-      const scale    = p.isBouncer ? TrailSystem.BOUNCER_TRAIL_SCALE    : TrailSystem.PROJECTILE_TRAIL_SCALE;
+      const lifetime = TrailSystem.PROJECTILE_TRAIL_LIFETIME;
+      const scale    = TrailSystem.PROJECTILE_TRAIL_SCALE;
 
       // Decay existing trail points (write-index avoids O(n) splice shifts)
       if (p.trail) {

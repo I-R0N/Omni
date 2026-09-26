@@ -81,19 +81,6 @@ export function drawProjectileShape(
 
            ctx.globalCompositeOperation = 'source-over';
            ctx.restore();
-       } else if (entity.isBouncer) {
-           // ── Bouncer projectile: the beam body is drawn entirely by
-           // the fast-fading trail in renderTrails. All we draw here
-           // is a small green head dot so the beam has a visible tip
-           // even before the trail accumulates its first couple of
-           // points (first 1–2 frames after spawn).
-           ctx.save();
-           ctx.globalAlpha = Math.min(1, lifetimeFrac);
-           ctx.fillStyle = '#22c55e';
-           ctx.beginPath();
-           ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
-           ctx.fill();
-           ctx.restore();
        } else if (entity.isCharged) {
            // ── Charged Blaster: red+orange fireball ──
            // Larger glow with explicit two-tone red+orange ring

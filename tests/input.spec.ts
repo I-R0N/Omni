@@ -928,7 +928,7 @@ test.describe('buttons — edges, not levels', () => {
     // spelled out rather than captured into the predicate: `waitForStats`
     // stringifies it, so a closed-over variable does not exist in the page.
     await engine(page, e => e.debugGrantWeapon('SHOTGUN'));
-    await waitForStats(page, s => s.currentWeapon === 'Blaster', 'the lean start weapon');
+    await waitForStats(page, s => s.currentWeapon === 'Projector', 'the lean start weapon');
 
     // Fed through the ENGINE's own poll, not called directly: this asserts
     // that the edge survives the round trip GameEngine.pollGamepad makes.

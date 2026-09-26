@@ -313,8 +313,11 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
       // Mk III grant, so a fully-gunned round is the one carrying the full
       // 10x.  Read live, because this is a relationship between two
       // constants rather than a number.
+      // (Energy modules: the base bolt is the unmodified PROJECTOR now, whose
+      // authored bank is 0.75 — one bite of its 3 at speed 16 — against the
+      // retired Blaster's 1.0; the relationship pinned here is unchanged.)
       expect(r.boltWorth, 'a BASE bolt carries 10x over the base-bank divisor')
-        .toBeCloseTo(0.03125 * r.scale / r.divisor, 5);
+        .toBeCloseTo((0.75 / 32) * r.scale / r.divisor, 5);
 
       watch.assertClean();
     });

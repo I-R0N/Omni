@@ -1,4 +1,4 @@
-import { GameEntity, EntityType, Vector2, WeaponConfig, WeaponType } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponConfig } from '../../types';
 import {
   PROJECTILE_CONSTANTS,
   SPRITE_CONSTANTS,
@@ -54,23 +54,27 @@ export class ProjectileSystem {
     // Clear optional projectile-only fields so the next spawn's reuse
     // path starts from a clean slate — spawn() re-sets the fields it
     // cares about, but a config-mismatched leftover (e.g. previous shot
-    // was lightning chain with chainBranches set, next shot is a plain
-    // bouncer) would otherwise carry stale config through.
+    // carried an electric payload, next shot is a plain round) would
+    // otherwise carry stale config through.
     e.targetEntityId = undefined;
     e.hitEntityIds = undefined;
     e.arcPoints = undefined;
     e.isLightningProjectile = undefined;
-    e.isBouncer = undefined;
     e.isLightningArc = undefined;
-    e.bouncesRemaining = undefined;
     e.explosionRadius = undefined;
     e.explosionDamage = undefined;
     e.explosionKnockback = undefined;
     e.glow = undefined;
-    e.chainCount = undefined;
-    e.chainRange = undefined;
-    e.chainBranches = undefined;
     e.isCharged = undefined;
+    e.hitFalloff = undefined;
+    e.energyHeat = undefined;
+    e.energyBurnSeconds = undefined;
+    e.energyBurnRate = undefined;
+    e.energyElectric = undefined;
+    e.energyMagnetic = undefined;
+    e.speedRetain = undefined;
+    e.homingPrefers = undefined;
+    e.homingTarget = undefined;
     e.homing = undefined;
     e.homingStrength = undefined;
     this._pool.push(e);
@@ -103,19 +107,9 @@ export class ProjectileSystem {
     }
 
     const halfSpread = (config.spread * (Math.PI / 180)) / 2;
-    // Omnidirectional layout: count projectiles at equal angular spacing
-    // around 360° starting at the aim direction.  Used by the charged
-    // Bouncer nova; falls through to the standard fan when omniDirectional
-    // is unset.
-    const omniStep = config.omniDirectional && config.count > 1
-      ? (Math.PI * 2) / config.count
-      : 0;
-
     for (let i = 0; i < config.count; i++) {
       let currentAngle = angle;
-      if (omniStep > 0) {
-        currentAngle = angle + omniStep * i;
-      } else if (config.count > 1) {
+      if (config.count > 1) {
         const step = (halfSpread * 2) / (config.count - 1);
         currentAngle = (angle - halfSpread) + (step * i);
       } else if (config.spread > 0) {
@@ -177,9 +171,9 @@ export class ProjectileSystem {
       const blastDamage = config.explosionRadius && config.explosionRadius > 0
         ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed))
         : config.explosionDamage;
-      const isLight = config.type === WeaponType.LIGHTNING || undefined;
-      const isBnc   = config.type === WeaponType.BOUNCER || undefined;
-      const bouncesRem = config.type === WeaponType.BOUNCER ? config.bounceCount : undefined;
+      // The charged bolt (projectile + electric) keeps the old Lightning's
+      // curve toward targets and its electric render.
+      const isLight = (config.energy === 'electric' && config.delivery === 'projectile') || undefined;
       const pooled = this._pool.pop();
       if (pooled) {
         // Reuse path: in-place reset.  Optional fields the pool's
@@ -214,8 +208,6 @@ export class ProjectileSystem {
         pooled.pierceHits = 0;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
-        pooled.isBouncer = isBnc;
-        pooled.bouncesRemaining = bouncesRem;
         pooled.explosionRadius = config.explosionRadius;
         // Unconditional, like every other config-derived field on this path:
         // a recycled shell that kept a previous gun's fuse would detonate on
@@ -231,10 +223,17 @@ export class ProjectileSystem {
         pooled.explosionDamage = blastDamage;
         pooled.explosionKnockback = config.explosionKnockback;
         pooled.glow = config.glow;
-        pooled.chainCount = config.chainCount;
-        pooled.chainRange = config.chainRange;
-        pooled.chainBranches = config.chainBranches;
         pooled.isCharged = config.isCharged;
+        // Energy payload — unconditional, the same pooled-object rule.
+        pooled.hitFalloff = undefined;
+        pooled.energyHeat = config.heat;
+        pooled.energyBurnSeconds = config.burnSeconds;
+        pooled.energyBurnRate = config.burnRate;
+        pooled.energyElectric = config.electric;
+        pooled.energyMagnetic = config.magnetic;
+        pooled.speedRetain = config.speedRetain;
+        pooled.homingPrefers = config.homingPrefers;
+        pooled.homingTarget = undefined;
         pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
         // Rival-shot flags (Stage 7) are stamped by GameEngine AFTER spawn, so a
         // recycled rival projectile MUST clear them or a reused player/enemy shot
@@ -270,8 +269,6 @@ export class ProjectileSystem {
           pierceHits: 0,
           trail: [],
           isLightningProjectile: isLight,
-          isBouncer: isBnc,
-          bouncesRemaining: bouncesRem,
           explosionRadius: config.explosionRadius,
           explosionDamage: blastDamage,
           explosionKnockback: config.explosionKnockback,
@@ -280,10 +277,14 @@ export class ProjectileSystem {
           blastPending: false,
           detonated: false,
           glow: config.glow,
-          chainCount: config.chainCount,
-          chainRange: config.chainRange,
-          chainBranches: config.chainBranches,
           isCharged: config.isCharged,
+          energyHeat: config.heat,
+          energyBurnSeconds: config.burnSeconds,
+          energyBurnRate: config.burnRate,
+          energyElectric: config.electric,
+          energyMagnetic: config.magnetic,
+          speedRetain: config.speedRetain,
+          homingPrefers: config.homingPrefers,
           appliesEffect: config.appliesEffect,
         });
       }
@@ -335,7 +336,19 @@ export class ProjectileSystem {
           targetDy = wrapDeltaY(p.position.y, player.position.y);
           hasTarget = true;
         }
-      } else {
+      } else if (p.homingTarget) {
+        // A PREFERENCE-homing round (electric → conductors, magnetic →
+        // metal) was handed its target by GameEngine's bounded grid
+        // acquire; steer at it while it lives.
+        const t = p.homingTarget;
+        if (t.active && !t.isExploding) {
+          targetDx = wrapDeltaX(p.position.x, t.position.x);
+          targetDy = wrapDeltaY(p.position.y, t.position.y);
+          hasTarget = true;
+        } else {
+          p.homingTarget = undefined;
+        }
+      } else if (!p.homingPrefers) {
         // Player homing weapon: steer toward the nearest enemy within range.
         let minDist = acquireRangeSq;
         for (let j = 0; j < enemies.length; j++) {
