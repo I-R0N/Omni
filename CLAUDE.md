@@ -74,7 +74,10 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           debugmenu (the debug panel: reachable from
                           every screen, the freeze decision, that no
                           device flies the ship through it, the
-                          panel-only payload, and every old row label),
+                          panel-only payload, every old row label, the
+                          description popup on mouse / touch / focus,
+                          and the see-through backing with the canvas
+                          HUD clipped out from under it),
                           modules (Gunnery, Scanner, hex slots, and
                           that the deleted Penetration family is gone
                           from every surface), weapons (what a SHOT
@@ -90,7 +93,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  459 tests.  All run at
+                          whatever happened next).  465 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -108,15 +111,23 @@ components/
                           so the debug panel floats above every screen
   uiClasses.ts            The named DOM class vocabulary (T_*, PANEL*,
                           BTN_*, CHIP_*, HUD_CHIP, SECTION_TOGGLE, the
-                          overlay scrim) — shared by UIOverlay and the
-                          debug panel, so neither can drift (see §8)
+                          overlay scrim, the debug panel's see-through
+                          backing) — shared by UIOverlay and the debug
+                          panel, so neither can drift (see §8)
   DebugMenu.tsx           THE DEBUG PANEL — one component on every
                           screen: the DBG launcher, the ❄ freeze, the
-                          filter box, and a renderer for whatever
-                          debugSections declares (see §8)
+                          ◐ backing toggle, the filter box, and a
+                          renderer for whatever debugSections declares
+                          (see §8)
   debugSections.tsx       The debug panel's REGISTRY — every group,
-                          section and row as data.  Adding a section is
-                          one entry in `DEBUG_SECTIONS`
+                          section and row as data, each row with a
+                          one-line summary and (mostly) its old tooltip
+                          as detail.  Adding a section is one entry in
+                          `DEBUG_SECTIONS`
+  debugHelp.tsx           The debug panel's DESCRIPTION POPUP — what an
+                          item does, on a mouse hover, a touch
+                          long-press (which does not also press it) or
+                          a resting keyboard / pad focus (see §8)
 
 engine/
   GameEngine.ts           Orchestrator (~4900 lines).  Owns the player
@@ -2301,7 +2312,8 @@ Engine plumbing for adding a map: register the `MapType` value in
 the subclass in `MapClasses.ts`, switch on it in `GameEngine.buildMap()`,
 add per-map config in `constants.ts` (`PLAYER_MOVEMENT_CONFIG`,
 `MAP_POPULATION`), and add the button to `REAL_MAPS` or `TEST_MAPS` in
-`components/debugSections.tsx` (the debug panel's World & Maps group,
+`components/debugSections.tsx` (with a one-line `summary` of what the map
+is — the chip's description popup) (the debug panel's World & Maps group,
 reachable from every screen — the front door offers no map choice).  To
 make it portal-reachable as well, add a `HUB_PORTAL_SITES`
 entry pointing at its descriptor id and call `this.addReturnPortal()` at
@@ -4226,13 +4238,14 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   map / enemy-test dropdown on the main menu, fed by ~140 one-line forwarding
   handlers in App.  Now `components/DebugMenu.tsx` renders whatever
   `components/debugSections.tsx` declares, over whichever screen is up.
-  Seven rules hold it up:
+  Nine rules hold it up:
   (1) **A SECTION IS ONE ENTRY.**  `DEBUG_GROUPS` lists eight task groups —
   Player & Ship, Weapons & Modules, Economy, World & Maps, Enemies & Bosses,
   Materials, Visual / HUD, Perf & Diagnostics — and `DEBUG_SECTIONS` holds
   `{ id, label, group, rows, defaultOpen?, when? }` entries whose rows are
-  DATA built by `ctrl` / `stat` / `chips` / `custom` / `each`.  Adding a
-  section is one entry there: no JSX, no App handler, no UIOverlay prop.  A
+  DATA built by `ctrl(label, act, value, summary, detail?)` / `stat` /
+  `chips` / `custom` / `each`.  Adding a section is one entry there: no JSX,
+  no App handler, no UIOverlay prop.  A
   row reads ONLY the stats payload (`c.s`) and acts through the engine handle
   (`dbg(e => e.dbg.cycleX())`) — type-checked there, where the old 140-prop
   chain through UIOverlay never was (the repo carries no React types, so
@@ -4243,7 +4256,9 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `data-debug-row` (its label) and `data-debug-kind` (its shape).
   (2) **LABELS ARE IDENTITY.**  Suites, docs and muscle memory name rows by
   label, so every row moved with its label, readout and tooltip intact —
-  byte for byte, the timing tree's no-break-space indents included — and
+  byte for byte, the timing tree's no-break-space indents included (the
+  tooltip has since become the row's DETAIL, behind a one-line summary — see
+  rule 8) — and
   `tests/debugmenu.spec.ts` pins the full old set as a multiset.  Moving a row
   between sections is free; renaming one is a deliberate edit to that list.
   What moved where (old pause sections → new homes):
@@ -4279,9 +4294,11 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   overlay" is UIOverlay's `overlayUp` predicate, which a new overlay has to
   join anyway to hide the HUD — so joining it is the whole wiring.  The
   panel docks to the BOTTOM 45% of the screen (▴ for 85%), leaving the ship
-  and the top half of the world in view, is `PANEL_OPAQUE`, scrolls, and has
-  a FILTER box that matches names first (row labels, chip labels, group and
-  section names) and tooltips second ("Mentioned in descriptions").
+  and the top half of the world in view, is see-through over live play and
+  solid over an overlay (rule 9), scrolls, and has a FILTER box that matches
+  names first (row labels, chip labels, group and section names) and
+  descriptions second ("Mentioned in descriptions" — every row's summary and
+  detail).
   (4) **OPEN STATE IS THE ENGINE'S** (`GameEngine.debugPanelOpen`,
   `toggleDebugPanel` / `setDebugPanelOpen`): three devices open it — the
   launcher, the ` key (`INPUT_CONSTANTS.DEBUG_KEY`, a physical position, so
@@ -4324,6 +4341,46 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   `GameEngine.pollGamepad`) — no pad thrust, aim or fire, and the flight edges
   drained rather than banked, SCAN included, since its Circle half is the
   panel's BACK.  The keyboard and the canvas still fly the ship.
+  (8) **EVERY ITEM SAYS WHAT IT DOES, ON EVERY DEVICE** (user call).  Each
+  control and chip carries a one-line SUMMARY (`DebugHelp.summary`; a
+  `ctrl` row cannot be declared without one, and a new map in `REAL_MAPS` /
+  `TEST_MAPS` needs one too) and, for every row that had a tooltip, that
+  tooltip VERBATIM as its DETAIL — a row whose old tooltip was already one
+  plain line keeps it as the summary.  `components/debugHelp.tsx` shows them
+  in a popup, because a `title` tooltip only ever existed for a mouse and the
+  design target is a phone, where not one of them could be read.  A MOUSE or
+  pen reads by resting `DWELL_MS` (once one is up, the next item swaps at
+  once; moving into the popup keeps it, so its "More" — the detail — is
+  reachable); a FINGER by long-pressing `LONG_PRESS_MS` without drifting,
+  after which the popup stays until the next tap AND THE PRESS DOES NOT ACT —
+  the click a browser sends when the finger lifts is swallowed in the capture
+  phase, so long-pressing a boss chip to read it does not warp a boss in; a
+  KEYBOARD or PAD by resting focus (panel buttons refuse mouse focus, so this
+  path cannot fire from a click).  The popup renders BESIDE the panel, not in
+  it — the panel clips, and a popup has to sit above a row near its top edge —
+  and carries `data-debug-ui`, so it is part of the panel as far as input is
+  concerned.  Items are found by DELEGATION (`data-help` /
+  `data-help-title` / `data-help-detail` on the item, one set of handlers on
+  the panel), because the panel re-renders ~60×/s and per-row handler
+  closures would be garbage for nothing.  A native `title` is not left on any
+  row: beside the popup it is two tooltips on one hover.
+  (9) **SEE-THROUGH OVER LIVE PLAY; SOLID OVER AN OVERLAY** (user call:
+  "make this menu transparent").  Over live play the panel's backing is
+  `PANEL_SEE_THROUGH` — a translucent fill with a text outline on every glyph
+  and NO backdrop blur (a blur is frosted glass, not transparency, and it
+  re-runs every frame over the canvas on the one panel that shows frame
+  times) — with a ◐ toggle to `PANEL_OPAQUE` for a scene too bright to read
+  through.  Over a full-screen overlay it is solid regardless and the toggle
+  is not offered, like ❄ Freeze: what would show through there is the
+  overlay's own text.  And the canvas HUD is CLIPPED OUT FROM UNDER the open
+  panel (`RenderSystem.hudHole`, one even-odd clip over every screen-space
+  step): the minimap, loadout strip, banners and touch controls dock exactly
+  where the panel docks, so under see-through rows they are the double-vision
+  the DOM HUD is already hidden from behind an overlay.  The WORLD still reads
+  through.  The rect is REPORTED by the panel (`GameEngine.setDebugPanelRect`,
+  on open and on resize) rather than measured by the canvas, and it is a hole
+  rather than a skip, so a widget only half under the panel keeps its other
+  half.
   The individual rows keep their notes: DBG **Weapons** rows (grant + equip
   per weapon, `debugGrantWeapon`) are the wave-map test path for weapons now
   that commerce is station-only.  DBG **Bosses** chips (`debugSpawnBoss`) warp
@@ -5145,7 +5202,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   It is NOT coupled to whether the sim is running: the pause menu freezes
   the world and still shows it.  Dense information panels that must stay
   readable regardless of what is behind them use `PANEL_OPAQUE` instead
-  (today: the debug menu) — a panel ON the scrim, not more transparency
+  (today: the Controls & Basics help panels, and the debug panel over an
+  overlay) — a panel ON the scrim, not more transparency
   stacked on transparency.  And because the scrim no longer hides what is
   under it, the DOM HUD is gated off while any overlay is up
   (`overlayUp`): a score chip ghosting through a run summary reads as

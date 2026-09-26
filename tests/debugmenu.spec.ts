@@ -20,6 +20,13 @@
  *    while the panel is open, on every screen — it used to ride every
  *    paused frame whether or not anyone was looking.
  *  - IDENTITY.  Every row the old menu had survives under its old label.
+ *  - DESCRIPTIONS.  Every control and chip says what it does in one short
+ *    line — shown on a mouse hover, a touch long-press (which must NOT also
+ *    press the thing it describes) or a resting keyboard / pad focus — with
+ *    its old tooltip kept behind "More".
+ *  - SEE-THROUGH.  The panel ships see-through with a solid toggle, and the
+ *    canvas HUD is clipped out from under it rather than ghosting beneath
+ *    its rows.
  *
  *  Layout at six viewport sizes lives in `viewports.spec.ts`, with the rest
  *  of the viewport matrix.
@@ -28,7 +35,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   boot, engine, stats, startRun, waitForStats, waitForEngine, waitForTransit,
-  waitForStatsKeyChange, dockAtStation, advanceSim,
+  waitForStatsKeyChange, dockAtStation, advanceSim, quietScene,
 } from './helpers';
 
 // ── Duplicated on purpose (harness rule 7) ────────────────────────────────
@@ -741,6 +748,268 @@ test.describe('input: touch', () => {
       (x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER'),
     'a canvas tap to fire');
     expect(await engine(page, e => e.player.rotation as number)).toBeCloseTo(-Math.PI / 2, 1);
+
+    watch.assertClean();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+
+/** `debugHelp.tsx`'s DWELL_MS — duplicated on purpose (harness rule 7). */
+const DWELL_MS = 500;
+
+/** Where the description popup's text lives, and whether it is up. */
+function popup(page: Page) {
+  return page.getByTestId('debug-help');
+}
+
+test.describe('descriptions: what an item does, on every device', () => {
+  test('every control and chip says what it does in one short line, and the old tooltips survive', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    await expandAll(page);
+
+    const audit = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="debug-panel"]')!;
+      const rows = Array.from(panel.querySelectorAll<HTMLElement>('[data-debug-row]'));
+      const controls = rows.filter(r => r.dataset.debugKind === 'ctrl' || r.dataset.debugKind === 'buttons');
+      const chips = Array.from(panel.querySelectorAll<HTMLElement>('[data-debug-kind="chips"] > button'));
+      const summaries = [...rows, ...chips].map(el => el.dataset.help ?? '').filter(Boolean);
+      const longest = summaries.reduce((a, b) => (b.length > a.length ? b : a), '');
+      return {
+        controls: controls.length,
+        bare: controls.filter(r => !(r.dataset.help ?? '').trim()).map(r => r.dataset.debugRow),
+        chips: chips.length,
+        bareChips: chips.filter(b => !(b.dataset.help ?? '').trim()).map(b => b.textContent),
+        details: rows.filter(r => (r.dataset.helpDetail ?? '').length > 0).length,
+        // A native `title` beside the popup is two tooltips on one hover.
+        titled: panel.querySelectorAll('[data-debug-row][title], [data-debug-row] [title]').length,
+        longest,
+      };
+    });
+    expect(audit.controls, 'the audit reached the controls').toBeGreaterThan(150);
+    expect(audit.bare, 'controls with no summary').toEqual([]);
+    expect(audit.chips, 'the audit reached the chips').toBeGreaterThan(30);
+    expect(audit.bareChips, 'chips with no summary').toEqual([]);
+    // SHORT is the ask: two lines of the popup on a phone.
+    expect(audit.longest.length, `the longest summary: "${audit.longest}"`).toBeLessThanOrEqual(160);
+    // The long tooltips moved behind "More" rather than being lost.
+    expect(audit.details, 'rows keeping their long description').toBeGreaterThan(100);
+    expect(audit.titled, 'native title tooltips left on rows').toBe(0);
+
+    watch.assertClean();
+  });
+
+  test('mouse: resting on a row shows it, More shows the rest, leaving closes it', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    await expand(page, 'perf', 'simrender');
+    const row = page.locator('[data-debug-row="Substep cap"]');
+    await row.scrollIntoViewIfNeeded();
+    const box = (await row.boundingBox())!;
+
+    // Arriving shows NOTHING yet — the dwell, so a pointer crossing the panel
+    // on its way to a button does not trail popups.  Checked at once: the
+    // dwell is a wall-clock timer, and it cannot have fired already.
+    await page.mouse.move(box.x + 12, box.y + box.height / 2);
+    await expect(popup(page)).toHaveCount(0);
+    // Resting shows the one-liner — the title and the summary, no detail.
+    await expect(popup(page)).toBeVisible();
+    await expect(popup(page)).toHaveAttribute('data-help-via', 'hover');
+    await expect(popup(page)).toContainText('Substep cap');
+    await expect(popup(page)).toContainText('snowballing');
+    await expect(page.getByTestId('debug-help-detail')).toHaveCount(0);
+
+    // More shows the old tooltip, verbatim — reached by moving INTO the
+    // popup, which must not close it.
+    await page.getByTestId('debug-help-more').click();
+    await expect(page.getByTestId('debug-help-detail')).toContainText('spiral-of-death');
+
+    // Leaving both closes it.
+    await page.mouse.move(4, 4);
+    await expect(popup(page)).toHaveCount(0);
+
+    // Nothing about the popup changes what a click does.
+    const was = (await stats(page)).substepCapName;
+    await row.locator('button').click();
+    await waitForStatsKeyChange(page, 'substepCapName', was, 'the clicked row to act');
+
+    watch.assertClean();
+  });
+
+  test('keyboard / pad: resting focus on a control shows it, and moving on swaps it', async ({ page }) => {
+    /*  The pad's menu driver moves DOM focus, exactly as `focus()` here does,
+     *  so this is the pad's path as well as Tab's. */
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    await expand(page, 'visual', 'hud');
+
+    const shake = page.locator('[data-debug-row="Screen shake"] button');
+    await shake.focus();
+    await expect(popup(page)).toHaveAttribute('data-help-via', 'focus');
+    await expect(popup(page)).toContainText('screen-shake');
+    // Announced as the focused control's description while it shows.
+    await expect(shake).toHaveAttribute('aria-describedby', 'debug-help');
+
+    await page.locator('[data-debug-row="Chevrons"] button').focus();
+    await expect(popup(page)).toContainText('edge arrows');
+    await expect(shake).not.toHaveAttribute('aria-describedby', 'debug-help');
+
+    // Focus leaving the panel takes it away.
+    await page.locator('[data-debug-row="Chevrons"] button').evaluate(b => (b as HTMLElement).blur());
+    await expect(popup(page)).toHaveCount(0);
+
+    watch.assertClean();
+  });
+});
+
+test.describe('descriptions: touch', () => {
+  test.use({ hasTouch: true });
+
+  test('a long-press reads a chip without pressing it; a moving finger scrolls; a tap still presses', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await quietScene(page);
+    await page.getByTestId('debug-launcher').tap();
+    await waitForStats(page, s => s.debugPanel?.open === true, 'the panel from a tap');
+    await page.locator('[data-debug-group="enemies"]').tap();
+    await page.locator('[data-debug-section="boss"]').tap();
+    const chip = page.locator('[data-debug-row="Warp in a boss"] button', { hasText: 'Warden' });
+    await chip.scrollIntoViewIfNeeded();
+    const b = (await chip.boundingBox())!;
+    const at = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    const bosses = () => engine(page, e => e.currentMap.entities.filter((x: any) => x.isBoss && x.active).length as number);
+    expect(await bosses(), 'no boss before the presses').toBe(0);
+
+    // Count the clicks the page receives, so the swallow below is shown to be
+    // what held the chip rather than a browser that never sent one.
+    await page.evaluate(() => {
+      (window as any).__clicks = 0;
+      document.addEventListener('click', () => { (window as any).__clicks++; }, true);
+    });
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: string, points: { x: number; y: number }[]) =>
+      cdp.send('Input.dispatchTouchEvent', { type: type as any, touchPoints: points });
+
+    // A finger that MOVES is scrolling: held past the long-press, no popup.
+    await touch('touchStart', [at]);
+    await touch('touchMove', [{ x: at.x, y: at.y - 30 }]);
+    await page.waitForTimeout(DWELL_MS + 300);
+    await expect(popup(page)).toHaveCount(0);
+    await touch('touchEnd', []);
+    await frames(page, 3);
+
+    // A finger that RESTS asks: the popup comes up while it is still down…
+    await chip.scrollIntoViewIfNeeded();
+    const b2 = (await chip.boundingBox())!;
+    const at2 = { x: b2.x + b2.width / 2, y: b2.y + b2.height / 2 };
+    await page.evaluate(() => { (window as any).__clicks = 0; });
+    await touch('touchStart', [at2]);
+    await expect(popup(page)).toBeVisible();
+    await expect(popup(page)).toHaveAttribute('data-help-via', 'press');
+    await expect(popup(page)).toContainText('Warden');
+    await touch('touchEnd', []);
+    await frames(page, 10);
+    // …the browser delivers the click the lifted finger owes…
+    expect(await page.evaluate(() => (window as any).__clicks),
+      'the browser sent the release click (else the swallow below is untested)').toBe(1);
+    // …and it is swallowed: reading the chip did not press it.
+    expect(await bosses(), 'no boss warped in by a long-press').toBe(0);
+    // The popup stays after the finger lifts — it is read, not glanced at.
+    await expect(popup(page)).toBeVisible();
+
+    // The next tap closes it, and a tap on the chip is a press again.
+    await chip.tap();
+    await expect(popup(page)).toHaveCount(0);
+    await waitForEngine(page, e => e.currentMap.entities.some((x: any) => x.isBoss && x.active),
+      'a tapped chip to warp the boss in');
+
+    watch.assertClean();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+
+test.describe('the see-through backing', () => {
+  test('ships see-through over live play, ◐ makes it solid, and over a menu it is always solid', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await openPanel(page);
+    const panel = page.getByTestId('debug-panel');
+    await expect(panel).toHaveAttribute('data-backing', 'see-through');
+
+    await page.getByTestId('debug-solid').click();
+    await expect(panel).toHaveAttribute('data-backing', 'solid');
+    await closePanel(page);
+    await openPanel(page);
+    await expect(panel, 'remembered across closing').toHaveAttribute('data-backing', 'solid');
+    await page.getByTestId('debug-solid').click();
+    await expect(panel).toHaveAttribute('data-backing', 'see-through');
+
+    // Over a full-screen overlay what would show through is the overlay's
+    // own text, not the world: solid there, and no toggle offered.
+    await engine(page, e => e.pauseGame());
+    await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+    await expect(panel).toHaveAttribute('data-backing', 'solid');
+    await expect(page.getByTestId('debug-solid')).toHaveCount(0);
+    await engine(page, e => e.resumeGame());
+    await waitForStats(page, s => s.gameState === 'PLAYING', 'back to live play');
+    await expect(panel, 'see-through again over live play').toHaveAttribute('data-backing', 'see-through');
+
+    watch.assertClean();
+  });
+
+  test('the canvas HUD steps out from under the panel, and comes back when it closes', async ({ page }) => {
+    /*  The panel is see-through so the WORLD reads through it; the minimap
+     *  and loadout strip, which dock exactly where it docks, are clipped out
+     *  from under it instead of ghosting beneath its rows.  Read off the
+     *  canvas, because that is the only place the claim exists.  The minimap
+     *  region is compared against ITSELF a few frames apart: with the panel
+     *  shut, frames differ only by the minimap's own animation; opening the
+     *  panel takes the whole widget away. */
+    const watch = await boot(page);
+    await startRun(page);
+    const grab = () => page.evaluate(() => new Promise<number[]>(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const cv = document.querySelector('canvas')!;
+        const dpr = cv.width / cv.clientWidth;
+        const r = (window as any).__omniHud.computeMinimapRect(cv.clientHeight, false);
+        const img = cv.getContext('2d')!.getImageData(
+          Math.round(r.x * dpr), Math.round(r.y * dpr),
+          Math.round(r.size * dpr), Math.round(r.size * dpr)).data;
+        resolve(Array.from(img));
+      }));
+    }));
+    const changed = (a: number[], b: number[]) => {
+      let n = 0;
+      for (let i = 0; i < a.length; i += 4) {
+        if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 12) n++;
+      }
+      return n / (a.length / 4);
+    };
+
+    const shut1 = await grab();
+    const shut2 = await grab();
+    expect(changed(shut1, shut2), 'CONTROL: the shut panel leaves the minimap in place').toBeLessThan(0.2);
+
+    await openPanel(page);
+    const box = (await page.getByTestId('debug-panel').boundingBox())!;
+    const hole = await waitForEngine(page, e => !!e.renderer.hudHole, 'the panel to report where it is')
+      .then(() => engine(page, e => e.renderer.hudHole));
+    expect(hole!.x).toBeCloseTo(box.x, 0);
+    expect(hole!.y).toBeCloseTo(box.y, 0);
+    expect(hole!.w).toBeCloseTo(box.width, 0);
+    expect(hole!.h).toBeCloseTo(box.height, 0);
+    const open = await grab();
+    expect(changed(shut2, open), 'the minimap is gone from under the open panel').toBeGreaterThan(0.8);
+
+    await closePanel(page);
+    await waitForEngine(page, e => e.renderer.hudHole === null, 'the hole to close with the panel');
+    const back = await grab();
+    expect(changed(open, back), 'and it is back once the panel shuts').toBeGreaterThan(0.8);
 
     watch.assertClean();
   });

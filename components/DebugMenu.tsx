@@ -21,9 +21,16 @@
  *  launcher clears the 40px tap floor and has its own slot (stacked under
  *  PAUSE, with the arrow band re-measured around it — see
  *  `UI_CONSTANTS.INDICATORS.CONTROL_COLUMN_INSET`); it opens a panel and does
- *  nothing else (the renderer overlays are their own row); the panel is solid
- *  (`PANEL_OPAQUE`, pointer-events on) and scrolls; and it docks to the BOTTOM
- *  of the screen, leaving the ship and the top half of the world visible.
+ *  nothing else (the renderer overlays are their own row); the panel catches
+ *  every pointer (pointer-events on, over a SEE-THROUGH backing — see
+ *  `PANEL_SEE_THROUGH` — with a ◐ toggle to a solid one) and scrolls; and it
+ *  docks to the BOTTOM of the screen, leaving the ship and the top half of the
+ *  world visible.
+ *
+ *  WHAT A ROW DOES is one hover, long-press or focus away: every item carries
+ *  a one-line summary and its old tooltip behind "More", and `debugHelp.tsx`
+ *  shows them in a popup — see that file for why a `title` attribute could
+ *  not (a phone has no hover).
  *
  *  OPEN STATE IS THE ENGINE'S (`GameEngine.debugPanelOpen`), not React's:
  *  three devices open it — this launcher, the ` key, a pad's Select/Share —
@@ -35,11 +42,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { GameEngine } from '../engine/GameEngine';
 import { EngineStats, MapType } from '../types';
-import { PANEL_OPAQUE, T_MICRO, T_NOTE, T_BODY, TAP, CHIP_BASE, CHIP_OFF } from './uiClasses';
+import { PANEL_OPAQUE, PANEL_SEE_THROUGH, T_MICRO, T_NOTE, T_BODY, TAP, CHIP_BASE } from './uiClasses';
 import {
-  DEBUG_GROUPS, DEBUG_SECTIONS, ROW_LABEL, STAT_ROW, keepFocus,
+  DEBUG_GROUPS, DEBUG_SECTIONS, ROW_LABEL, STAT_ROW, DEBUG_CHIP_OFF, keepFocus,
   type DebugCtx, type DebugRow, type DebugSection, type DebugGroupId, type EntityCountMode,
 } from './debugSections';
+import { useRowHelp } from './debugHelp';
 
 // ── The launcher ─────────────────────────────────────────────────────────
 
@@ -87,16 +95,19 @@ const norm = (s: string) => s.toLowerCase().replace(/[↳·]/g, ' ').replace(/\s
 
 /** What a row is FOUND by.  The first string is its names — its label, and a
  *  chip row's chip labels, so "warden" finds the boss row — and the second is
- *  its descriptions (tooltips), matched only when the names are not. */
+ *  its descriptions (the one-line summary and the long detail), matched only
+ *  when the names are not. */
 function rowHaystacks(row: DebugRow, c: DebugCtx): [string, string] {
   switch (row.kind) {
-    case 'ctrl': return [row.label, row.title];
-    case 'buttons': return [row.label, row.buttons.map(b => b.title).join(' ')];
     case 'chips': {
       const list = row.chips(c);
-      return [`${row.label} ${list.map(x => x.label).join(' ')}`, list.map(x => x.title ?? '').join(' ')];
+      return [
+        `${row.label} ${list.map(x => x.label).join(' ')}`,
+        list.map(x => `${x.summary ?? ''} ${x.detail ?? ''}`).join(' '),
+      ];
     }
-    default: return [row.label, ''];
+    case 'each': return [row.label, ''];
+    default: return [row.label, `${row.summary ?? ''} ${row.detail ?? ''}`];
   }
 }
 
@@ -151,27 +162,31 @@ function filterSections(query: string, c: DebugCtx): { names: Hit[]; description
 
 /** The value BUTTON of a control row.  The 22px floor is the debug menu's
  *  deliberate exception to the 40px tap floor (5d, D4): a developer surface
- *  of ~150 rows trades reach for density. */
+ *  of ~150 rows trades reach for density.  Its fill is translucent like the
+ *  panel's (the see-through backing), and its border and text carry it. */
 const CTRL_BUTTON =
-  `bg-slate-800/70 border border-slate-600/60 rounded px-1.5 py-1 min-h-[22px] ${T_MICRO} ` +
+  `bg-slate-800/55 border border-slate-600/60 rounded px-1.5 py-1 min-h-[22px] ${T_MICRO} ` +
   'font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors ' +
   'text-right break-all';
 
 /** Every row carries two hooks: `data-debug-row` (its label — the row's
  *  identity, which suites address it by) and `data-debug-kind` (which of the
  *  shapes it is, so a suite can sweep the controls without also firing the
- *  map and spawn chips). */
+ *  map and spawn chips).  A row with a description also carries the three
+ *  `data-help*` attributes the description popup reads (`debugHelp.tsx`); a
+ *  chip carries its own, since a chip has no row label to press. */
 function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
   switch (row.kind) {
     case 'ctrl':
       return (
-        <div key={key} data-debug-row={row.label} data-debug-kind="ctrl" className="mt-1 flex items-center justify-between gap-2">
+        <div key={key} data-debug-row={row.label} data-debug-kind="ctrl"
+          data-help={row.summary} data-help-title={row.label} data-help-detail={row.detail}
+          className="mt-1 flex items-center justify-between gap-2">
           <span className={`${ROW_LABEL} shrink-0`}>{row.label}</span>
           <button
             onMouseDown={keepFocus}
             onClick={() => row.act(c)}
             className={`${CTRL_BUTTON} min-w-0`}
-            title={row.title}
           >
             {row.value(c)}
           </button>
@@ -179,14 +194,18 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
       );
     case 'stat':
       return (
-        <div key={key} data-debug-row={row.label} data-debug-kind="stat" className={STAT_ROW}>
+        <div key={key} data-debug-row={row.label} data-debug-kind="stat"
+          data-help={row.summary} data-help-title={row.label} data-help-detail={row.detail}
+          className={STAT_ROW}>
           <span className="whitespace-pre shrink-0">{row.label}</span>
           <span className={`${row.tone ? row.tone(c) : 'text-white'} min-w-0 text-right break-all`}>{row.value(c)}</span>
         </div>
       );
     case 'buttons':
       return (
-        <div key={key} data-debug-row={row.label} data-debug-kind="buttons" className="mt-1 flex items-center justify-between gap-1">
+        <div key={key} data-debug-row={row.label} data-debug-kind="buttons"
+          data-help={row.summary} data-help-title={row.label} data-help-detail={row.detail}
+          className="mt-1 flex items-center justify-between gap-1">
           <span className={ROW_LABEL}>{row.label}</span>
           <span className="flex gap-0.5">
             {row.buttons.map(b => (
@@ -194,8 +213,7 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
                 key={b.label}
                 onMouseDown={keepFocus}
                 onClick={() => b.act(c)}
-                className={`bg-slate-800/70 border border-slate-600/60 rounded px-1 py-0.5 min-h-[22px] ${T_MICRO} font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors`}
-                title={b.title}
+                className={`bg-slate-800/55 border border-slate-600/60 rounded px-1 py-0.5 min-h-[22px] ${T_MICRO} font-bold text-slate-200 hover:border-amber-400/70 hover:text-amber-300 transition-colors`}
               >
                 {b.label}
               </button>
@@ -213,9 +231,11 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
               key={ch.key}
               onMouseDown={keepFocus}
               onClick={() => ch.act(c)}
-              title={ch.title}
+              data-help={ch.summary}
+              data-help-title={ch.label}
+              data-help-detail={ch.detail}
               className={`${CHIP_BASE} ${ch.capitalize ? 'capitalize ' : ''}${
-                ch.active ? (ch.on ?? '') : `${CHIP_OFF} ${ch.hover}`
+                ch.active ? (ch.on ?? '') : `${DEBUG_CHIP_OFF} ${ch.hover}`
               }`}
             >
               {ch.label}
@@ -224,9 +244,16 @@ function renderRow(row: DebugRow, c: DebugCtx, key: string): React.ReactNode {
         </div>
       );
     case 'custom':
-      // `contents`: the wrapper carries the row's hook without adding a box
-      // of its own, so a custom row lays out exactly as its JSX says.
-      return <div key={key} data-debug-row={row.label} data-debug-kind="custom" className="contents">{row.render(c)}</div>;
+      // `contents`: the wrapper carries the row's hooks without adding a box
+      // of its own, so a custom row lays out exactly as its JSX says (the
+      // popup measures the row's first child instead).
+      return (
+        <div key={key} data-debug-row={row.label} data-debug-kind="custom"
+          data-help={row.summary} data-help-title={row.label} data-help-detail={row.detail}
+          className="contents">
+          {row.render(c)}
+        </div>
+      );
     case 'each':
       return <React.Fragment key={key}>{row.rows(c).map((r, i) => renderRow(r, c, `${key}.${i}`))}</React.Fragment>;
   }
@@ -269,10 +296,18 @@ export default function DebugMenu({
   const [openMap, setOpenMap] = useState<OpenMap>({});
   const [query, setQuery] = useState('');
   const [tall, setTall] = useState(false);
+  /** See-through (the default over live play — user call) or solid.
+   *  Remembered like the size, in memory only: a scene too bright to read
+   *  through is a moment, not a preference.  Over a full-screen overlay the
+   *  panel is solid regardless (`seeThrough`, below). */
+  const [solid, setSolid] = useState(false);
   const [entityCountMode, setEntityCountMode] = useState<EntityCountMode>('total');
   const [perfCopyText, setPerfCopyText] = useState('');
   const [perfCopied, setPerfCopied] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The description popup: hover, long-press or focus an item to read it.
+  const help = useRowHelp(panelRef, open);
 
   // Opened from the KEYBOARD: put the caret in the filter, so the shortcut is
   // "` then type".  Only for the keyboard — on touch, focusing a text field
@@ -281,6 +316,30 @@ export default function DebugMenu({
   useEffect(() => {
     if (open && panel?.via === 'key') filterRef.current?.focus();
   }, [open, panel?.via]);
+
+  // Tell the engine WHERE the panel is, so the canvas HUD steps out from
+  // under it (`RenderSystem.hudHole`) — the panel is see-through, and a
+  // minimap or loadout strip ghosting under its rows is noise, not world.
+  // Measured by the DOM on its own schedule — on open, when the panel resizes
+  // (the ▴ toggle, a viewport change) and on a window resize, which can move
+  // a width-capped panel without resizing it — never by the canvas per frame.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!open || !el) { engine()?.setDebugPanelRect(null); return; }
+    const report = () => {
+      const r = el.getBoundingClientRect();
+      engine()?.setDebugPanelRect({ x: r.left, y: r.top, w: r.width, h: r.height });
+    };
+    report();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(report) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', report);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', report);
+      engine()?.setDebugPanelRect(null);
+    };
+  }, [open]);
 
   const toggle = () => engine()?.toggleDebugPanel('pointer');
   const close = () => engine()?.setDebugPanelOpen(false);
@@ -318,8 +377,12 @@ export default function DebugMenu({
   };
 
   const isOpen = (key: string, dflt = false) => openMap[key] ?? dflt;
-  const flip = (key: string, dflt = false) =>
+  // Folding a group or section moves every row under it, so a description
+  // showing for one of them goes too.
+  const flip = (key: string, dflt = false) => {
+    help.dismiss();
     setOpenMap(prev => ({ ...prev, [key]: !(prev[key] ?? dflt) }));
+  };
 
   const visible = (s: DebugSection) => !s.when || s.when(c);
   const searching = norm(query).length > 0;
@@ -328,6 +391,13 @@ export default function DebugMenu({
   /** ❄ Freeze only means something over LIVE play: every other screen either
    *  freezes on its own or — the death screen — must never freeze. */
   const live = !overlayUp;
+  /** SEE-THROUGH ONLY OVER LIVE PLAY.  Over a full-screen overlay (the menu,
+   *  pause, a station, death, stage-clear) what would show through the panel
+   *  is not the world but that overlay's own rows of text, colliding with the
+   *  panel's — the double-vision the DOM HUD is already hidden from behind an
+   *  overlay.  So there the backing is solid whatever the ◐ toggle says, and
+   *  the toggle, like ❄ Freeze, is only offered over live play. */
+  const seeThrough = live && !solid;
 
   const sectionHeader = (s: DebugSection) => (
     <button
@@ -337,7 +407,7 @@ export default function DebugMenu({
       onClick={() => flip(`s:${s.id}`, s.defaultOpen)}
       aria-expanded={isOpen(`s:${s.id}`, s.defaultOpen)}
       /* Same deliberate density exception as the rows (5d, D4). */
-      className={`mt-1 w-full min-h-[24px] flex items-center justify-between text-slate-400/80 hover:text-amber-300 uppercase tracking-wider ${T_MICRO} transition-colors`}
+      className={`mt-1 w-full min-h-[24px] flex items-center justify-between text-slate-300/80 hover:text-amber-300 uppercase tracking-wider ${T_MICRO} transition-colors`}
       title={`Toggle ${s.label} section`}
     >
       <span>{s.label}</span>
@@ -357,7 +427,9 @@ export default function DebugMenu({
   ));
 
   return (
+    <>
     <div
+      ref={panelRef}
       /* THE GAMEPAD DRIVER SCOPES BY THIS TAG: the last visible
          `[data-overlay]` is the live one, and this panel renders after every
          other overlay, so while it is open the D-pad moves inside it.
@@ -366,14 +438,22 @@ export default function DebugMenu({
       data-overlay="debug"
       data-debug-ui=""
       data-testid="debug-panel"
+      data-backing={seeThrough ? 'see-through' : 'solid'}
       role="dialog"
       aria-label="Debug menu"
+      /* The description popup's hover / long-press / focus handlers, one set
+         for the whole panel (`debugHelp.tsx`). */
+      {...help.panelHandlers}
       /* DOCKED TO THE BOTTOM, 45% tall by default: the ship sits at screen
          centre, so this leaves it — and the top half of the world, and the
          HUD's top row — in view while a knob is turned.  `dvh`, not `vh`, so
          a phone's collapsing toolbar cannot push the panel's foot off the
-         screen. */
-      className={`absolute inset-x-2 bottom-2 z-[60] mx-auto max-w-xl pointer-events-auto flex flex-col ${PANEL_OPAQUE} border border-amber-500/40 rounded-xl shadow-2xl overflow-hidden ${
+         screen.  On a TOUCH screen nothing in it selects as text: a
+         long-press here asks for a description, and iOS would otherwise
+         answer it with a selection handle and a callout first. */
+      className={`absolute inset-x-2 bottom-2 z-[60] mx-auto max-w-xl pointer-events-auto flex flex-col ${
+        seeThrough ? PANEL_SEE_THROUGH : PANEL_OPAQUE
+      } border border-amber-500/40 rounded-xl shadow-2xl overflow-hidden pointer-coarse:select-none [-webkit-touch-callout:none] ${
         tall ? 'h-[85dvh]' : 'h-[45dvh]'
       }`}
     >
@@ -387,23 +467,47 @@ export default function DebugMenu({
               onMouseDown={keepFocus}
               onClick={() => engine()?.setDebugFreeze(!panel?.freeze)}
               aria-pressed={panel?.freeze === true}
-              title="❄ Freeze: hold the game while this panel is open (like pause). Off (default) keeps the world running so a setting can be watched taking effect. Never holds a dying or dead ship — the death screen always runs live."
+              data-help="Hold the game while this panel is open, like pause."
+              data-help-title="❄ Freeze"
+              data-help-detail="Off (default) keeps the world running so a setting can be watched taking effect. Never holds a dying or dead ship — the death screen always runs live."
               className={`min-h-[32px] px-2 rounded border ${T_NOTE} font-bold uppercase tracking-wider transition-colors ${
                 panel?.freeze
                   ? 'bg-sky-600/40 border-sky-400/70 text-sky-100'
-                  : 'bg-slate-800/70 border-slate-600/60 text-slate-300 hover:border-sky-400/70'
+                  : 'bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-sky-400/70'
               }`}
             >
               ❄ Freeze {panel?.freeze ? 'On' : 'Off'}
             </button>
           )}
+          {live && (
+            <button
+              data-testid="debug-solid"
+              onMouseDown={keepFocus}
+              onClick={() => setSolid(v => !v)}
+              aria-pressed={solid}
+              aria-label={solid ? 'See-through debug panel' : 'Solid debug panel'}
+              data-help={solid
+                ? 'The panel has a solid backing. Tap for see-through, to watch the world behind it.'
+                : 'The world shows through the panel. Tap for a solid backing, for reading over a bright scene.'}
+              data-help-title="Backing"
+              data-help-detail="Only offered over live play. Over a menu, pause, a station, death or stage-clear the panel is always solid: what would show through there is that screen's own text, not the world."
+              className={`min-h-[32px] min-w-[32px] rounded border ${T_BODY} transition-colors ${
+                solid
+                  ? 'bg-slate-700/80 border-slate-400/70 text-slate-100'
+                  : 'bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-amber-400/70'
+              }`}
+            >
+              {solid ? '●' : '◐'}
+            </button>
+          )}
           <button
             data-testid="debug-size"
             onMouseDown={keepFocus}
-            onClick={() => setTall(t => !t)}
+            onClick={() => { help.dismiss(); setTall(t => !t); }}
             aria-label={tall ? 'Shorter debug panel' : 'Taller debug panel'}
-            title={tall ? 'Shorter — see more of the world' : 'Taller — see more rows'}
-            className={`min-h-[32px] min-w-[32px] rounded border bg-slate-800/70 border-slate-600/60 text-slate-300 hover:border-amber-400/70 ${T_BODY}`}
+            data-help={tall ? 'Shorter — see more of the world.' : 'Taller — see more rows.'}
+            data-help-title="Panel size"
+            className={`min-h-[32px] min-w-[32px] rounded border bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-amber-400/70 ${T_BODY}`}
           >
             {tall ? '▾' : '▴'}
           </button>
@@ -413,7 +517,7 @@ export default function DebugMenu({
             onClick={close}
             aria-label="Close debug menu"
             title="Close (Esc, the ` key, or the pad's BACK / Select)"
-            className={`min-h-[32px] min-w-[32px] rounded border bg-slate-800/70 border-slate-600/60 text-slate-300 hover:border-rose-400/70 hover:text-rose-200 ${T_BODY}`}
+            className={`min-h-[32px] min-w-[32px] rounded border bg-slate-800/55 border-slate-600/60 text-slate-300 hover:border-rose-400/70 hover:text-rose-200 ${T_BODY}`}
           >
             ✕
           </button>
@@ -423,7 +527,7 @@ export default function DebugMenu({
           type="search"
           data-testid="debug-filter"
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={e => { help.dismiss(); setQuery(e.target.value); }}
           /* Escape in a filter with text in it CLEARS the filter and stops
              there — the engine closes the panel on an Escape that reaches
              the window, and a query typed to find one row should not cost
@@ -437,12 +541,16 @@ export default function DebugMenu({
           }}
           placeholder="Filter rows — e.g. neb bond, portal, warden"
           aria-label="Filter debug rows"
-          className={`w-full min-h-[32px] bg-slate-900 border border-slate-600 rounded px-2 ${T_BODY} text-white placeholder:text-slate-500 focus:border-amber-400 focus:outline-none`}
+          className={`w-full min-h-[32px] bg-slate-900/70 border border-slate-600 rounded px-2 ${T_BODY} text-white placeholder:text-slate-500 focus:border-amber-400 focus:outline-none`}
         />
       </div>
 
-      {/* ── Body: the groups, or the filter's results ── */}
-      <div className={`flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 font-mono ${T_MICRO} leading-tight text-slate-300/90`}>
+      {/* ── Body: the groups, or the filter's results.  Scrolling moves
+             every row out from under an open description, so it closes it. ── */}
+      <div
+        onScroll={help.scrolled}
+        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 font-mono ${T_MICRO} leading-tight text-slate-300/90`}
+      >
         {results ? (
           results.names.length === 0 && results.descriptions.length === 0 ? (
             <p className={`mt-3 ${T_NOTE} text-slate-500`}>No row matches “{query.trim()}”.</p>
@@ -497,5 +605,7 @@ export default function DebugMenu({
         )}
       </div>
     </div>
+    {help.popup}
+    </>
   );
 }

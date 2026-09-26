@@ -36,12 +36,36 @@ export const OVERLAY_SCRIM = 'bg-slate-950/55 backdrop-blur-[3px]';
 /**
  * Backing for content that must stay readable REGARDLESS of what is on the
  * map behind it — dense, small, information-bearing panels where the scrim's
- * legibility floor isn't enough.  Today that is the debug menu (rows of 10px
- * mono readouts, explicitly called out as needing to stay visible).  Nearly
- * opaque plus its own blur, so it reads like a panel sitting ON the scrim
- * rather than more transparency stacked on transparency.
+ * legibility floor isn't enough.  Today: the Controls & Basics help panels,
+ * and the debug menu's SOLID mode (its default is `PANEL_SEE_THROUGH`, below).
+ * Nearly opaque plus its own blur, so it reads like a panel sitting ON the
+ * scrim rather than more transparency stacked on transparency.
  */
 export const PANEL_OPAQUE = 'bg-slate-950/95 backdrop-blur-md';
+
+/**
+ * The DEBUG PANEL's default backing over LIVE PLAY (user call: "make this
+ * menu transparent") — the world shows through it, because most of what the
+ * panel tunes is something moving on the map behind it (a flow pattern, a
+ * lens, a light, a tilt spring), and it covers the bottom half of the screen
+ * while it does.  Over a full-screen overlay the panel takes `PANEL_OPAQUE`
+ * instead: there, what would show through is that overlay's own text.
+ *
+ * The HUD chip's rule, applied to a denser surface: the FILL goes translucent
+ * and the MARKS carry the legibility.  Here that means a dark text outline on
+ * every glyph (`text-shadow` inherits, so one declaration on the panel reaches
+ * every row), because the panel's type is 9–11px mono over arbitrary bright
+ * colour — a lit nebula, a glass field under the emissive light.
+ *
+ * NO backdrop blur, and that is a decision rather than an omission: a blur is
+ * what makes a backing read as frosted glass instead of as transparent, and a
+ * backdrop filter over 45% of a canvas that repaints every frame is re-run
+ * every frame — on the one panel that hosts the frame-time readouts.  When a
+ * scene is too bright to read through, the panel's ◐ toggle swaps in
+ * `PANEL_OPAQUE`.
+ */
+export const PANEL_SEE_THROUGH =
+  'bg-slate-950/40 [text-shadow:0_1px_2px_rgb(0_0_0/0.95),0_0_1px_rgb(0_0_0/0.9)]';
 
 /** The overlay fade-in.  Death and stage-clear both interrupt live play, so
  *  both ease in rather than snapping over the frame the fight ended. */

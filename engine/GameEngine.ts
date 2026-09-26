@@ -473,6 +473,14 @@ export class GameEngine {
    *  for the keyboard: a touch open that raised the soft keyboard would bury
    *  the panel it had just opened under it. */
   debugPanelVia: 'pointer' | 'key' | 'pad' = 'pointer';
+  /** WHERE the open panel sits on screen, in CSS px, as the panel last
+   *  REPORTED it (DebugMenu: on open, and whenever it or the window resizes)
+   *  — null while it is closed.  The canvas never measures the DOM for this:
+   *  the DOM tells it, on its own schedule, the same way the React profiler
+   *  reports into `noteUiRender`.  Read by `draw`, which hands it to the
+   *  renderer as the hole the screen-space HUD is not drawn in
+   *  (`RenderSystem.hudHole`). */
+  debugPanelRect: { x: number; y: number; w: number; h: number } | null = null;
 
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
@@ -1413,6 +1421,12 @@ export class GameEngine {
 
   public toggleDebugPanel(via: 'pointer' | 'key' | 'pad' = 'pointer') {
     this.setDebugPanelOpen(!this.debugPanelOpen, via);
+  }
+
+  /** The panel reports where it is (or null).  A plain field write: nothing
+   *  reads it until the next `draw`. */
+  public setDebugPanelRect(r: { x: number; y: number; w: number; h: number } | null) {
+    this.debugPanelRect = r;
   }
 
   /** The panel's ❄ Freeze toggle.  A preference, not a state change: it only
@@ -7483,6 +7497,11 @@ export class GameEngine {
       // where the frame is drawn rather than read out of the DOM.
       this.renderer.bossBarActive =
           !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+
+      // The open debug panel is SEE-THROUGH so the world reads through it; the
+      // screen-space HUD does not draw under it (RenderSystem.hudHole).  Null
+      // whenever the panel is shut, whatever rect was last reported.
+      this.renderer.hudHole = this.debugPanelOpen ? this.debugPanelRect : null;
 
       // Transit warp — hand the renderer a plain 0->1 progress, so the beat
       // stays a pure function of one number and the render side owns no
