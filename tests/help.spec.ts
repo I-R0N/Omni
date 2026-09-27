@@ -13,12 +13,20 @@
  *  controls. No test can — a help panel is prose. That accuracy is a review
  *  matter, which is why the copy was written from the mappings G2/G3 bound
  *  rather than from a plan.
+ *
+ *  The control-scheme PICKER the panel follows is pinned here too: every
+ *  scheme's button on the front door, the pause menu's dropdown, and a choice
+ *  that survives a restart.
  */
 
 import { test, expect } from '@playwright/test';
 import { boot, engine, stats, startRun, waitForStats } from './helpers';
 
 const PHONE_W = 390;
+/** The tap-target floor every control here carries (the `TAP` class in
+ *  components/uiClasses.ts), hard-coded rather than imported (harness
+ *  rule 7). */
+const TAP_FLOOR = 40;
 
 /** Every control-column label in the open panel, in order. */
 async function helpRows(page: any): Promise<string[]> {
@@ -39,7 +47,7 @@ test.describe('controls & basics — reachable from both menus', () => {
     await expect(toggle).toBeVisible();
     // The toggle is itself a tap target on glass.
     const tb = await toggle.boundingBox();
-    expect(tb!.height).toBeGreaterThanOrEqual(28);
+    expect(tb!.height).toBeGreaterThanOrEqual(TAP_FLOOR);
 
     await toggle.click();
     const panel = page.getByTestId('help-panel');
@@ -127,11 +135,17 @@ test.describe('controls & basics — reachable from both menus', () => {
     // The picker is on the front door, next to Difficulty, because it is the
     // same kind of choice: a preference that shapes the whole run.
     await expect(page.getByTestId('scheme-picker')).toBeVisible();
-    for (const id of ['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad']) {
+    // Every scheme, written out like the dropdown's list below (harness
+    // rule 7).  There are seven, so the last one takes the 2-up grid's
+    // odd-count full-row branch — laid out and measured like the rest.
+    for (const id of [
+      'touch', 'joystick-left', 'joystick-right', 'keyboard',
+      'gamepad', 'gamepad-thrust', 'gamepad-left',
+    ]) {
       const box = await page.getByTestId(`scheme-${id}`).boundingBox();
       expect(box, `${id} button should be laid out`).not.toBeNull();
       // Thumb-sized on the phone, and inside it.
-      expect(box!.height).toBeGreaterThanOrEqual(36);
+      expect(box!.height).toBeGreaterThanOrEqual(TAP_FLOOR);
       expect(box!.x).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(PHONE_W);
     }
@@ -148,9 +162,13 @@ test.describe('controls & basics — reachable from both menus', () => {
     expect(active[0]).toContain('Joystick');
 
     // And it survives a restart, like difficulty — it describes the player's
-    // hands, not the run.
-    await engine(page, e => { e.startGame(); e.restartGame(); });
-    expect((await stats(page)).controlScheme).toBe('joystick-left');
+    // hands, not the run.  Read off the engine in the same breath: the stats
+    // payload still says joystick-left for a frame whatever the restart did
+    // (harness rule 12).
+    expect(await engine(page, e => {
+      e.startGame(); e.restartGame();
+      return e.input.getControlScheme();
+    })).toBe('joystick-left');
 
     watch.assertClean();
   });
@@ -163,13 +181,13 @@ test.describe('controls & basics — reachable from both menus', () => {
 
     // A native <select>: on a phone it opens the OS picker, which is a better
     // target than anything drawn here, and the pause menu is already a long
-    // scroll without five captioned buttons in it.
+    // scroll without seven captioned buttons in it.
     const select = page.getByTestId('scheme-select');
     await expect(select).toBeVisible();
     await expect(select).toHaveValue('touch');
 
     const box = await select.boundingBox();
-    expect(box!.height).toBeGreaterThanOrEqual(30);
+    expect(box!.height).toBeGreaterThanOrEqual(TAP_FLOOR);
     expect(box!.x + box!.width).toBeLessThanOrEqual(PHONE_W);
 
     /*  Every scheme is reachable from it, including both handednesses.  The

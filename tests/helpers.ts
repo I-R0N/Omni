@@ -1,7 +1,7 @@
 /** Shared harness for the Omni smoke suites.
  *
- *  Everything here is a thin wrapper over the two debug handles the app
- *  publishes on mount (App.tsx; CLAUDE.md §8):
+ *  Everything here is a thin wrapper over two of the debug handles the app
+ *  publishes on mount (App.tsx; CLAUDE.md §8 lists them all):
  *
  *    window.__omniEngine  — the live GameEngine instance
  *    window.__omniStats   — the most recent EngineStats payload
@@ -12,7 +12,8 @@
  *  if a suite can observe it, the UI can too.
  *
  *  Three habits are baked in here because a prior session lost real time to
- *  each of them (GAUNTLET_PAIR_A_LOG / GAUNTLET_BOSSES_LOG, "harness flakes"):
+ *  each of them (docs/GAUNTLET_BOSSES_LOG.md, "Four harness flakes fixed";
+ *  docs/GAUNTLET_5B_LOG.md on pixel sampling):
  *
  *   1. POLL, never sleep.  The sim runs on a fixed timestep and this browser
  *      renders canvas in software, so sim-seconds elapse slower than
@@ -107,8 +108,9 @@ export function engine<R, A = undefined>(
 
 /** Poll `pred` against successive stats payloads until it holds.
  *  ALWAYS use this instead of a fixed wait: the sim's clock is not the
- *  wall clock here. */
-/** THE PREDICATE RUNS IN THE PAGE, NOT IN NODE.  It is shipped across as
+ *  wall clock here.
+ *
+ *  THE PREDICATE RUNS IN THE PAGE, NOT IN NODE.  It is shipped across as
  *  `pred.toString()` and rebuilt with `new Function`, so it may reference
  *  ONLY its own argument and page globals — a closure over a test-side
  *  constant is `undefined` in there, the predicate throws, and the wait
@@ -217,11 +219,11 @@ export async function advanceSim(page: Page, seconds: number, timeoutMs = 120_00
  *  seen.  For transient state (hit stun, a flash timer, a peak count) that a
  *  single read will usually miss.
  *
- *  NOT USED by any suite today, for the same reason as `advanceSim`: nothing
- *  in the current net measures a transient.  Kept because the flake it
- *  prevents — a 0.12s hit-stun read 200 ms after the shot, which comes back
- *  zero and reads as a product bug — cost a previous session real time, and
- *  the fix should not have to be rediscovered. */
+ *  Used by debugmenu.spec.ts (`peakShots` — the shots a click on the panel
+ *  must not fire).  The flake it prevents — a 0.12s hit-stun read 200 ms
+ *  after the shot, which comes back zero and reads as a product bug — cost a
+ *  previous session real time, and the fix should not have to be
+ *  rediscovered. */
 export async function samplePeak(
   page: Page,
   read: (e: Engine) => number,
@@ -398,7 +400,9 @@ export async function dockAtStation(page: Page, kind = 'tradehub') {
     (e, k: string) => {
       const st = e.stations.find((s: any) => s.stationKind === k);
       if (!st) return false;
-      // Just inside DOCK_RANGE, mirroring debugTeleportToStation's offset.
+      // 40 units out — well inside STATION_CONSTANTS.DOCK_RANGE (260); the
+      // DBG teleport lands at DOCK_RANGE × 0.8, and any point in range docks
+      // the same.
       e.player.position.x = st.position.x;
       e.player.position.y = st.position.y + 40;
       e.player.velocity.x = 0;
@@ -426,16 +430,15 @@ export async function enableTilt(page: Page) {
   await waitForStats(page, s => s.rollFeelName === 'Default', 'the tilt enabled');
 }
 
-/** Put the engine into SCANNER mode — i.e. turn the DBG "Scan off" reveal
- *  OFF, so discovery, the auto sweep and the `found` bookkeeping all run.
+/** Put the engine into SCANNER mode — make sure the DBG "Scan off" reveal
+ *  (Visual / HUD ▸ Camera & HUD) is OFF, so discovery, the auto sweep and the
+ *  `found` bookkeeping all run.
  *
- *  That switch now ships ON (constants.ts `activeScanRevealAll`), which draws
- *  the whole minimap and skips the scanner's periodic work.  Every suite that
- *  tests the SCANNER SUBSYSTEM has to opt back in, because with the reveal up
- *  there is nothing for a scanner to discover — the map is already drawn.
- *  The behaviour under test is unchanged and still shipped; only the default
- *  starting state moved, so this is a setup step rather than a weakening of
- *  the assertions.
+ *  The reveal ships OFF (constants.ts `activeScanRevealAll = false`), so on a
+ *  fresh page this checks and does nothing.  It stays the one seam every
+ *  scanner suite calls because that default has moved before (it briefly
+ *  shipped ON), and with the reveal up there is nothing for a scanner to
+ *  discover — the map is already drawn.
  *
  *  Idempotent: reads the live state and only flips when it needs to. */
 export async function useScanner(page: Page): Promise<void> {
