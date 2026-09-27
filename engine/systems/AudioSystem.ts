@@ -7,8 +7,9 @@ import { AUDIO_CONSTANTS, getActiveCollapseMode } from '../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
 /** Event-based Web Audio mixer. Registry IDs are the call-site contract.
- * Existing WAVs and cached production recipes share priority, variation,
- * toroidal spatialization, category gains and lifecycle handling.
+ * Cinematic bank takes, discovered WAVs and cached production recipes share
+ * priority, variation, toroidal spatialization, category gains and lifecycle
+ * handling.
  * The context starts only after a user gesture. Recipes render immediately
  * during preparation, so gameplay never waits for downloads or compilation.
  */
@@ -58,8 +59,9 @@ export interface SynthCtx {
 const SFX_ASSET_DIR = '/assets/sfx/';
 
 /** A one-shot sound.  `render` returns the voice's duration in seconds so
- *  the manager can retire it without a timer.  With `sample` set and the
- *  file decoded, the recording plays instead and `render` is the fallback. */
+ *  the manager knows when to retire it.  Once a recorded take has decoded (a
+ *  bank cue, or a WAV) the recording plays instead and `render` is the
+ *  fallback. */
 export interface SfxDef {
   tier: SfxTier;
   /** Relative mix level, 0..1, before master volume (inventory `mix`). */
@@ -86,7 +88,8 @@ export interface SfxDef {
    *  change and never a trigger-site change, and a missing file degrades
    *  to a sound rather than to silence.
    *
-   *  Several filenames = VARIANTS, cycled round-robin per trigger.  Bulk-
+   *  Several filenames = VARIANTS, one chosen at random per trigger and
+   *  never the one just played.  Bulk-
    *  fired ids machine-gun without variation, which is what `jitter` is
    *  for on the synth side; a handful of takes is the sampled equivalent
    *  and the two stack (jitter still detunes the chosen take). */
@@ -214,12 +217,14 @@ export class AudioSystem {
   private unmatchedSamples: string[] = [];
   /** Files named after a LOOP id.  Matched, but unusable — see
    *  discoverSamples().  Kept apart from `unmatchedSamples` because the two
-   *  need different advice: one is a typo, this one is an unbuilt feature. */
+   *  need different advice: one is a typo, the other names a loop, which only
+   *  the cinematic banks can record. */
   private loopSampleFiles: string[] = [];
   /** When false, an id with no usable recording makes NO SOUND rather than
    *  falling back to its procedural voice.  Exists so recorded assets can be
    *  auditioned alone: with the drafts under them, a sound that is quietly
-   *  still synthetic is impossible to tell from one that landed. */
+   *  still synthetic is impossible to tell from one that landed.  No UI sets
+   *  it since the pause menu's WAV-only button was removed (2026-09-10). */
   private _draftsEnabled = true;
   private gestureBound = false;
   /** iOS session-category shim — see claimPlaybackSession(). */
@@ -230,10 +235,11 @@ export class AudioSystem {
   private _volume: number = AUDIO_CONSTANTS.DEFAULT_VOLUME;
   private _muted = false;
   /** False while paused / docked / in the menu — i.e. whenever the sim is
-   *  frozen.  Silences the WORLD (loops and positional one-shots) but
-   *  deliberately NOT flat/UI sounds: the station and pause screens are
-   *  exactly where menu clicks, purchases and docking cues have to be
-   *  audible. */
+   *  frozen.  Stops every loop and drops every one-shot whose id is not on
+   *  `AudioMix.survivesPause`: the station and pause screens are exactly
+   *  where menu clicks, purchases and docking cues have to be audible, while
+   *  flat GAMEPLAY cues (`weapon.reject`, `weapon.charge.ready`) go quiet
+   *  with the world. */
   private _active = true;
 
   // ── Listener (camera) position, world space ──
@@ -246,7 +252,7 @@ export class AudioSystem {
   /** Global live-voice end times, compacted in place on each play. */
   private globalEnds: number[] = [];
 
-  // ── Headless-smoke counters (window.__omniEngine drives the assertions;
+  // ── Headless-test counters (window.__omniEngine drives the assertions;
   //    a map increment per event is free at audio-event rates) ──
   public readonly counts = { played: 0, dropped: 0, collapsed: 0 };
   private perId = new Map<string, number>();
@@ -319,7 +325,7 @@ export class AudioSystem {
    *     playing an `<audio>` element promotes the page's session
    *     category.  A ~600-byte silent WAV data URI does it, and being a
    *     data URI it stays inside the single-file standalone build (no
-   *     asset file, so scripts/inline-build.mjs is still untouched).
+   *     asset file for scripts/inline-build.mjs to bake).
    *
    * Both paths are best-effort and wrapped: on a browser that does
    * neither, this is a no-op and audio behaves as before.
@@ -419,12 +425,13 @@ export class AudioSystem {
     return true;
   }
 
-  /** Fetch + decode every `sample` declared in the registry.  Idempotent,
-   *  parallel, and FAILURE-TOLERANT by design — a 404 or an undecodable
-   *  file leaves that id on its procedural voice and logs nothing to the player.
-   *  The standalone single-file build takes exactly that path today: its
-   *  inliner carries images, not audio, so the standalone game is the
-   *  procedural game. */
+  /** Decode the cinematic banks first, then fetch + decode a WAV take for
+   *  every id no bank covers (a `sample` declared on the def, else the
+   *  folder's).  Idempotent, parallel across the WAVs, and FAILURE-TOLERANT
+   *  by design — a 404 or an undecodable file leaves that id on its
+   *  procedural voice and logs nothing to the player.  The standalone
+   *  single-file build takes the same path from its inlined data URIs
+   *  (`__omniAudioInline` for the banks, `__omniSfxInline` for the WAVs). */
   private async preloadSamples(): Promise<void> {
     if (!this.ctx || this.samplesRequested) return;
     this.samplesRequested = true;
@@ -450,7 +457,7 @@ export class AudioSystem {
             // them here.  Checking the table first is the whole of the
             // single-file audio path: everything below is unchanged, so a
             // baked take goes through the same decode, the same silent-file
-            // rejection and the same round-robin as a fetched one.
+            // rejection and the same take choice as a fetched one.
             const inlined = (globalThis as { __omniSfxInline?: Record<string, string> })
               .__omniSfxInline?.[name];
             const res = await fetch(inlined ?? `${SFX_ASSET_DIR}${name}`);
@@ -529,13 +536,13 @@ export class AudioSystem {
       const stem = file.replace(/\.wav$/i, '').toLowerCase();
       const hit = dashed.find(([, d]) => stem === d || stem.startsWith(d + '-'));
       if (!hit) { this.unmatchedSamples.push(file); continue; }
-      // A LOOP cannot take a recording yet — the sample path builds a
-      // one-shot BufferSource, and a sustained sound needs seamless looping
-      // plus a mapping from its tracked parameter (throttle, charge) onto
-      // the buffer.  Until that exists, refusing the file LOUDLY beats
-      // accepting it: registering it would mark the id as covered while
-      // `loop()` went on calling the synth, so the draft would play and
-      // look like the recording was working.
+      // A LOOP takes a recorded texture from the cinematic banks only
+      // (`startRecordedLoop`, seamless and parameter-mapped); nothing checks
+      // that a WAV here would loop cleanly.  So a file named after a loop id
+      // is refused LOUDLY: kept apart and reported (`loopSampleFilenames`)
+      // rather than registered.  The rule predates recorded loops, when
+      // `loop()` could only call the synth and accepting the file would have
+      // passed the draft off as the recording.
       if (this.loopDefs.has(hit[0])) { this.loopSampleFiles.push(file); continue; }
       const list = byId.get(hit[0]);
       if (list) list.push(file); else byId.set(hit[0], [file]);
@@ -544,9 +551,10 @@ export class AudioSystem {
     return byId;
   }
 
-  /** Next decoded take for an id, or null while none has landed.  Cycles
-   *  round-robin and SKIPS slots still loading, so a partially-decoded set
-   *  is usable the moment its first take arrives. */
+  /** Next decoded take for an id, or null while none has landed.  Picks at
+   *  random, never the take just played (`chooseTake`), and SKIPS slots
+   *  still loading, so a partially-decoded set is usable the moment its
+   *  first take arrives. */
   private takeSample(id: string): AudioBuffer | null {
     const set = this.samples.get(id);
     if (!set) return null;
@@ -628,8 +636,8 @@ export class AudioSystem {
   }
   public toggleMute() { this.setMuted(!this._muted); }
 
-  /** Paused / docked: kill loops and drop one-shots, but keep the context
-   *  alive so the next resume is instant. */
+  /** Paused / docked: kill loops and drop one-shots off the pause
+   *  whitelist, but keep the context alive so the next resume is instant. */
   public setActive(a: boolean) {
     if (this._active === a) return;
     this._active = a;
@@ -637,7 +645,8 @@ export class AudioSystem {
     if (!a) this.stopScene();
   }
   public get active(): boolean { return this._active; }
-  /** Current wave/hostile state. Repeated values are ignored by the score. */
+  /** Current combat proximity (`GameEngine.inCombatProximity`, sent on a
+   *  transition). Repeated values are ignored by the score. */
   public setCombat(combat: boolean) {
     this._combat = combat;
     this.music?.setCombat(combat);
@@ -677,9 +686,9 @@ export class AudioSystem {
     if (!def) return;
     if (!this.ctx || !this.master || !this.noiseBuf) return;
     if (this._muted) return;
-    // Frozen sim silences the world but not the UI — see `_active`.
-    // Counted as a drop rather than returning silently, so the headless
-    // smoke can tell "suppressed" from "never reached the manager".
+    // A frozen sim silences everything off the pause whitelist — see
+    // `_active`.  Counted as a drop rather than returning silently, so the
+    // headless tests can tell "suppressed" from "never reached the manager".
     if ((!this._active && !survivesPause(id)) || this.ctx.state !== 'running') { this.counts.dropped++; return; }
 
     const now = this.ctx.currentTime;
@@ -758,7 +767,8 @@ export class AudioSystem {
       else { this.counts.dropped++; return; }
     }
 
-    // 3. Global ceiling, thinned by tier.  Tier 1 always plays.
+    // 3. Global ceiling, thinned by tier.  Tier 1 skips the tier caps; at the
+    //    hard cap below it must steal a less important voice or is dropped.
     this.pruneGlobal(now);
     if (def.tier > 1) {
       const cap = (def.tier === 3
@@ -806,8 +816,9 @@ export class AudioSystem {
     if (buf) {
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
-      // The call site's pitch (shard SIZE, in the case of contact) and the
-      // def's jitter both ride playbackRate, so one take spans pebble-tap
+      // The call site's pitch (the impactor's MASS, in the case of contact —
+      // `PhysicsSystem.impactVoice`) and the def's jitter (capped at 3.5% on
+      // a bank take) both ride playbackRate, so one take spans pebble-tap
       // to boulder-slam exactly as the synth's f0 sweep did.  Rate scales
       // duration, so the voice's retirement has to scale with it too.
       src.playbackRate.value = s.pitch;
@@ -876,10 +887,10 @@ export class AudioSystem {
     }
 
     // Drafts off and no recording for this id → the loop must NOT sound.
-    // Every loop is a procedural voice today (the sample path is one-shot only),
-    // so WAV-only silences all of them — which is the point: the engine bed
-    // and the POI hums are exactly the sounds most likely to be mistaken for
-    // a recording, because they are always there.
+    // Loops record from the cinematic banks (`startRecordedLoop`), so this
+    // silences only a loop whose bank failed to decode — and a draft there is
+    // exactly what would be mistaken for a recording: the engine bed and the
+    // POI hums are always there.
     const draftOnly = !this.hasSample(id);
     if (!on || outOfEarshot || this._muted || !this._active
         || (draftOnly && !this._draftsEnabled)) {
@@ -971,7 +982,9 @@ export class AudioSystem {
     setTimeout(() => { v.gain.disconnect(); v.tail.disconnect(); }, AUDIO_MIX.release * 1000);
   }
 
-  /** Map changes discard old world voices and retrigger gates; UI tails survive. */
+  /** Map loads, a frozen sim and a hidden tab discard old world voices and
+   *  retrigger gates; `survivesPause` tails survive.  `all` (mute, return to
+   *  the menu) clears everything. */
   public stopScene(all = false) {
     this.stopAllLoops();
     for (const v of this.live) if (all || !survivesPause(v.id)) this.retire(v);
@@ -999,15 +1012,16 @@ export class AudioSystem {
     this.loops.clear();
   }
 
-  // ── Introspection (headless smokes + the DBG panel) ───────────────────────
+  // ── Introspection (headless tests + the DBG panel) ────────────────────────
 
   public playsOf(id: string): number { return this.perId.get(id) ?? 0; }
-  /** How many recorded takes decoded successfully.  0 with samples declared
-   *  means every id is on its procedural voice — the normal state until files
-   *  are dropped in, and the state the standalone build stays in. */
+  /** How many recorded takes decoded successfully, bank cues and WAVs
+   *  alike.  0 means every id is on its procedural voice — the state a
+   *  failed bank load leaves behind. */
   public get sampleCount(): number { return this.samplesLoaded; }
   /** Synth drafts on/off.  With them off, only recorded takes sound — the
-   *  audition mode for judging assets without mistaking a draft for one. */
+   *  audition mode for judging assets without mistaking a draft for one.
+   *  Engine-side only now; see `_draftsEnabled`. */
   public get draftsEnabled(): boolean { return this._draftsEnabled; }
   public set draftsEnabled(v: boolean) {
     if (this._draftsEnabled === v) return;
@@ -1034,7 +1048,7 @@ export class AudioSystem {
   public get allIds(): string[] { return [...this.defs.keys(), ...this.loopDefs.keys()]; }
   /** Filenames present in the folder that match no id — i.e. typos. */
   public get unmatchedFiles(): string[] { return this.unmatchedSamples.slice(); }
-  /** Filenames naming a LOOP id, which cannot use a recording yet. */
+  /** Filenames naming a LOOP id, which the WAV tier cannot use. */
   public get loopSampleFilenames(): string[] { return this.loopSampleFiles.slice(); }
   /** Ids that are loops, so callers can explain why they take no file. */
   public get loopIds(): string[] { return [...this.loopDefs.keys()]; }

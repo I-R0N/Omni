@@ -1,6 +1,7 @@
 /** Streamed score layers through one Music bus.  The exploration bed keeps its
- * place; the battle playlist runs CONTINUOUSLY once opened and is only ever
- * ducked, never rewound — see `setCombat`. */
+ * place; the battle playlist runs CONTINUOUSLY once opened and a lull only ever
+ * ducks it, never rewinds it — see `setCombat`.  `cueBattleTrack` is the one
+ * cut to a new song. */
 interface MusicTrack {
   file: string;
   media: HTMLAudioElement;
@@ -40,7 +41,8 @@ export class BackgroundMusic {
   private readonly ambient: MusicTrack;
   private readonly battleTracks: MusicTrack[];
   /** -1 until the playlist is opened for the first time.  After that it only
-   *  ever moves in `advanceBattle`, i.e. when a song ends. */
+   *  ever moves in `advanceBattle`, i.e. when a song ends or `cueBattleTrack`
+   *  cuts to a new one. */
   private battleIndex = -1;
   private pauseTimer: ReturnType<typeof setTimeout> | undefined;
   private battlePauseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -67,9 +69,10 @@ export class BackgroundMusic {
     const track: MusicTrack = { file, media, gain: this.ctx.createGain(), error: null, loaded: false };
     track.gain.gain.value = 0;
     media.addEventListener('error', () => { track.error = media.error?.message || `${file} unavailable`; });
-    // THE ONLY TRACK CHANGE THERE IS.  A ducked track is paused, so `ended`
-    // cannot fire while the layer is silent either: a song is never skipped
-    // past while nobody is listening to it.
+    // THE ORDINARY TRACK CHANGE (`cueBattleTrack` is the only other).  A
+    // ducked track is paused, so `ended` cannot fire while the layer is
+    // silent either: a song is never skipped past while nobody is listening
+    // to it.
     if (!loop) media.addEventListener('ended', () => {
       if (track === this.currentBattle && this.enabled) this.advanceBattle();
     });
@@ -221,7 +224,8 @@ export class BackgroundMusic {
     this.preloadSuccessor();
   }
 
-  /** The one place a track CHANGES — reached only from a track's own `ended`. */
+  /** The one place a track CHANGES — reached from a track's own `ended` and
+   *  from `cueBattleTrack`. */
   private advanceBattle() {
     const previous = this.currentBattle;
     if (previous) {

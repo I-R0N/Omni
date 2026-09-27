@@ -11,11 +11,12 @@ asset architecture.
 - **Exploration music:** Osmic's [Space ambient](https://opengameart.org/content/space-ambient),
   CC BY 3.0; `space-ambient.mp3` is the complete, unmodified ten-minute file.
 - **Battle music:** Alexandr Zhelanov's [Fly](https://opengameart.org/content/techno-space),
-  CC BY 3.0; `fly-battle.mp3` is the published MP3, unmodified.
+  CC BY 3.0; `fly-battle.mp3` is a 192 kbps transcode of the published MP3, with
+  no musical edits.
 - **Battle playlist:** Sygil's [Tracers](https://opengameart.org/content/tracers),
   CC BY 4.0, and Alexandr Zhelanov's [Countdown](https://opengameart.org/content/countdown-0),
-  CC BY 3.0. The three battle tracks rotate without looping one track during
-  prolonged combat.
+  CC BY 3.0, transcoded the same way. The three battle tracks rotate without
+  looping one track during prolonged combat.
 
 Keep a license record for every new asset. Put the source URL, author, license,
 whether the file was changed, and the local filename in
@@ -39,8 +40,9 @@ by the source.
 
 ## Add or replace background music
 
-The game streams two looping score layers through `BackgroundMusic`, which routes
-them to the Music bus: `space-ambient.mp3` is the exploration bed and
+The game streams a looping exploration bed and a non-looping battle playlist
+through `BackgroundMusic`, which routes them to the Music bus:
+`space-ambient.mp3` is the exploration bed and
 `fly-battle.mp3`, `tracers-battle.mp3`, and `countdown-battle.mp3` form a battle
 playlist that hands over from one track to the next only when a track ENDS.
 Hostile proximity ducks that layer and pauses it, holding its position, so a
@@ -90,16 +92,17 @@ not download the whole playlist.
    `engine/systems/BackgroundMusic.ts` and update the visible credit in
    `components/UIOverlay.tsx`.
 3. Add its credit and license notice as described above.
-4. Run `npm run build`. `scripts/inline-build.mjs` automatically embeds every
+4. Run `npm run build`, then `node scripts/inline-build.mjs`, which embeds every
    MP3 in `public/assets/audio/` for the standalone build.
 5. Verify user-gesture start, music-volume zero, mute, pause, tab hiding and
    resume. The existing `tests/audio.spec.ts` music test is the baseline.
 
-To use several tracks, do not create another independent `<audio>` element.
-Extend `BackgroundMusic` with a small, credited track catalog and change tracks
-by fading its existing gain to zero, switching the element source, then fading up.
-Keep all tracks connected through the single Music bus so the Master and Music
-sliders continue to work.
+Tracks are a small, credited catalog inside `BackgroundMusic`: each
+`makeTrack(file, destination, loop)` owns one `<audio>` element and a gain on the
+single Music bus. Battle tracks change only in `advanceBattle` (a song's own
+`ended`, or `cueBattleTrack`). Do not create audio elements anywhere else, and
+keep every track on the Music bus so the Master and Music sliders continue to
+work.
 
 ### Exact OpenGameArt workflow
 
@@ -120,12 +123,16 @@ matches the implementation of the existing `Space ambient` soundtrack.
    track-construction pattern:
 
    ```ts
-   this.battle = this.makeTrack('fly-battle.mp3', destination);
+   this.battleTracks = [
+     'fly-battle.mp3',
+     'tracers-battle.mp3',
+     'countdown-battle.mp3',
+   ].map(file => this.makeTrack(file, destination, false));
    ```
 
-   Replace the appropriate track filename, or add another `makeTrack` entry when
-   implementing a new music state. `makeTrack` preserves web serving and standalone
-   data-URI playback.
+   Replace the appropriate track filename, add a new battle file to that list, or
+   add another `makeTrack` call when implementing a new music state. `makeTrack`
+   preserves web serving and standalone data-URI playback.
 5. Update the visible music-credit links in `components/UIOverlay.tsx` to the new
    title, creator, source page and license. This is required for CC-BY and is good
    provenance for CC0.
@@ -135,8 +142,9 @@ matches the implementation of the existing `Space ambient` soundtrack.
    present in the generated standalone HTML.
 
 Adding a file alone does not make it selectable. `BackgroundMusic.ts` selects and
-mixes the active tracks. For a third or selectable track, extend its small track
-catalog/fade behavior and include a complete credit entry for every catalog item.
+mixes the active tracks. For another track or a new music state, extend its small
+track catalog/fade behavior and include a complete credit entry for every catalog
+item.
 
 ## Add a produced sound effect
 
@@ -165,6 +173,22 @@ itself.
 The generator creates three varied takes per one-shot and one seamless take per
 parameter-driven loop. Keep bulk effects low-fatigue and respect the existing
 per-ID cooldown and polyphony settings.
+
+### Listening checks
+
+The browser tests pin structure, never quality. Before calling a sound done,
+listen with headphones, ideally on a phone, since that is where the game is played:
+
+- **Fatigue.** A sound that is fine once can be intolerable after two minutes.
+  Every past offender was a loop or a bulk-fired chip.
+- **Mix balance.** Check that combat does not drown pickups and that the engine
+  and station beds sit under everything. The registry `gain` (the inventory's
+  `mix` column) is the knob.
+- **Legibility.** Enemy fire is voiced apart from player fire; confirm that
+  incoming and outgoing stay tellable apart on a busy screen.
+- **An actual iPhone.** Sound must play with the ring/silent switch on and come
+  back after a call or an app switch. The pause menu shows a diagnostic strip
+  whenever audio is not audible.
 
 ## Legacy WAV fallback
 
