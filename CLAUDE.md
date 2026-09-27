@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  488 tests.  All run at
+                          whatever happened next).  491 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -3992,7 +3992,20 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     overflowing cap drop the FAR bodies.
   - **Beams** are timed pulses (one per trigger pull — there is no hold-to-
     fire), aimed at the pull, ticking a capped raycast; an electric beam
-    arcs to the nearest conductor in a forward cone or fizzles.
+    arcs to the nearest conductor in a forward cone or fizzles.  THE BEAM
+    STOPS ON THE DRAWN SHAPE (user report): the raycast's circle — sized to
+    a body's LONGEST extent — is only the broadphase, and a body with a
+    polygon is hit where the beam (centre and both edges) meets that
+    polygon, in its local rotated frame (`rayPolygonEntry`).  On an
+    irregular shard the circle had ended the beam visibly short of it.
+  - **A FRAGMENT IS AS HOT AS WHAT IT BROKE OFF** (user call;
+    `inheritHeat`).  Heat is a temperature, so a piece takes the parent's
+    heat, not a share of it — at the two places children are born, the
+    death shatter (the same appended-slice seam `blastImpulse` uses) and the
+    mid-life grain detach.  Burns and the byPlayer stamp carry too, and it
+    goes through the bounded heated set like any deposit.  Capped just under
+    the material's `thermalFailAt`, or a glass pane that failed from heat
+    would hand its pieces enough heat to fail again and cascade to dust.
   - **HEAT SHOWS IN THE MATERIAL AND NOWHERE ELSE, AND IT RADIATES FROM
     WHERE IT WENT IN** (user call).  A heated body CHANGES COLOUR and EMITS
     LIGHT (`render/energyFx.ts` `renderHeat`); there is deliberately NO
@@ -4474,8 +4487,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   HUD rate → Perf & Diagnostics ▸ Sim & Render; Station → Economy); Ship
   Tilt → Player & Ship ▸ Ship Tilt, beside ▸ Trail (Trail and Trail dir,
   from Visual); Modules → Weapons & Modules ▸ Modules, except Salvage /
-  +1M Salv / Lock slots → Economy ▸ Salvage & Stations; Weapons → Weapons &
-  Modules ▸ Weapons;
+  +1M Salv / Lock slots → Economy ▸ Salvage & Stations; Weapons → REMOVED
+  (superseded by Weapons & Modules ▸ Weapon Modules, user call);
   Dragon, Rivals, Bosses → Enemies & Bosses (with the old dropdown's Enemy
   Test chips); Portals and Flow Field → World & Maps (with the Maps and
   Material Field Maps chips); Grain & Fracture, Nebula, Shards & Physics →
@@ -4529,8 +4542,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   the freeze on (a freeze that caught the wreck would also hang the death
   screen forever, since the beat that raises it is sim time).  The toggle is
   only drawn over live play: every other screen already freezes, or must not.
-  (6) **PANEL-ONLY DATA RIDES ONLY WHILE THE PANEL IS OPEN.**  The weapon
-  catalog (which used to ride every paused frame, looked at or not) and the
+  (6) **PANEL-ONLY DATA RIDES ONLY WHILE THE PANEL IS OPEN.**  The weapon-
+  module catalog (`weaponModuleCatalog`) and the
   Lock-slots readout (`debugSlotLock`) are published only while it is open,
   on any screen.  What is always sent is `EngineStats.debugPanel` — four
   scalars (open / freeze / holding / via).  No per-frame React state.
@@ -4605,9 +4618,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   value wraps where it always did.  The suite checks that by laying every
   row out again without its leader, at the design width and squeezed until
   values wrap, and requiring every button to land in the same place.
-  The individual rows keep their notes: DBG **Weapons** rows (grant + equip
-  per weapon, `debugGrantWeapon`) are the wave-map test path for weapons now
-  that commerce is station-only.  DBG **Weapon Modules** (Weapons &
+  The individual rows keep their notes: DBG **Weapon Modules** (Weapons &
   Modules group) is the shop-free path for the eight energy-module items: a
   `+` / `−` per delivery and energy module (`debugAddWeaponModule` mounts on
   the first free weapon hex — a gun only under the 2-gun cap — else drops to
@@ -4616,8 +4627,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   deterministic layout), `Clear`, and **Outfit anywhere**
   (`dbgOutfitAnywhere`): lifts `moveModule`'s drydock guard and makes the
   pause menu's flowers the station's editable ones.  Off by default; the
-  station-only rule is unchanged when it is off.  Its catalog
-  (`EngineStats.weaponModuleCatalog`) is PANEL-ONLY like `weaponCatalog`.
+  station-only rule is unchanged when it is off.  It is the wave-map test
+  path for weapons now that commerce is station-only, and it REPLACED the
+  old per-gun Weapons rows (user call: redundant with it).  Its catalog
+  (`EngineStats.weaponModuleCatalog`) is PANEL-ONLY.
   DBG **Bosses** chips (`debugSpawnBoss`) warp
   a capstone in with its full phase table, each click stacking another (the
   Dragon-menu pattern).  Step 5's rows: **Gamepad** + **↳ axes** (a live

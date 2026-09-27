@@ -1964,10 +1964,6 @@ export interface EngineStats {
     fullRepairCost: number;
     canRepair: boolean;
   };
-  /** Full weapon catalog for the debug panel's Weapons rows (built only while
-   *  the panel is OPEN, on any screen).  `slot` = equipped loadout slot (0/1)
-   *  or null. */
-  weaponCatalog?: { id: string; name: string; owned: boolean; slot: number | null }[];
   /** DBG (panel only): the eight weapon modules and where each copy is. */
   weaponModuleCatalog?: { id: string; name: string; kind: 'delivery' | 'energy'; installed: number; stored: number }[];
   /** DBG: outfitting is allowed away from a drydock. */
@@ -1983,7 +1979,7 @@ export interface EngineStats {
     via: 'pointer' | 'key' | 'pad';
   };
   /** DBG "Lock slots" readout — `unlocked/max` hexes of the ship flower.
-   *  Panel-only like `weaponCatalog`: absent while the panel is closed. */
+   *  Panel-only like `weaponModuleCatalog`: absent while the panel is closed. */
   debugSlotLock?: string;
   debugMode?: boolean;
   trailShape?: TrailShape;

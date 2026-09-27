@@ -532,20 +532,6 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
     ],
   },
   {
-    id: 'weapons', label: 'Weapons', group: 'weapons',
-    rows: [
-      // With commerce station-only, this is the wave-map test path for getting
-      // a weapon in hand: click = unlock (if needed) + equip.  S1/S2 = the gun
-      // hex it went on.  The catalog is a PANEL-ONLY payload, so these rows
-      // exist only while the panel is open, and are expanded per render.
-      each('Weapons', c => (c.s.weaponCatalog ?? []).map(w =>
-        ctrl(w.name, dbg(e => e.debugGrantWeapon(w.id)),
-          () => w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
-          `Grant and equip the ${w.name}; the readout is the gun hex it sits on (S1 / S2).`,
-          `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then mounts it on a gun hex (first empty, else the inactive one). S1/S2 = gun hex.`))),
-    ],
-  },
-  {
     // The shop-free path for the energy-module items: add / remove each one,
     // equip any delivery x energy combination in one click, and lift the
     // drydock rule so the pause menu's flowers can be edited in the field.

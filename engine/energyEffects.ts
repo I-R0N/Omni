@@ -310,6 +310,39 @@ export function depositHeat(g: GameEngine, e: GameEntity, magnitude: number, fro
     applyHeatThresholds(g, e);
 }
 
+/** A FRAGMENT IS AS HOT AS WHAT IT BROKE OFF (user call).  Heat is a
+ *  temperature, normalised per material, so a piece of a body takes the
+ *  body's heat rather than a share of it — a chip off a glowing plate glows.
+ *  Called at the two places children are born: the death shatter and the
+ *  mid-life grain detach.
+ *
+ *  THE PIECE IS HEATED ACROSS ITS WHOLE BODY, and its DRAWN heat starts where
+ *  the parent's was, so it does not fade in from cold.  It is capped just
+ *  under the material's own thermal failure point: glass FAILS at critical
+ *  heat, so a glass fragment inheriting it would fail again on the next heat
+ *  tick and cascade to dust.  Burns and the byPlayer stamp carry too, so an
+ *  incendiary break keeps burning in its pieces and still pays the player.
+ *  Goes through the same bounded set as every other deposit, so a full set
+ *  leaves the piece cold rather than untracked-and-hot. */
+export function inheritHeat(g: GameEngine, parent: GameEntity, child: GameEntity): void {
+    const h = parent.heat ?? 0;
+    if (!(h > 0) || !child.active) return;
+    const mat = materialOf(child);
+    const r = responseOf(mat);
+    let heat = clampHeat(h, maxHeatOf(mat));
+    if (r.thermalFailAt > 0) heat = Math.min(heat, r.thermalFailAt * 0.9);
+    if (!(heat > 0) || !trackHeat(g.energy, child)) return;
+    child.heat = heat;
+    child.heatSpotX = 0; child.heatSpotY = 0;
+    child.heatSpread = heatBodyR(child) * 2;
+    child.heatShown = Math.min(parent.heatShown ?? heat, heat);
+    if (parent.heatByPlayer) child.heatByPlayer = true;
+    if ((parent.burnTimer ?? 0) > 0) {
+        child.burnTimer = parent.burnTimer;
+        child.burnRate = parent.burnRate;
+    }
+}
+
 /** Latch a burn: keep heating at `rate` for `seconds` (incendiary rounds,
  *  the thermal seeker).  Tracked through the same active set. */
 export function latchBurn(g: GameEngine, e: GameEntity, seconds: number, rate: number, byPlayer: boolean): void {
@@ -610,6 +643,45 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
 /** First solid body along a ray, by circle approximation.  Grid walk in
  *  steps along the ray; a GAS never blocks (it is displaced / heated in
  *  passing and reported through `passed`).  Returns the hit and its t. */
+/** Distance along a ray from (ox, oy) in unit direction (ux, uy) to where it
+ *  first meets `e`'s polygon, or Infinity if it misses.  `halfW` widens the
+ *  ray into a beam: the two edge rays are tested alongside the centre one,
+ *  which is exact for a beam narrower than the polygon's edges and costs three
+ *  edge walks.  Works in the body's LOCAL frame, because `polygonPoints` are
+ *  stored unrotated (the physics' SAT and the grain bore read them the same
+ *  way).  A ray that starts inside the body hits at 0. */
+function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: number,
+                         halfW: number): number {
+    const poly = e.polygonPoints!;
+    const rot = e.rotation ?? 0;
+    const cs = Math.cos(-rot), sn = Math.sin(-rot);
+    const rx = -wrapDeltaX(ox, e.position.x), ry = -wrapDeltaY(oy, e.position.y);
+    const lx0 = rx * cs - ry * sn, ly0 = rx * sn + ry * cs;
+    const dx = ux * cs - uy * sn, dy = ux * sn + uy * cs;
+    // The normal to the ray, for the two edge rays.
+    const nx = -dy, ny = dx;
+    let best = Infinity;
+    for (let k = -1; k <= 1; k++) {
+        if (k !== 0 && halfW <= 0) continue;
+        const lx = lx0 + nx * halfW * k, ly = ly0 + ny * halfW * k;
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const ax = poly[j].x, ay = poly[j].y, bx = poly[i].x, by = poly[i].y;
+            if ((ay > ly) !== (by > ly) && lx < (bx - ax) * (ly - ay) / (by - ay) + ax) inside = !inside;
+            // Ray (lx,ly)+t(dx,dy) against segment a + s(b-a).
+            const ex = bx - ax, ey = by - ay;
+            const den = dx * ey - dy * ex;
+            if (Math.abs(den) < 1e-9) continue;
+            const qx = ax - lx, qy = ay - ly;
+            const t = (qx * ey - qy * ex) / den;
+            const sgm = (qx * dy - qy * dx) / den;
+            if (t >= 0 && sgm >= 0 && sgm <= 1 && t < best) best = t;
+        }
+        if (inside) return 0;
+    }
+    return best;
+}
+
 function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, range: number,
                  width: number, passed: GameEntity[]): { e: GameEntity | null; t: number } {
     const buf = g.energy.buf2;
@@ -631,7 +703,13 @@ function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, 
                 if (passed.length < 6 && !passed.includes(e)) passed.push(e);
                 continue;
             }
-            const tHit = Math.max(0, t - Math.sqrt(Math.max(0, rad * rad - perp * perp)));
+            // The circle above is only the BROADPHASE.  A body with a polygon
+            // is hit where the beam meets that polygon: the circle is sized to
+            // the body's longest extent, so on an irregular shard it stopped
+            // the beam well short of anything visible (user report).
+            const tHit = e.polygonPoints && e.polygonPoints.length >= 3
+                ? rayPolygonEntry(e, ox, oy, ux, uy, width * 0.5)
+                : Math.max(0, t - Math.sqrt(Math.max(0, rad * rad - perp * perp)));
             if (tHit < bestT) { bestT = tHit; best = e; }
         }
     }

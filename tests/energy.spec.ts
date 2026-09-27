@@ -878,6 +878,108 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
+  test('BEAM: stops where it touches the drawn shape, not a bounding circle', async ({ page }) => {
+    // User report: the beam ended short of the shard it hit, because the
+    // raycast tested a circle sized to the body's LONGEST extent.  A thin
+    // bar 8 wide and 80 tall has a 40-radius circle, so the circle stops the
+    // beam 36 units short of the bar's face; the polygon test must not.
+    const watch = await boot(page);
+    await onMap(page, 'ROCK_FIELD');
+    const setup = await engine(page, e => {
+      const p = e.player, P: any = e.physics;
+      const s = e.currentMap.entities.find((x: any) => x.active
+        && x.shardVariant === 'rock-tile' && x.mass === Infinity);
+      for (const x of e.currentMap.entities) if (x !== s && x.type === 'STRUCTURE') x.active = false;
+      s.polygonPoints = [{ x: -4, y: -40 }, { x: 4, y: -40 }, { x: 4, y: 40 }, { x: -4, y: 40 }];
+      s.size.x = 80; s.size.y = 80;
+      s.rotation = 0; s.rotationSpeed = 0; s.angularVelocity = 0;
+      s.health = s.maxHealth = 1e9;
+      delete s.fractureCells; delete s.fractureEdges; delete s.fractureEdgeFill;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.position.x = s.position.x - 200; p.position.y = s.position.y;
+      p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+      p.currentWeapon = 'beam'; p.weaponCooldown = 0;
+      (window as any).__bar = s;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: s.position.x, y: s.position.y }, undefined, false);
+      return { sx: s.position.x };
+    });
+    await page.waitForFunction(() => {
+      const e = (window as any).__omniEngine;
+      return e.energy.beam && e.energy.beam.hit;
+    }, null, { timeout: 5000 });
+    const r = await engine(page, e => {
+      const b = e.energy.beam, s = (window as any).__bar;
+      return { x1: b.x1, sx: s.position.x, hitId: e.energy.lastBeamHitId, id: s.id };
+    });
+    expect(r.hitId, 'the beam hit the bar').toBe(r.id);
+    // The face is 4 in front of the bar's centre.  A circle hit would sit
+    // near 40 in front (plus half the beam's width).
+    expect(r.sx - r.x1, 'the beam ends on the face, not on a bounding circle')
+      .toBeLessThan(8);
+    expect(r.sx - r.x1).toBeGreaterThan(0);
+    watch.assertClean();
+  });
+
+  test('HEAT: a fragment is as hot as the body it broke off', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'ROCK_FIELD');
+    const r = await engine(page, e => {
+      const P: any = e.physics;
+      const tiles = e.currentMap.entities.filter((x: any) => x.active
+        && x.shardVariant === 'rock-tile' && x.mass === Infinity).slice(0, 2);
+      const [a, b] = tiles;
+      // A DETACH: heat a tile and chip one grain off it.
+      e.debugHeat(a, 40);
+      const heatA = a.heat;
+      let before = e.currentMap.entities.length;
+      for (let i = 0; i < 20 && e.currentMap.entities.length === before; i++) {
+        e.chipStructureAt(a, { x: a.position.x + 6, y: a.position.y }, 6);
+      }
+      const chips = e.currentMap.entities.slice(before)
+        .filter((x: any) => x.shardVariant === 'rock-shard');
+      // A SHATTER: heat a tile and break it outright.
+      e.debugHeat(b, 40);
+      const heatB = b.heat;
+      before = e.currentMap.entities.length;
+      b.health = 0; P.removeStaticEntity(b); e.handleEntityDeath(b); b.active = false;
+      const kids = e.currentMap.entities.slice(before)
+        .filter((x: any) => x.shardVariant === 'rock-shard');
+      return {
+        heatA, heatB,
+        chipHeat: chips.map((c: any) => c.heat ?? 0),
+        chipTracked: chips.every((c: any) => c.heatTracked === true),
+        kidHeat: kids.map((c: any) => c.heat ?? 0),
+      };
+    });
+    expect(r.heatA).toBeGreaterThan(0.1);
+    expect(r.chipHeat.length, 'a grain came off').toBeGreaterThan(0);
+    for (const h of r.chipHeat) expect(h).toBeCloseTo(r.heatA, 5);
+    expect(r.chipTracked, 'and joined the heated set, so it will cool').toBe(true);
+    expect(r.kidHeat.length, 'the tile shattered').toBeGreaterThan(1);
+    for (const h of r.kidHeat) expect(h).toBeCloseTo(r.heatB, 5);
+    watch.assertClean();
+  });
+
+  test('HEAT: glass that failed from heat hands on heat, but its pieces do not fail again', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'GLASS_FIELD');
+    const n = await engine(page, e => {
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile' && x.mass === Infinity);
+      const before = e.currentMap.entities.length;
+      e.debugHeat(t, 400);            // past critical: the pane fails
+      const kids = e.currentMap.entities.slice(before).filter((x: any) => x.shardVariant === 'glass-shard');
+      (window as any).__kids = kids;
+      return { failed: !t.active, n: kids.length, heat: kids.map((k: any) => k.heat ?? 0) };
+    });
+    expect(n.failed, 'the pane failed').toBe(true);
+    expect(n.n).toBeGreaterThan(0);
+    for (const h of n.heat) { expect(h).toBeGreaterThan(0.5); expect(h).toBeLessThan(1); }
+    await page.waitForTimeout(1500);
+    const alive = await engine(page, () => (window as any).__kids.filter((k: any) => k.active).length);
+    expect(alive, 'no cascade: the hot pieces are still there').toBe(n.n);
+    watch.assertClean();
+  });
+
   test('DBG: weapon modules add, remove and clear without a shop, and outfit anywhere is a toggle', async ({ page }) => {
     const watch = await boot(page);
     await onMap(page, 'GLASS_FIELD');

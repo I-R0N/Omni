@@ -44,7 +44,7 @@ import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
 import { materialOf, materialDef } from './systems/energy';
-import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat } from './energyEffects';
+import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat, inheritHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
@@ -2579,9 +2579,6 @@ export class GameEngine {
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
       // PANEL-ONLY payloads.  Nothing but a debug row reads these, so they
       // are built only while the panel is up — on whatever screen that is.
-      // (The weapon catalog used to be built on every PAUSED frame, because
-      // the pause menu was the only place the panel could be open.)
-      weaponCatalog: this.debugPanelOpen ? this.weaponCatalogSnapshot() : undefined,
       weaponModuleCatalog: this.debugPanelOpen ? this.weaponModuleSnapshot() : undefined,
       debugSlotLock: this.debugPanelOpen
         ? `${this.slotsUnlocked('ship')}/${MODULE_SLOT_COUNT}` : undefined,
@@ -3700,14 +3697,20 @@ export class GameEngine {
               // always APPENDED, so the slice past the old length is exactly
               // this break's output whichever style ran, and the rule cannot
               // come to mean different things under the fracture A/B.
+              // The same slice also carries the parent's HEAT: a piece of a
+              // glowing body is as hot as the body was (`inheritHeat`).
               const bi = entity.blastImpulse;
-              const before = bi !== undefined ? this.currentMap.entities.length : 0;
+              const hot = (entity.heat ?? 0) > 0;
+              const before = this.currentMap.entities.length;
               this.shards.shatter(entity, this.currentMap.entities);
-              if (bi !== undefined) {
+              if (bi !== undefined || hot) {
                   const ents = this.currentMap.entities;
                   for (let i = before; i < ents.length; i++) {
-                      ents[i].velocity.x += bi.x;
-                      ents[i].velocity.y += bi.y;
+                      if (bi !== undefined) {
+                          ents[i].velocity.x += bi.x;
+                          ents[i].velocity.y += bi.y;
+                      }
+                      if (hot) inheritHeat(this, entity, ents[i]);
                   }
               }
           }
@@ -5530,20 +5533,6 @@ export class GameEngine {
       };
   }
 
-  /** Weapon catalog for the debug panel's Weapons rows (built only while the
-   *  panel is open): every gun variety with its presence + gun-hex index. */
-  private weaponCatalogSnapshot() {
-      return MODULE_DEFS.filter(d => d.family === 'gun').map(d => ({
-          id: d.weapon as string,
-          name: d.label,
-          owned: this.weaponSlots.includes(d.id) || this.inventory.includes(d.id),
-          slot: (() => {
-              const i = this.equippedWeapons.findIndex(k => parseWeaponKey(k)?.delivery === d.weapon);
-              return i === -1 ? null : i;
-          })(),
-      }));
-  }
-
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
    *  per COMBO_KILLS_PER_TIER ship kills, capped at COMBO_MAX_MULTIPLIER. */
   private comboMultiplier(): number {
@@ -6173,6 +6162,7 @@ export class GameEngine {
           // every detach.  See docs/MATERIAL_GRAIN_SPEC.md §6.3.
           const chip = this.shards.spawnDetachedCell(
               target, c, original, this.currentMap.entities);
+          if (chip !== null) inheritHeat(this, target, chip);
           target.polygonPoints = remainder;
           const massBefore = target.mass;
           if (target.mass !== Infinity && polyArea > 0) {
