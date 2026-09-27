@@ -5,8 +5,8 @@
  * per-frame PerfSnapshot (render ms, sim ms, collisions ms, PerfController
  * load tier, entity counts).  This recorder lets a player on ANY device —
  * including an iPhone with no devtools — capture that stream over a window,
- * then export a compact copy-paste text block for pasting back into a chat /
- * the optimization report.
+ * then export a compact copy-paste text block for pasting back into a chat
+ * (the how-to is in perf/README.md).
  *
  * Design:
  *   - Zero cost while idle (the engine only calls `sample()` when recording).
@@ -107,7 +107,8 @@ export class PerfRecorder {
   private worstFrameMs = 0;
   private worstFrameRender = 0;
   private worstFrameSim = 0;
-  // ── Worst-frame table (gauntlet 5c P7) ────────────────────────────────
+  // ── Worst-frame table ─────────────────────────────────────────────────
+  // (gauntlet 5c P7 — commit 30164f9; not written up in the ledger)
   //
   // Aggregates answer "is it smooth on average"; they cannot answer "why did
   // it hitch when I killed that enemy", which is the question a player

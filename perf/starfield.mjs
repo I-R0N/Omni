@@ -34,9 +34,11 @@
  *  number and not the device's.  Draw-call count and byte count are the
  *  device-independent halves of that cost, and they are what this reports.
  *
- *  Sibling probe: `starfield-motion.mjs` (the S8 low-speed jitter).
- *  (`starfield-regions.mjs` printed the S7 region field as ASCII; the field
- *  was removed in S13 and the probe went with it.)
+ *  (`starfield-motion.mjs` measured the S8 low-speed jitter, retargeted in S9
+ *  to Smooth-vs-Crisp quantisation error; S10 deleted Crisp mode, leaving it
+ *  nothing to compare, and it was removed.  `starfield-regions.mjs` printed
+ *  the S7 region field as ASCII; the field was removed in S13 and the probe
+ *  went with it.)
  *
  *  Usage:
  *    npx vite build && npx vite preview --port 4183 --strictPort &
@@ -70,8 +72,6 @@ const label = flag('label', browserName);
  *  no background-nebula centers, so the backdrop is pure star field and the
  *  pixel counts below are stars and nothing else. */
 const MAP = flag('map', 'ASTEROID_FIELD');
-/** Star MOTION mode to measure/shoot in: 'smooth' (default) or 'crisp'. */
-const MOTION = flag('motion', 'smooth');
 
 /** Configurations to sweep.  390x844 is the phone the game is played on and
  *  is the default everywhere in this repo; the desktop size is included
@@ -369,7 +369,7 @@ const DRAWCALL_PROBE = (frames) => new Promise(resolve => {
  *
  *  The band canvases exist to turn "one fillRect per star per frame" into "a
  *  few drawImage per frame". That was written when there were 8 bands and
- *  12,000 stars (both stale — see the S1 findings). Today it is 61 bands x 4
+ *  12,000 stars (both stale — see the S1 findings). At S1 it was 61 bands x 4
  *  tiles = 244 FULL-VIEWPORT blits per frame against ~6,000 stars, and at
  *  device resolution each blit moves the whole screen: at 390x844 dpr2 that is
  *  244 x 780 x 1688 = 321 MEGApixels of mostly-transparent overdraw per frame.
@@ -478,9 +478,6 @@ for (const cfg of CONFIGS) {
   await page.goto(BASE);
   await page.waitForFunction(() => !!window.__omniEngine);
   await page.evaluate(m => { window.__omniEngine.setMapType(m); window.__omniEngine.startGame(); }, MAP);
-  if (MOTION === 'crisp') {
-    await page.evaluate(() => window.__omniEngine.dbg.cycleStarMotion());
-  }
   // Let the background initialise and a few frames land.
   await page.waitForTimeout(2500);
 

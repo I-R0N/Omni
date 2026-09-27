@@ -3,8 +3,11 @@
  *
  *  Establishes what a shipped weapon's authored `damage` is WORTH in energy
  *  and momentum terms against each material's DERIVED HP, and what the crash
- *  gates correspond to in those same units — so any future conversion
- *  constant can be FITTED to the game that exists rather than chosen.
+ *  gates correspond to in those same units.  It was written to ask whether
+ *  one conversion constant could fit the game that existed; step 3 answered
+ *  by freeing projectile mass and fixing `IMPACT_ENERGY_PER_DAMAGE` at 32.
+ *  It stays as the read-out later steps re-run: ram counts (§5 / §5b), the
+ *  mass scale (§7), penetration and the blast (§8).
  *
  *  Everything here is measured through the REAL engine in a REAL browser via
  *  `window.__omniEngine` / `window.__omniGrain` (CLAUDE.md §8), on the
@@ -60,8 +63,9 @@ const materials = [];
 for (const m of MATERIALS) {
   await page.evaluate(mapType => {
     const e = window.__omniEngine;
-    // setMapType is honoured only from the MAIN MENU, so come back to it
-    // between materials rather than switching mid-run.
+    // Back through the MAIN MENU between materials, so each map starts a
+    // fresh run.  (A mid-run setMapType is a switch-and-play that resets the
+    // run too; going via the menu just keeps the order explicit.)
     e.restartGame();
     e.setMapType(mapType);
     e.startGame();
@@ -110,8 +114,7 @@ for (const m of MATERIALS) {
     let killed = 0;
     for (const b of ents.slice()) {
       if (killed >= 24) break;
-      if (b.active && b.shardVariant === tileV && b.mass === Infinity && (b.health ?? 0) > 0
-          && !tiles.some(t => false)) {
+      if (b.active && b.shardVariant === tileV && b.mass === Infinity && (b.health ?? 0) > 0) {
         b.health = 0;
         b.lastImpactVelocity = { x: 4, y: 0 };
         b.lastImpactDamage = 3;
@@ -141,7 +144,6 @@ const weapons = await page.evaluate(() => {
   e.startGame();
   const p = e.player;
   const out = [];
-  const list = e.stats && e.stats.weaponCatalog ? null : null;
   const TYPES = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
   for (const t of TYPES) {
     const cfg = e.weapons.getConfig(t);
@@ -233,14 +235,13 @@ const crashes = await page.evaluate(() => {
 });
 
 // ── 5. How many crashes a tile takes — virgin vs already shot ──────────────
-// The crash paths decrement `health` DIRECTLY, while a weapon hit converts
-// the body onto the DERIVED boundary budget.  So the same crash is worth a
-// wildly different fraction of a tile depending on whether that tile has ever
-// been shot.  Driven through the REAL player-crash branch of
-// `PhysicsSystem.resolveCollision`.
+// Since step 2 a crash spends on the same derived boundaries a shot does, and
+// since step 4 it spends kinetic energy (`crashDamageFor`), so VIRGIN and
+// ONCE-SHOT should read the same count, give or take the bolt's own bite.
+// This section is that regression pin.  Driven through the REAL player-crash
+// branch of `PhysicsSystem.resolveCollision`.
 const crashCounts = [];
 for (const m of MATERIALS) {
-  if (m.map === 'ROCK_FIELD') { /* rock tiles exist only here */ }
   await page.evaluate(mapType => {
     const e = window.__omniEngine;
     e.restartGame(); e.setMapType(mapType); e.startGame();
@@ -291,11 +292,9 @@ for (const m of MATERIALS) {
     // virgin-vs-once-shot claim (step 2) is pinned against a stable number.
     const a = pick(authoredTiers[0]); const virgin = a ? crashTo(a, false) : null;
     const b = pick(authoredTiers[0]); const shot   = b ? crashTo(b, true)  : null;
-    // Every tier, so the spread the AUTHORED-HP conversion introduces is
-    // visible rather than sampled.  A crash spends one authored HP, so a
-    // material whose authored HP is tiered has a ram count that is tiered
-    // too — while its derived HP, which is what the grain model calls
-    // toughness, does not move at all.
+    // Every tier, so a spread would be visible rather than sampled.  Since
+    // step 4 a crash never reads authored HP, so every tier of one material
+    // should take the same count — 5b is the column that proves it flat.
     const tiers = [];
     for (const au of authoredTiers) {
       const t = pick(au);
@@ -402,6 +401,7 @@ const pen = await page.evaluate(() => {
   out.mk3Frac = 0.36;
   const g3 = 1 + 3 * out.mk3Frac;
   out.g3 = g3;
+  out.trim = window.__omniMass.BASE_BANK_TRIM;
 
   // ACTOR penetration, at base and at three Gunnery Mk III.
   for (const mult of [1, g3]) {
@@ -673,8 +673,8 @@ console.log('\n=== 6. HOW FAR APART THE TWO SIDES ARE ===\n');
   console.log(`\n  WEAPON side, KE per point of damage (= per derived HP, damage is spent 1:1`);
   console.log(`               on boundaries):        ${f(Math.min(...kes),1)} .. ${f(Math.max(...kes),1)}  (${f(Math.max(...kes)/Math.min(...kes),1)}× spread)`);
   console.log(`  CRASH side, virgin tile, KE per derived HP:  ${f(Math.min(...virginK),0)} .. ${f(Math.max(...virginK),0)}  (${f(Math.max(...virginK)/Math.min(...virginK),1)}× spread)`);
-  console.log(`  CRASH side, once shot:  a crash spends exactly 1 HP whatever it brings,`);
-  console.log(`               so the constant is ${f(crashKe,0)} KE per HP for EVERY material.`);
+  console.log(`  CRASH side, once shot:  the same as virgin since step 4 — a crash spends`);
+  console.log(`               kinetic energy (crashDamageFor), so the rows above should agree.`);
 }
 console.log('');
 
@@ -715,8 +715,9 @@ console.log('\n=== 8. PENETRATION AND THE BLAST (fired, not derived) ===\n');
 {
   console.log(`  Gunnery Mk III damageFrac ${f(pen.mk3Frac, 3)} -> three of them = x${f(pen.g3, 3)}`);
   console.log('  A bolt is charged only what a body could ABSORB, so 1-HP gnats measure the');
-  console.log('  BANK directly: each costs one damage however big the bite is.  The base');
-  console.log('  round is sized so three Gunnery Mk III put it back where it was.\n');
+  console.log('  BANK directly: each costs one damage however big the bite is.  Three');
+  console.log(`  Gunnery Mk III multiply the base bank by x${f(pen.g3, 2)}; since BASE_BANK_TRIM`);
+  console.log(`  they land at ${f(pen.trim, 2)} of the pre-rebase round, not back on it.\n`);
   console.log('weapon          base   3x Mk III    ratio     base mass');
   const mults = [...new Set(pen.rows.map(r => r.mult))];
   const at = (t, m) => pen.rows.find(x => x.type === t && x.mult === m);

@@ -76,24 +76,27 @@ const ABLATIONS = {
   // Sim rate at 60Hz instead of the 120Hz default — the DBG "Sim rate"
   // toggle, driven headlessly so the cost side of the trade can be measured
   // while the feel side is judged by hand.
-  simrate60: `() => { window.__omniEngine.cycleSimRate(); }`,
-  // applyFlow bisect: the flow body vs. the bare `e.rotation +=` tail that
-  // runs even when asteroid flow is off. Splits "the arithmetic allocates"
+  simrate60: `() => { window.__omniEngine.dbg.cycleSimRate(); }`,
+  // applyFlowTo bisect: the flow body vs. the bare `e.rotation +=` tail that
+  // runs even when shard flow is off. Splits "the arithmetic allocates"
   // from "writing a double field on a GameEntity allocates".
-  flowoff: `() => { window.__omniEngine.asteroidFlowEnabled = false; }`,
+  flowoff: `() => { window.__omniEngine.shardFlowEnabled = false; }`,
   // Same body, but with the per-shard lane jitter (the only branch in
-  // applyFlow that WRITES a new property onto an entity) disabled.
+  // applyFlowTo that WRITES a new property onto an entity) disabled.
   lanejitter0: `() => { window.__omniEngine.ffLaneJitter = 0; }`,
   // Cut the UNCONDITIONAL nebula-shard vs nebula-tile collision pass.  It is
   // the one broadphase pass with no PerfController cadence behind it — its
   // siblings (`resolveShardPairs`, `resolveShardTilePairs`) both skip on
   // off-frames — and it walks 9 static cells per nebula shard per SUBSTEP.
   // On a map whose every tile is a nebula tile that is a lot of SAT calls,
-  // and nebula's voronoi shatter tripled the shard count feeding it.
+  // and nebula's voronoi shatter tripled the shard count feeding it (at the
+  // original grainSize 14 — the shipped 20 yields about half as many
+  // children a tile; CLAUDE.md §8).
   // Difference = what cadencing (or narrowing) that pass would be worth.
   nebtilepass: `() => { window.__omniEngine.physics.resolveNebulaShardTilePairs = () => {}; }`,
   // Send nebula back to its legacy rear-cone shatter (2-3 children per tile
-  // instead of the voronoi decomposition's 6-8).  Difference = the cost of
+  // instead of the voronoi decomposition's 6-8 — a grainSize-14 figure; ~4
+  // at the shipped 20).  Difference = the cost of
   // the ENTITY COUNT the voronoi change introduced, as distinct from any
   // per-entity work.  Note this flips the fracture mode GLOBALLY, so read it
   // only on a nebula-only scene.
@@ -113,12 +116,13 @@ const ABLATIONS = {
     // ladder and land back on the shipped step.
     for (let i = 0; i < 8 && e.dbg.cycleNebulaBond() !== 0; i++) {}
   }`,
-  // Keep React, cut the payload build: isolates the cost of assembling the
-  // ~120-field stats object (and its nested snapshots) from the cost of
-  // React consuming it.
+  // Keep React, stub ONE nested snapshot: `buildPerfSnapshot` hands back a
+  // single cached empty object instead of rebuilding the `perf` timing block
+  // every frame.  Difference = that block's build cost — NOT the whole
+  // payload: the stats literal around it is still assembled, and React still
+  // consumes it.
   statspayload: `() => {
     const e = window.__omniEngine;
-    const real = e.onStatsUpdate;
     let cached = null;
     e.buildPerfSnapshot = () => (cached = cached || {});
   }`,
@@ -304,7 +308,10 @@ const HOOK_API = `
       x.active = false;
     }
   },
-  /** Portal-travel to a random arena (the map-load long frame + its residue). */
+  /** Portal-travel through the map's FIRST portal, portals[0] (the map-load
+   *  long frame + its residue).  From an arena that is its return rift, from
+   *  the hub the first arena rift, so repeated calls ping-pong between two
+   *  maps rather than touring them. */
   travel() {
     const e = window.__omniEngine;
     if (!e || !e.portals || e.portals.length === 0) return;

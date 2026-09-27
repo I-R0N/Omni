@@ -19,7 +19,8 @@
  *  "immediately upon moving" — a parked camera never re-stamps the static
  *  tile cache, never re-culls, and never scrolls the star field.
  *
- *  Usage: npx vite build && node perf/spike.mjs [--map OVERWORLD] [--sec 25]
+ *  Usage: npx vite build && npx vite preview --port 4183 --strictPort &
+ *         node perf/spike.mjs [--map OVERWORLD] [--sec 25]
  */
 import { chromium } from '@playwright/test';
 import { connect } from 'node:net';
