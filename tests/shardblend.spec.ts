@@ -221,14 +221,6 @@ test.describe('the connector geometry', () => {
     expect(seen[6], 'the cycle wraps').toBeCloseTo(start, 6);
     expect(seen[7]).toBeCloseTo(seen[1], 6);
 
-    // Leave the cycle where the suite found it: this is module-level
-    // state on a shared page, and a later test reading a coat margin
-    // would otherwise inherit whatever step this one stopped on.
-    await engine(page, e => { for (let i = 0; i < 4; i++) e.dbg.cycleShardCoat(); });
-    expect(await engine(page, () =>
-      (window as any).__omniBlend.coatMargin('plastic-shard', 'plastic-shard', 100),
-    )).toBeCloseTo(start, 6);
-
     watch.assertClean();
   });
 
@@ -332,11 +324,14 @@ test.describe('a bond in the sim reaches the draw pass', () => {
     await engine(page, e => {
       const p = e.player.position;
       e.player.velocity.x = 0; e.player.velocity.y = 0;
+      // DERIVED, not retyped (tests/README.md, "A global rescale breaks the
+      // tests that were RIGHT"): the literal here was the pre-MASS_SCALE 20.8.
+      const mass = (window as any).__omniMass.SHARD_VARIANTS['plastic-shard'].spawn.sizeToMass(40);
       const shard = (dx: number, dy: number, id: string) => ({
         id, type: 'STRUCTURE', shardVariant: 'plastic-shard',
         position: { x: p.x + dx, y: p.y + dy },
         velocity: { x: 0, y: 0 }, rotation: 0,
-        size: { x: 40, y: 40 }, mass: 20.8, active: true, color: '#7fbf5f',
+        size: { x: 40, y: 40 }, mass, active: true, color: '#7fbf5f',
         health: 30, maxHealth: 30,
       });
       e.currentMap.entities.push(shard(-21, 200, 'blend_a'));

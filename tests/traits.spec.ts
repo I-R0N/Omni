@@ -77,7 +77,10 @@ async function spawnBoss(page: any, id: string) {
  *  The shell is a real projectile entity run through the real collision
  *  resolver, so every gate on the way — shield absorption, front-shield
  *  sector, armor chip threshold, the regen bucket — applies exactly as it
- *  does in play. */
+ *  does in play.  One gate is not on this path: an ARC shield turns a
+ *  covered shot away BEFORE the resolver (`checkAndResolveCollision` →
+ *  `tryShieldDeflect`), so here such a shot takes the absorb fallback
+ *  instead — for a fresh shot the same drain, without the ricochet. */
 async function shell(
   page: any,
   opts: { targetId: string; damage: number; fromDeg?: number; traits?: boolean },
@@ -237,7 +240,7 @@ test.describe('front-shield — a permanent plate with no pool', () => {
     watch.assertClean();
   });
 
-  test('lightning chains and shockwave rings bypass the plate for free', async ({ page }) => {
+  test('a shockwave ring bypasses the plate for free', async ({ page }) => {
     const watch = await boot(page);
     const id = await spawnBoss(page, 'BOSS_SIEGE');
     await engine(page, (e, tid: string) => {
@@ -542,7 +545,7 @@ test.describe('evasive — a real dodge, blind to homing by design', () => {
   });
 });
 
-test.describe('the arc shield absorbs only from the covered side', () => {
+test.describe('the arc shield covers only its sector', () => {
   test('a covered hit drains the shield; a flanking hit reaches the hull', async ({ page }) => {
     const watch = await boot(page);
     const id = await spawnBoss(page, 'BOSS_WARDEN');
@@ -557,7 +560,8 @@ test.describe('the arc shield absorbs only from the covered side', () => {
     }, id);
     expect(setup.shield).toBe(200);
 
-    // From the covered side: the shield eats it, the hull does not.
+    // From the covered side: the shield pays for it (in play the pre-SAT arc
+    // deflect turns it away for the same drain), the hull does not.
     const covered = await shell(page, { targetId: id, damage: 30, fromDeg: 0 });
     expect(covered.shieldDrained).toBe(30);
     expect(covered.dealt).toBe(0);

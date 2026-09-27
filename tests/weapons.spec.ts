@@ -72,7 +72,8 @@ async function quietField(page: any, map = 'GLASS_FIELD') {
   await startRun(page, map);
   // Built as a string, never a closure: `waitForStats` serialises the
   // predicate with toString(), so a captured `map` would be undefined in the
-  // page and the poll would throw rather than wait (helpers.ts, rule 1).
+  // page and the poll would throw rather than wait (tests/README.md harness
+  // rule 9; the note on `waitForStats`).
   await waitForStats(
     page,
     new Function('s', `return s.currentMapType === ${JSON.stringify(map)}`) as any,
@@ -89,8 +90,8 @@ async function quietField(page: any, map = 'GLASS_FIELD') {
  *
  *  WAIT for the readout rather than reading it once: `__omniStats` is
  *  republished by the rAF loop, so a read taken in the same breath as the
- *  click that changes it can still carry the pre-click payload (helpers.ts,
- *  rules 12 and 13). */
+ *  click that changes it can still carry the pre-click payload
+ *  (tests/README.md harness rule 12). */
 async function relativeMode(page: any) {
   await dialByName(page, 'impactVelocityName', 'relative',
     e => e.dbg.cycleImpactVelocity(), 1);
@@ -822,7 +823,9 @@ test.describe('how far a round gets is what it can afford', () => {
  *  Blaster bolt punched thirty-one one-HP gnats where the pre-scale round
  *  managed four (audit §8).  The call was that TODAY'S reach is what a
  *  fully-gunned ship should have, so the base round is today's divided by
- *  what three Gunnery Mk III multiply it by.
+ *  what three Gunnery Mk III multiply it by — and a later call
+ *  (`BASE_BANK_TRIM`) took a further 40% off, so three marks now land at
+ *  0.6 of it.
  *
  *  And the blast was the last damage number in the roster still authored as
  *  a flat scalar while everything around it went kinetic, so it shrank into
@@ -888,7 +891,7 @@ test.describe('the base bank, and the blast derived from it', () => {
       watch.assertClean();
     });
 
-  test('three marks scale the bank by the anchor, and move only the bank', async ({ page }) => {
+  test('three marks scale the bank by the anchor, and the re-base moved only the bank', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
 
@@ -915,15 +918,24 @@ test.describe('the base bank, and the blast derived from it', () => {
       };
       const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
       const types = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
-      return types.map(t => ({ type: t, base: fire(t, 1), gunned: fire(t, g3), g3 }));
+      return types.map(t => ({
+        type: t, authored: M.WEAPONS[t].damage,
+        base: fire(t, 1), gunned: fire(t, g3), g3,
+      }));
     });
 
     for (const w of r) {
       // (2) three marks multiply the bank by exactly the anchor.
       expect(w.gunned.mass! / w.base.mass!, `${w.type}: three marks scale the bank by the anchor`)
         .toBeCloseTo(w.g3, 6);
-      // (3) and the BITE is the mark's ordinary effect, untouched by any of
-      // this — the re-base must not have quietly nerfed damage.
+      // (3) ONLY THE BANK MOVED: the round flies its authored bite at mark
+      // 0 — the re-base must not have quietly nerfed damage.  Read against
+      // the table, because a ratio cannot see it: a uniform cut to the bite
+      // cancels out of gunned / base.
+      expect(w.base.damage!, `${w.type}: the re-base left the bite alone`)
+        .toBeCloseTo(w.authored, 9);
+      // And a mark's bite is its ordinary effect, the same factor the bank
+      // took.
       expect(w.gunned.damage! / w.base.damage!, `${w.type}: the bite is the mark's own`)
         .toBeCloseTo(w.g3, 6);
     }
@@ -1201,10 +1213,11 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
     });
 
     expect(r.rings, 'exactly one damaging ring, not two').toBe(1);
-    // And the bystander took at most ONE blast's worth — the ring's own
-    // distance falloff halves it at half the radius, so two would exceed it.
+    // And the bystander took ONE blast's worth: it sits at half the radius,
+    // where the ring's own distance falloff lands half the charge — so one
+    // blast is ~0.5 of it, and two would land the whole.
     expect(r.lost, 'so the bystander cannot have taken two blasts')
-      .toBeLessThanOrEqual(r.blast);
+      .toBeLessThan(r.blast * 0.75);
 
     watch.assertClean();
   });
@@ -1335,8 +1348,8 @@ test.describe('a blast breaks cloud up; it does not delete it', () => {
          *  of 2.13, so a 1.4 bar sat barely over one standard deviation
          *  under the median and the claim failed roughly one run in ten —
          *  once in CI, on 1.39984.  The physics was never in question
-         *  (CLAUDE.md test rule 11: a derived quantity has a spread; clear
-         *  it, don't sit in it), so the fix is to measure the population
+         *  (tests/README.md harness rule 11: a derived quantity has a spread;
+         *  clear it, don't sit in it), so the fix is to measure the population
          *  property with enough samples to see it.  Interleaved because
          *  each arm consumes the cluster it tested, so running one arm's
          *  samples back to back would hand the other a thinner field. */

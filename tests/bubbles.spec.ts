@@ -1,7 +1,10 @@
-/** BUBBLE behaviour — the A1 aggro timeout and the A2 immovability fix.
+/** BUBBLE behaviour — the A1 aggro timeout, the A2 immovability fix, and the
+ *  mouth-size / bite eating rules.
  *
- *  Both are Phase A of docs/CONFIG_CHANGES_PHASED_PLAN.md, and both are about
- *  the same thing from opposite ends: a bubble that will not let go.
+ *  A1 and A2 are Phase A of docs/CONFIG_CHANGES_PHASED_PLAN.md, and both are
+ *  about the same thing from opposite ends: a bubble that will not let go.
+ *  The eating rules are not a plan element; they carry their own note at the
+ *  Eating section below.
  *
  *  A1.  Aggro used to end exactly three ways — the target died, it fled past
  *  AGGRO_LOSE_RANGE, or a latch detached.  A hunter that never managed a bite
@@ -10,7 +13,7 @@
  *  `AGGRO_TIMEOUT_SEC` is the fourth ending: left alone, it loses interest.
  *
  *  A2.  A bubble read as a mass-infinity wall after its attack pass.  It was
- *  never mass (a bubble's is a constant 9 for its whole life): the AI applied
+ *  never mass (a bubble's is a constant 90 for its whole life): the AI applied
  *  its regime SPEED CAP to the bubble's total velocity every sim step, which
  *  erased the collision recoil the impulse solver had just computed.  The
  *  bubble never left the contact, the player re-collided on the next step, and
@@ -301,8 +304,9 @@ test.describe('A2 — a bubble is a body, not a wall', () => {
     await emptyArena(page);
 
     // Drive the real resolver once, no sim steps: this is the arithmetic the
-    // fix must NOT have changed.  Player mass 100 vs bubble mass 9, ELASTICITY
-    // 0.5, MASS_BIAS_EXPONENT 0.5 (hard-coded per rule 7).
+    // fix must NOT have changed.  Player mass 1000 vs bubble mass 90 (both
+    // x MASS_SCALE), ELASTICITY 0.5, MASS_BIAS_EXPONENT 0.5 (hard-coded per
+    // rule 7).
     const hit = (sick: boolean) => engine(page, (e: any, s: any) => {
       const p = e.player;
       p.position.x = 3000; p.position.y = 3000; p.velocity.x = 20; p.velocity.y = 0;
@@ -325,7 +329,7 @@ test.describe('A2 — a bubble is a body, not a wall', () => {
     expect(calm.mass, 'the bubble is an ordinary finite-mass body').toBe(90);
     // A fresh bubble's collision response is EXACTLY what it always was — the
     // fix must not have made calm bubbles flimsy.
-    expect(calm.player, 'the ship keeps most of its way through a 9-mass blob').toBeCloseTo(13.08, 1);
+    expect(calm.player, 'the ship keeps most of its way through a 90-mass blob').toBeCloseTo(13.08, 1);
     expect(calm.bubble, 'and the blob is thrown clear').toBeCloseTo(23.08, 1);
     // Being sick changes the AI, never the physics.
     expect(sick.player).toBeCloseTo(calm.player, 5);

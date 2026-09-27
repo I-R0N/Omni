@@ -5,7 +5,8 @@
  *  and the bouncer round negated one velocity component off a tile face. Both
  *  now go through `PhysicsSystem.deflectProjectile`, which owns the mirror,
  *  the rotation, the snap, and the rule that stops a just-deflected bolt from
- *  being deflected again on the next step.
+ *  being deflected again on the next step — and so does the third caller the
+ *  generalization below added, a non-arc shield's deflect at CONTACT.
  *
  *  On top of that the SHIELD side was generalized: deflection used to require
  *  an ARC (`shieldArcHalfWidth`), so the player's own bubble — and the bosses'
@@ -31,11 +32,6 @@
 
 import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
-
-/** SHIELD_CONSTANTS.COLLISION_MULTIPLIER — hard-coded, not imported
- *  (harness rule 7). It is the radius at which a non-arc shield turns a shot
- *  away, and also where the ring is drawn. */
-const SHIELD_REACH_MULT = 1.8;
 
 /** A still player in empty space with a working shield core, so the only
  *  thing that can touch it is the synthetic bolt. */
@@ -73,6 +69,9 @@ function shootPlayer(page: any, o: {
     p.systemsDisabled = opt.disabled === true;
     p.health = p.maxHealth;
 
+    // 1.8 = SHIELD_CONSTANTS.COLLISION_MULTIPLIER, hard-coded (harness rule
+    // 7): a live shield inflates the player's collision shape by it, and on
+    // this axis that shape's face is where the shield catches the bolt.
     const reach = Math.max(p.size.x, p.size.y) * 0.5 * 1.8;
     const gap = opt.where === 'hull' ? 0 : reach - 2;
     const proj: any = {
@@ -269,13 +268,13 @@ test.describe('a live shield turns a shot away', () => {
   });
 });
 
-test.describe('one deflection primitive, two callers', () => {
+test.describe('one deflection primitive, every caller', () => {
   test('a bolt already travelling outward is never deflected twice', async ({ page }) => {
     const watch = await boot(page);
     await shieldedPlayer(page);
 
     /*  The `v·n >= 0` guard IS the no-immediate-re-trigger rule, and it lives
-     *  in the helper so both callers get it.  Pinned directly on the static
+     *  in the helper so every caller gets it.  Pinned directly on the static
      *  rather than through a collision, because it is the one part of the
      *  primitive with no observable side effect when it fires correctly. */
     const r = await engine(page, e => {
