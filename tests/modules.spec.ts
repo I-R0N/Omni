@@ -1,41 +1,46 @@
-/** GUNNERY (step 5) and SCANNER (A4) — two module families, one of which is
- *  now the grave of a third.
+/** GUNNERY (step 5) and SCANNER (A4, since reworked into a tool) — two
+ *  module families, one of which is now the grave of a third — plus the A5
+ *  purchasable hex slots they are fitted into.
  *
- *  Both drop into the outfitting system as it ships: a `statMks` row in
- *  MODULE_DEFS, an effect summed by `applyModuleEffects`, and one consumer
- *  reading the folded value.  Neither adds a subsystem, and that is exactly
- *  what makes them easy to break quietly — an effect that stops being folded,
- *  or an adjacency-offline module that keeps contributing, changes no shape
- *  on screen and throws nothing.
+ *  Both families drop into the outfitting system as it ships: a `statMks`
+ *  row in MODULE_DEFS, an effect summed by `applyModuleEffects`, and a
+ *  consumer reading the folded value.  That fold is exactly what makes them
+ *  easy to break quietly — an effect that stops being folded, or an
+ *  adjacency-offline module that keeps contributing, changes no shape on
+ *  screen and throws nothing.
  *
  *  What is pinned:
- *   1. THE PENETRATION FAMILY IS GONE, and gone from every surface a run can
- *      reach: the catalog, the adjacency table, the Ship Status panel, and
- *      the DBG grant path.  A deleted module that is still buyable somewhere
- *      is the quiet failure this guards.
+ *   1. THE PENETRATION FAMILY IS GONE from every surface a run can reach: the
+ *      catalog, the Ship Status panel, the DBG grant path and the Outfit-all
+ *      layout (the one door that actually reopened).  A deleted module that
+ *      is still buyable or installable somewhere is the quiet failure this
+ *      guards.
  *   2. GUNNERY BUYS A HEAVIER ROUND — the bite AND the bank together, through
- *      the real weapon path, read off the spawned projectile.  Scaling only
- *      the bite would make a Gunnery shot hit harder and stop SOONER, which
- *      is the opposite of a heavier shell, and nothing on screen would say so.
- *   3. OFFLINE IS ZERO.  An adjacency-offline module contributes exactly
- *      nothing — which for the scanner means the baseline, to the pixel.
- *   4. EACH SCANNER MARK REVEALS ITS OWN TIER, measured against the
- *      no-scanner baseline in the same scene.
+ *      the real weapon path, read off the spawned projectile — and so reaches
+ *      further through a line of 1-HP gnats.  Scaling only the bite would
+ *      make a Gunnery shot hit harder and stop SOONER, which is the opposite
+ *      of a heavier shell, and nothing on screen would say so.
+ *   3. OFFLINE IS ZERO on both flowers: an adjacency-offline Gunnery mod or
+ *      Scanner contributes exactly nothing.
+ *   4. THE SCANNER IS A TOOL: a scannerless ship shows only what it has met
+ *      (plus the two landmarks a run starts charted with), marks are a
+ *      CATEGORY ladder that STACKS in range, a mark fades, the ping has a
+ *      cooldown, and auto-scan (Mk II+) feeds the minimap only.  That a
+ *      fitted scanner reveals nothing until it is fired is pinned in
+ *      `tests/minimap.spec.ts`, with the rest of the portal-arrow bracket.
+ *   5. HEX SLOTS: a shipped run has every hex, a locked hex refuses every way
+ *      in, only a docked shop sells the next one, the flower is the cap, and
+ *      a run reset restores the counts.
  *
  *  The PHYSICS the deleted module used to sell — the falloff curve, the grain
  *  bore, overkill carry-through, the far side — moved to
  *  `tests/weapons.spec.ts`, which is where claims about what a shot does now
  *  live.  They were never really module claims; they only lived here because
  *  Penetration was the thing that made them reachable.
- *
- *  Every reveal assertion reads the BASELINE first and the scanner state
- *  second in the same scene, because "today's behaviour exactly" is the load-
- *  bearing half of A4: the existing indicator/minimap/portal suites are
- *  written against the no-scanner gating and must keep passing.
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats, waitForStatsKeyChange } from './helpers';
+import { boot, engine, quietScene, startRun, useScanner, waitForEngine, waitForStats } from './helpers';
 
 /** The energy model, hard-coded (harness rule: a test that imports the
  *  constant it is checking pins nothing).  A round's MASS and SPEED fix the
@@ -54,7 +59,8 @@ async function quietField(page: any, map = 'GLASS_FIELD') {
   await startRun(page, map);
   // Built as a string, never a closure: `waitForStats` serialises the
   // predicate with toString(), so a captured `map` would be undefined in the
-  // page and the poll would throw rather than wait (helpers.ts, rule 1).
+  // page and the poll would throw rather than wait (tests/README.md, harness
+  // rule 9).
   await waitForStats(
     page,
     new Function('s', `return s.currentMapType === ${JSON.stringify(map)}`) as any,
@@ -135,26 +141,36 @@ function isolate(page: any, group: 'ship' | 'weapon', rootId: string, modId: str
 // ── Step 5 — the Penetration family is deleted, and Gunnery absorbed it ─────
 
 test.describe('the Penetration module is gone', () => {
-  test('no catalog entry, no adjacency rule, no stat line, no DBG grant',
+  test('no catalog entry, no stat line, no DBG grant, and Outfit all installs none',
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
 
       const r = await engine(page, e => {
-        const snap = e.outfittingSnapshot();
-        const before = (snap.inventory ?? []).length;
+        // Everything aboard — both flowers and the hold.  Counted off the
+        // slot arrays themselves: the snapshot's inventory is the full
+        // fixed-capacity hold, nulls included, so its LENGTH never moves.
+        const aboard = () => [...e.shipSlots, ...e.weaponSlots, ...e.inventory];
+        const before = aboard().filter((id: any) => id !== null).length;
         // The DBG grant path is the widest door into the catalog — it takes a
         // bare id — so it is the one worth trying.  A family that survived
         // only here would still be reachable in play through the debug menu.
         e.debugGrantModule('piercing_mk1');
         e.debugGrantModule('piercing_mk3');
-        const after = e.outfittingSnapshot();
+        const granted = aboard().filter((id: any) => id !== null).length - before;
+        // OUTFIT ALL is the door that actually reopened: its canonical layout
+        // still wrote 'piercing_mk3' into weapon hex 5 after the family was
+        // deleted, and threw halfway through the write.  A throw here rejects
+        // this evaluate; a resurrected module lands in the count below.
+        e.debugOutfitAll();
+        const snap = e.outfittingSnapshot();
         return {
-          catalog: (after.catalog ?? []).filter((c: any) =>
-            c.family === 'piercing' || /penetrat/i.test(c.label ?? '')).length,
-          statLine: (after.statLines ?? []).some((x: any) => x.id === 'pierce'),
-          granted: (after.inventory ?? []).length - before,
-          installed: [...e.shipSlots, ...e.weaponSlots]
+          // Catalog entries carry no `family`, so the family is matched by id.
+          catalog: (snap.catalog ?? []).filter((c: any) =>
+            String(c.id).startsWith('piercing') || /penetrat/i.test(c.label ?? '')).length,
+          statLine: (snap.statLines ?? []).some((x: any) => x.id === 'pierce'),
+          granted,
+          installed: aboard()
             .filter((id: any) => typeof id === 'string' && id.startsWith('piercing')).length,
         };
       });
@@ -162,27 +178,7 @@ test.describe('the Penetration module is gone', () => {
       expect(r.catalog, 'the shop offers nothing of the family').toBe(0);
       expect(r.statLine, 'and the Ship Status panel has no Penetration row').toBe(false);
       expect(r.granted, 'a grant for a deleted id is a no-op, not a phantom item').toBe(0);
-      expect(r.installed, 'and nothing of the family is aboard').toBe(0);
-
-      watch.assertClean();
-    });
-
-  test('the weapon flower still works without it — a mod can be offline, and it is the one that is',
-    async ({ page }) => {
-      const watch = await boot(page);
-      await quietField(page);
-      // The adjacency machinery was shared with the deleted family, so prove
-      // it still refuses an isolated weapon-mod rather than silently
-      // defaulting everything to active once the piercing row left
-      // MODULE_REQUIREMENTS.
-      await grant(page, 'gunnery_mk3');
-      expect(await engine(page, e => e.player.damageMult), 'connected: Mk III').toBeCloseTo(1.36, 6);
-
-      const iso = await isolate(page, 'weapon', 'wpn_blaster', 'gunnery_mk3');
-      expect(iso.rootActive, 'the gun is a root — always active').toBe(true);
-      expect(iso.modActive, 'the mod is not touching it').toBe(false);
-      expect(await engine(page, e => e.player.damageMult),
-        'an OFFLINE module contributes zero, not its effect').toBe(1);
+      expect(r.installed, 'and a full Outfit all carries nothing of the family').toBe(0);
 
       watch.assertClean();
     });
@@ -193,8 +189,9 @@ test.describe('Gunnery buys a heavier round', () => {
     const watch = await boot(page);
     await quietField(page);
 
-    // BASELINE — the starter Blaster, authored 4 damage in a round whose
-    // whole energy is one bite of it.
+    // BASELINE — the starter Blaster: authored 4 damage, in a round authored
+    // as one bite over BASE_BANK_DIVISOR (the original solve), which
+    // MASS_SCALE then multiplies.
     const bare = await fireOne(page);
     expect(bare.count, 'one bolt').toBe(1);
     expect(bare.damage, 'the authored bite').toBeCloseTo(4, 6);
@@ -243,10 +240,10 @@ test.describe('Gunnery buys a heavier round', () => {
     const punch = () => engine(page, e => {
       const ctx = e.waveContext();
       const foes: any[] = [];
-      // 40 deep, not 12: at the 10x bank `MASS_SCALE` gives, a BARE bolt
-      // already punches twelve, so a twelve-gnat flock is saturated before
-      // the Gunnery arm gets a chance to reach further and the comparison
-      // measures the flock instead of the round.
+      // 40 deep: at the shipped bank (MASS_SCALE / BASE_BANK_DIVISOR ≈ 2.9
+      // bites) a bare bolt punches ~9 one-HP gnats and one Mk III ~13, so a
+      // shallower flock would saturate first and measure the flock instead
+      // of the round.
       for (let i = 0; i < 40; i++) {
         const f = e.waves.spawnAt('SWARM',
           { x: e.player.position.x + 400 + i * 30, y: e.player.position.y }, ctx, false);
@@ -275,14 +272,15 @@ test.describe('Gunnery buys a heavier round', () => {
     });
 
     const bare = await punch();
-    // A bare Blaster bolt punches TWELVE gnats, not the four it used to: the
-    // round's BANK is 10x under `MASS_SCALE` while a gnat's 1 HP is not, so
-    // the same bolt pays for three times as many.  The claim is unchanged —
-    // a body is charged only what it could absorb and the bolt flies on with
-    // the rest — only the count it reaches moved.  A floor rather than an
-    // exact figure, because the Gunnery arm below has to out-reach it and a
-    // flock deep enough for that cannot also pin this to the gnat.
-    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so its 10x bank buys many')
+    // A bare bolt punches ~9: its bank is ~2.9 bites of 4, each gnat charges
+    // it 1, and it kills while its bite (4·E/E0) stays ≥ 1.  The claim is
+    // unchanged — a body is charged only what it could absorb and the bolt
+    // flies on with the rest — only the count it reaches moves with the
+    // bank.  A floor rather than an exact figure, because the Gunnery arm
+    // below has to out-reach it and a flock deep enough for that cannot also
+    // pin this to the gnat.  It is 9 at the shipped bank, so the floor has
+    // one gnat of margin: a retune of the base bank is meant to land here.
+    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so its bank buys several')
       .toBeGreaterThan(8);
 
     await grant(page, 'gunnery_mk3');
@@ -292,19 +290,36 @@ test.describe('Gunnery buys a heavier round', () => {
 
     watch.assertClean();
   });
+
+  test('an OFFLINE Gunnery mod contributes nothing — the weapon flower still gates on adjacency',
+    async ({ page }) => {
+      const watch = await boot(page);
+      await quietField(page);
+      // A weapon-mod works only while it touches a gun (MODULE_REQUIREMENTS).
+      // This is the one test of that rule on the WEAPON flower — the ship
+      // flower's is pinned by economy.spec.ts (an offline engine) and by the
+      // offline scanner below — so prove an isolated mod is refused rather
+      // than every weapon hex defaulting to active.
+      await grant(page, 'gunnery_mk3');
+      expect(await engine(page, e => e.player.damageMult), 'connected: Mk III').toBeCloseTo(1.36, 6);
+
+      const iso = await isolate(page, 'weapon', 'wpn_blaster', 'gunnery_mk3');
+      expect(iso.rootActive, 'the gun is a root — always active').toBe(true);
+      expect(iso.modActive, 'the mod is not touching it').toBe(false);
+      expect(await engine(page, e => e.player.damageMult),
+        'an OFFLINE module contributes zero, not its effect').toBe(1);
+
+      watch.assertClean();
+    });
 });
 
 // ── Scanner (rework) ────────────────────────────────────────────────────────
 //
 // The A4 suite asserted the OPPOSITE contract and is replaced wholesale
 // rather than extended: A4's rule was "no scanner degrades to today's
-// behaviour exactly", and the rework's is that a scannerless ship sees
-// NOTHING.  A test written for the first cannot be adapted into a test for
-// the second; keeping it would pin the behaviour the rework removed.
-
-/** Is a portal in the off-screen indicator buffer this frame? */
-const portalIndicated = (page: any) => engine(page, e =>
-  e.renderer._indicatorBuffer.some((i: any) => i.entity.isPortal === true));
+// behaviour exactly", and the rework's is that a scannerless ship sees only
+// what it has met.  A test written for the first cannot be adapted into a
+// test for the second; keeping it would pin the behaviour the rework removed.
 
 /** Park the player as far as possible from every contact on the map, and
  *  prove it landed outside `SCANNER.ENCOUNTER_RANGE` (900).
@@ -376,8 +391,9 @@ test.describe('scanner module', () => {
     await startRun(page);
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
     await page.waitForTimeout(400);
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-    // this suite has to switch the subsystem it tests back on.
+    // Idempotent: the scan reveal ships OFF (constants.ts
+    // `activeScanRevealAll`), so on a fresh run this only confirms the
+    // scanner subsystem is live.
     await useScanner(page);
 
     // Park well clear of EVERY contact.  NATURAL ENCOUNTER is deliberately
@@ -406,7 +422,7 @@ test.describe('scanner module', () => {
     expect(r.mk, 'a lean outfit carries no scanner').toBe(0);
     // Tier 1 is the widest reach there is, so zero there is zero everywhere.
     expect(r.ranges[1] ?? 0, 'no scanner reaches nowhere').toBe(0);
-    expect(r.arrows, 'THE HUD CARRIES NO ARROWS AT ALL without a scanner').toBe(0);
+    expect(r.arrows, 'out of eyesight, THE HUD CARRIES NO ARROWS without a scanner').toBe(0);
     expect(r.uncharted, 'and the minimap carries nothing but the landmarks').toBe(0);
     // The HUD's scan button is absent, not merely disabled: a control for a
     // tool you do not own is a control that does nothing.
@@ -641,8 +657,9 @@ test.describe('scanner module', () => {
       const watch = await boot(page);
       await startRun(page);
       await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-      // this suite has to switch the subsystem it tests back on.
+      // Idempotent: the scan reveal ships OFF (constants.ts
+      // `activeScanRevealAll`), so on a fresh run this only confirms the
+      // scanner subsystem is live.
       await useScanner(page);
 
       // A rift the player has never been near: not found, not on the map.
@@ -702,8 +719,9 @@ test.describe('scanner module', () => {
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-      // this suite has to switch the subsystem it tests back on.
+      // Idempotent: the scan reveal ships OFF (constants.ts
+      // `activeScanRevealAll`), so on a fresh run this only confirms the
+      // scanner subsystem is live.
       await useScanner(page);
 
       await engine(page, e => { e.resetOutfit(); e.debugSpawnRival('neutral'); });
@@ -747,8 +765,9 @@ test.describe('scanner module', () => {
     async ({ page }) => {
       const watch = await boot(page);
       await quietField(page);
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-      // this suite has to switch the subsystem it tests back on.
+      // Idempotent: the scan reveal ships OFF (constants.ts
+      // `activeScanRevealAll`), so on a fresh run this only confirms the
+      // scanner subsystem is live.
       await useScanner(page);
 
       // Mk I is fully manual — auto-tracking is what a mark buys.
@@ -825,35 +844,6 @@ test.describe('scanner module', () => {
       await engine(page, e => e.setAutoScan(true));
       watch.assertClean();
     });
-
-  test('a portal arrow needs a scan, whatever the mark', async ({ page }) => {
-    const watch = await boot(page);
-    await startRun(page);
-    await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
-
-    await engine(page, e => { e.resetOutfit(); e.debugGrantModule('scanner_mk5'); });
-    await waitForEngine(page, e => e.scannerMk === 5, 'Mk V');
-    await engine(page, e => {
-      const p = e.portals[0];
-      // Beyond SCANNER.ENCOUNTER_RANGE (900): inside it the rift is seen with
-      // the naked eye, and the test would be measuring eyesight rather than
-      // the instrument.
-      e.player.position.x = p.position.x + 1400;
-      e.player.position.y = p.position.y;
-      e.camera.position.x = e.player.position.x;
-      e.camera.position.y = e.player.position.y;
-    });
-    await page.waitForTimeout(250);
-
-    // Fitted but not fired: still nothing.  The scanner is a TOOL — owning it
-    // is not using it, which is the whole reversal from A4.
-    expect(await portalIndicated(page), 'a scanner you never fire reveals nothing').toBe(false);
-
-    await scanOnce(page);
-    expect(await portalIndicated(page), 'the ping is what puts it there').toBe(true);
-
-    watch.assertClean();
-  });
 });
 
 // ── A5 — purchasable hex slots ──────────────────────────────────────────────

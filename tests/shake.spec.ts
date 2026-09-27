@@ -26,13 +26,13 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { boot, engine, startRun, waitForStats } from './helpers';
 
 /** Every mass in the game carries `constants.MASS_SCALE`; the stand-in
  *  shard masses below are `size² × density` off the real material table and
  *  carry it too.  Written out rather than imported, on the weapons.spec
  *  rule. */
 const MASS_SCALE = 10;
-import { boot, engine, startRun, waitForStats } from './helpers';
 
 /** COLLISION_CONFIG.SHAKE, hard-coded rather than imported (harness rule 7). */
 const DV_MIN = 3.0;
@@ -144,10 +144,12 @@ test.describe('shake magnitude follows the impact, not the speed', () => {
 
     // Player mass scales with ship weight (SHIP_WEIGHT), so this falls out of
     // the formula rather than being written: the same rock against a laden
-    // hull moves it less, and moving less is what shake now measures.
+    // hull moves it less, and moving less is what shake now measures.  It
+    // must be the SAME rock on both sides: a lighter one on the laden side
+    // shakes less whether or not shake reads the ship's mass at all.
     const lean = await impact(page, 48 * MASS_SCALE, 20);
     await engine(page, e => { e.player.mass *= 3; });
-    const laden = await impact(page, 48, 20);
+    const laden = await impact(page, 48 * MASS_SCALE, 20);
     expect(laden.intensity).toBeLessThan(lean.intensity);
 
     watch.assertClean();
@@ -181,8 +183,9 @@ test.describe('a shot never rivals a collision', () => {
     const watch = await boot(page);
     await quietPlayer(page);
 
-    // The two ends of the shipped enemy-damage range: a Drone pellet and a
-    // Bastion siege shell.
+    // The ends of the enemy-damage range, with headroom: a 5-damage Drone
+    // pellet, and 18 — above the heaviest authored enemy shot (the Tank's 16)
+    // and twice a Bastion siege shell's 9-damage direct hit.
     const pellet = await shootPlayer(page, 5);
     const shell  = await shootPlayer(page, 18);
 
