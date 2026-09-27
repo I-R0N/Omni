@@ -11,8 +11,10 @@
  *
  *  WHY THE STAGE-3 PRIMITIVES LIVE HERE.  `updateAttachments` (3c attach) and
  *  `updateConsumers` (3b consume-and-grow) are documented as reusable
- *  primitives, and `updateConsumers` does carry the dragon's `eats: 'tile'`
- *  branch — but every piece of state they touch is a `bubble*` field
+ *  primitives, and `updateConsumers` does carry an `eats: 'tile'` branch for
+ *  the dragon head's config (unreachable: its candidate list is mobile-only,
+ *  and the dragon devours tiles through its own pass in `roamers/dragons.ts`)
+ *  — but every piece of state they touch is a `bubble*` field
  *  (`bubbleDigestTimer`, `bubbleFeedTimer`, `bubbleSickTimer`) and their
  *  helpers read `BUBBLE_CONSTANTS`.  Filing them under a neutral name would
  *  have been truer to the intent and less true to the code, so they sit with
@@ -326,18 +328,19 @@ export function updateAttachments(g: GameEngine) {
 // ─── Consume-and-grow pass (Stage 3b) ──────────────────────────────────
 //
 // For each consumer (an entity carrying a `consume` config — the bubble; the
-// dragon later), two-phase feeding within the SENSE radius (`cfg.range`):
-// mobile candidates outside membrane contact are PULLED inward (a suck-in tug,
-// `cfg.pull`), and a candidate that has reached MEMBRANE CONTACT (radii
-// overlap) is SWALLOWED — grow + animate (consumeEntity).  This replaces the
-// old eat-on-sight-at-range so shards visibly stream in and pop on contact
-// instead of vanishing from afar.  PerfController-gated ('consume');
+// dragon head carries one too, but its `eats: 'tile'` finds nothing in this
+// mobile-only candidate list), two-phase feeding within the SENSE radius
+// (`cfg.range`): mobile candidates outside membrane contact are PULLED inward
+// (a suck-in tug, `cfg.pull`), and a candidate that has reached MEMBRANE
+// CONTACT (radii overlap) is SWALLOWED — grow + animate (beginDigest).  This
+// replaces the old eat-on-sight-at-range so shards visibly stream in and pop
+// on contact instead of vanishing from afar.  PerfController-gated ('consume');
 // torus-correct.  Growth is capped at `cfg.maxSize`; the self-replication
 // entity cap lives at the child-spawn site (updateBubbles, Stage 5).
 export function updateConsumers(g: GameEngine, dt: number) {
     if (!g.currentMap) return;
     const enemies = g.entityIndex.enemies;
-    // Candidates: mobile shards (asteroids index) and/or static tiles.
+    // Candidates: mobile shards only — `shardCandidates` holds no static tiles.
     const shards = g.entityIndex.shardCandidates;
     for (let c = 0; c < enemies.length; c++) {
         const consumer = enemies[c];
@@ -378,8 +381,9 @@ export function updateConsumers(g: GameEngine, dt: number) {
             const fits = Math.max(cand.size.x, cand.size.y) <= mouth;
             if (d2 <= contact * contact) {
                 // SWALLOW on membrane contact.  Mobile shards are engulfed and
-                // DIGESTED over time (held inside the bubble); static tiles
-                // (the future dragon) are eaten instantly.
+                // DIGESTED over time (held inside the bubble).  The static-tile
+                // branch (`consumeTile`) is unreachable: no candidate is
+                // static.
                 if (isTile) consumeTile(g, consumer, cand, cfg, dx, dy);
                 else if (fits) { beginDigest(g, consumer, cand, dx, dy); break; }
                 else if (canBite && !bit) { bit = biteBody(g, consumer, cand, cfg.bite!); if (bit) break; }
@@ -525,8 +529,10 @@ function beginDigest(g: GameEngine, consumer: GameEntity, shard: GameEntity, dx:
     shard.active = false; // swallowed (no score/regen — it's eaten, not destroyed)
 }
 
-/** Instant tile eat (the future dragon): grow + route the tile through the
- *  death/flow-field patch + an inward implosion.  `dx/dy` is consumer→tile. */
+/** Instant tile eat: grow + route the tile through the death/flow-field
+ *  patch + an inward implosion.  `dx/dy` is consumer→tile.  UNREACHABLE:
+ *  `updateConsumers` only offers mobile candidates, and the shipped dragon
+ *  devours tiles through its own pass in `roamers/dragons.ts`. */
 function consumeTile(g: GameEngine, consumer: GameEntity, tile: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
     growConsumer(consumer, cfg);
     const inward = Math.atan2(-dy, -dx);

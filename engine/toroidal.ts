@@ -6,8 +6,9 @@
  * engine must use the shorter of "direct delta" and "delta ± mapSize"
  * so targeting, AI vision, lightning chains, and pathfinding don't
  * ignore entities sitting just across a seam.  Rendering handles the
- * seam by duplicate-drawing entities at every wrap offset that falls
- * inside the camera frustum (see `forEachWrapOffset`).
+ * seam by drawing each entity once, at the wrapped copy nearest the
+ * camera (`shiftX`/`shiftY` in render/drawUtils — the frustum is always
+ * under half a map, so one copy is enough).
  *
  * Keep this module free of game-specific types so it can be imported
  * from engine/systems, engine/maps, and the renderer without cycles.
@@ -125,10 +126,9 @@ export function toroidalDist(a: Vector2, b: Vector2): number {
  * entity inside the frustum (+cullMargin), the callback is invoked
  * with the offset position.
  *
- * Used by the renderer so entities near a seam are drawn twice — once
- * at their canonical position and once at their wrapped position if
- * that wrapped copy is visible.  Leaves the rest of the render pass
- * untouched; the camera transform stays anchored to world coordinates.
+ * UNUSED: nothing calls this today.  It was written for duplicate-drawing
+ * entities near a seam; the renderer instead draws the single nearest
+ * wrapped copy (`shiftX`/`shiftY` in render/drawUtils).
  *
  * `radius` is the entity's rough visible radius: we still call the
  * callback when only part of the entity pokes into the frustum so its
@@ -157,8 +157,9 @@ export function forEachWrapOffset(
 
 /**
  * Returns true if the entity (or any wrapped copy) intersects the
- * rectangular viewport.  Convenience wrapper around `forEachWrapOffset`
- * for callers that only need a boolean cull decision.
+ * rectangular viewport.  Walks the same 3x3 wrap neighbourhood as
+ * `forEachWrapOffset`, with an early exit, for callers that only need a
+ * boolean cull decision.
  */
 export function isVisibleOnTorus(
     wx: number, wy: number, radius: number,

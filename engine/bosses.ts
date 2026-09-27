@@ -10,8 +10,8 @@
  *  bespoke script.  What lives here is the bookkeeping around it: stamp the
  *  phase whose health gate the boss has fallen past, keep the live-boss handle
  *  the HUD bar reads, and pay the capstone bounty (score + a physical salvage
- *  spray + a module into the inventory) with the stage-clear beat and the
- *  descent rift that follow it.
+ *  spray + a module into the inventory) with the stage-clear beat that
+ *  follows it.  The descent rift (`openDescentPortal`) is kept but UNCALLED.
  *
  *  Deliberately NOT here: `handleBossSpawn` (the WaveSystem callback wiring
  *  the engine hands to `waveContext`), `debugSpawnBoss` (public API), and
@@ -64,8 +64,6 @@ export function bossStatsSnapshot(g: GameEngine): EngineStats['boss'] {
  * so it stays ungated like the kamikaze / nest passes.
  */
 export function updateBosses(g: GameEngine, dt: number) {
-    // Timed shop discount (payout model (d)) — run-scoped, ticks on sim time
-    // so it doesn't drain while docked or paused.
     if (!g.currentMap) return;
     const enemies = g.entityIndex.enemies;
     let live: GameEntity | null = null;
@@ -162,18 +160,18 @@ if (index > 0) g.audio.play('boss.phase', { x: boss.position.x, y: boss.position
 }
 
 /**
- * Boss kill payout — WEAPONS_AMMO_PLAN §6 model (d): SALVAGE + a timed SHOP
- * DISCOUNT.  Deliberately NO weapon unlock: weapons stay purely purchased and
- * the boss is an income accelerator that funds (or cheapens) the next shop
- * run.  Called from handleEntityDeath alongside the normal enemy death path,
- * which still runs — a boss explodes, pays kill points and sprays enemy
- * shards like any other enemy.
+ * Boss kill payout: SCORE + a physical SALVAGE spray + one RANDOM module into
+ * the inventory (`grantBossModule`, which replaced the timed shop discount of
+ * WEAPONS_AMMO_PLAN's model (d)).  Deliberately NO weapon-unlock plumbing:
+ * the module is drawn from the purchasable catalog, so a gun can drop, but
+ * nothing is unlocked.  Called from handleEntityDeath alongside the normal
+ * enemy death path, which still runs — a boss explodes, pays kill points and
+ * sprays enemy shards like any other enemy.
  */
 export function payBossBounty(g: GameEngine, boss: GameEntity) {
 g.audio.play('boss.death');
     g.bossesKilled++;
     g.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
-    // Stack the discount fraction (capped) and refresh the window.
     // The money is PHYSICAL — the same salvage drops every other source pays,
     // sprayed off the corpse so it converges and merges normally.
     for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
@@ -204,9 +202,9 @@ g.audio.play('boss.death');
     });
     g.handleScreenShake(COLLISION_CONFIG.SHAKE.HEAVY);
 
-    // Name the kill and its payout — the banner is what tells the player the
-    // capstone is DOWN and that the shop just got cheaper, which is
-    // otherwise only legible by opening a station menu.
+    // Name the kill and its payout — the banner is what tells the player, in
+    // the moment, that the capstone is DOWN and which module just landed in
+    // cargo.
     // The DROP-COUNT payout in real money, so the banner and the screen
     // speak the same units the shop does.
     const salvageCredits = BOSS_CONSTANTS.SALVAGE_DROPS * SALVAGE_CONSTANTS.CREDITS_PER_DROP;
@@ -250,17 +248,17 @@ g.audio.play('boss.death');
     }
 
     // ── Stage cleared ──────────────────────────────────────────────────
-    // Open the DESCENT rift beside the wreck and raise the stage-clear
-    // screen.  Only on a real wave capstone: a DBG-spawned boss on the hub
-    // (or any wave-free map) has no ladder to descend from.
+    // Raise the stage-clear screen (the descent rift is switched off — see
+    // below).  Only on a real wave capstone: a DBG-spawned boss on the hub
+    // (or any wave-free map) has no ladder to clear.
     if (g.wavesEnabled) {
         // The stage's ladder is FINISHED — no further wave starts in this
-        // arena.  Whatever is still on the field stays (the player mops up),
-        // but the arena stops feeding the fight so the choice between the
-        // two rifts is made in quiet.  That includes the capstone's OWN
-        // escort still queued in the spawn stream: haltForBoss spared it
-        // while the boss was alive (it was the fight), but reinforcements
-        // must not keep warping in after the rout.
+        // arena.  Whatever the rout spared stays (third parties, rivals),
+        // but the arena stops feeding the fight so the way out is taken in
+        // quiet.  That includes the capstone's OWN escort still queued in the
+        // spawn stream: haltForBoss spared it while the boss was alive (it
+        // was the fight), but reinforcements must not keep warping in after
+        // the rout.
         g.waves.halted = true;
         g.waves.cancelPendingSpawns();
         // NO DESCENT RIFT for now (user call — the descent flow is being

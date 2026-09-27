@@ -149,10 +149,10 @@ export function applyModuleEffects(g: GameEngine) {
     g.scannerMk = scanner;
     g.scanRanges = scannerRangesFor(scannerMarks);
     g.player.overchargeUnlocked = overcharge;
-    // Flashlight Kit: the ship-tap light tool exists only while the kit is
-    // installed and ACTIVE (touching a hull, like every utility).  Losing
-    // the kit also turns the light OFF — an uninstalled tool must not leave
-    // its beam burning.
+    // The Light module (catalog id `flashlight_kit`): the ship-tap light tool
+    // exists only while it is installed and ACTIVE (touching a hull, like
+    // every utility).  Losing the module also turns the light OFF — an
+    // uninstalled tool must not leave its beam burning.
     if (!flashlight) g.flashlightLevel = 0;
     g.flashlightEquipped = flashlight;
 }
@@ -217,7 +217,7 @@ export function resaleValue(g: GameEngine, idx: number, fraction: number): numbe
     if (id === null) return null;
     const def = moduleDef(id);
     if (!def) return null;
-    // Priced off the DISCOUNTED cost, not the catalog cost — see modulePrice.
+    // Priced through modulePrice, not off the raw catalog cost — see there.
     return Math.round(modulePrice(def.cost) * fraction);
 }
 
@@ -266,17 +266,17 @@ export function moveModuleInternal(
     return true;
 }
 
-/** Shop price for a catalog cost after the run's TIMED boss discount ((h)
- *  payout model (d): a boss kill makes the shop cheaper for a window rather
- *  than unlocking anything).  RESALE IS PRICED OFF THE SAME NUMBER
- *  (resaleValue) — if buying were discounted while sell-back stayed on full
- *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
+/** Shop price for a catalog cost — the ONE pricing seam.  Identity today:
+ *  the timed boss shop discount it used to apply ((h) payout model (d)) was
+ *  removed when the capstone started dropping a module instead.  RESALE IS
+ *  PRICED OFF THE SAME NUMBER (resaleValue), and any future price modifier
+ *  must join this seam: when buying was discounted while sell-back stayed on
+ *  full catalog cost, buy-then-sell profited `discount - (1 - SELL_FRACTION)`
  *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
 export function modulePrice(cost: number): number {
     return Math.max(0, Math.round(cost));
 }
 
-/** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
 /** Per-stat module attribution for the Ship Status panel (A2).
  *
  *  Walks the two hex groups exactly the way `applyModuleEffects`'s `fold`
@@ -435,6 +435,7 @@ export function statBreakdown(g: GameEngine) {
     ];
 }
 
+/** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
 export function outfittingSnapshot(g: GameEngine) {
     const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
         if (id === null) return null;
@@ -477,8 +478,9 @@ export function outfittingSnapshot(g: GameEngine) {
         inventory: g.inventory.map(id => {
             if (id === null) return null;
             const def = moduleDef(id)!;
-            // Both resale values track the same discounted price the shop
-            // charges, so a discount can never be laundered into credits.
+            // Both resale values track the same price the shop charges
+            // (modulePrice), so no price modifier can be laundered into
+            // credits.
             const price = modulePrice(def.cost);
             return {
                 id, label: def.label, kind: def.kind as string, family: def.family as string, group: def.group as string,
@@ -490,8 +492,8 @@ export function outfittingSnapshot(g: GameEngine) {
         // slot walk applyModuleEffects folds, so the UI never recomputes a
         // derived stat — it only renders what the sim is already using.
         statLines: statBreakdown(g),
-        // Catalog prices are the DISCOUNTED prices the shop will actually
-        // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
+        // Catalog prices are the prices the shop will actually charge (via
+        // modulePrice), so the UI needs no arithmetic.
         catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
             const price = modulePrice(d.cost);
             return {

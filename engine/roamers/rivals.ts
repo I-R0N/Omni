@@ -30,7 +30,7 @@ export interface RivalInstance {
   state: 'enter' | 'roam' | 'leave';
   stateTimer: number;        // seconds left in the current state
   fireTimer: number;         // weapon cooldown
-  stolen: number;            // points denied to the player so far (HUD/popup)
+  stolen: number;            // denied points — UNUSED: never incremented/read
   portal?: { x: number; y: number };  // exit-portal centre (leave only)
   // Cached hunt target (Stage 7 perf).  Re-acquired on the PerfController
   // `rivalScan` cadence; steering/firing recompute only the O(1) distance to it

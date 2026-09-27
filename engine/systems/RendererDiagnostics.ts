@@ -58,8 +58,9 @@ export interface RendererDiagnostics {
   /** SCANNER — pushed per frame by GameEngine.draw from the module fold and
    *  the live ping.  `scannerMk` is the highest mark aboard (which detection
    *  TIERS are reachable) and `scanRanges` is the per-tier reach; the rest
-   *  carry the ping and the material bubble.  With no scanner the minimap and
-   *  the off-screen arrows show nothing but the always-charted landmarks. */
+   *  carry the ping and the auto sweep.  With no scanner the minimap and the
+   *  off-screen arrows show only what natural encounter has detected
+   *  (`SCANNER.ENCOUNTER_RANGE`) plus the always-charted landmarks. */
   scannerMk: number;
   scanRanges: number[];
   scanPingRadius: number;
@@ -68,6 +69,9 @@ export interface RendererDiagnostics {
   autoPingRadius: number;
   autoPingMax: number;
   simClock: number;
+  /** The last completed ping's WHEN / HOW FAR / WHERE — UNREAD by the
+   *  renderer since `GameEngine.discoverStructures` replaced the radius
+   *  reveal; still pushed by GameEngine.draw. */
   materialRevealAt: number;
   materialRevealRadius: number;
   materialRevealX: number;

@@ -1,18 +1,21 @@
-/** THE DEBUG MENU — every toggle and cycle behind pause ▸ Debug Menu.
+/** THE DEBUG MENU — every toggle and cycle behind the debug panel
+ *  (reachable from every screen).
  *
  *  Extracted from `GameEngine` in gauntlet 5f (see
- *  `docs/GAUNTLET_5F_LOG.md`).  Sixty small methods, none of them gameplay:
- *  they flip a flag, mirror it onto a system, or step a cycle table in
- *  `constants.ts`.  They were the first 714 lines of `GameEngine.ts` — a
- *  reader opening the engine met the whole debug panel before reaching the
- *  constructor, which is the single worst thing about that file's shape.
+ *  `docs/GAUNTLET_5F_LOG.md`).  Small methods — sixty at extraction, some
+ *  125 now — none of them gameplay: they flip a flag, mirror it onto a
+ *  system, or step a cycle table in `constants.ts`.  They were the first 714
+ *  lines of `GameEngine.ts` — a reader opening the engine met the whole
+ *  debug panel before reaching the constructor, which was the single worst
+ *  thing about that file's shape.
  *
  *  Unlike the other 5f extractions this one is a CLASS rather than free
  *  functions, because these are called from the UI, not from the engine:
- *  `engine.dbg.toggleCollisions()` reads at the call site, where sixty
- *  imported free functions in `App.tsx` would not.  It is a plain concrete
- *  class with one back-reference and one instance — no interface, no
- *  dispatch, nothing to route through.
+ *  `engine.dbg.toggleCollisions()` reads at the call site (the panel's
+ *  registry, `components/debugSections.tsx`), where a hundred-odd imported
+ *  free functions would not.  It is a plain concrete class with one
+ *  back-reference and one instance — no interface, no dispatch, nothing to
+ *  route through.
  *
  *  `toggleTraits` deliberately stayed on `GameEngine`: the 5b trait suites
  *  call it straight off `window.__omniEngine`, which makes it observable
@@ -366,7 +369,7 @@ export class DebugControls {
     cycleMinimapMaterial();
   }
 
-  /** DBG (Modules): lock hexes off both flowers so the A5 purchase can
+  /** DBG (Economy): lock hexes off both flowers so the A5 purchase can
    *  actually be flown.  `MODULE_SLOT_UNLOCK.START` ships at the cap — the
    *  count is the seam for the ship catalog, not a balance number to set
    *  here — so without this row the locked state and the shop's "+1 Hex
@@ -391,14 +394,15 @@ export class DebugControls {
     g.syncOutfitAfterDebugSlotLock();
   }
 
-  /** DBG (Visual): cycle the ROCK palette — mixed (default) / slate / rust /
-   *  mineral.  Shades are rolled per instance AT SPAWN, so this takes effect
-   *  on newly generated rock; reload the map to repaint a whole field. */
+  /** DBG (Material Look): cycle the ROCK palette — mixed (default) /
+   *  slate / rust / mineral.  Shades are rolled per instance AT SPAWN, so
+   *  this takes effect on newly generated rock; reload the map to repaint a
+   *  whole field. */
   cycleRockPalette() {
     cycleRockPalette();
   }
 
-  /** DBG (Visual): LLOYD RELAXATION rounds on the fracture pattern —
+  /** DBG (Grain): LLOYD RELAXATION rounds on the fracture pattern —
    *  the REGULARITY dial (V11).  0 is raw Poisson Voronoi (ragged,
    *  wildly uneven chunks), 2 ships, 4 is nearly a honeycomb.  Applies
    *  to patterns computed from here on: the cycle bumps the tuning
@@ -409,7 +413,7 @@ export class DebugControls {
     cycleFractureRelax();
   }
 
-  /** DBG (Visual): master multiplier on every material's GRAIN-BOUNDARY
+  /** DBG (Grain): master multiplier on every material's GRAIN-BOUNDARY
    *  STRENGTH (V15) — how much damage it takes to break through a
    *  boundary, and therefore, since HP is derived from the pattern, how
    *  tough terrain is overall.  Relative material strengths stay the
@@ -419,30 +423,25 @@ export class DebugControls {
     cycleBoundaryStrength();
   }
 
-  /** DBG (Visual): minimum fracture-site separation (blue noise before
+  /** DBG (Grain): minimum fracture-site separation (blue noise before
    *  relaxation).  Matters most at relaxation 0. */
   cycleFractureSeparation() {
     cycleFractureSeparation();
   }
 
-  /** DBG (Visual): multiplier on the per-variant fracture site count —
+  /** DBG (Grain): multiplier on the per-variant fracture site count —
    *  fewer/bigger or more/smaller chunks without touching the table. */
   cycleFractureSiteScale() {
     cycleFractureSiteScale();
   }
 
-  /** DBG (Visual): force the impact bias (site crowding toward the hit)
+  /** DBG (Grain): force the impact bias (site crowding toward the hit)
    *  or leave it to the variant.  Pulls AGAINST regularity by design —
    *  crowding sites is what makes cell sizes uneven — so this is the
    *  other half of the same look. */
   cycleFractureBias() {
     cycleFractureBias();
   }
-  /** DBG (Grain): which MATERIAL the five per-material knob rows read and
-   *  write.  The selector lives here rather than in the overlay so a knob
-   *  handler knows its target without the UI threading it through five
-   *  callbacks — and so a knob row is one argument-free method like every
-   *  other DBG row. */
   /** DBG (Grain): how deep a hit's damage reaches into the pattern,
    *  forced across every material.  'material' defers to each one's own
    *  `damageSpread`; 'off' is the shipped sequential spend, and 0 is a
@@ -461,27 +460,33 @@ export class DebugControls {
     cycleChipDustPool();
   }
 
+  /** DBG (Grain): which MATERIAL the seven per-material knob rows read and
+   *  write.  The selector lives here rather than in the overlay so a knob
+   *  handler knows its target without the UI threading it through seven
+   *  callbacks — and so a knob row names only its knob, never the
+   *  material. */
   cycleGrainMaterial() {
     cycleGrainMaterial();
   }
 
-  /** DBG (Grain): step one knob on the SELECTED material.  Index 0 of
-   *  every ladder is "use the variant table", so the shipped values stay
-   *  the default and a readout of `table` means exactly that rather than a
-   *  number that happens to match. */
+  /** DBG (Grain): step one knob on the SELECTED material.  Each ladder is
+   *  the shared numeric steps with that material's own default spliced in
+   *  at its sorted position (`grainLadder`), and the readout shows the
+   *  default as the table's number marked `(def)` — so a default and a value
+   *  someone set to the same number still read differently. */
   cycleGrainKnob(knob: GrainKnob) {
     cycleGrainKnob(knob);
   }
 
-  /** DBG (Grain): drop every per-material override at once.  Tuning four
-   *  materials across five knobs leaves no way to tell which of twenty
+  /** DBG (Grain): drop every per-material override at once.  Tuning five
+   *  materials across seven knobs leaves no way to tell which of thirty-five
    *  values are still off the table; this is the way back. */
   resetGrainOverrides() {
     resetGrainOverrides();
   }
 
 
-  /** DBG (Visual): the fracture A/B (voronoi gauntlet) — voronoi
+  /** DBG (Grain): the fracture A/B (voronoi gauntlet) — voronoi
    *  (default: variants break along their seeded Voronoi cell
    *  decomposition) / legacy (the shipped powerlaw + dent-spawn break).
    *  Applies at the next break; nothing cached needs a reload. */
@@ -489,7 +494,7 @@ export class DebugControls {
     cycleFractureMode();
   }
 
-  /** DBG (Visual): which way the player's wake spins a passing nebula
+  /** DBG (Nebula): which way the player's wake spins a passing nebula
    *  shard — physical (starboard pass → clockwise, from the velocity×offset
    *  cross product) / inverted / random (the old id-parity vortices).  The
    *  A/B for the user's spin-direction report while proper rotational
@@ -661,18 +666,18 @@ export class DebugControls {
     cycleShadowSoftness();
   }
 
-  /** DBG (Visual): gamepad force feedback on/off.  Separate from the
-   *  screen-shake toggle on purpose — the camera lurching and the hand
+  /** DBG (Controls & Input): gamepad force feedback on/off.  Separate from
+   *  the screen-shake toggle on purpose — the camera lurching and the hand
    *  buzzing are different preferences, and only one of them is felt by a
    *  player with no pad. */
   toggleRumble() {
     this.g.input.rumbleEnabled = !this.g.input.rumbleEnabled;
   }
 
-  /** DBG (Visual): force the onscreen joystick to draw with no touch session.
-   *  The widget is touch-only by design — it exists while a thumb is on the
-   *  glass and nowhere else — which also means its size and placement cannot
-   *  be checked on a desktop browser without this. */
+  /** DBG (Controls & Input): force the onscreen joystick to draw with no
+   *  touch session.  The widget is touch-only by design — it exists while a
+   *  thumb is on the glass and nowhere else — which also means its size and
+   *  placement cannot be checked on a desktop browser without this. */
   toggleJoystickDebug() {
     this.g.input.joystickForceVisible = !this.g.input.joystickForceVisible;
   }

@@ -229,12 +229,14 @@ export function renderIndicators(
         // gauntlet step 5 G6).  The exemption meant that approaching a rift
         // gave you the rift ON SCREEN, its own world-space destination tag,
         // AND an edge arrow naming the same destination a second time — the
-        // arrow at its least useful, at the moment it was loudest.  The
-        // range gate stays, so a portal still does not put a permanent arrow
-        // on the edge from across the map; between those two rules the arrow
-        // now covers exactly the case it is good for — the rift is close
-        // enough to matter but not yet visible.  Long-range discovery is the
-        // minimap's job, which G5 just made materially better at it.
+        // arrow at its least useful, at the moment it was loudest.  The old
+        // range gate is now DETECTION (a scan or a natural encounter stamps
+        // `detectedAt`, and the mark fades), so a portal still does not put a
+        // permanent arrow on the edge from across the map; between those two
+        // rules the arrow now covers exactly the case it is good for — the
+        // rift has been detected but is not yet visible.  Long-range
+        // discovery is the minimap's job, which G5 just made materially
+        // better at it.
         if (r.chevronsOffscreenOnly && item.onScreen) continue;
 
         const isBoss   = t.isBoss === true;
@@ -341,8 +343,8 @@ export function renderIndicators(
         // PORTALS NO LONGER PRINT A DISTANCE (G6).  They were the wordiest
         // contact on the screen — name AND number, while an enemy prints
         // nothing — and the number was the redundant half: a portal arrow
-        // only appears inside INDICATOR_RANGE now, and the size ramp already
-        // says how far through that range you are.  The NAME stays, because
+        // only appears while its detection mark is fresh, and the size ramp
+        // already says how far away it is.  The NAME stays, because
         // an unlabelled arrow is ambiguous the moment a second rift is on
         // the same edge, which on the hub is the normal case.
         const portalName = isPortal ? (t.name ?? '')
@@ -951,11 +953,12 @@ export function renderMinimap(
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
     // The DBG cycle picks WHICH material layer is drawn.  The DOTS half is
-    // then filtered PER SHARD in the buffer fill, against the same CHARTED
-    // memory the terrain blit is masked to — material is remembered exactly
-    // as the ground around it is.  The FLOW half cannot be: a streamline is
-    // an inferred FIELD rather than a set of seen objects, so it is gated on
-    // owning the instrument that infers it.
+    // then filtered PER SHARD in the buffer fill: a shard draws only once it
+    // is `found` (met, or inside a scan's bubble) and within
+    // MINIMAP_CONSTANTS.RANGE — the same object tracking the terrain layer
+    // holds.  The FLOW half cannot be: a streamline is an inferred FIELD
+    // rather than a set of seen objects, so it is gated on owning the
+    // instrument that infers it.
     const materialMode = getActiveMinimapMaterial();
     const flowAllowed = r.scannerMk > 0;
     // Hoisted: ONE lookup for the whole pass, not one per contact — the
@@ -1123,14 +1126,12 @@ export function renderMinimap(
         if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
         // ── Mobile material (shards) ──────────────────────────────────
-        // Only in 'dots' mode.  The default is the flow layer above: a dot
-        // per shard is a few thousand identical marks that average out to a
-        // grey wash, and it answers a question ("where is that rock") the
-        // player never asks of a 75px map.
+        // Only in 'dots' mode — the shipped default (user call: the map is
+        // asked "what is out there", and a dot answers it directly); the flow
+        // layer above is two clicks of the cycle away (dots → off → flow).
         if (entity.type === EntityType.STRUCTURE) {
-            // A Scanner Mk I (A4) draws the dots on top of whatever the cycle
-            // is doing.  ONE definition of the answer, shared with the buffer
-            // fill in RenderSystem — see RenderSystem.minimapShardDots.
+            // ONE definition of the answer, shared with the buffer fill in
+            // RenderSystem — see RenderSystem.minimapShardDots.
             if (!shardDots) continue;
             ctx.globalAlpha = 1;
             ctx.fillStyle = entity.color;

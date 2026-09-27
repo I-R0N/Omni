@@ -1,10 +1,14 @@
-/** UNIFIED TILE LIGHTING — the geometry half.
+/** UNIFIED TILE LIGHTING — the light layer, geometry and compositing both.
  *
- *  This is the portable arm of the lighting system: occluder collection and
- *  (from A4) the tangent / shadow-volume maths.  It deliberately contains NO
- *  Canvas2D types and touches no drawing context.  Compositing is the
- *  throwaway half and lives elsewhere; a future renderer swap should be able
- *  to keep this file as-is.
+ *  Occluder collection, (from A4) the tangent / shadow-volume maths,
+ *  transmission / refraction caustics, emitters, world lights and the
+ *  player beam, composited onto an offscreen light canvas and laid over the
+ *  world by `renderLightLayer` (once per frame from RenderSystem, after the
+ *  entity pass and before the fog and the HUD).  It began as a portable,
+ *  context-free geometry half with the compositing kept elsewhere; the
+ *  compositing has since moved in, so the file is Canvas2D throughout.
+ *  `unified` ships; LIGHTING_CYCLE 'legacy' is the zero-cost restore, where
+ *  the layer is a no-op.
  *
  *  WHAT AN OCCLUDER IS.  The shard family, solid, on either side of the
  *  mass axis:
@@ -646,9 +650,9 @@ const PLAYER_LIGHT = {
      *  live value comes from `LIGHT_COLOR_CYCLE` (DBG "Light color"); this
      *  row is that cycle's first entry. */
     RGB: '125, 211, 252',
-    /** Mirrored in constants as `PLAYER_LIGHT_PEAK` for the fog, which needs
-     *  to know how far to boost this into a mask.  The suite pins the two
-     *  equal. */
+    /** `PLAYER_LIGHT_PEAK` itself, imported from constants — the fog reads
+     *  the same constant to know how far to boost this into a mask, so the
+     *  two cannot drift. */
     PEAK: PLAYER_LIGHT_PEAK,
     /** Where the falloff reaches zero, as a fraction of the light radius.
      *  1.0 exactly would put a hard rim at the radius; the gradient's own
@@ -682,9 +686,11 @@ function softSteps(k: number): number {
     const n = 2 + Math.round(k / 2);
     return n < 3 ? 3 : n > 6 ? 6 : n;
 }
-/** Degrees of angular widening per unit of the tier's `penumbraK`.  The
- *  softness is an ANGLE, which is why the resulting soft band widens with
- *  distance from the caster instead of being a uniform blur. */
+/** Degrees of angular widening per unit of penumbra k — `getShadowSoftness()`
+ *  (the "Shadow soft" cycle) at every tier; the tier table's own `penumbraK`
+ *  column is no longer read.  The softness is an ANGLE, which is why the
+ *  resulting soft band widens with distance from the caster instead of
+ *  being a uniform blur. */
 const PENUMBRA_DEG_PER_K = 1.6;
 /** How many of the (nearest-first) occluders get soft edges.  Softening
  *  everything triples the wedge work — measured +0.46 to +0.66 ms p95, which

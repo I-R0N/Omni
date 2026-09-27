@@ -1,16 +1,22 @@
-// ShardSystem — orchestrator for tile / shard regen, shatter, and merge.
+// ShardSystem — orchestrator for tile / shard regen, shatter, and merge,
+// every policy decision read from SHARD_VARIANTS (CLAUDE.md §5).  It owns:
 //
-// Stage 1: skeleton with no-op update / onDeath.
-// Stage 2 (this stage): owns the unified regen queue.  Both STRUCTURE-tile
-// and NEBULA-tile regens flow through `queueRegen` + `tickRegens`,
-// driven by `SHARD_VARIANTS[variantId].regen`.  Variant-specific
-// completion work (nebula composition rewrite, cache invalidation,
-// neighbour-counts dirty bookkeeping) is dispatched via a small
-// adapter interface implemented by NebulaSystem.
-//
-// Subsequent stages migrate shatter (Stage 3), homogeneous merge
-// (Stage 4), then the EntityType collapse + cross-variant absorb
-// (Stage 5).  See docs/SHARD_SYSTEM.md.
+//   - the unified regen queue: STRUCTURE-tile and NEBULA-tile regens flow
+//     through `queueRegen` + `tickRegens`, driven by
+//     `SHARD_VARIANTS[variantId].regen`.  Variant-specific completion work
+//     (nebula composition rewrite, cache invalidation, neighbour-counts
+//     dirty bookkeeping) is dispatched via a small adapter interface
+//     implemented by NebulaSystem;
+//   - shatter: the voronoi grain break (`shatterVoronoiStyle`, plus
+//     `spawnDetachedCell` for progressive chips), the legacy powerlaw /
+//     nebula-fan / metal-lattice breaks behind the DBG fracture A/B, and
+//     the one spawn-HP ladder;
+//   - the merge pipeline: gravity pull + stick-bond formation, bond
+//     cohesion and timers, and the compose outcomes — rock condensation,
+//     glass / plastic accretion, and the nebula condense ledger, whose
+//     tile-vs-material outcome the NebulaSystem adapter routes;
+//   - shard→tile snap (plastic / glass), rigid metal assembly, hotspot /
+//     large-shard collapse, and the grain + plastic dent recovery ticks.
 
 import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry, NebulaColorStop } from '../../types';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -317,7 +323,7 @@ export class ShardSystem {
    * isn't refreshed (RenderSystem then falls back to per-instance
    * shades), saving the extra plastic-only neighbour scan.  Default
    * OFF — matches the renderer default; toggled in sync via
-   * GameEngine.togglePlasticAutomata.
+   * `dbg.togglePlasticAutomata` (engine/debugControls.ts).
    */
   public plasticAutomataEnabled: boolean = false;
   /**
@@ -572,9 +578,9 @@ export class ShardSystem {
   public lastUpdateMs: number = 0;
 
   /**
-   * Death-routing entry point.  Stage 1–2: returns false (existing
-   * GameEngine paths still own death dispatch).  Stage 5 will route
-   * variant-driven shatter through here.
+   * Death-routing entry point from the staged rollout — UNUSED: nothing
+   * calls it.  GameEngine.handleEntityDeath dispatches a structure death
+   * straight to `shatter` / `queueRegen` instead.
    */
   public onDeath(_entity: GameEntity): boolean {
     return false;
@@ -774,25 +780,25 @@ export class ShardSystem {
 
   /**
    * Variant-driven shatter.  Reads `SHARD_VARIANTS[variant].shatter`
-   * and produces children according to the configured style.
-   * Today's two styles:
+   * and produces children according to the configured kind.  Every
+   * breakable variant ships `kind: 'voronoi'` — its cached grain
+   * decomposition becomes the children (shatterVoronoiStyle).  The two
+   * `style`s below are the powerlaw paths, which a 'voronoi' variant
+   * takes only under the DBG 'legacy' fracture A/B:
    *
-   *  - 'asteroid' — power-law area distribution over parent area,
+   *  - 'scatter'  — power-law area distribution over parent area,
    *                 cone scatter around impact direction, count
-   *                 driven by lastImpactDamage.  Replaces today's
-   *                 the long-deleted `GameEngine.createAsteroidShards`.
+   *                 driven by lastImpactDamage.  Replaced the
+   *                 long-deleted `GameEngine.createAsteroidShards`.
    *  - 'nebula'   — fixed 2–3 children sized off GLASS_TILE_HALF²
    *                 (independent of parent size), rear-cone fan
    *                 positioning, tangent-rule spin, parallel/perp
-   *                 velocity model.  Replaces today's
+   *                 velocity model.  Replaced the old
    *                 `NebulaSystem.spawnShards`.
    *
    *  Variants whose `shatter.kind === 'none'` are no-ops, so callers
-   *  can dispatch unconditionally.  STRUCTURE tile variants today
-   *  spawn glass-shards via DropSystem.spawnGlassShards (out of
-   *  scope per task brief) and `shatter.kind === 'powerlaw'` is
-   *  currently invoked only by ROCK_SHARD + NEBULA + NEBULA_SHARD
-   *  death dispatch in GameEngine.
+   *  can dispatch unconditionally.  The caller is the STRUCTURE branch
+   *  of GameEngine.handleEntityDeath.
    */
   public shatter(parent: GameEntity, entities: GameEntity[]): void {
     const variantId = shardVariantOf(parent);
@@ -809,16 +815,14 @@ export class ShardSystem {
     parent.shattered = true;
     const variant = SHARD_VARIANTS[variantId];
 
-    // Metal-composite decomposition — metal-shard.shatter.kind is
-    // 'none', so by default a dying metal entity just disappears.
-    // But a composite (metalCells.length >= 2) is conceptually N
-    // bonded triangles, and the user expects it to fragment back
-    // into those triangles on destruction.  decomposeMetalComposite
-    // walks the lattice, spawns one loose triangle per cell at the
-    // cell's world position, and returns — bypassing the powerlaw
-    // pipeline entirely so we don't double-spawn.  Single-cell
-    // metal-shards still fall through to the kind-check below and
-    // die cleanly without children.
+    // Metal-composite decomposition.  A composite (metalCells.length
+    // >= 2) is conceptually N bonded triangles; under the DBG 'legacy'
+    // fracture A/B it fragments back into those triangles on
+    // destruction — decomposeMetalComposite walks the lattice, spawns
+    // one loose triangle per cell at the cell's world position, and
+    // returns, bypassing the pipelines below so we don't double-spawn.
+    // Single-cell metal-shards fall through to the voronoi kind-check
+    // below like any other grain material.
     if (parent.shardVariant === 'metal-shard'
      && parent.metalCells !== undefined
      && parent.metalCells.length >= 2) {
@@ -891,8 +895,9 @@ export class ShardSystem {
    * else, which is why it survived — the grain model rewrites maxHealth
    * to the DERIVED boundary total at first WEAPON damage (measured:
    * metal 16.2, plastic 17.0, rock 5.3, glass 3.2), but the crash and
-   * tile-pressure paths in PhysicsSystem decrement `health` directly, so
-   * a 1-HP metal grain shrugged off six blaster bolts and died to one
+   * tile-pressure paths in PhysicsSystem then decremented `health`
+   * directly (they spend on the boundaries now — crashBoundaryDamage),
+   * so a 1-HP metal grain shrugged off six blaster bolts and died to one
    * bump.
    *
    * `dentOverride` is the parent variant's `dent.shardHealth` where the
@@ -1764,7 +1769,7 @@ export class ShardSystem {
   /**
    * Find the per-pair rule the puller's merge.rules expresses for a
    * partner variant.  Falls back to defaultOutcome if no rule
-   * matches.  Mirrors the resolver in §3 of docs/SHARD_SYSTEM.md.
+   * matches.
    */
   private resolveRule(pullerVariant: ShardVariantDef, partnerId: ShardVariantId): MergeRule {
     const rules = pullerVariant.merge.rules;
@@ -1942,13 +1947,13 @@ export class ShardSystem {
    *   1. Pull pass:  if puller's variant.attractedTo selects partner
    *                  and pull tuning is configured, find the nearest
    *                  qualifying neighbour and apply gravity force.
-   *                  Mirrors today's NebulaSystem.updateDynamics
+   *                  Replaced the old NebulaSystem.updateDynamics
    *                  (nearest-larger, 1/dist force).
    *   2. Bond pass:  if either variant's bondsWith selects the other
    *                  and the pair is in contact and neither is
    *                  already bonded this frame, form a stick-bond
-   *                  with the resolved per-pair threshold.  Mirrors
-   *                  today's GameEngine.handleEntitySticking
+   *                  with the resolved per-pair threshold.  Replaced
+   *                  the old GameEngine.handleEntitySticking
    *                  contact-detection.
    *
    *  Shared state per pass: spatial hash (built once, scanned
@@ -1987,12 +1992,11 @@ export class ShardSystem {
     }
 
 
-    // Candidate set: every mobile shard-family entity + eligible drops.
+    // Candidate set: every mobile shard-family entity.
     // Stage 5: shards live on EntityType.STRUCTURE with finite mass
     // (mass=Infinity tiles are in the static grid — never candidates).
-    // The legacy ROCK_SHARD branch is kept as defence for any spawn
-    // site that hasn't migrated yet.  Fading nebula-shards are
-    // skipped (they're in their death animation).
+    // Fading nebula-shards are skipped (they're in their death
+    // animation).
     const candidates: GameEntity[] = [];
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
@@ -2011,9 +2015,10 @@ export class ShardSystem {
       }
       candidates.push(e);
     }
-    // Ammo drops are no longer merge candidates — they're inert
-    // collectibles (magnet-pull + proximity-collect only), so they
-    // neither bond with each other nor get absorbed by asteroids.
+    // Collectible drops (salvage / health) are never merge candidates —
+    // they're INTERACTABLEs (magnet-pull + proximity-collect only; their
+    // own same-type merge is DropSystem.mergeDrops), so they neither
+    // bond here nor get absorbed by shards.
     if (candidates.length < 2) return;
 
     // Spatial hash — cell size matches the widest pull range across
@@ -2101,9 +2106,8 @@ export class ShardSystem {
       if (!a.active) continue;
 
       const aVariantId = shardVariantOf(a);
-      // Drops have no shard variant — skip the variant-driven passes
-      // for them, but they're still candidates for a partner's
-      // bond-formation scan below.
+      // A null variant only guards the lookup — drops never reach this
+      // pass (collectibles are INTERACTABLEs, filtered out above).
       const aVariant: ShardVariantDef | null = aVariantId !== null ? SHARD_VARIANTS[aVariantId] : null;
 
       // Cooldown gate: freshly-spawned / freshly-merged shards skip
@@ -2616,37 +2620,27 @@ export class ShardSystem {
 
   /**
    * Apply the resolved merge outcome between two stick-bonded
-   * entities.  Today's three flavours preserved verbatim:
+   * entities (composeEntities, below).  The flavours:
    *
-   *   nebula-shard + nebula-shard → area accumulation, composition
-   *                                 blend, glimmer burst, smaller
-   *                                 fades.  Adapter then attempts
-   *                                 transmutation (host area ≥ HEX_AREA
-   *                                 → new tile, host dissolves).
-   *   asteroid + asteroid         → area-conserving accretion; larger
-   *                                 dominates shardVariant / glow / hp.
-   *   drop + drop                 → same-type grows; cross-type
-   *                                 collapses into a composite asteroid.
-   *   asteroid + drop             → asteroid absorbs drop's payload.
+   *   nebula-shard + nebula-shard → the condense ledger
+   *                                 (composeNebulaShards): short of
+   *                                 its cost the pair coalesces into
+   *                                 the larger; at the cost both
+   *                                 retire and the NebulaSystem
+   *                                 adapter spawns a tile or the
+   *                                 committed material.
+   *   asteroid + asteroid         → rock condenses through
+   *                                 ROCK_CONDENSE (mass conserved);
+   *                                 glass / plastic accrete by area.
+   *                                 Larger dominates shardVariant /
+   *                                 glow / hp.
    *
-   *  Invokes a soft sparkle at the merge point for asteroid / drop
-   *  merges (today's behaviour).  Nebula-shard merges use the
-   *  existing glimmer burst inside composeNebulaShards.
+   *  Collectible drops never get here — they are not merge
+   *  candidates.  Invokes a soft sparkle at the merge point for
+   *  shard merges.  Nebula-shard merges use the glimmer burst
+   *  inside composeNebulaShards.
    */
 
-  /**
-   * Tier-transition router for a glass-shard that has grown to
-   * tile-equivalent diameter via the merge pipeline.  Rolls 50/50
-   * between:
-   *   - glass-tile:  condense at the nearest free hex cell.
-   *   - rock-shard:  downgrade in-place to a smaller, denser rock-
-   *                  shard (first leg of the planned material tier
-   *                  chain: nebula → glass → rock → metal → plastic).
-   *
-   * Glass-tile path can still fail if every candidate hex is
-   * occupied — in that case the shard stays a glass-shard and a
-   * later merge will retry.
-   */
   /**
    * Unified post-compose tile snap for plastic + glass.  Called at
    * the end of every successful compose for the survivor.  Snaps
@@ -3816,15 +3810,15 @@ export class ShardSystem {
   }
 
   /**
-   * Nebula-shard self-merge — port of NebulaSystem.mergeNebulas.
-   * Larger shard grows by the smaller's disc area, accumulates
-   * effective area for transmutation, blends compositions, drops
-   * render fast-path caches, and emits a glimmer burst.  Smaller
-   * shard fades out (compaction removes it).  Adapter is then
-   * invoked for transmutation: if the host's accumulated
-   * `nebulaTileArea` has crossed HEX_AREA, NebulaSystem spawns a
-   * brand-new tile at the nearest free hex cell and the host
-   * dissolves.
+   * Nebula-shard self-merge — the condense LEDGER (see the ledger note
+   * in constants.ts).  `a` is the larger party.  Short of the units its
+   * outcome costs (and not stalled out), the pair COALESCES: the smaller
+   * folds into the larger (growNebulaShard — area-conserving growth,
+   * compositions blended, units summed and then cut by
+   * `nebulaMergeLoss()`) and waits for more.  At the cost both retire
+   * and the adapter crystallises the pair — a nebula-tile when the cloud
+   * can afford one and wins the `nebulaTileShare()` roll, otherwise the
+   * COMMITTED material shard plus any excess as a leftover nebula-shard.
    */
   private composeNebulaShards(
     a: GameEntity,
@@ -3832,11 +3826,10 @@ export class ShardSystem {
     entities: GameEntity[],
     physics: PhysicsSystem,
   ): void {
-    // Pair-consuming transmute — both source shards retire and a
-    // single tile-equivalent output materialises (50/50 nebula-tile
-    // vs glass-shard, routed inside the adapter).  No area-
-    // accumulator any more: every successful nebula self-bond
-    // triggers a transmute attempt.
+    // Either the pair coalesces into `a` (below its cost) or both source
+    // shards retire and a single output materialises — a nebula-tile or
+    // the committed material, routed inside the adapter.  The gate is
+    // the condense-unit ledger below, not an area accumulator.
     const aR = getCollisionR(a);
     const bR = getCollisionR(b);
     const aArea = Math.PI * aR * aR;
@@ -4007,9 +4000,9 @@ export class ShardSystem {
 }
 
 /**
- * Hex-color average — RGB midpoint blend.  Local to ShardSystem;
- * the same helper is duplicated in GameEngine.ts (private function)
- * and will be unified in Stage 6's dead-code sweep.
+ * Hex-color average — RGB midpoint blend.  Local to ShardSystem; an
+ * identical copy, `blendHexColors`, is still declared in GameEngine.ts
+ * but nothing calls it.
  */
 function blendHex(hexA: string, hexB: string): string {
   const rA = parseInt(hexA.slice(1, 3), 16), gA = parseInt(hexA.slice(3, 5), 16), bA = parseInt(hexA.slice(5, 7), 16);

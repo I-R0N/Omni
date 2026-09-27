@@ -502,8 +502,9 @@ export class InputSystem {
    * check lives inside `DualSenseHID.applyTriggers`, so an unchanged profile
    * costs one struct compare and creates no promise.
    *
-   * The left trigger is always released — the game binds nothing to it, and a
-   * clutch on a control that does nothing is just a stiff trigger.
+   * The LEFT trigger has its own setter below: it is the throttle under the
+   * trigger-thrust scheme (`gamepad-thrust`) and released under every other
+   * scheme — a clutch on a control that does nothing is just a stiff trigger.
    */
   public setTriggerProfile(profile: TriggerProfile): void {
     this.triggerProfile = profile;

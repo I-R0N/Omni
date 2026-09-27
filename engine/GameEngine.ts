@@ -123,10 +123,6 @@ const SALVAGE_STREAK_WINDOW_MS = 1500;
 /** Cap on that climb, so a long magnet train doesn't run off the top. */
 const SALVAGE_STREAK_MAX = 11;
 
-/** DBG (Grain) readouts for the five per-material knob rows: each knob's
- *  live value on the SELECTED material, or 'table' where it defers.  Built
- *  per stats push, which is paused-only for the debug panel — five string
- *  lookups, not a per-frame cost. */
 /** Cap on the recoil a parent takes when it sheds a piece, as a fraction
  *  of the relative ejection velocity.  A nearly-eroded body shedding a
  *  large final piece has `chipMass / remainingMass` well above 1, and the
@@ -201,15 +197,19 @@ function recentreFracturedBody(e: GameEntity, remainder: Vector2[], eps: number)
   wrapPosition(e.position);
 }
 
+/** DBG (Grain) readouts for the seven per-material knob rows: each knob's
+ *  live value on the SELECTED material, or the table's own number marked
+ *  `(def)` where it defers.  Built on every stats push, whether or not the
+ *  debug panel is open — seven string lookups. */
 function grainKnobNamesSnapshot(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of GRAIN_KNOB_LIST) out[k] = getGrainKnobName(k);
   return out;
 }
 
-/** How many of the twenty per-material overrides are currently OFF the
- *  variant table.  The panel shows it beside Reset: with four materials
- *  across five knobs there is otherwise no way to tell whether what you
+/** How many of the thirty-five per-material overrides are currently OFF
+ *  the variant table.  The panel shows it beside Reset: with five materials
+ *  across seven knobs there is otherwise no way to tell whether what you
  *  are looking at is the shipped tuning. */
 function grainOverrideCountSnapshot(): number {
   let n = 0;
@@ -243,9 +243,8 @@ export class GameEngine {
   private drops: DropSystem;
   waves: WaveSystem;
   nebulas: NebulaSystem;
-  // Stage 1 of shard-system overhaul — additive skeleton, no-op
-  // update / onDeath.  Existing GameEngine + NebulaSystem code paths
-  // still drive regen / shatter / merge.  See docs/SHARD_SYSTEM.md.
+  // Tile / shard regen, shatter and merge, driven by SHARD_VARIANTS
+  // (CLAUDE.md §5).
   shards: ShardSystem;
   entityIndex: EntityIndex;
   flowField: FlowFieldGrid;
@@ -254,7 +253,7 @@ export class GameEngine {
   // engine/systems/PerfController.ts.
   perfController: PerfController;
   // SFX manager.  PUBLIC because UIOverlay's audio row (master volume +
-  // mute) and the headless smokes both drive it directly — it holds no
+  // mute) and tests/audio.spec.ts both drive it directly — it holds no
   // simulation state, so there is nothing to protect.  See
   // docs/SFX_INVENTORY.md for the id contract and
   // engine/systems/AudioSystem.ts for the voice budget.
@@ -338,9 +337,9 @@ export class GameEngine {
   // the capstone never lands inside a normal wave and cannot start until wave
   // WAVE_INTERVAL is cleared.  Killing that boss freezes the loop on a
   // STAGE-CLEAR screen
-  // (the player is alive, so this pauses rather than ends) and opens a DESCENT
-  // rift beside them.  From there the choice is in-world: down the new rift to
-  // stage N+1, or back through the arena's return rift to the hub.
+  // (the player is alive, so this pauses rather than ends).  The DESCENT rift
+  // that used to open beside them is switched off (engine/bosses.ts), so the
+  // way out is back through the arena's return rift to the hub.
   //
   // `stageIndex` is 0-based DEPTH.  It drives WaveSystem.waveOffset, so enemy
   // growth and the boss rotation continue across a descent instead of
@@ -438,13 +437,13 @@ export class GameEngine {
   forcedTestEnemy: EnemySubtype | null = null;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
-  // Map the next restart / initial load should build.  Updated from the
-  // main-menu map-style buttons so the UI-selected map survives the
-  // restartGame() path (which re-instantiates the map class from scratch).
+  // Map the next restart / initial load should build.  Set by `setMapType`
+  // (the debug panel's World & Maps ▸ Maps picker) and rebuilt by every
+  // `resetAndLoadSelectedMap()`; `restartGame()` resets it to the hub.
   // A new run starts on the HUB (roadmap step (k) decision): the player
   // spawns dock-adjacent at the home station and takes a portal out to an
   // arena, so the intended loop — earn → outfit → fight → return — is the
-  // default path.  The main menu's map grid stays a direct-start override
+  // default path.  The debug panel's map picker stays a direct-start override
   // (testing + the showcase maps); direct-starting an arena just skips the
   // hub, and run-state carry works identically either way.
   private selectedMapType: MapType = HUB_DESCRIPTOR.mapType;
@@ -455,10 +454,10 @@ export class GameEngine {
   // ── The DEBUG PANEL (components/DebugMenu.tsx) ──────────────────────────
   // Whether the panel is up, and whether it HOLDS the sim while it is.  Engine
   // state rather than React state because three devices open it (the on-screen
-  // launcher, the ` key, the pad's Select/Share button) and three engine paths
-  // read it (the loop's freeze branch, the pad capture in `pollGamepad`, and
-  // the stats payload's panel-only fields).  In memory only, like every other
-  // preference in the project.
+  // launcher, the ` key, the pad's Select/Share button) and four engine paths
+  // read it (the loop's freeze branch, the pad capture in `pollGamepad`, the
+  // stats payload's panel-only fields, and `draw`'s canvas-HUD hole).  In
+  // memory only, like every other preference in the project.
   //
   // Opening the panel NEVER changes game state: it is not a pause, a dock or a
   // screen.  It floats over whatever screen is up — including live play, which
@@ -546,7 +545,8 @@ export class GameEngine {
   // what a crash, a detonation and a boss landing all read through — and it
   // shipped OFF, so the default build had no camera reaction to any of them.
   // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
-  // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
+  // gate on purpose.)  DBG ▸ Visual / HUD ▸ Camera & HUD ▸ "Screen shake" is
+  // the off switch.
   screenShakeEnabled: boolean = true;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
@@ -604,20 +604,22 @@ export class GameEngine {
   // ── (h) Bosses ────────────────────────────────────────────────────────────
   // A boss is an ordinary wave enemy carrying a BOSS_DEFS phase table, so the
   // only engine state it needs is the live-boss handle the HUD bar reads and
-  // the TIMED shop discount from the model-(d) payout (salvage + discount, no
-  // unlock plumbing).  All three are run-scoped — reset with credits/score.
+  // the kill count.  The payout (score + a salvage spray + a random module,
+  // `payBossBounty` in engine/bosses.ts) keeps no state of its own.  Both are
+  // run-scoped — reset with credits/score.
   liveBoss: GameEntity | null = null;
   bossesKilled = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
   // The station lives on the OVERWORLD map (found by isStation at map load).
   // Docking = proximity (one O(1) torus distance per sim step) + an explicit
-  // action (E key / HUD DOCK button).  While `dockedAtStation` the loop
-  // short-circuits the sim exactly like the removed cardChoicePending card
-  // modal did (field stays drawn behind the React station UI) and the
-  // station UI hosts the Drydock shop, the loadout swaps, and hull repair.
-  // Undocked = locked loadout: equipWeapon / purchaseUnlock / purchase-
-  // Upgrade are guarded on this flag.
+  // action (selecting your own ship, the E key or the pad's action button).
+  // While `dockedAtStation` the loop short-circuits the sim exactly like the
+  // removed cardChoicePending card modal did (field stays drawn behind the
+  // React station UI), and the station UI shows the panels its services
+  // offer.  Undocked = committed outfit: the commerce API (moveModule /
+  // purchaseModule / sellModule / repairHull / purchaseSlot) is guarded on
+  // this flag, bar a cargo-only reorder.
   private stations: GameEntity[] = [];
   private nearestStation: GameEntity | null = null; // nearest in dock range this step
   private dockedStation: GameEntity | null = null;
@@ -661,21 +663,22 @@ export class GameEngine {
   // sweep doesn't bury detail on dense maps.  Cells/obstacles/rebuild
   // overlays always render every cell.
   ffOverlaySampleN: number = 1;
-  // Cycle of cell sizes for the DBG "FF Density" toggle.  Coarsest
-  // first (matches the existing default).  Each step rebuilds both
+  // Flow-field cell size, stepped by DBG ▸ World & Maps ▸ Flow Field ▸
+  // "Density" (FF_DENSITY_CYCLE, coarsest first).  Each step rebuilds both
   // grids — asteroid field via the analytical formula + repulsion,
   // pursuit field lazily on the next sample.  Note: pursuit-field
   // range (MAX_ENEMY_RANGE) is measured in cells, so shrinking the
   // cell size also shrinks the world-units range — at 32 / 6 ≈ 50 %
   // of the default the BFS only fans out ~350 units, leaving enemies
-  // outside that radius to rely on direct steering.  DBG-only knob;
-  // production stays at the default 256.
+  // outside that radius to rely on direct steering.  Ships at 48, the
+  // cycle's second-finest step.
   ffCellSize: number = 48;
   // Wall-repulsion kernel radius for the asteroid field, in cells.
   // R = 0 → legacy 4-cardinal-only scan (A/B baseline); R = 1..5 →
   // (2R+1)² neighbourhood with 1/d² falloff so the flow curves around
-  // tile clusters from several cells away.  Default 3 — matches the
-  // FlowFieldGrid default constant.  DBG-cycle via "FF KernelR".
+  // tile clusters from several cells away.  Ships at 5, pushed over
+  // FlowFieldGrid's own default (3) at every map load.  DBG ▸ World &
+  // Maps ▸ Flow Field ▸ "Kernel R".
   ffKernelR: number = 5;
   // Tangent-mix factor for the wall-repulsion contribution.  0 = pure
   // radial (push perpendicular away from walls — current behaviour
@@ -688,8 +691,8 @@ export class GameEngine {
   ffTangentMix: number = 0.5;
   // Breathing field — scroll rate (rad/s) for the slow undulation
   // that migrates convergence zones so shard piles dissolve.  0 = off
-  // (static field, no periodic re-bake).  DBG-cycle "FF Breathe":
-  // off / slow / med / fast.
+  // (static field, no periodic re-bake).  DBG ▸ World & Maps ▸ Flow
+  // Field ▸ "Breathe": off / slow / med / fast.
   ffBreatheRate: number = 0;
   ffBreathePhase: number = 0;
   private ffBreatheRebakeTimer: number = 0;
@@ -700,9 +703,10 @@ export class GameEngine {
   // Per-shard lane jitter — strength of the persistent perpendicular
   // offset added to each shard's flow target so shards ride slightly
   // different parallel lanes instead of collapsing onto one streamline.
-  // 0 = off.  DBG-cycle "FF Lane": off / low / med / high.
+  // 0 = off.  DBG ▸ World & Maps ▸ Flow Field ▸ "Lane".
   ffLaneJitter: number = 0.2;
-  // Selectable base-flow pattern (DBG "FF Pattern").  DEFAULT routes to
+  // Selectable base-flow pattern (DBG ▸ World & Maps ▸ Flow Field ▸
+  // "Pattern").  DEFAULT routes to
   // the active map's own sampleFlow(); the rest swap in an analytical
   // field (circular / spiral / gravity well / directional / wavy …).
   // Persists across map loads so a pattern can be compared on different
@@ -896,15 +900,16 @@ export class GameEngine {
   };
 
 
-  /** The DEBUG MENU — every toggle and cycle behind pause ▸ Debug Menu, moved
-   *  to engine/debugControls.ts in gauntlet 5f.  Called from the UI as
-   *  `engine.dbg.<toggle>()`; the flags they write are still engine fields. */
+  /** The DEBUG MENU — every toggle and cycle behind the debug panel
+   *  (reachable from every screen), moved to engine/debugControls.ts in
+   *  gauntlet 5f.  Called from the UI as `engine.dbg.<toggle>()`; the flags
+   *  they write are still engine fields. */
   readonly dbg = new DebugControls(this);
 
-  /** Flashlight Kit tool state (user call): whether the kit module is
-   *  installed+active (folded by applyModuleEffects), and the tap-cycled
-   *  level (index into FLASHLIGHT_TOOL_LEVELS: 0 off / 1 medium / 2 high).
-   *  Run-scoped like the outfit it derives from. */
+  /** Light tool state (user call): whether the Light module (catalog id
+   *  `flashlight_kit`) is installed+active (folded by applyModuleEffects),
+   *  and the tap-cycled level (index into FLASHLIGHT_TOOL_LEVELS: 0 off /
+   *  1 medium / 2 high).  Run-scoped like the outfit it derives from. */
   public flashlightEquipped: boolean = false;
   public flashlightLevel: number = 0;
 
@@ -1128,10 +1133,10 @@ export class GameEngine {
   }
 
   /** Select the active map.  From the main menu this just swaps the
-   *  backdrop the next startGame() will use.  Mid-game (paused or
-   *  playing) it performs a full switch-and-play: reset the run, load
-   *  the chosen map, and drop straight back into PLAYING so the map
-   *  grid in the pause screen acts as a live map picker. */
+   *  backdrop the next startGame() will use.  From any other screen it
+   *  performs a full switch-and-play: reset the run, load the chosen map,
+   *  and drop straight back into PLAYING, so the debug panel's World &
+   *  Maps ▸ Maps picker acts as a live map switch. */
   public setMapType(type: MapType) {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
@@ -1387,9 +1392,10 @@ export class GameEngine {
   }
 
   public pauseGame() {
-    // The docked station UI and the death/run-summary screen already freeze
-    // the sim; stacking the pause menu on top would double up two
-    // full-screen overlays.
+    // The docked station UI, the death/run-summary screen and the stage-clear
+    // screen are already up; stacking the pause menu on top would double up
+    // two full-screen overlays.  (Docked and stage-clear freeze the sim; the
+    // death screen deliberately does not — CLAUDE.md §3.)
     if (this.gameState === GameState.PLAYING && !this.dockedAtStation
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
@@ -1483,8 +1489,9 @@ export class GameEngine {
       this.dragons = []; // die with the old map's entity list
       this.rivals = [];  // rival ships die with the old map
       // A boss belongs to the wave it capstoned; wave progress is fresh per
-      // entry, so drop the handle with the map.  The RUN-scoped discount it
-      // paid is economy state and survives the transition.
+      // entry, so drop the handle with the map.  What it paid (score,
+      // collected salvage, the module in cargo) is run state and survives
+      // the transition.
       this.liveBoss = null;
       // Station / docking / portal state — the POI entities themselves are
       // rebuilt with the map (loadMap re-finds them); the overworld dragon
@@ -1560,8 +1567,8 @@ export class GameEngine {
       this.snitchCatchCount = 0;
       this.dragonsKilled = 0;
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
-      // Boss payouts ((h) model (d)) are run-scoped like the credits they
-      // discount — a new run starts at full price with no boss in the world.
+      // Boss state ((h)) is run-scoped like the score and credits its payout
+      // feeds — a new run starts with no boss killed and none in the world.
       this.bossesKilled = 0;
       this.liveBoss = null;
 
@@ -1660,7 +1667,7 @@ export class GameEngine {
       });
 
       // NOTE: `selectedMapType` is deliberately NOT updated.  It means
-      // "the map a NEW RUN builds" — set by the menu's map grid — and a
+      // "the map a NEW RUN builds" — set by the DBG map picker — and a
       // portal is travel within a run, not a new selection.  So restarting
       // after a portal trip returns to the player's chosen start map (the
       // hub by default) rather than stranding the next run in an arena.
@@ -1868,8 +1875,8 @@ export class GameEngine {
   }
 
   /** Dismiss the stage-clear screen and resume the fight-cleared arena.  The
-   *  descent rift and the return rift are both in the world; the player picks
-   *  one by flying to it, which is why this needs no destination argument. */
+   *  way out is the arena's return rift (the descent rift is switched off),
+   *  which the player flies to — why this needs no destination argument. */
   public dismissStageClear() {
       if (!this.stageClearPending) return;
       this.stageClearPending = false;
@@ -1956,19 +1963,20 @@ export class GameEngine {
    *  is the STRAFE term — the thrust input's projection onto the facing
    *  axis's perpendicular — plus the TURN term — the smoothed rate the
    *  facing is swinging, scaled by throttle, the term the aim-locked
-   *  schemes (touch / joystick / gamepad, where thrust is always along the
-   *  nose) actually exercise, scaled by the CENTRIPETAL gate (bank scales
-   *  with real speed), plus the SLIP term (drift relative to the nose
-   *  holds the bank through a hard turn's slide).  PITCH (longitudinal)
-   *  is nose-line thrust directly — held throttle holds the lean, cutting
-   *  it settles level.  Components are signed so reversals swing
-   *  through level instead of teleporting across it, and the signal VECTOR
-   *  is magnitude-clamped so a diagonal cannot out-tilt the authored
-   *  maximum.  Easing is a SECOND-ORDER SPRING (user call): each component
-   *  carries an angular velocity and overshoots-and-settles rather than
-   *  lerping, its frequency divided by √(mass ratio) so a heavy outfit
-   *  tilts ponderously.  TUMBLE mode (DBG "Tilt mode") repurposes the same
-   *  velocity state as a continuous roll rate — see the constants note. */
+   *  schemes (touch, both joysticks, gamepad-thrust and gamepad-left, where
+   *  thrust is always along the nose) actually exercise, scaled by the
+   *  CENTRIPETAL gate (bank scales with real speed), plus the SLIP term
+   *  (drift relative to the nose holds the bank through a hard turn's
+   *  slide).  PITCH (longitudinal) is nose-line thrust directly — held
+   *  throttle holds the lean, cutting it settles level.  Components are
+   *  signed so reversals swing through level instead of teleporting across
+   *  it, and the signal VECTOR is magnitude-clamped so a diagonal cannot
+   *  out-tilt the authored maximum.  Easing is a SECOND-ORDER SPRING (user
+   *  call): each component carries an angular velocity and overshoots-and-
+   *  settles rather than lerping, its frequency divided by √(mass ratio) so
+   *  a heavy outfit tilts ponderously.  TUMBLE mode (DBG "Tilt mode")
+   *  repurposes the same velocity state as a continuous roll rate — see the
+   *  constants note. */
   private _rollPrevFacing: number | null = null;
   private _rollYawRate = 0;
   /** Tilt spring state: the angular velocities of the two eased
@@ -2112,7 +2120,7 @@ export class GameEngine {
     // reach √2 of the authored maximum.
     const sigMag = Math.sqrt(sigLat * sigLat + sigLong * sigLong);
     if (sigMag > 1) { sigLat /= sigMag; sigLong /= sigMag; }
-    // Max angle comes from the DBG feel cycle (Player ▸ "Roll feel");
+    // Max angle comes from the DBG feel cycle (Ship Tilt ▸ "Roll feel");
     // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
     // levels out through this same easing rather than a separate branch.
     const maxAngle = getActivePlayerRollAngle();
@@ -2303,8 +2311,9 @@ export class GameEngine {
    * needs no game knowledge at all — but BACK means something different on
    * each screen, and only the engine knows which is up.  Deliberately does
    * NOT dismiss the death or stage-clear screens: those are decisions
-   * (respawn / restart / quit; descend / return), and a button that quietly
-   * picks one for you is worse than no button.
+   * (respawn / restart / quit; descend / return — though with the descent
+   * rift switched off the stage-clear screen offers only CONTINUE), and a
+   * button that quietly picks one for you is worse than no button.
    */
   public menuBack() {
     // The debug panel floats ABOVE every other overlay, so it is the one BACK
@@ -2782,8 +2791,8 @@ export class GameEngine {
     }
 
     // Stage cleared: the player is ALIVE, so this PAUSES rather than ends —
-    // same freeze as the death screen, dismissed by CONTINUE, after which the
-    // choice (descend / go home) is made in the world by flying to a rift.
+    // a freeze the death screen deliberately does NOT share, dismissed by
+    // CONTINUE, after which the player flies home through the return rift.
     if (this.stageClearPending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
@@ -3467,12 +3476,13 @@ export class GameEngine {
       // Resolved ONCE and reused for the burst below, so a class's look and
       // its voice come from a single classification.
       // STRUCTURE deaths are IDEMPOTENT (V9).  progressFracture can kill
-      // an entity from INSIDE the damage-feedback hook (min-remainder),
-      // after which the outer damage path still sees health <= 0 and
-      // raises onDeath again — the cached decomposition then spawned an
-      // exact duplicate of every fragment (user report: large rocks
-      // releasing doubled shards).  Enemies/player already guard via
-      // isExploding; structures get an explicit stamp, cleared on regen
+      // an entity from INSIDE the damage-feedback hook (`killByFracture`:
+      // the last cell leaving, nothing left binding, or the legacy
+      // min-remainder rule), after which the outer damage path still sees
+      // health <= 0 and raises onDeath again — the cached decomposition
+      // then spawned an exact duplicate of every fragment (user report:
+      // large rocks releasing doubled shards).  Enemies/player already guard
+      // via isExploding; structures get an explicit stamp, cleared on regen
       // revival (completeRegen reuses the entity object).
       if (entity.type === EntityType.STRUCTURE) {
           if (entity.deathDispatched === true) return;
@@ -3528,8 +3538,8 @@ export class GameEngine {
       // flips `active` directly), so they correctly award nothing.
       // scoreScale (default 1) lets the snitch board-clear pay a fraction
       // of the normal kill value per swept enemy.
-      // Boss capstone ((h)): the model-(d) payout (salvage + timed shop
-      // discount) rides ON TOP of the normal enemy death path below — a boss is
+      // Boss capstone ((h)): the payout (score + a salvage spray + a random
+      // module) rides ON TOP of the normal enemy death path below — a boss is
       // still an enemy, so it explodes, pays tier kill points and sprays shards
       // like one.  A rival-stolen kill pays the player nothing, same rule.
       if (entity.isBoss === true && entity.type === EntityType.ENEMY
@@ -4072,7 +4082,7 @@ export class GameEngine {
 
     // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
     // pass, so a phase that raises an escort brood arms its timer on the same
-    // step it is entered.  Also ticks the timed shop-discount window.
+    // step it is entered.
     updateBosses(this, dt);
     // (h) regen trait: tick the burst buckets and heal.  Not boss-only — any
     // enemy carrying the trait is served here.
@@ -4407,9 +4417,12 @@ export class GameEngine {
     // why the sync sits here rather than on the weapon-change path: what the
     // trigger should feel like is a function of what the player is holding
     // RIGHT NOW, and "charging" is a state no weapon-change event fires for.
-    // Three cases, in order of precedence: nothing to fire (no gun, or EMP'd
-    // — the trigger goes slack, which is the disable made physical), winding
-    // up a charged shot (a hard wall), or the equipped gun's own profile.
+    // In order of precedence: the SCHEME first (trigger-thrust makes the
+    // right trigger a throttle too; face-fire moves the gun off it, so it goes
+    // slack), then nothing to fire (no gun, or EMP'd — the trigger goes slack,
+    // which is the disable made physical), then winding up a charged shot
+    // (`chargeTrigger`, a slope that stiffens as the ring fills), and
+    // otherwise the equipped gun's own profile.
     // The call is a struct compare when nothing changed; it is a no-op
     // entirely unless the player has opted into WebHID.
     const thrustScheme = this.input.usesTriggerThrust();
@@ -5325,11 +5338,11 @@ export class GameEngine {
       return area === 'inventory' || idx < this.slotsUnlocked(area);
   }
 
-  /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
-   *  Weapons rows — the wave-map test path; bypasses the drydock guard).
-   *  Fills the first empty gun hex, else replaces the hex the ACTIVE
-   *  weapon is not in; a displaced gun drops to the inventory if there
-   *  is room (else it is scrapped — DBG only). */
+  /** DBG: mount one gun variety onto a gun hex (the debug panel's Weapons &
+   *  Modules ▸ Weapons rows — the wave-map test path; bypasses the drydock
+   *  guard).  Fills the first empty gun hex, else replaces the hex the
+   *  ACTIVE weapon is not in; a displaced gun drops to the inventory if
+   *  there is room (else it is scrapped — DBG only). */
   public debugGrantWeapon(id: string) {
       const mDef = MODULE_DEFS.find(m => m.weapon === (id as WeaponType));
       if (!mDef) return;
@@ -5928,10 +5941,11 @@ export class GameEngine {
               if (bound) { stillBound++; continue; } // this hit only cracks it
               if (cells.length <= 1) { hitIdx = cand.i; c = cc; break; }
               // The remainder is the UNION of the cells that stay (V15).
-              // The arc splice below is the fallback: it is exact where it
-              // applies but refuses once a survivor's whole outline lies on
-              // the boundary, which is precisely the tail — and the tail is
-              // where "the last pieces dump at death" comes from.
+              // The arc splice below serves only a body with no grain model:
+              // it is exact where it applies but refuses once a survivor's
+              // whole outline lies on the boundary, which is precisely the
+              // tail — and the tail is where "the last pieces dump at death"
+              // comes from.
               const survivors = cells.filter((_, i) => i !== cand.i);
               // For a grain material the body's outline IS the union of
               // its surviving grains, and that is what makes the break
@@ -6648,22 +6662,12 @@ export class GameEngine {
   // ─── (h) Bosses ────────────────────────────────────────────────────────
   //
   // A boss is an ordinary counted wave enemy with a BOSS_DEFS phase table.
-  // Everything below is bookkeeping around that: stamp the phase whose
-  // health-fraction gate the boss has fallen past, keep the live-boss handle
-  // for the HUD, and pay the model-(d) bounty on death.
+  // The bookkeeping around that — stamping the phase whose health-fraction
+  // gate the boss has fallen past, the live-boss handle for the HUD, and the
+  // capstone bounty on death — lives in engine/bosses.ts.  What stays on the
+  // engine is the spawn seam (`handleBossSpawn`), the regen trait pass and
+  // `debugSpawnBoss`, further down.
 
-  /** Timed boss shop-discount readout — undefined when no window is running,
-   *  so the shop UI can show the beat only while it is live. */
-  /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
-   *  the same `openPortal` abstraction the dragon and the rivals use. */
-  /** ── The FLASHLIGHT TOOL (user call) ────────────────────────────────
-   *  Cycle the ship's light: off → medium → high → off.  Reachable only
-   *  while the Flashlight Kit module is installed and active
-   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
-   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
-   *  FALLBACK when neither of those is in range — the arbitration in
-   *  updateInteractables stays nearest-wins, the light just claims the
-   *  gesture nothing else wanted. */
   /** Fire a scan (scanner rework, user call).  The scanner is a TOOL the
    *  player operates rather than a passive reveal, so this is the whole
    *  contract: a wavefront leaves the ship, and whatever it crosses is
@@ -6883,10 +6887,11 @@ export class GameEngine {
    *  are stamped INDIVIDUALLY (`detectedAt`) because there are tens of them
    *  and a stale mark left behind by a contact that moved is the whole point
    *  of a sonar reveal.  MATERIALS are not: there can be thousands of mobile
-   *  shards, so tier 1 is revealed as a RADIUS the minimap tests at draw
-   *  time (`materialRevealRadius`), which costs nothing per shard.  The two
-   *  halves are different because the entity counts are different by three
-   *  orders of magnitude, not because they mean different things.
+   *  shards, so the front does not stamp them — when the ping COMPLETES,
+   *  `discoverStructures` flags every tile and every large shard inside the
+   *  tier-1 radius as `found` in one pass.  The two halves are different
+   *  because the entity counts are different by three orders of magnitude,
+   *  not because they mean different things.
    *
    *  Nothing here allocates, and there is no per-entity countdown anywhere:
    *  freshness is a subtraction against `simClock`. */
@@ -6905,9 +6910,9 @@ export class GameEngine {
 
       this.scanPingRadius = cur;
       if (cur >= this.scanPingMax) {
-          // The front has run its course.  `materialRevealAt` is when it
-          // FINISHED, so the material bubble fades on the same clock a
-          // stamped contact does.
+          // The front has run its course.  The `materialReveal*` fields
+          // record where and when it finished, but nothing reads them any
+          // more — the reveal is the `discoverStructures` pass below.
           this.scanPingRadius = 0;
           this.materialRevealAt = now;
           this.materialRevealRadius = this.scanRanges[1] ?? 0;
@@ -6921,13 +6926,22 @@ export class GameEngine {
   }
 
   /** When the last completed ping finished, and how far its tier-1 reach
-   *  went.  Together these are the MATERIAL reveal — a bubble around where
-   *  the player was, rather than a stamp on each of a few thousand shards. */
+   *  went.  UNREAD: these drove the old radius-based MATERIAL reveal, which
+   *  `discoverStructures` replaced; `draw` still copies them to the
+   *  renderer, which reads none of them. */
   public materialRevealAt: number = -1e9;
   public materialRevealRadius: number = 0;
   public materialRevealX: number = 0;
   public materialRevealY: number = 0;
 
+  /** ── The LIGHT TOOL (user call) ─────────────────────────────────────
+   *  Cycle the ship's light: off → medium → high → off.  Reachable only
+   *  while the Light module is installed and active
+   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
+   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
+   *  FALLBACK when neither of those is in range — the arbitration in
+   *  updateInteractables stays nearest-wins, the light just claims the
+   *  gesture nothing else wanted. */
   public cycleShipLight(): boolean {
       if (!this.flashlightEquipped) return false;
       this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
@@ -6937,6 +6951,8 @@ export class GameEngine {
       return true;
   }
 
+  /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
+   *  the same `openPortal` abstraction the dragon and the rivals use. */
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
       // THE LADDER STOPS HERE (user call).  One seam for both ways a boss
@@ -7481,9 +7497,9 @@ export class GameEngine {
       // again once it has resolved the arrival rift; here it charts the home
       // station, which is what a fresh run on the hub begins with.
       this.chartLandmarks();
-      // A new map's contacts have never been scanned.  The material bubble is
-      // pushed back out of range rather than cleared to 0, so a scan that was
-      // in flight when the player transited cannot leave a stale reveal.
+      // A new map's contacts have never been scanned, so a ping in flight when
+      // the player transited is dropped.  (`materialRevealAt` is reset with
+      // it, though nothing reads it any more — see its declaration.)
       this.scanPingRadius = 0;
       this.materialRevealAt = -1e9;
   }
