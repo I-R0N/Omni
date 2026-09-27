@@ -1,12 +1,16 @@
 # Configuration Changes — Phased Plan
 
 > **Status: FORWARD-LOOKING PLAN, not implementation description.**  Unlike
-> `POLISH_ARCHITECTURE.md` / `PARKING_LOT.md` this doc is *current* as a plan,
-> but nothing in it should be read as shipped.  `CLAUDE.md` stays the source
-> of truth for what exists.  As elements land, strike them here and record
-> them in `CLAUDE.md` per its §10 rules.
+> `PARKING_LOT.md` this doc is *current* as a plan, but nothing in it should
+> be read as shipped unless it is struck and marked LANDED.  `CLAUDE.md`
+> stays the source of truth for what exists.  As elements land, strike them
+> here and record them in `CLAUDE.md` per its §10 rules.
 
 ## 0. How this document is used
+
+**Status (2026-09-26):** Phase A is complete and was promoted to `main`
+with `plan-completion` (PR #93, 2026-09-21).  Phases B–G are the live
+queue; none of them has landed.
 
 The user supplied a large list of major configuration/design changes to
 investigate **before** merging `claude/plan-completion` into `main`.  This
@@ -43,7 +47,7 @@ restating it.
 **Second companion doc (from the PR #91 voronoi/grain gauntlet).**
 `docs/MATERIAL_GRAIN_SPEC.md` owns MATERIALS, FRACTURE and BONDING: the
 grain model (HP *derived* from grain boundaries rather than authored),
-unified bonding, per-grain materials (its Tier C).  Its A1–A3/B1 stages
+unified bonding, per-grain materials (its Tier C).  Its A1–A4/B1 stages
 are already SHIPPED — see CLAUDE.md §5/§8 — so unlike the portal doc it
 is part reality, part proposal.  It constrains this plan's B1/B2 (mining
 is now a fracture interaction, not an HP race) and E1 (assembly runs on
@@ -70,11 +74,11 @@ graph; nothing in this plan's phases should couple them.
 
 | Request | Element(s) | Phase |
 |---|---|---|
-| Bubble aggro never times out | A1 | **A (pre-merge)** |
-| Post-attack "green" bubble is immovable; player slams to a stop | A2 | **A (pre-merge)** |
+| Bubble aggro never times out | A1 | **A — landed (PR #97)** |
+| Post-attack "green" bubble is immovable; player slams to a stop | A2 | **A — landed (PR #97)** |
 | Penetration weapon module (+1 pierce per level) | A3 | **A — landed, then RETIRED by PR #102's kinetic model** |
-| Scanner tool/module (materials / enemies / portals, per level) | A4 | **A (pre-merge)** |
-| Stations sell additional module slots, capped per ship | A5 | **A (pre-merge, stretch)** |
+| Scanner tool/module (materials / enemies / portals, per level) | A4 | **A — landed, reworked (PR #96)** |
+| Stations sell additional module slots, capped per ship | A5 | **A — landed (PR #96)** |
 | Base miner ship start; weak mining blaster; can't portal without engine; fuel | B1–B4 | B |
 | Mine tiles for salvage; material buckets; storage/inventory slots | B2, B3 | B |
 | Home mining colony arena (safe, training grounds, tower-defense base) | C1–C4 | C |
@@ -99,7 +103,7 @@ graph; nothing in this plan's phases should couple them.
 
 ---
 
-## 2. Phase A — pre-merge (this branch → `claude/plan-completion`)
+## 2. Phase A — pre-merge (this branch → `claude/plan-completion`) — COMPLETE; promoted to `main` by PR #93
 
 Selection rule: an element goes pre-merge only if it (a) fixes a live bug,
 or (b) drops cleanly into an existing seam without prejudging the Phase B–D
@@ -107,8 +111,8 @@ redesigns.  Everything here is a bounded session, **not** a gauntlet —
 except that A1+A2 together may warrant a short bubble-behavior mini-gauntlet
 if the A2 root-cause turns out to be systemic.  (It did not — see A2 below.
 A1+A2 have LANDED via PR #97, and A3+A4+A5 via PR #96 — **Phase A is
-COMPLETE**; what remains is the `plan-completion` → `main` merge, with the
-FULL suite run at that seam per the clarified rule in CLAUDE.md §7.)
+COMPLETE**, and the `plan-completion` → `main` merge it was waiting on
+followed (PR #93, 2026-09-21).)
 
 ### ~~A1 — Bubble aggro timeout~~  *(bug/behavior fix, small)*  — **LANDED**
 
@@ -189,7 +193,9 @@ the player (the physics handles let a test call
 > RATE that SHIPS AT 0 (a thing to be judged, not a balance statement);
 > the Laser's own pierce went 99 → 4 now that piercing can carry a cost;
 > and pierce is a lifetime budget — ricochets buy coverage, never extra
-> damage events.  Full detail in CLAUDE.md §5.
+> damage events.  (The falloff rate was since deleted too — PR #102 made
+> falloff arithmetic; CLAUDE.md §5 "PENETRATION IS DELETED AS A MODULE"
+> is what survives.)
 >
 > **THEN SUPERSEDED — the module was DELETED by unified impact physics
 > step 5 (PR #102, user call).**  The `piercing` family, `pierceBonus`,
@@ -264,6 +270,11 @@ modules; effect zeroed when adjacency-offline (the Light's
 `applyModuleEffects` pattern).  Phase D note: scanner survives the module
 rework as a catalog row.
 
+*SUPERSEDED in part by the landed rework above: hidden and secret POIs
+are the Mk V / Mk IV rungs, not a Mk III tier, and with no scanner there
+are no arrows at all.  Only the last point — discovered state is per
+node — still stands.*
+
 **Forward constraint (PORTAL_AND_WORLD_LAYER_PLAN §4):** the scanner is
 the designated *reveal mechanism for hidden wormholes* (G4) — its Mk III
 "portals/POIs map-wide" tier is what will flip an undiscovered wormhole to
@@ -283,8 +294,9 @@ build A4 state anywhere that would fight that.
 > untouched and the whole feature is one destination guard plus inert UI
 > hexes.  `MODULE_SLOT_UNLOCK.START` equals the cap today, so a shipped
 > run is unchanged; the unlock count is the SEAM for Phase D's ship
-> catalog (D2), exactly as `SHIP_WEIGHT.HULL_BASE` is.  DBG ▸ Modules ▸
-> "Lock slots" makes the locked state reachable in play.
+> catalog (D2), exactly as `SHIP_WEIGHT.HULL_BASE` is.  DBG ▸ Economy ▸
+> Salvage & Stations ▸ "Lock slots" makes the locked state reachable in
+> play.
 
 The request ("stations sell new module slots, capped per ship") is really
 the first brick of Phase D's ship catalog.  A pre-merge version can stay
@@ -296,8 +308,9 @@ and the hex-flower UI rendering locked hexes for unpurchased slots.
 semantics; if it starts pulling the adjacency table apart, park it into
 Phase D where the ship catalog will rebuild that layer anyway.
 
-**Phase A exit gate**: all three validation gates green — `typecheck`,
-`build`, and the FULL test suite, which since PR #97 is
+**Phase A exit gate** (MET — Phase A merged via PRs #96/#97, and
+`plan-completion` → `main` via PR #93): all three validation gates
+green — `typecheck`, `build`, and the FULL test suite, which since PR #97 is
 **`npm run test:full`** (`npm test` now runs only the boot/loop SMOKE
 scope; do not read a green `npm test` as full validation) — `CLAUDE.md`
 updated per element, then merge this branch to `claude/plan-completion`
@@ -559,9 +572,9 @@ section says where each piece sits in the phase order and points there.
   g1500 / range 525; peak pull 0.15 px/step) because it read as too
   powerful, and the same subtlety makes a rift hard to spot — the portal
   doc recommends hidden portals carry their own stronger well plus
-  slightly louder cues, A/B'd on the existing DBG Portals knobs (§5
-  decision #10).  Runs as a session with DBG A/B, after G1; can land
-  before or alongside G2.
+  slightly louder cues, A/B'd on the existing DBG ▸ World & Maps ▸
+  Portals knobs (§5 decision #10).  Runs as a session with DBG A/B,
+  after G1; can land before or alongside G2.
 - **G5 — Maze / labyrinth modes.**  *(New element, from the portal doc
   §5.)*  Once portals are edges (G1), a maze is a *generator* over the
   same node/edge graph — many small nodes with several edges each, some
@@ -574,7 +587,10 @@ section says where each piece sits in the phase order and points there.
   surface and must be costed before a maze mode is committed).  Sits in
   the worldgen gauntlet after G2.
 
-### Parked (recorded in PARKING_LOT.md when this plan is adopted)
+### Parked
+
+The first two items are recorded here only — the promise to copy them into
+PARKING_LOT.md when this plan was adopted was never kept.
 
 - **Level 3 / Level 4 arenas** — L4 (walking/boarding) is a second game
   mode (new player controller, camera, collision world); L3 is meaningless
@@ -585,8 +601,9 @@ section says where each piece sits in the phase order and points there.
   decision, not a phase.  The single-player-shaped subset (a *local*
   overworld node keyed to coordinates, portals gated on an engine tier)
   can ride Phase G if wanted.
-- **Proper bubble/roamer rotational mechanics** — already parked in
-  PARKING_LOT.md; unchanged.
+- **Proper rotational mechanics** (angular state and impact torque in the
+  impulse solver) — already parked in PARKING_LOT.md §"Rotational
+  mechanics for shards and asteroids"; unchanged.
 
 ---
 
@@ -656,8 +673,8 @@ argument for each; listed here so the guidance session has one checklist):
    generation can drive it (and every other thing in this game is drawn,
    not blitted).
 10. **(G4) Discovery cue strength** — own stronger well, louder cues at
-    the same pull, or scanner-first.  A/B on the DBG Portals knobs; do
-    not decide on paper.
+    the same pull, or scanner-first.  A/B on the DBG ▸ World & Maps ▸
+    Portals knobs; do not decide on paper.
 11. **(G5) Maze legibility** — small mazes, a map screen, or physical
     breadcrumbs (the transit-debris trail is a candidate).  A map screen
     is a genuinely new UI surface: cost it before committing to a maze
