@@ -903,20 +903,30 @@ test.describe('the weapons, fired into the world', () => {
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: s.position.x, y: s.position.y }, undefined, false);
       return { sx: s.position.x };
     });
+    // Snapshot in the SAME poll that sees the hit: the pulse lasts 0.3 s,
+    // so a separate read afterwards can find the beam already gone.
     await page.waitForFunction(() => {
       const e = (window as any).__omniEngine;
-      return e.energy.beam && e.energy.beam.hit;
-    }, null, { timeout: 5000 });
+      const b = e.energy.beam;
+      if (!(b && b.hit)) return false;
+      (window as any).__beamHit = { x1: b.x1, hitId: e.energy.lastBeamHitId };
+      return true;
+    }, null, { timeout: 5000, polling: 'raf' });
     const r = await engine(page, e => {
-      const b = e.energy.beam, s = (window as any).__bar;
-      return { x1: b.x1, sx: s.position.x, hitId: e.energy.lastBeamHitId, id: s.id };
+      const b = (window as any).__beamHit, s = (window as any).__bar;
+      // The beam's end point is in the SHIP's frame, so a bar near the torus
+      // seam has it a map-width away; measure the gap wrapped.
+      const W = e.currentMap.width;
+      let gap = s.position.x - b.x1;
+      gap -= Math.round(gap / W) * W;
+      return { gap, hitId: b.hitId, id: s.id };
     });
     expect(r.hitId, 'the beam hit the bar').toBe(r.id);
     // The face is 4 in front of the bar's centre.  A circle hit would sit
     // near 40 in front (plus half the beam's width).
-    expect(r.sx - r.x1, 'the beam ends on the face, not on a bounding circle')
+    expect(r.gap, 'the beam ends on the face, not on a bounding circle')
       .toBeLessThan(8);
-    expect(r.sx - r.x1).toBeGreaterThan(0);
+    expect(r.gap).toBeGreaterThan(0);
     watch.assertClean();
   });
 
