@@ -889,15 +889,31 @@ test.describe('the weapons, fired into the world', () => {
         const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile');
         p.position.x = t.position.x - 90; p.position.y = t.position.y;
         p.velocity.x = 0; p.velocity.y = 0;
+        p.health = p.maxHealth = 1e9;
+        // An ACTOR in front of the pane trips the incendiary shell there, so
+        // its blast lands on glass (a shell bores clean through panes, and
+        // left alone it would go off on its fuse past the cluster).
+        const foe = e.waves.spawnAt('RAMMER_1', { x: t.position.x - 40, y: t.position.y }, e.waveContext(), false);
+        foe.position.x = t.position.x - 40; foe.position.y = t.position.y;
+        foe.maxSpeed = 0; foe.velocity.x = 0; foe.velocity.y = 0;
+        foe.health = foe.maxHealth = 1e6; foe.shield = 0; foe.maxShield = 0;
         p.currentWeapon = k; p.weaponCooldown = 0;
         e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
       }, key);
-      await advanceSim(page, 0.9);   // the fuse (0.42 s) and the ring's whole life
-      return engine(page, e => {
-        const rings = e.currentMap.entities.filter((x: any) => x.isExplosionRing && x.validHitIds);
-        const hot = e.energy.heated.filter((x: any) => (x.heat ?? 0) > 0.01).length;
-        return { maxRing: Math.max(0, ...rings.map((x: any) => x.validHitIds.size)), hot };
-      });
+      // Sample PEAKS across the fuse (0.42 s) and the ring's whole life: the
+      // shell bores through panes before it goes off, and heat on the glass it
+      // reaches is already cooling by the end of the window.
+      let maxRing = 0, hot = 0;
+      for (let i = 0; i < 9; i++) {
+        await advanceSim(page, 0.1);
+        const r = await engine(page, e => {
+          const rings = e.currentMap.entities.filter((x: any) => x.isExplosionRing && x.validHitIds);
+          return { ring: Math.max(0, ...rings.map((x: any) => x.validHitIds.size)),
+                   hot: e.energy.heated.filter((x: any) => (x.heat ?? 0) > 0.01).length };
+        });
+        maxRing = Math.max(maxRing, r.ring); hot = Math.max(hot, r.hot);
+      }
+      return { maxRing, hot };
     };
     const bare = await fire('cannon');
     const hot = await fire('cannon+thermal');
