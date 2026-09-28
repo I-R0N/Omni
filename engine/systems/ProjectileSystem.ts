@@ -172,7 +172,7 @@ export class ProjectileSystem {
       // override and wins (BOSS_WEAPONS.SIEGE).  Computed ONCE here so the
       // pooled and fresh arms below cannot disagree about it.
       const blastDamage = config.explosionRadius && config.explosionRadius > 0
-        ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed))
+        ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed) * (config.blastScale ?? 1))
         : config.explosionDamage;
       // The charged bolt (projectile + electric) keeps the old Lightning's
       // curve toward targets and its electric render.
@@ -216,6 +216,7 @@ export class ProjectileSystem {
         // a recycled shell that kept a previous gun's fuse would detonate on
         // a timer it never armed.
         pooled.detonateOn = config.detonateOn;
+        pooled.boreCostScale = config.boreCostScale;
         pooled.fuseTimer = config.fuseSeconds;
         // Unconditional like the fuse beside it, and for a sharper reason: a
         // recycled shell that kept `detonated` from its last life would never
@@ -275,6 +276,7 @@ export class ProjectileSystem {
           explosionDamage: blastDamage,
           explosionKnockback: config.explosionKnockback,
           detonateOn: config.detonateOn,
+          boreCostScale: config.boreCostScale,
           fuseTimer: config.fuseSeconds,
           blastPending: false,
           detonated: false,

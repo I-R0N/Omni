@@ -99,9 +99,9 @@ test.describe('the weapon module table', () => {
       'projectile+explosive': 'cannon', radial: 'cannon', 'radial+thermal': 'cannon+thermal',
       'beam+magnetic': 'beam',
     });
-    // The bare Cannon IS the old Plasma Cannon.
+    // The bare Cannon is a time-fused penetrator: the old fuse, a tiny bite.
     expect(r.cannonFuse).toBe(0.42);
-    expect(r.cannonDamage).toBe(18);
+    expect(r.cannonDamage).toBe(3);
     expect(r.garbage).toBe('projectile');
     expect(r.badKey).toBeNull();
   });
@@ -254,9 +254,17 @@ test.describe('energy arithmetic (pure)', () => {
       const caps = { maxHops: 4, maxTargets: 12, maxRadius: 400, hopRange: 150, branches: 3 };
       const nodes = E.planChain(bodies[0], { x: 0, y: 0 }, 50, caps, neighbours, dist);
       const ids = nodes.map((n: any) => n.e.id);
-      // An insulator first: the arc lands and stops there.
+      // A POOR conductor first (glass, 0.1): the arc lands and passes on only
+      // weakly — low but not zero conductivity (user call).
       const glass = { id: 'g', active: true, shardVariant: 'glass-tile', position: { x: 0, y: 0 }, size: { x: 10, y: 10 } };
-      const stopped = E.planChain(glass, { x: 0, y: 0 }, 50, caps, neighbours, dist);
+      const weak = E.planChain(glass, { x: 0, y: 0 }, 50, caps, neighbours, dist);
+      // A TRUE insulator first: the arc lands and stops there.
+      const ins = { id: 'i', active: true, material: 'test_insulator', position: { x: 0, y: 0 }, size: { x: 10, y: 10 } };
+      E.MATERIALS.test_insulator = { ...E.MATERIALS.metal, conductivity: 0.005 };
+      const stopped = E.planChain(ins, { x: 0, y: 0 }, 50, caps, neighbours, dist);
+      delete E.MATERIALS.test_insulator;
+      const metalHop = nodes.filter((n: any) => n.depth === 1).map((n: any) => n.mag);
+      const glassHop = weak.filter((n: any) => n.depth === 1).map((n: any) => n.mag);
       const none = E.planChain(null, { x: 5000, y: 5000 }, 50, caps, neighbours, dist);
       const nan = E.planChain(bodies[0], { x: 0, y: 0 }, NaN, caps, neighbours, dist);
       return {
@@ -264,6 +272,7 @@ test.describe('energy arithmetic (pure)', () => {
         maxDepth: Math.max(...nodes.map((n: any) => n.depth)),
         attenuates: nodes.every((n: any) => n.depth === 0 || n.mag < 50),
         stopped: stopped.length, none: none.length, nan: nan.length,
+        weak: weak.length, metalHop: Math.max(...metalHop), glassHop: Math.max(0, ...glassHop),
       };
     });
     expect(r.count).toBeLessThanOrEqual(12);
@@ -271,7 +280,11 @@ test.describe('energy arithmetic (pure)', () => {
     expect(r.unique).toBe(r.count);          // nobody processed twice
     expect(r.maxDepth).toBeLessThanOrEqual(4);
     expect(r.attenuates).toBe(true);
-    expect(r.stopped).toBe(1);               // glass: the arc lands, no chain
+    expect(r.stopped).toBe(1);               // an insulator: the arc lands, no chain
+    expect(r.weak, 'glass passes the arc on').toBeGreaterThan(1);
+    // ...but weakly: the arc out of glass carries glass's conductivity.
+    expect(r.glassHop).toBeGreaterThan(0);
+    expect(r.glassHop).toBeLessThan(r.metalHop * 0.15);
     expect(r.none).toBe(0);                  // nothing in range: nothing, safely
     expect(r.nan).toBe(0);
   });
@@ -612,11 +625,37 @@ test.describe('the weapons, fired into the world', () => {
     expect(hit.id).not.toBeNull();
     expect(hit.chain).toBeGreaterThan(0);
     expect(hit.chain).toBeLessThanOrEqual(12);
-    // Now among INSULATORS only (a glass field, enemies cleared): no
-    // conductor in range — a fizzle and nothing else, safely.
+    // GLASS conducts, weakly (user call: low but not zero): the arc beam
+    // lands on a pane and cracks it, where it used to fizzle.
     await onMap(page, 'GLASS_FIELD');
+    const glass = await engine(page, e => {
+      const p = e.player;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile'
+        && x.mass === Infinity);
+      (window as any).__gl = t;
+      p.position.x = t.position.x - 100; p.position.y = t.position.y; p.rotation = 0;
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'beam+electric'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      return t.id;
+    });
+    await page.waitForTimeout(400);
+    const g = await engine(page, e => {
+      // Judged on whatever the arc actually struck: in a glass field the
+      // nearest conductor in its cone may be a neighbouring pane.
+      const id = e.energy.lastBeamHitId;
+      const t = e.currentMap.entities.find((x: any) => x.id === id);
+      return { hit: id, cracked: !!t && (!t.active
+        || (t.fractureEdgeFill ?? []).some((f: number) => f > 0)) };
+    });
+    expect(g.hit, 'the arc found glass').not.toBeNull();
+    expect(g.cracked, 'and the pane took damage').toBe(true);
+    void glass;
+    // With NOTHING in range at all: a fizzle and nothing else, safely.
     await engine(page, e => {
       const p = e.player;
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' || x.type === 'ENEMY') x.active = false;
+      e.physics.initializeStaticGrid(e.currentMap.entities);
       e.energy.lastBeamHitId = 'sentinel';
       p.currentWeapon = 'beam+electric'; p.weaponCooldown = 0;
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 100, y: p.position.y }, undefined, false);
@@ -678,12 +717,12 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
-  test('GAS: kinetic rounds displace a drifting cloud but never break it; an arc energises it', async ({ page }) => {
+  test('GAS: kinetic rounds shove a drifting puff and break up a static cloud tile; an arc energises gas', async ({ page }) => {
     // Nebula is a GAS (`gas: true` in the material table): it takes no damage
     // from any energy.  A kinetic round passing through a DRIFTING puff shoves
     // it along the round's travel (as a kinetic beam always has); a STATIC
-    // cloud tile has nowhere to go and is left alone; an arc energises a
-    // puff rather than damaging it.
+    // cloud tile is broken up into puffs, as a ship flying through it does;
+    // an arc energises a puff rather than damaging it.
     const watch = await boot(page);
     await onMap(page, 'NEBULA_FIELD');
     // Break a patch of cloud into drifting puffs, well away from the ship.
@@ -743,22 +782,30 @@ test.describe('the weapons, fired into the world', () => {
     expect(arc.hit!.energized, 'an arc energises a gas').toBe(true);
     expect(arc.hit!.active).toBe(true);
     expect(arc.hit!.lostHp, 'and never damages it').toBe(0);
-    // A static cloud TILE: a round passes through and leaves it whole.
+    // A static cloud TILE: a kinetic round breaks it up the way a ship flying
+    // through it does (user call) — into drifting puffs — and flies on.
     const tile = await engine(page, e => {
       const p = e.player;
       const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'nebula-tile'
         && Math.hypot(x.position.x - p.position.x, x.position.y - p.position.y) > 400);
       (window as any).__t = t;
+      (window as any).__n0 = e.currentMap.entities.length;
       p.position.x = t.position.x - 140; p.position.y = t.position.y;
       p.velocity.x = 0; p.velocity.y = 0;
       p.currentWeapon = 'projectile+kinetic'; p.weaponCooldown = 0;
+      const before = new Set(e.currentMap.entities.map((x: any) => x.id));
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      (window as any).__round = e.currentMap.entities.find((x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
       return t.id;
     });
     await page.waitForTimeout(500);
-    const t = await engine(page, e => { const x = (window as any).__t; return { active: x.active, hp: x.health }; });
-    expect(t.active, `tile ${tile} survives a round`).toBe(true);
-    expect(t.hp).toBe(1);
+    const t = await engine(page, e => {
+      const x = (window as any).__t, r = (window as any).__round;
+      return { hp: x.health, broken: x.health <= 0 || !x.active,
+               roundHit: (r.hitEntityIds ?? []).includes(x.id) };
+    });
+    expect(t.broken, `tile ${tile} is broken up by the round`).toBe(true);
+    expect(t.roundHit, 'by that round').toBe(true);
     watch.assertClean();
   });
 
@@ -860,6 +907,95 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
+  test('CANNON: the bare shell is white and weak, and only its FUSE sets it off — not an enemy, not terrain', async ({ page }) => {
+    // User call: the bare cannon is weaker, white, explodes after a set time,
+    // and its shell is a deep, low-damage penetrator that does not blast the
+    // moment it stops.  The Heavy Shell keeps the old shell rules, so it is
+    // the control: into the same wall it stops and blasts early.
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const cfg = await page.evaluate(() => {
+      const E = (window as any).__omniEnergy;
+      const c = E.weaponConfig('cannon');
+      return { color: c.color, detonateOn: c.detonateOn, damage: c.damage };
+    });
+    const hex = cfg.color.replace('#', '');
+    for (let i = 0; i < 3; i++) expect(parseInt(hex.slice(i * 2, i * 2 + 2), 16), 'white').toBeGreaterThan(225);
+    expect(cfg.detonateOn).toBe('fuse');
+
+    // A clean lane: a row of SIX metal tiles, nothing else in the world.
+    await engine(page, e => {
+      const tiles = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'metal-tile'
+        && x.mass === Infinity).slice(0, 6);
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' && !tiles.includes(x)) x.active = false;
+      (window as any).__wall = tiles.map((t: any) => ({ t, snap: JSON.parse(JSON.stringify({
+        poly: t.polygonPoints, size: t.size })) }));
+      e.player.health = e.player.maxHealth = 1e9;
+    });
+    const shoot = (key: string, withFoe: boolean) => engine(page, (e, a: any) => {
+      const p = e.player, P: any = e.physics;
+      const rings = () => e.currentMap.entities.filter((x: any) => x.active && x.isExplosionRing);
+      for (const r0 of rings()) r0.active = false;
+      // Rebuild the wall fresh for every shot: same place, whole, unhit.
+      const wall = (window as any).__wall;
+      const x0 = 2000, y0 = 2000;
+      wall.forEach((w: any, i: number) => {
+        const t = w.t;
+        t.active = true; t.position.x = x0 + i * 34; t.position.y = y0;
+        t.polygonPoints = w.snap.poly; t.size = w.snap.size; t.rotation = 0;
+        delete t.fractureCells; delete t.fractureEdges; delete t.fractureEdgeFill;
+        delete t.fractureBoundaryHp; delete t.shattered; delete t.deathDispatched;
+        t.health = t.maxHealth = t.authoredMaxHealth ?? t.maxHealth;
+      });
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.position.x = x0 - 150; p.position.y = y0; p.velocity.x = 0; p.velocity.y = 0;
+      let foe: any = null;
+      if (a.withFoe) {
+        foe = e.waves.spawnAt('RAMMER_1', { x: x0 - 70, y: y0 }, e.waveContext(), false);
+        foe.position.x = x0 - 70; foe.position.y = y0;
+        foe.maxSpeed = 0; foe.velocity.x = 0; foe.velocity.y = 0;
+        foe.health = foe.maxHealth = 1e6; foe.shield = 0; foe.maxShield = 0;
+      }
+      p.currentWeapon = a.key; p.weaponCooldown = 0;
+      const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: x0 + 400, y: y0 }, undefined, false);
+      const sh = e.currentMap.entities.find((x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+      const blast = sh.explosionDamage, sx = sh.position.x;
+      let ringAt = -1, maxTravel = 0;
+      for (let i = 0; i < 90 && ringAt < 0; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        if (sh.active && !sh.detonated) {
+          let d = sh.position.x - sx; d -= Math.round(d / e.currentMap.width) * e.currentMap.width;
+          maxTravel = Math.max(maxTravel, d);
+        }
+        if (rings().length > 0) ringAt = (i + 1) / 120;
+      }
+      const tilesHit = wall.filter((w: any) => w.t.fractureEdgeFill
+        && w.t.fractureEdgeFill.some((f: number) => f > 0)).length;
+      const foeLost = foe ? 1e6 - foe.health : 0;
+      if (foe) foe.active = false;
+      return { ringAt, maxTravel, tilesHit, blast, foeLost, bite: sh.damage };
+    }, { key, withFoe });
+
+    const bare = await shoot('cannon', true);
+    // Its bite is tiny against its bank, so it passes through the foe (the
+    // overkill rule) — and the contact does not set it off.
+    expect(bare.foeLost, 'it struck the foe').toBeGreaterThan(0);
+    expect(bare.ringAt, 'an enemy does not set it off: it goes off on its fuse (0.42 s)').toBeGreaterThan(0.38);
+    expect(bare.ringAt).toBeLessThan(0.5);
+    // The blast is the weapon's damage, but weaker than the old Plasma Cannon (20.8 peak).
+    expect(bare.blast).toBeGreaterThan(bare.bite * 2);
+    expect(bare.blast).toBeLessThan(20.8 * 0.75);
+
+    const heavy = await shoot('cannon+kinetic', false);
+    const deep = await shoot('cannon', false);
+    expect(heavy.ringAt, 'control: the Heavy Shell stops in the metal and blasts before its fuse').toBeLessThan(0.38);
+    expect(deep.ringAt, 'the bare shell does not blast because it met terrain').toBeGreaterThan(0.38);
+    expect(deep.tilesHit, 'it bores on through the wall').toBeGreaterThanOrEqual(4);
+    expect(deep.maxTravel).toBeGreaterThan(heavy.maxTravel + 100);
+    watch.assertClean();
+  });
+
   test('the module path: a modifier touching a gun changes what it fires', async ({ page }) => {
     const watch = await boot(page);
     await onMap(page, 'GLASS_FIELD');
@@ -930,11 +1066,180 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
-  test('HEAT: a fragment is as hot as the body it broke off', async ({ page }) => {
+  test('LIGHT: a beam reflects off metal, passes through glass (bending, splitting, leaving a little on each grain boundary), and stops in rock', async ({ page }) => {
+    // User call: beams split, pass through and reflect by MATERIAL PROPERTY
+    // (reflectivity, transmissivity, refractive index, per-boundary scatter /
+    // loss / split).  One lane, one tile, three materials.
+    const watch = await boot(page);
+    const lane = async (map: string, variant: string) => {
+      await onMap(page, map);
+      await engine(page, (e, v: string) => {
+        const p = e.player, P: any = e.physics;
+        const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === v && x.mass === Infinity);
+        for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+        t.rotation = 0; t.health = t.maxHealth = 1e9;
+        delete t.fractureCells; delete t.fractureEdges; delete t.fractureEdgeFill;
+        P.initializeStaticGrid(e.currentMap.entities);
+        p.position.x = t.position.x - 160; p.position.y = t.position.y + 3;
+        p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+        p.currentWeapon = 'beam'; p.weaponCooldown = 0;
+        (window as any).__lt = t;
+        (window as any).__light = null;
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y + 3 }, undefined, false);
+      }, variant);
+      await page.waitForFunction(() => {
+        const e = (window as any).__omniEngine, b = e.energy.beam;
+        if (!(b && b.hit && b.light.nSeg > 0)) return false;
+        (window as any).__light = { segs: b.light.segs.slice(0, b.light.nSeg * 5), n: b.light.nSeg };
+        return true;
+      }, null, { timeout: 5000, polling: 'raf' });
+      return engine(page, e => {
+        const L = (window as any).__light, t = (window as any).__lt;
+        const W = e.currentMap.width;
+        const rel = (x: number) => { let d = x - t.position.x; return d - Math.round(d / W) * W; };
+        const segs = [] as any[];
+        for (let k = 0; k < L.n; k++) {
+          const o = k * 5;
+          segs.push({ x0: rel(L.segs[o]), x1: rel(L.segs[o + 2]),
+                      dx: L.segs[o + 2] - L.segs[o], dy: L.segs[o + 3] - L.segs[o + 1], f: L.segs[o + 4] });
+        }
+        const edges = (t.fractureEdgeFill ?? []).filter((f: number) => f > 0);
+        return { segs, n: L.n, boundariesHit: edges.length,
+                 maxOnOne: edges.length ? Math.max(...edges) : 0, r: Math.max(t.size.x, t.size.y) / 2 };
+      });
+    };
+    const metal = await lane('METAL_FIELD', 'metal-tile');
+    // A MIRROR: a second segment leaves the face heading back toward the ship.
+    expect(metal.n, 'the beam reflected').toBeGreaterThan(1);
+    expect(metal.segs[1].dx, 'back the way it came').toBeLessThan(0);
+    expect(metal.segs[1].f, 'carrying most of the light').toBeGreaterThan(0.6);
+
+    const glass = await lane('GLASS_FIELD', 'glass-tile');
+    // Through the pane and out of the far side.
+    expect(Math.max(...glass.segs.map((q: any) => q.x1)), 'the beam came out of the far side').toBeGreaterThan(glass.r + 20);
+    // Bent and split inside: several segments within the pane, not one.
+    expect(glass.segs.filter((q: any) => Math.abs(q.x0) < glass.r && Math.abs(q.x1) < glass.r + 2).length,
+      'it crossed grain boundaries inside').toBeGreaterThan(1);
+    expect(glass.n, 'and split').toBeGreaterThan(4);
+    // A little energy on EACH boundary it crossed — low damage per boundary.
+    expect(glass.boundariesHit, 'it left energy on several grain boundaries').toBeGreaterThan(1);
+    expect(glass.maxOnOne, 'but only a little on each').toBeLessThan(1);
+
+    const rock = await lane('ROCK_FIELD', 'rock-tile');
+    // Opaque and dull: the light ends at the face.
+    expect(Math.max(...rock.segs.map((q: any) => q.x1)), 'nothing gets through rock').toBeLessThan(rock.r);
+    expect(Math.max(0, ...rock.segs.slice(1).map((q: any) => q.f)), 'and almost nothing comes back').toBeLessThan(0.1);
+    watch.assertClean();
+  });
+
+  test('LIGHT: the kinetic beam is a burst of pulses that FLY, reflect off metal and chip rock', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player, P: any = e.physics;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'metal-tile' && x.mass === Infinity);
+      for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+      t.rotation = 0; t.health = t.maxHealth = 1e9;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.position.x = t.position.x - 200; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+      p.currentWeapon = 'beam+kinetic'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      const alive = () => e.energy.pulses.filter((q: any) => q.alive);
+      const W = e.currentMap.width;
+      const rel = (x: number) => { let d = x - t.position.x; return d - Math.round(d / W) * W; };
+      let most = 0, firstX: number[] = [], back = false;
+      for (let i = 0; i < 60; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        const a = alive();
+        most = Math.max(most, a.length);
+        if (i < 6 && a.length) firstX.push(rel(a[0].x));
+        if (a.some((q: any) => q.ux < -0.5 && rel(q.x) < 0)) back = true;
+      }
+      return { most, firstX, back, burst: e.energy.burst === null };
+    });
+    expect(r.most, 'several pulses in flight at once').toBeGreaterThan(2);
+    // A pulse is not instantaneous: it advances step by step.
+    expect(r.firstX[r.firstX.length - 1]).toBeGreaterThan(r.firstX[0]);
+    expect(r.back, 'a pulse reflected off the metal and flew back').toBe(true);
+    expect(r.burst, 'the burst finished leaving').toBe(true);
+
+    await onMap(page, 'ROCK_FIELD');
+    const rock = await engine(page, e => {
+      const p = e.player;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'rock-tile' && x.mass === Infinity);
+      p.position.x = t.position.x - 150; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'beam+kinetic'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      for (let i = 0; i < 60; i++) { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); }
+      // Judged on whatever the pulses actually struck first.
+      const h = e.currentMap.entities.find((x: any) => x.id === e.energy.lastPulseHitId);
+      return { hit: e.energy.lastPulseHitId,
+               dmg: !!h && (!h.active || (h.fractureEdgeFill ?? []).some((f: number) => f > 0)) };
+    });
+    expect(rock.hit).not.toBeNull();
+    expect(rock.dmg, 'the pulses chipped the rock').toBe(true);
+    watch.assertClean();
+  });
+
+  test('LIGHT CARRIES HEAT: a hot body burns a hull that touches it, and heats a hull near it by radiation', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const setup = (gap: number) => engine(page, (e, gp: number) => {
+      const p = e.player, P: any = e.physics;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'metal-tile' && x.mass === Infinity);
+      for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      for (const h of [...e.energy.heated]) h.heat = 0;
+      p.heat = 0; p.health = p.maxHealth = 1000; p.shield = 0; p.maxShield = 0;
+      const tr = Math.max(t.size.x, t.size.y) / 2, pr = Math.max(p.size.x, p.size.y) / 2;
+      p.position.x = t.position.x - tr - pr - gp; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0;
+      (window as any).__src = t;
+      e.debugHeat(t, 200);
+      t.burnTimer = 6; t.burnRate = 30;   // keep it glowing
+    }, gap);
+    const hold = async () => {
+      let peak = 0;
+      for (let i = 0; i < 12; i++) {
+        await engine(page, e => {
+          const p = e.player, t = (window as any).__src;
+          const tr = Math.max(t.size.x, t.size.y) / 2;
+          // Park the ship where the setup put it (fauna and drift move it).
+          p.velocity.x = 0; p.velocity.y = 0;
+          void tr;
+        });
+        await advanceSim(page, 0.15);
+        peak = Math.max(peak, await engine(page, e => e.player.heat ?? 0));
+      }
+      return { peak, hp: await engine(page, e => e.player.health) };
+    };
+    await setup(2);
+    const touching = await hold();
+    expect(touching.peak, 'a hull touching a hot plate heats up').toBeGreaterThan(0.1);
+    expect(touching.hp, 'and burns').toBeLessThan(1000);
+    await setup(45);
+    const near = await hold();
+    expect(near.peak, 'at a distance, with nothing touching, radiant heat still reaches it').toBeGreaterThan(0.01);
+    expect(near.peak).toBeLessThan(touching.peak);
+    watch.assertClean();
+  });
+
+  test('HEAT: a break DIVIDES the heat between the pieces and what is left — energy is conserved', async ({ page }) => {
+    // User call: heat energy is split by area, not copied onto every piece.
+    // Copying it multiplied the energy by the piece count, and on plastic
+    // (heat is a strong DoT) every hot piece burned, broke and passed the
+    // heat on again — the incendiary chain reaction.
     const watch = await boot(page);
     await onMap(page, 'ROCK_FIELD');
     const r = await engine(page, e => {
       const P: any = e.physics;
+      const area = (x: any) => {
+        const p = x.polygonPoints; let a = 0;
+        for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += p[j].x * p[i].y - p[i].x * p[j].y;
+        return Math.abs(a) / 2;
+      };
       const tiles = e.currentMap.entities.filter((x: any) => x.active
         && x.shardVariant === 'rock-tile' && x.mass === Infinity).slice(0, 2);
       const [a, b] = tiles;
@@ -942,35 +1247,87 @@ test.describe('the weapons, fired into the world', () => {
       e.debugHeat(a, 40);
       const heatA = a.heat;
       let before = e.currentMap.entities.length;
+      let areaBefore = 0;
       for (let i = 0; i < 20 && e.currentMap.entities.length === before; i++) {
+        areaBefore = area(a);
         e.chipStructureAt(a, { x: a.position.x + 6, y: a.position.y }, 6);
       }
       const chips = e.currentMap.entities.slice(before)
         .filter((x: any) => x.shardVariant === 'rock-shard');
+      // Heat in this model is an AMOUNT per body (a deposit heats any body by
+      // the same step, whatever its size), so what a break must conserve is
+      // Σ heat × the material's capacity — energy in damage units.
+      const E = (window as any).__omniEnergy;
+      const energyOf = (x: any) => (x.heat ?? 0) * E.heatCapacityOf(E.materialOf(x));
+      const detach = {
+        before: heatA * E.heatCapacityOf('rock'),
+        after: energyOf(a) + chips.reduce((s: number, c: any) => s + energyOf(c), 0),
+        tileAfter: a.heat, chipHeat: chips.map((c: any) => c.heat ?? 0),
+        tracked: chips.every((c: any) => c.heatTracked === true),
+      };
       // A SHATTER: heat a tile and break it outright.
       e.debugHeat(b, 40);
       const heatB = b.heat;
       before = e.currentMap.entities.length;
       b.health = 0; P.removeStaticEntity(b); e.handleEntityDeath(b); b.active = false;
-      const kids = e.currentMap.entities.slice(before)
-        .filter((x: any) => x.shardVariant === 'rock-shard');
+      const all = e.currentMap.entities.slice(before).filter((x: any) => x.active);
+      const kids = all.filter((x: any) => x.shardVariant === 'rock-shard');
       return {
-        heatA, heatB,
-        chipHeat: chips.map((c: any) => c.heat ?? 0),
-        chipTracked: chips.every((c: any) => c.heatTracked === true),
-        kidHeat: kids.map((c: any) => c.heat ?? 0),
+        heatA, detach, heatB, n: kids.length,
+        shatterBefore: heatB * E.heatCapacityOf('rock'),
+        shatterAfter: all.reduce((s: number, c: any) => s + energyOf(c), 0),
+        kidMax: Math.max(...kids.map((c: any) => c.heat ?? 0)),
       };
     });
     expect(r.heatA).toBeGreaterThan(0.1);
-    expect(r.chipHeat.length, 'a grain came off').toBeGreaterThan(0);
-    for (const h of r.chipHeat) expect(h).toBeCloseTo(r.heatA, 5);
-    expect(r.chipTracked, 'and joined the heated set, so it will cool').toBe(true);
-    expect(r.kidHeat.length, 'the tile shattered').toBeGreaterThan(1);
-    for (const h of r.kidHeat) expect(h).toBeCloseTo(r.heatB, 5);
+    expect(r.detach.chipHeat.length, 'a grain came off').toBeGreaterThan(0);
+    expect(r.detach.tracked, 'the warm grain joined the heated set, so it will cool').toBe(true);
+    // Conserved across the detach: the tile's heat before = the tile's + the chips' after.
+    expect(r.detach.after / r.detach.before).toBeCloseTo(1, 3);
+    expect(r.detach.tileAfter, 'the tile gave some of its heat to the chip').toBeLessThan(r.heatA);
+    for (const h of r.detach.chipHeat) expect(h).toBeLessThan(r.heatA * 0.5);
+    expect(r.n, 'the tile shattered').toBeGreaterThan(1);
+    // Conserved across the shatter (pieces and their dust together), and no
+    // single piece is anywhere near as hot as the tile was.
+    expect(r.shatterAfter / r.shatterBefore).toBeCloseTo(1, 3);
+    expect(r.kidMax).toBeLessThan(r.heatB);
     watch.assertClean();
   });
 
-  test('HEAT: glass that failed from heat hands on heat, but its pieces do not fail again', async ({ page }) => {
+  test('HEAT: incendiary fire on plastic does not chain-react', async ({ page }) => {
+    // The user report this pins: a thermal cannon on plastic tiles broke them
+    // into an enormous number of hot pieces that burned, broke and re-heated
+    // their pieces in turn.  With heat divided on every break the cascade dies
+    // out: measured ~47 plastic-shard deaths over six seconds of fire, against
+    // ~1000 when every piece copied its parent's heat.
+    const watch = await boot(page);
+    await onMap(page, 'PLASTIC_FIELD');
+    await engine(page, e => {
+      const w: any = window; w.__deaths = 0;
+      const orig = e.handleEntityDeath;
+      e.handleEntityDeath = (x: any, o: any) => { if (x.shardVariant === 'plastic-shard') w.__deaths++; return orig(x, o); };
+      e.player.health = e.player.maxHealth = 1e9;
+    });
+    for (let s = 0; s < 4; s++) {
+      await engine(page, e => {
+        const p = e.player;
+        const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'plastic-tile');
+        p.position.x = t.position.x - 160; p.position.y = t.position.y;
+        p.velocity.x = 0; p.velocity.y = 0;
+        for (let i = 0; i < 3; i++) {
+          p.currentWeapon = 'cannon+thermal'; p.weaponCooldown = 0;
+          e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y + (i - 1) * 40 }, undefined, false);
+        }
+      });
+      await advanceSim(page, 1);
+    }
+    await advanceSim(page, 2);
+    const deaths = await engine(page, () => (window as any).__deaths);
+    expect(deaths, 'hot plastic pieces do not burn, break and re-ignite without end').toBeLessThan(250);
+    watch.assertClean();
+  });
+
+  test('HEAT: glass that failed from heat hands on its heat, and its pieces do not fail again', async ({ page }) => {
     const watch = await boot(page);
     await onMap(page, 'GLASS_FIELD');
     const n = await engine(page, e => {
@@ -983,10 +1340,11 @@ test.describe('the weapons, fired into the world', () => {
     });
     expect(n.failed, 'the pane failed').toBe(true);
     expect(n.n).toBeGreaterThan(0);
-    for (const h of n.heat) { expect(h).toBeGreaterThan(0.5); expect(h).toBeLessThan(1); }
+    expect(Math.max(...n.heat), 'the pieces are warm').toBeGreaterThan(0.05);
+    for (const h of n.heat) expect(h).toBeLessThan(1);
     await page.waitForTimeout(1500);
     const alive = await engine(page, () => (window as any).__kids.filter((k: any) => k.active).length);
-    expect(alive, 'no cascade: the hot pieces are still there').toBe(n.n);
+    expect(alive, 'no cascade: the warm pieces are still there').toBe(n.n);
     watch.assertClean();
   });
 

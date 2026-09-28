@@ -6142,8 +6142,11 @@ export const LEGACY_BASE_WEAPON = { damage: 4, cooldown: 0.14, dps: 4 / 0.14 } a
 export const ENERGY_COLORS: Record<EnergyModifier | 'none', string> = {
   none: '#94a3b8', kinetic: '#f97316', electric: '#22d3ee', thermal: '#ef4444',
 };
-/** The Cannon's own colour — the old Plasma Cannon purple, which it keeps. */
+/** The Cannon's modified shells keep the old Plasma Cannon purple family;
+ *  the BARE cannon is white (user call), like the other bare deliveries are
+ *  neutral. */
 export const CANNON_COLOR = '#a855f7';
+export const BARE_CANNON_COLOR = '#f1f5f9';
 
 const DELIVERY_LABEL: Record<Delivery, string> = {
   projectile: 'Projector', beam: 'Beam', spread: 'Scatter', homing: 'Seeker', cannon: 'Cannon',
@@ -6170,14 +6173,20 @@ const DELIVERY_BASE: Record<Delivery, WeaponConfig> = {
   homing: { delivery: 'homing', name: 'Seeker', cooldown: 0.3, speed: 11, damage: 5,
     lifetime: 2.5, color: ENERGY_COLORS.none, size: 6, count: 1, spread: 8, recoil: 0.3,
     mass: 2.6 / BASE_BANK_DIVISOR, homing: true, homingStrength: 0.8 },
-  // THE PLASMA CANNON (user call: the Pulse became the Cannon).  The old
-  // Cannon verbatim: a heavy round with ONE blast at the end of it, tripped
-  // by an ACTOR, by its fuse, or by running out of travel energy in terrain;
-  // the blast is derived from the shell's own energy (`blastDamageFor`).
-  cannon: { delivery: 'cannon', name: 'Cannon', cooldown: 1.40, speed: 18, damage: 18, lifetime: 2.5,
-    color: CANNON_COLOR, size: 16, count: 1, spread: 0, recoil: 4.0,
-    mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
-    detonateOn: 'enemy', fuseSeconds: 0.42 },
+  // THE BARE CANNON (user call): a white, deliberately weak TIME-FUSED
+  // shell.  Nothing trips it — not an enemy, not terrain, not stopping — so
+  // it goes off exactly when its fuse runs out, wherever it has got to.  The
+  // shell itself is a NARROW PENETRATOR: a tiny bite (3), a big bank (three
+  // times the old shell's) and `boreCostScale` 0.25, so it slides deep into
+  // terrain leaving little on each grain boundary instead of stopping and
+  // blasting at the first tile.  The blast is still the weapon's main damage
+  // but weaker than the old Plasma Cannon's (~12.5 peak against 20.8):
+  // `blastScale` keeps the charge light even though the heavy shell's
+  // derived blast would otherwise have grown with its bank.
+  cannon: { delivery: 'cannon', name: 'Cannon', cooldown: 1.40, speed: 18, damage: 3, lifetime: 2.5,
+    color: BARE_CANNON_COLOR, size: 12, count: 1, spread: 0, recoil: 3.0,
+    mass: 10.6667 / BASE_BANK_DIVISOR, explosionRadius: 95, explosionKnockback: 5,
+    detonateOn: 'fuse', fuseSeconds: 0.42, blastScale: 0.2, boreCostScale: 0.25 },
 };
 
 /** What each MODIFIER does to each DELIVERY (§10).  Every entry is a real
@@ -6200,9 +6209,13 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
       heat: 8, burnSeconds: 1.5, burnRate: 5 },
   },
   beam: {
-    // A WIDE, HEAVY beam with a strong shove — and a short uptime to pay for it.
-    kinetic: { name: 'Ram Beam', damage: 4, cooldown: 1.1, beamDuration: 0.35, beamRange: 240,
-      beamWidth: 22, beamTick: 0.05, push: 5, color: ENERGY_COLORS.kinetic },
+    // A BURST OF SHORT BEAMS THAT FLY (user call), each reflecting,
+    // splitting and passing through by the material optics.  Six pulses of
+    // 4.5 per 1.0 s ≈ 27/s — the old Ram Beam's 25.5 — with a smaller shove,
+    // since a burst lands it six times.
+    kinetic: { name: 'Pulse Beam', damage: 4.5, cooldown: 1.0, beamRange: 420,
+      beamWidth: 3, push: 2.5, color: ENERGY_COLORS.kinetic,
+      pulseCount: 6, pulseInterval: 0.05, pulseSpeed: 1500, pulseLength: 26 },
     // An ARC from the ship to the nearest conductor in range, then a bounded
     // chain.  Nothing conductive in range → a fizzle and nothing else.
     electric: { name: 'Arc Beam', damage: 0, cooldown: 0.8, beamDuration: 0.4, beamRange: 320,
@@ -6244,13 +6257,21 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
   // feedback is still to come).  Each reuses an existing effect.
   cannon: {
     // A heavier, slower shell with a bigger blast.
+    // They keep the OLD Plasma Cannon's shell (tripped by an actor, by the
+    // fuse, or by running out of travel energy in terrain; full derived
+    // blast) — the bare cannon's fuse-only penetrator is its own thing.
     kinetic: { name: 'Heavy Shell', damage: 24, speed: 16, cooldown: 1.7, size: 18, recoil: 5.0,
-      mass: 5.3333 / BASE_BANK_DIVISOR, explosionRadius: 130, explosionKnockback: 8 },
+      mass: 5.3333 / BASE_BANK_DIVISOR, explosionRadius: 130, explosionKnockback: 8,
+      detonateOn: 'enemy', blastScale: 1, boreCostScale: 1 },
     // The blast point starts a bounded arc chain (`queueElectric`).
-    electric: { name: 'Arc Shell', damage: 14, color: ENERGY_COLORS.electric,
+    electric: { name: 'Arc Shell', damage: 14, color: ENERGY_COLORS.electric, size: 16, recoil: 4.0,
+      mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
+      detonateOn: 'enemy', blastScale: 1, boreCostScale: 1,
       electric: { magnitude: 8, hops: 3, targets: 10, hopRange: 180, branches: 2 } },
     // An incendiary shell: the blast also heats everything it reaches.
-    thermal: { name: 'Incendiary Shell', damage: 14, color: ENERGY_COLORS.thermal, blastHeat: 1.0 },
+    thermal: { name: 'Incendiary Shell', damage: 14, color: ENERGY_COLORS.thermal, size: 16, recoil: 4.0,
+      mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
+      detonateOn: 'enemy', blastScale: 1, boreCostScale: 1, blastHeat: 1.0 },
   },
 };
 

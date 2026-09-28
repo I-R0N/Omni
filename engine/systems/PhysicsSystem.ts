@@ -1553,7 +1553,11 @@ export class PhysicsSystem {
       // metal 8x1.8 = 14.4.  THAT ratio is the whole of step 5: depth becomes
       // `energy / price`, so the same shell crosses glass and stops in metal
       // without either being written down anywhere.
-      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0));
+      // A NARROW PENETRATOR (`boreCostScale` < 1) pays — and so deposits —
+      // only that fraction of each grain's price: deeper, and gentler on
+      // every boundary it crosses.
+      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0)
+          * Math.max(0.02, Math.min(1, proj.boreCostScale ?? 1)));
       const heatScale = mechanicalScale(materialOf(target), target.heat);
       let ordinal = proj.pierceHits ?? 0;
       let steps = 0;
@@ -1589,6 +1593,16 @@ export class PhysicsSystem {
           if (steps > PhysicsSystem.MAX_BORE_STEPS) break;
       }
       proj.pierceHits = ordinal;
+      // THE ROUND IS WHERE ITS WALK ENDED.  The walk is the round's own path
+      // through the body, so it is moved there: out of the far side when it
+      // exited (or broke the body), or to the grain it stopped in.  Left at
+      // the entry face it would still be inside the body next substep.
+      // Written as a DISPLACEMENT from where the round is, so it holds in
+      // whichever frame the broadphase shifted the pair into.
+      if (steps > 0) {
+          proj.position.x += (lx * cw - ly * sw) - ex;
+          proj.position.y += (lx * sw + ly * cw) - ey;
+      }
       // A bolt that walked out of the far side with nothing left has not
       // exited in any sense that matters — it stops at the surface.
       if (this._boreExited
@@ -3771,9 +3785,17 @@ export class PhysicsSystem {
           // gravity field; contact alone is a pure pass-through with
           // no destruction.
           const isShatterable = nebula.shardVariant === 'nebula-tile';
+          // A KINETIC ROUND BREAKS A CLOUD TILE THE WAY A SHIP FLYING THROUGH
+          // IT DOES (user call): the static tile breaks up into its drifting
+          // cells and the round flies on, uncharged — a gas absorbs no energy.
+          // Once per round per tile (the hit list), like the displacement
+          // below; a round never takes the ship's impact cooldown.
+          const roundThrough = other.type === EntityType.PROJECTILE
+              && !(other.hitEntityIds !== undefined && other.hitEntityIds.includes(nebula.id));
           const shatters = isShatterable
-                            && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
-                            && (other.nebulaImpactCooldown ?? 0) <= 0;
+                            && (((other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
+                                 && (other.nebulaImpactCooldown ?? 0) <= 0)
+                                || roundThrough);
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.
@@ -3808,17 +3830,22 @@ export class PhysicsSystem {
                   // with mergeFadeTimer set, so fading shards drop out
                   // of broadphase automatically on the next frame.
                   //
-                  // Arm the striker's post-shatter cooldown.
-                  other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
+                  // Arm the striker's post-shatter cooldown (a ship's; a
+                  // round is gated by its hit list instead).
+                  if (other.type === EntityType.PROJECTILE) {
+                      (other.hitEntityIds ?? (other.hitEntityIds = [])).push(nebula.id);
+                  } else {
+                      other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
+                  }
                   if (onDeath) onDeath(nebula);
               }
           }
           // A ROUND THROUGH A GAS (energy modules, user call): mechanical
-          // energy DISPLACES a gas it passes through — never breaks it —
-          // exactly as a kinetic beam already does.  A drifting body takes a
-          // shove along the round's travel, once per round, capped; a static
-          // cloud tile has nowhere to go and is left alone.  The round is not
-          // charged for it: a gas takes no damage, so it absorbs no energy.
+          // energy DISPLACES a drifting gas body it passes through, exactly
+          // as a kinetic beam does — a shove along the round's travel, once
+          // per round, capped.  (A static cloud TILE is broken up above.)
+          // The round is not charged for either: a gas takes no damage, so it
+          // absorbs no energy.
           if (other.type === EntityType.PROJECTILE && nebula.mass !== Infinity
               && nebula.velocity && other.velocity) {
               const hit = other.hitEntityIds ?? (other.hitEntityIds = []);
@@ -3886,6 +3913,14 @@ export class PhysicsSystem {
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY
               && !target.thirdParty && !proj.hitsEnemies) return;
           if (proj.hitsEnemies && target.isRival) return;
+          // A BODY A ROUND HAS ALREADY STRUCK IS NOT STRUCK AGAIN.  A round
+          // still overlapping it on the next substep (it bored through a tile
+          // wider than one step, or came to rest inside one) is passing
+          // through or resting, not hitting — before this it was damaged a
+          // second time on the single-spend path and then STOPPED, so no
+          // bored round ever came out of a tile wider than its own step.  A
+          // ricochet that should re-hit clears the list at the bounce.
+          if (proj.hitEntityIds !== undefined && proj.hitEntityIds.includes(target.id)) return;
 
           // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
           // less than the first, the third less again — and it is measured,
@@ -4330,7 +4365,13 @@ export class PhysicsSystem {
               // LATER IN THIS SAME SUBSTEP (updatePhysics then
               // updateGameLogic, over the entity index built at the top of
               // the step), so the round is still in the list it walks.
-              if (proj.explosionRadius && proj.explosionRadius > 0 && !proj.detonated) {
+              if (proj.detonateOn === 'fuse' && proj.explosionRadius && proj.explosionRadius > 0
+                  && !proj.detonated) {
+                  // A FUSE SHELL does not go off because it stopped: it
+                  // comes to rest where it is and waits for its fuse (user
+                  // call — the bare Cannon explodes after a set time).
+                  proj.velocity.x = 0; proj.velocity.y = 0;
+              } else if (proj.explosionRadius && proj.explosionRadius > 0 && !proj.detonated) {
                   // ARMED, AND DELIBERATELY LEFT ALIVE for the rest of this
                   // substep.  The entity-compaction pass at the end of
                   // `updatePhysics` releases an INACTIVE projectile straight

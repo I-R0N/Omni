@@ -44,7 +44,7 @@ import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
 import { materialOf, materialDef } from './systems/energy';
-import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat, inheritHeat } from './energyEffects';
+import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat, shareHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
@@ -379,8 +379,8 @@ export class GameEngine {
   /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
   energy: EnergyState = new EnergyState();
   /** The render view of it — one object, refilled per frame (no allocation). */
-  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, simClock: 0, locks: [] };
-  private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false };
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], simClock: 0, locks: [] };
+  private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false, segs: [], nSeg: 0 };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
   // land in `inventory` (tile grid, duplicates allowed); outfitting moves
@@ -3697,22 +3697,20 @@ export class GameEngine {
               // always APPENDED, so the slice past the old length is exactly
               // this break's output whichever style ran, and the rule cannot
               // come to mean different things under the fracture A/B.
-              // The same slice also carries the parent's HEAT: a piece of a
-              // glowing body is as hot as the body was (`inheritHeat`).
+              // The same slice also takes the parent's HEAT, DIVIDED between
+              // the pieces by area — the energy is conserved, not copied
+              // (`shareHeat`).
               const bi = entity.blastImpulse;
-              const hot = (entity.heat ?? 0) > 0;
               const before = this.currentMap.entities.length;
               this.shards.shatter(entity, this.currentMap.entities);
-              if (bi !== undefined || hot) {
-                  const ents = this.currentMap.entities;
+              const ents = this.currentMap.entities;
+              if (bi !== undefined) {
                   for (let i = before; i < ents.length; i++) {
-                      if (bi !== undefined) {
-                          ents[i].velocity.x += bi.x;
-                          ents[i].velocity.y += bi.y;
-                      }
-                      if (hot) inheritHeat(this, entity, ents[i]);
+                      ents[i].velocity.x += bi.x;
+                      ents[i].velocity.y += bi.y;
                   }
               }
+              shareHeat(this, entity, ents, before, ents.length, 0);
           }
           // CLEARED UNCONDITIONALLY, outside the branch above: it is per-LIFE
           // state on an object regen reuses, and several deaths never reach
@@ -4743,7 +4741,8 @@ export class GameEngine {
     // penetration would have made that a full blast per pebble.  An ACTOR
     // (enemy, boss, fauna, the player) still trips it on contact, and
     // `updateProjectileFuses` covers the shell that meets nothing.
-    if (proj.explosionRadius && proj.explosionRadius > 0
+    // A 'fuse' shell (the bare Cannon) is tripped by NOTHING it touches.
+    if (proj.explosionRadius && proj.explosionRadius > 0 && proj.detonateOn !== 'fuse'
         && (proj.detonateOn !== 'enemy' || target.type !== EntityType.STRUCTURE)) {
         applyExplosionAoE(this, impactPos, proj, target);
         proj.detonated = true;
@@ -6160,9 +6159,15 @@ export class GameEngine {
           // neighbour on the other side left.  So its whole boundary is
           // spent at the moment it comes away, measured 0 partial on
           // every detach.  See docs/MATERIAL_GRAIN_SPEC.md §6.3.
+          const chipAt = this.currentMap.entities.length;
           const chip = this.shards.spawnDetachedCell(
               target, c, original, this.currentMap.entities);
-          if (chip !== null) inheritHeat(this, target, chip);
+          // The chip takes its SHARE of the body's heat and the body keeps
+          // the rest (`shareHeat`) — a break conserves heat.
+          if (chip !== null) {
+              shareHeat(this, target, this.currentMap.entities, chipAt,
+                  this.currentMap.entities.length, remainderArea);
+          }
           target.polygonPoints = remainder;
           const massBefore = target.mass;
           if (target.mass !== Infinity && polyArea > 0) {
@@ -6444,10 +6449,12 @@ export class GameEngine {
           bv.x0 = b.x0; bv.y0 = b.y0; bv.x1 = b.x1; bv.y1 = b.y1;
           bv.width = b.config.beamWidth ?? 3; bv.color = b.config.color;
           bv.energy = b.config.energy; bv.hit = b.hit;
+          bv.segs = b.light.segs; bv.nSeg = b.light.nSeg;
           v.beam = bv;
       } else {
           v.beam = null;
       }
+      v.pulses = this.energy.pulses;
       this.renderer.energyFx = v;
   }
 

@@ -23,14 +23,15 @@ import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../types';
 import {
     ENERGY_CONSTANTS, materialOf, responseOf, heatGain, clampHeat, coolHeat,
-    mechanicalScale, maxHeatOf, conductShare, planChain, safeMag,
-    stampFractureProfile, diffuseSpread, type MaterialId, mixHeatSpot, heatPeak, easeShownHeat, type ChainCaps, type EnergyDomain,
+    mechanicalScale, maxHeatOf, conductShare, planChain, safeMag, heatRadiance, materialDef,
+    stampFractureProfile, diffuseSpread, heatCapacityOf, type MaterialId, mixHeatSpot, heatPeak, easeShownHeat, type ChainCaps, type EnergyDomain,
 } from './systems/energy';
 import {
     breakYieldsNothing, noteTraitDamage, markDamaged, hitReactStrength,
-    isCollectibleDrop, UI_CONSTANTS, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
+    isCollectibleDrop, grainSpecFor, UI_CONSTANTS, SHIELD_CONSTANTS, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
 } from '../constants';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
+import { polygonArea, pointInPolygon } from './systems/fracture';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
 import { nextId } from './systems/IdAllocator';
 
@@ -50,6 +51,9 @@ interface BeamState {
     angle: number;      // aim, fixed at the trigger pull (a pulse goes where it was fired)
     // Drawn this frame (renderer reads).
     x0: number; y0: number; x1: number; y1: number; hit: boolean;
+    /** The traced light path: every segment of it, reflections and splits
+     *  included (renderer reads). */
+    light: LightOut;
 }
 
 const MAX_PENDING = 48;
@@ -63,6 +67,11 @@ export class EnergyState {
     energized: GameEntity[] = [];
     pending: PendingEvent[] = [];
     beam: BeamState | null = null;
+    /** Kinetic-beam pulses in flight (a bounded, reused pool) and the burst
+     *  still leaving the muzzle. */
+    pulses: Pulse[] = [];
+    burst: Burst | null = null;
+    lastPulseHitId: string | null = null;
     effectAcc = 0;
     conductAcc = 0;
     /** Diagnostics (tests + DBG): the size of the last electric chain. */
@@ -86,6 +95,8 @@ export class EnergyState {
         this.energized.length = 0;
         this.pending.length = 0;
         this.beam = null;
+        this.burst = null;
+        for (const p of this.pulses) p.alive = false;
         this.effectAcc = 0;
         this.conductAcc = 0;
     }
@@ -190,7 +201,8 @@ function killBody(g: GameEngine, e: GameEntity, from: Vector2 | null, byPlayer: 
  *    shed a grain (the ordinary chip path); anything else loses health.
  */
 export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vector2 | null,
-                           domain: EnergyDomain, byPlayer: boolean, text = true, flash = 0.12): void {
+                           domain: EnergyDomain, byPlayer: boolean, text = true, flash = 0.12,
+                           at: Vector2 | null = null): void {
     if (!e.active || e.isExploding) return;
     let d = safeMag(dmg);
     if (d <= 0) return;
@@ -201,10 +213,12 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
     stampFractureProfile(e, domain, d);
 
     if (e.type === EntityType.STRUCTURE) {
-        const at = contactOn(e, from);
+        // Where it lands: an explicit point (light crossing a grain boundary
+        // INSIDE the body), else the hull facing where it came from.
+        const hitAt = at ?? contactOn(e, from);
         if (byPlayer && d >= e.health) e.killedByPlayer = true;
-        if (!g.chipStructureAt(e, at, d, from ?? undefined, flash)) {
-            stampLocalImpact(e, at);
+        if (!g.chipStructureAt(e, hitAt, d, from ?? undefined, flash)) {
+            stampLocalImpact(e, hitAt);
             if (!applyBoundaryDamage(e, d)) e.health -= d;
             if (flash > 0) markDamaged(e, flash);
         }
@@ -217,6 +231,24 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
             if (e.mass === Infinity && e.active) g.physics.removeStaticEntity(e);
             e.active = false;
         }
+        return;
+    }
+    // THE PLAYER takes energy damage too (heat on contact, radiant heat):
+    // shield first, then hull, the same order every other player-damage path
+    // uses.
+    if (e.type === EntityType.PLAYER) {
+        if ((e.shield ?? 0) > 0 && !e.systemsDisabled) {
+            const absorbed = Math.min(e.shield!, d);
+            e.shield! -= absorbed;
+            d -= absorbed;
+            e.shieldRechargeTimer = SHIELD_CONSTANTS.RECHARGE_DELAY;
+        }
+        if (d > 0) {
+            e.health -= d;
+            e.healthBarTimer = UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION;
+            if (text) g.spawnDamageText(e.position, d, e);
+        }
+        if (e.health <= 0 && !e.isExploding) g.handleEntityDeath(e);
         return;
     }
     // Actors (enemies).  Like the old lightning chain and the blast ring, an
@@ -310,36 +342,75 @@ export function depositHeat(g: GameEngine, e: GameEntity, magnitude: number, fro
     applyHeatThresholds(g, e);
 }
 
-/** A FRAGMENT IS AS HOT AS WHAT IT BROKE OFF (user call).  Heat is a
- *  temperature, normalised per material, so a piece of a body takes the
- *  body's heat rather than a share of it — a chip off a glowing plate glows.
- *  Called at the two places children are born: the death shatter and the
- *  mid-life grain detach.
+/** Area of a body for the heat ledger: its polygon where it has one, else
+ *  the disc its size describes. */
+function heatArea(e: GameEntity): number {
+    const poly = e.polygonPoints;
+    if (poly && poly.length >= 3) {
+        const a = Math.abs(polygonArea(poly));
+        if (a > 0) return a;
+    }
+    const r = Math.max(e.size.x, e.size.y) * 0.5;
+    return Math.PI * r * r;
+}
+
+/** A BREAK CONSERVES HEAT (user call).  When pieces come off a hot body the
+ *  heat ENERGY it held is DIVIDED between the pieces and whatever of the body
+ *  remains, by area — it is not copied onto every piece.  In this model heat
+ *  behaves as an amount per body (a deposit heats any body by the same
+ *  step, whatever its size), so copying the parent's heat onto N fragments
+ *  multiplied the energy by N — and on plastic, whose heat is a strong DoT,
+ *  every hot fragment then burned to death within a tick, shattered, and
+ *  handed its full heat on again: the incendiary chain reaction that filled
+ *  the screen with nebula dust and salvage (user report).
  *
- *  THE PIECE IS HEATED ACROSS ITS WHOLE BODY, and its DRAWN heat starts where
- *  the parent's was, so it does not fade in from cold.  It is capped just
- *  under the material's own thermal failure point: glass FAILS at critical
- *  heat, so a glass fragment inheriting it would fail again on the next heat
- *  tick and cascade to dust.  Burns and the byPlayer stamp carry too, so an
- *  incendiary break keeps burning in its pieces and still pays the player.
- *  Goes through the same bounded set as every other deposit, so a full set
- *  leaves the piece cold rather than untracked-and-hot. */
-export function inheritHeat(g: GameEngine, parent: GameEntity, child: GameEntity): void {
+ *  `list[from..to)` are the new pieces; `keepArea` is the area the PARENT
+ *  keeps (0 when it died).  Energy is carried in damage units (heat ×
+ *  the material's capacity), so a piece of a different material (a chip's
+ *  nebula dust) takes its share at its OWN capacity.  A burn — a heat
+ *  SOURCE — is divided the same way.  A share too small to register leaves
+ *  the piece cold rather than spending a slot in the bounded set on it.
+ *  Capped under the material's thermal-failure heat: a pane that failed from
+ *  heat must not hand a piece enough to fail again. */
+export function shareHeat(g: GameEngine, parent: GameEntity, list: GameEntity[], from: number, to: number,
+                          keepArea: number): void {
     const h = parent.heat ?? 0;
-    if (!(h > 0) || !child.active) return;
-    const mat = materialOf(child);
-    const r = responseOf(mat);
-    let heat = clampHeat(h, maxHeatOf(mat));
-    if (r.thermalFailAt > 0) heat = Math.min(heat, r.thermalFailAt * 0.9);
-    if (!(heat > 0) || !trackHeat(g.energy, child)) return;
-    child.heat = heat;
-    child.heatSpotX = 0; child.heatSpotY = 0;
-    child.heatSpread = heatBodyR(child) * 2;
-    child.heatShown = Math.min(parent.heatShown ?? heat, heat);
-    if (parent.heatByPlayer) child.heatByPlayer = true;
-    if ((parent.burnTimer ?? 0) > 0) {
-        child.burnTimer = parent.burnTimer;
-        child.burnRate = parent.burnRate;
+    const burn = (parent.burnTimer ?? 0) > 0 ? (parent.burnRate ?? 0) : 0;
+    if (!(h > 0) && !(burn > 0)) return;
+    let total = keepArea > 0 ? keepArea : 0;
+    for (let i = from; i < to; i++) if (list[i].active) total += heatArea(list[i]);
+    if (!(total > 0)) return;
+    const pMat = materialOf(parent);
+    const energy = h * heatCapacityOf(pMat);
+    for (let i = from; i < to; i++) {
+        const child = list[i];
+        if (!child.active) continue;
+        const share = heatArea(child) / total;
+        const mat = materialOf(child);
+        const r = responseOf(mat);
+        const cap = heatCapacityOf(mat);
+        let heat = cap > 0 ? clampHeat(energy * share / cap, maxHeatOf(mat)) : 0;
+        if (r.thermalFailAt > 0) heat = Math.min(heat, r.thermalFailAt * 0.9);
+        const rate = burn * share;
+        const burns = rate >= ENERGY_CONSTANTS.MIN_SHARED_BURN;
+        if (heat < ENERGY_CONSTANTS.HEAT_EPSILON && !burns) continue;
+        if (!trackHeat(g.energy, child)) continue;
+        child.heat = heat >= ENERGY_CONSTANTS.HEAT_EPSILON ? heat : 0;
+        child.heatSpotX = 0; child.heatSpotY = 0;
+        child.heatSpread = heatBodyR(child) * 2;
+        child.heatShown = Math.min(parent.heatShown ?? child.heat, child.heat);
+        if (parent.heatByPlayer) child.heatByPlayer = true;
+        if (burns) { child.burnTimer = parent.burnTimer; child.burnRate = rate; }
+    }
+    // What the body keeps is its own share of both.
+    if (keepArea > 0 && parent.active) {
+        const keep = keepArea / total;
+        parent.heat = clampHeat(h * keep, maxHeatOf(pMat));
+        if (burn > 0) {
+            const rate = burn * keep;
+            if (rate >= ENERGY_CONSTANTS.MIN_SHARED_BURN) parent.burnRate = rate;
+            else { parent.burnTimer = undefined; parent.burnRate = undefined; }
+        }
     }
 }
 
@@ -388,19 +459,9 @@ function agitateGas(g: GameEngine, e: GameEntity, heat: number, dt: number,
         e.velocity.y += Math.sin(a) * k;
         if (heat > 0.2) e.nebulaMergeCooldown = Math.max(e.nebulaMergeCooldown ?? 0, 0.5);
     } else if (heat >= disperseAt && e.health > 0 && !e.deathDispatched) {
-        // Mirrors the ship-through-cloud break-up in PhysicsSystem exactly —
-        // out of the static grid, a FADE rather than a pop (the fade tick
-        // retires it), and the ordinary nebula death — with no impact
-        // direction, since heat has none, and the full slow fade.
-        const childD = Math.max(e.size.x, e.size.y) * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
-        if (childD < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return;
-        e.lastImpactVelocity = { x: 0, y: 0 };
-        e.lastImpactDamage = 1;
-        e.health = 0;
-        e.mergeFadeTimer = NEBULA_CONSTANTS.FADE_DURATION;
-        e.mergeFadeDuration = NEBULA_CONSTANTS.FADE_DURATION;
-        g.physics.removeStaticEntity(e);
-        g.handleEntityDeath(e);
+        // The same break-up a ship flying through the cloud causes, with no
+        // impact direction (heat has none) and the full slow fade.
+        disperseCloud(g, e, 0, 0, false);
     }
 }
 
@@ -408,7 +469,7 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
     const s = g.energy;
     const list = s.heated;
     const effDt = HEAT_EFFECT_INTERVAL;
-    let n = 0;
+    let n = 0, radiators = 0;
     for (let i = 0; i < list.length; i++) {
         const e = list[i];
         if (!e.active || e.isExploding) { dropHeat(e); continue; }
@@ -435,6 +496,11 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
             if (e.active) applyHeatThresholds(g, e);
         }
         if (heat > 0.3 && doConduct && r.thermalConductivity > 0 && e.active) conductHeat(g, e, mat);
+        if (doEffects && heat >= ENERGY_CONSTANTS.RADIATE_MIN_HEAT && e.active
+            && radiators < ENERGY_CONSTANTS.RADIATE_MAX_SOURCES) {
+            radiators++;
+            radiateHeat(g, e, mat, heat, effDt);
+        }
         // What is DRAWN eases toward the true peak, so every step in it — a
         // deposit, a conduction transfer, the cold snap — blends instead of
         // flashing, and a cooled body fades out rather than vanishing.
@@ -448,6 +514,71 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
         list[n++] = e;
     }
     if (list.length !== n) list.length = n;
+}
+
+// ── Radiant heat and contact ─────────────────────────────────────────────────
+//
+// LIGHT CARRIES HEAT (user call).  A hot body is a light source: its power
+// follows T⁴ above ambient (`heatRadiance`, the same curve its visible glow
+// uses) times the material's emissivity, and what a neighbour receives is the
+// share of that light its silhouette intercepts at that distance — so the
+// receiver's own absorptivity (`heatAbsorb`) decides how much becomes heat.
+// The source pays for what it gives (energy is conserved; `coolHeat` still
+// accounts for what leaves into empty space).  A hull that takes it BURNS
+// (hull heat is a DoT — the `generic` material's `thermalDps`).
+//
+// This is the general case the other light sources sit at the low end of: a
+// LIGHT source is a power and a position.  The ship's Light module is a light
+// of ~zero power, so it lights things without heating them; a hot tile or
+// shard is a source whose power comes from its own heat; a future heat source
+// is one more caller of `radiate`.  What it heats is HULLS — the player's and
+// enemies' — since between terrain bodies conduction already moves the heat.
+// No occlusion is modelled: radiant heat is short-range (RADIATE_RADIUS).
+
+/** Radiate `power` (damage units/s) from world point (x, y) for `dt` seconds
+ *  onto up to RADIATE_MAX_RECEIVERS bodies within RADIATE_RADIUS, the player
+ *  included.  Returns the energy delivered (damage units). */
+export function radiate(g: GameEngine, src: GameEntity | null, x: number, y: number, srcR: number,
+                        power: number, dt: number, byPlayer: boolean): number {
+    const C = ENERGY_CONSTANTS;
+    if (!(power > 0)) return 0;
+    const buf = g.energy.buf2;
+    gather(g, x, y, C.RADIATE_RADIUS, buf, 32);
+    nearestK(buf, x, y, C.RADIATE_MAX_RECEIVERS + 1);
+    let given = 0;
+    const give = (o: GameEntity) => {
+        const oR = heatBodyR(o);
+        const d = Math.max(srcR + oR, dist(x, y, o.position.x, o.position.y));
+        if (d > C.RADIATE_RADIUS + oR) return;
+        // The share of an isotropic source's light a body of width 2·oR
+        // intercepts at distance d.
+        const share = Math.min(0.5, (2 * oR) / (2 * Math.PI * d));
+        const q = power * dt * share;
+        if (!(q > 1e-4)) return;
+        _from.x = x; _from.y = y;
+        depositHeat(g, o, q, _from, byPlayer);
+        given += q;
+    };
+    for (let i = 0; i < buf.length; i++) {
+        const o = buf[i];
+        // HULLS take radiant heat; terrain does not — between neighbouring
+        // bodies CONDUCTION already carries heat, and a hot plate radiating
+        // into every cold tile around it would drain in a second, undoing
+        // "metal holds heat longest".
+        if (o === src || o.type !== EntityType.ENEMY) continue;
+        give(o);
+    }
+    const p = g.player;
+    if (p.active && !p.isExploding) give(p);
+    return given;
+}
+
+/** A hot body's radiant heat: T⁴ × emissivity, paid for out of its own heat. */
+function radiateHeat(g: GameEngine, e: GameEntity, mat: MaterialId, heat: number, dt: number): void {
+    const emit = materialDef(mat).look.heatEmit;
+    const power = ENERGY_CONSTANTS.RADIATE_POWER * heatRadiance(Math.min(heat, 1.5)) * emit;
+    const given = radiate(g, e, e.position.x, e.position.y, heatBodyR(e), power, dt, e.heatByPlayer === true);
+    if (given > 0) e.heat = clampHeat((e.heat ?? 0) - given / heatCapacityOf(mat), maxHeatOf(mat));
 }
 
 /** Heat CONDUCTS between neighbours of ANY material: a hot body shares with
@@ -480,6 +611,24 @@ function conductHeat(g: GameEngine, e: GameEntity, mat: MaterialId): void {
         o.heat = clampHeat((o.heat ?? 0) + q, maxHeatOf(oMat));
         if (e.heatByPlayer) o.heatByPlayer = true;
         given++;
+    }
+    // A HULL TOUCHING A HOT BODY is burned by it (user call): the player's
+    // ship is not an energy target, so it is checked here directly — surface
+    // to surface within CONTACT_GAP — at the same pair rate as any contact.
+    const p = g.player;
+    if (p.active && !p.isExploding) {
+        const gap = dist(e.position.x, e.position.y, p.position.x, p.position.y)
+            - heatBodyR(e) - heatBodyR(p);
+        const diff = (e.heat ?? 0) - (p.heat ?? 0);
+        if (gap <= C.CONTACT_GAP && diff > 0.05 && trackHeat(g.energy, p)) {
+            const pm = materialOf(p);
+            const q = Math.min(diff * conductShare(mat, pm), Math.max(0, maxHeatOf(pm) - (p.heat ?? 0)));
+            if (q > 0) {
+                addHeatSpot(p, q, contactOn(p, e.position), 0.6);
+                e.heat = clampHeat((e.heat ?? 0) - q, maxHeatOf(mat));
+                p.heat = clampHeat((p.heat ?? 0) + q, maxHeatOf(pm));
+            }
+        }
     }
 }
 
@@ -592,10 +741,18 @@ export function queueElectric(g: GameEngine, at: Vector2, spec: NonNullable<Weap
 /** WeaponSystem's sink for every delivery that is not a round. */
 export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, target: Vector2): void {
     const aim = Math.atan2(wrapDeltaY(player.position.y, target.y), wrapDeltaX(player.position.x, target.x));
+    if (c.delivery === 'beam' && (c.pulseCount ?? 0) > 0) {
+        // A BURST OF PULSES (the kinetic beam): they leave one by one.
+        g.energy.burst = { config: c, left: Math.min(12, c.pulseCount!), acc: 0, angle: aim };
+        return;
+    }
     if (c.delivery === 'beam') {
+        const prev = g.energy.beam;
         g.energy.beam = { config: c, time: c.beamDuration ?? 0.3, acc: c.beamTick ?? 0.05, angle: aim,
                           x0: player.position.x, y0: player.position.y,
-                          x1: player.position.x, y1: player.position.y, hit: false };
+                          x1: player.position.x, y1: player.position.y, hit: false,
+                          light: prev ? prev.light : makeLightOut() };
+        g.energy.beam.light.nSeg = 0;
         return;
     }
     fireCone(g, c, player, aim);
@@ -638,18 +795,97 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
     }
 }
 
-// ── Beam ─────────────────────────────────────────────────────────────────────
+// ── Light: beams and pulses ──────────────────────────────────────────────────
+//
+// A beam is LIGHT, and what light does at a body is a MATERIAL PROPERTY
+// (user call): it REFLECTS (metal is the mirror), is ABSORBED (rock), or
+// PASSES THROUGH (glass, cloudy plastic) — bending at the faces by the
+// refractive index, glancing off every grain boundary it crosses inside and
+// splitting a little at each, and leaving a little energy on each boundary on
+// the way (a deep pass-through with low per-boundary damage).  A gas lets it
+// through untouched.
+//
+// `traceLight` does all of it as a BOUNDED set of rays: at most MAX_RAYS rays
+// per trace, MAX_BOUNCES reflections per ray, MAX_INTERNAL_STEPS grain steps
+// inside a body and MAX_SEGS drawn segments — whatever the geometry.  Rays
+// live in a fixed module pool, segments in a flat array the caller owns, so a
+// trace allocates nothing.  A continuous beam traces its whole range each
+// tick; a PULSE traces only the distance it flies this step, and the rays
+// still in flight at the end of it become the pulse (or new pulses, when it
+// split).  Internal deflection is seeded by the body and the step, so a
+// beam's path through a pane is stable from tick to tick instead of jittering.
 
-/** First solid body along a ray, by circle approximation.  Grid walk in
- *  steps along the ray; a GAS never blocks (it is displaced / heated in
- *  passing and reported through `passed`).  Returns the hit and its t. */
+const MAX_RAYS = 10;
+const MAX_BOUNCES = 4;
+const MAX_INTERNAL_STEPS = 48;
+const MAX_SEGS = 48;
+/** A ray carrying less than this fraction of its trace's energy is spent. */
+const MIN_F = 0.04;
+
+interface LightRay {
+    x: number; y: number; ux: number; uy: number;
+    len: number; f: number; bounces: number;
+    /** A body the ray must not re-strike on its first cast (it just left it). */
+    skip: GameEntity | null;
+    /** A ray that starts INSIDE this body (a split made in there). */
+    inside: GameEntity | null;
+    step: number;
+}
+const _rays: LightRay[] = [];
+for (let i = 0; i < MAX_RAYS; i++) {
+    _rays.push({ x: 0, y: 0, ux: 0, uy: 0, len: 0, f: 0, bounces: 0, skip: null, inside: null, step: 0 });
+}
+let _nRays = 0;
+function pushRay(x: number, y: number, ux: number, uy: number, len: number, f: number,
+                 bounces: number, skip: GameEntity | null, inside: GameEntity | null, step = 0): boolean {
+    if (_nRays >= MAX_RAYS || !(f >= MIN_F) || !(len > 0.5)) return false;
+    const r = _rays[_nRays++];
+    r.x = x; r.y = y; r.ux = ux; r.uy = uy; r.len = len; r.f = f;
+    r.bounces = bounces; r.skip = skip; r.inside = inside; r.step = step;
+    return true;
+}
+
+/** What a trace deposits, per unit of energy fraction.  One reused object
+ *  per caller — never a closure per tick. */
+export interface LightDeposit {
+    dmg: number;          // mechanical damage units at f = 1
+    heat: number;         // thermal packet at f = 1
+    push: number;         // kinetic shove at f = 1 (surface only)
+    thermal: boolean;     // infrared: reads `thermalTransmissivity`
+    breaksCloud: boolean; // a kinetic pulse breaks a static cloud tile it crosses
+    byPlayer: boolean;
+}
+
+/** Trace output: drawn segments (x0,y0,x1,y1,f per segment, flat), the rays
+ *  still in flight when their length ran out (x,y,ux,uy,f), and the first body
+ *  struck.  Owned by the caller and reused. */
+export interface LightOut {
+    segs: number[]; nSeg: number;
+    leaves: number[]; nLeaf: number;
+    firstHit: GameEntity | null;
+}
+export function makeLightOut(): LightOut {
+    return { segs: [], nSeg: 0, leaves: [], nLeaf: 0, firstHit: null };
+}
+
+function addSeg(out: LightOut, x0: number, y0: number, x1: number, y1: number, f: number): void {
+    if (out.nSeg >= MAX_SEGS) return;
+    const k = out.nSeg++ * 5;
+    const a = out.segs;
+    a[k] = x0; a[k + 1] = y0; a[k + 2] = x1; a[k + 3] = y1; a[k + 4] = f;
+}
+
+// Scratch for the hit test: the struck body, its distance, and the OUTWARD
+// surface normal (world) at the contact.
+let _hitT = 0, _hitNx = 0, _hitNy = 0;
+let _hitE: GameEntity | null = null;
+
 /** Distance along a ray from (ox, oy) in unit direction (ux, uy) to where it
- *  first meets `e`'s polygon, or Infinity if it misses.  `halfW` widens the
- *  ray into a beam: the two edge rays are tested alongside the centre one,
- *  which is exact for a beam narrower than the polygon's edges and costs three
- *  edge walks.  Works in the body's LOCAL frame, because `polygonPoints` are
- *  stored unrotated (the physics' SAT and the grain bore read them the same
- *  way).  A ray that starts inside the body hits at 0. */
+ *  first meets `e`'s polygon, or Infinity if it misses, and the outward
+ *  normal of the edge it meets (written to `_hitNx/_hitNy`, world frame).
+ *  `halfW` widens the ray into a beam: the two edge rays are tested alongside
+ *  the centre one.  Works in the body's LOCAL frame, because `polygonPoints`
+ *  are stored unrotated.  A ray that starts inside the body hits at 0. */
 function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: number,
                          halfW: number): number {
     const poly = e.polygonPoints!;
@@ -660,7 +896,7 @@ function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: 
     const dx = ux * cs - uy * sn, dy = ux * sn + uy * cs;
     // The normal to the ray, for the two edge rays.
     const nx = -dy, ny = dx;
-    let best = Infinity;
+    let best = Infinity, bnx = -dx, bny = -dy;
     for (let k = -1; k <= 1; k++) {
         if (k !== 0 && halfW <= 0) continue;
         const lx = lx0 + nx * halfW * k, ly = ly0 + ny * halfW * k;
@@ -675,48 +911,302 @@ function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: 
             const qx = ax - lx, qy = ay - ly;
             const t = (qx * ey - qy * ex) / den;
             const sgm = (qx * dy - qy * dx) / den;
-            if (t >= 0 && sgm >= 0 && sgm <= 1 && t < best) best = t;
+            if (t >= 0 && sgm >= 0 && sgm <= 1 && t < best) {
+                best = t;
+                // Edge normal, turned to face AWAY from the polygon's centre.
+                const el = Math.hypot(ex, ey) || 1;
+                let mx = ey / el, my = -ex / el;
+                if (mx * (ax + bx) + my * (ay + by) < 0) { mx = -mx; my = -my; }
+                bnx = mx; bny = my;
+            }
         }
-        if (inside) return 0;
+        if (inside) { best = 0; bnx = -dx; bny = -dy; break; }
     }
+    // Back to world.
+    const cw = Math.cos(rot), sw = Math.sin(rot);
+    _hitNx = bnx * cw - bny * sw;
+    _hitNy = bnx * sw + bny * cw;
     return best;
 }
 
+const _passed: GameEntity[] = [];
+/** First solid body along a ray.  A grid walk in steps along the ray; a
+ *  circle per body is only the BROADPHASE — a body with a polygon is hit
+ *  where the beam meets that polygon (user report: the circle, sized to the
+ *  body's longest extent, stopped the beam short of irregular shards).  A
+ *  GAS never blocks; it is reported through `passed`.  Sets `_hitE`,
+ *  `_hitT` and the outward normal. */
 function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, range: number,
-                 width: number, passed: GameEntity[]): { e: GameEntity | null; t: number } {
+                 width: number, skip: GameEntity | null, passed: GameEntity[]): boolean {
     const buf = g.energy.buf2;
     const step = 60;
-    let best: GameEntity | null = null, bestT = range;
+    let best: GameEntity | null = null, bestT = range, bnx = 0, bny = 0;
     passed.length = 0;
     for (let t0 = 0; t0 <= range + step && best === null; t0 += step) {
         const cx = ox + ux * t0, cy = oy + uy * t0;
         gather(g, cx, cy, step * 0.75 + width, buf, 96);
         for (let i = 0; i < buf.length; i++) {
             const e = buf[i];
+            if (e === skip) continue;
             const dx = wrapDeltaX(ox, e.position.x), dy = wrapDeltaY(oy, e.position.y);
             const t = dx * ux + dy * uy;
-            if (t < 0 || t > range) continue;
-            const perp = Math.abs(dx * uy - dy * ux);
             const rad = Math.max(e.size.x, e.size.y) * 0.5 + width * 0.5;
+            if (t < -rad || t > range + rad) continue;
+            const perp = Math.abs(dx * uy - dy * ux);
             if (perp > rad) continue;
             if (responseOf(materialOf(e)).gas) {
-                if (passed.length < 6 && !passed.includes(e)) passed.push(e);
+                if (t >= 0 && t <= range && passed.length < 6 && !passed.includes(e)) passed.push(e);
                 continue;
             }
-            // The circle above is only the BROADPHASE.  A body with a polygon
-            // is hit where the beam meets that polygon: the circle is sized to
-            // the body's longest extent, so on an irregular shard it stopped
-            // the beam well short of anything visible (user report).
-            const tHit = e.polygonPoints && e.polygonPoints.length >= 3
-                ? rayPolygonEntry(e, ox, oy, ux, uy, width * 0.5)
-                : Math.max(0, t - Math.sqrt(Math.max(0, rad * rad - perp * perp)));
-            if (tHit < bestT) { bestT = tHit; best = e; }
+            let tHit: number, nx: number, ny: number;
+            if (e.polygonPoints && e.polygonPoints.length >= 3) {
+                tHit = rayPolygonEntry(e, ox, oy, ux, uy, width * 0.5);
+                nx = _hitNx; ny = _hitNy;
+            } else {
+                if (t < 0) continue;
+                tHit = Math.max(0, t - Math.sqrt(Math.max(0, rad * rad - perp * perp)));
+                const hx = ox + ux * tHit, hy = oy + uy * tHit;
+                const ex = wrapDeltaX(e.position.x, hx), ey = wrapDeltaY(e.position.y, hy);
+                const m = Math.hypot(ex, ey) || 1;
+                nx = ex / m; ny = ey / m;
+            }
+            if (tHit < bestT) { bestT = tHit; best = e; bnx = nx; bny = ny; }
         }
     }
-    return { e: best, t: best ? bestT : range };
+    _hitE = best; _hitT = best ? bestT : range; _hitNx = bnx; _hitNy = bny;
+    return best !== null;
 }
 
-const _passed: GameEntity[] = [];
+/** Deposit a fraction `f` of a trace's energy into `e` — at `at` (world) when
+ *  it lands inside the body on a grain boundary, else on the surface facing
+ *  `from`. */
+function depositLight(g: GameEngine, e: GameEntity, f: number, from: Vector2, at: Vector2 | null,
+                      dep: LightDeposit, ux: number, uy: number): void {
+    if (!(f > 0) || !e.active) return;
+    if (dep.heat > 0) depositHeat(g, e, dep.heat * f, at ?? from, dep.byPlayer);
+    if (dep.dmg * f > 0.01 && e.active) damageBody(g, e, dep.dmg * f, from, 'mechanical', dep.byPlayer, false, 0.08, at);
+    if (at === null && dep.push > 0 && e.active && e.mass !== Infinity) {
+        const k = dep.push * f * Math.min(2, Math.sqrt(60 / Math.max(1, e.mass)));
+        e.velocity.x += ux * k; e.velocity.y += uy * k;
+    }
+}
+
+/** Unit vector through a surface by Snell's law, written to `_rx/_ry`.
+ *  (dx,dy) the incoming direction, (nx,ny) the normal facing AGAINST it,
+ *  `eta` = n1/n2.  False on total internal reflection. */
+let _rx = 0, _ry = 0;
+function refract(dx: number, dy: number, nx: number, ny: number, eta: number): boolean {
+    const cosi = -(dx * nx + dy * ny);
+    const k = 1 - eta * eta * (1 - cosi * cosi);
+    if (k < 0) return false;
+    const a = eta * cosi - Math.sqrt(k);
+    _rx = eta * dx + a * nx; _ry = eta * dy + a * ny;
+    const m = Math.hypot(_rx, _ry) || 1;
+    _rx /= m; _ry /= m;
+    return true;
+}
+
+/** Deterministic -1..1 for a body and a step, so a path through a body is
+ *  the same every tick. */
+function jitter(id: string, step: number, lane: number): number {
+    let h = 2166136261 ^ Math.imul(step + 1, 374761393) ^ Math.imul(lane + 3, 668265263);
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+    h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13;
+    return ((h >>> 0) / 4294967296) * 2 - 1;
+}
+
+const _at = { x: 0, y: 0 };
+const _from = { x: 0, y: 0 };
+
+/** Carry a ray THROUGH `e` from world point (x, y), already inside, heading
+ *  (ux, uy).  Steps a grain at a time: each boundary crossed takes its loss
+ *  (deposited there), turns the ray by up to the material's scatter and may
+ *  split a new ray off.  Leaving the body it refracts out (or reflects back
+ *  in, past the critical angle) and a new ray carries on outside. */
+function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number, uy: number,
+                  f: number, len: number, bounces: number, step0: number, dep: LightDeposit, out: LightOut): void {
+    const r = responseOf(materialOf(e));
+    const poly = e.polygonPoints;
+    if (!poly || poly.length < 3) return;
+    const grain = (e.shardVariant ? grainSpecFor(e.shardVariant)?.grainSize : undefined) ?? 12;
+    const s = Math.max(4, grain);
+    const rot = e.rotation ?? 0;
+    const cs = Math.cos(-rot), sn = Math.sin(-rot), cw = Math.cos(rot), sw = Math.sin(rot);
+    let lx = wrapDeltaX(e.position.x, x), ly = wrapDeltaY(e.position.y, y);
+    { const tx = lx * cs - ly * sn, ty = lx * sn + ly * cs; lx = tx; ly = ty; }
+    let dx = ux * cs - uy * sn, dy = ux * sn + uy * cs;
+    // World position of the local frame's origin in the RAY's frame, so every
+    // point written out stays continuous with where the ray came from.
+    const ox = x - (lx * cw - ly * sw), oy = y - (lx * sw + ly * cw);
+    let travelled = 0;
+    for (let k = 0; k < MAX_INTERNAL_STEPS && travelled < len; k++) {
+        const stepN = step0 + k;
+        const nx = lx + dx * s, ny = ly + dy * s;
+        const wx0 = ox + (lx * cw - ly * sw), wy0 = oy + (lx * sw + ly * cw);
+        if (!pointInPolygon(nx, ny, poly)) {
+            // LEAVING: find the exit on the segment and the edge it crosses.
+            let tBest = s, enx = dx, eny = dy;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const ax = poly[j].x, ay = poly[j].y, bx = poly[i].x, by = poly[i].y;
+                const ex = bx - ax, ey = by - ay;
+                const den = dx * ey - dy * ex;
+                if (Math.abs(den) < 1e-9) continue;
+                const qx = ax - lx, qy = ay - ly;
+                const t = (qx * ey - qy * ex) / den;
+                const sg = (qx * dy - qy * dx) / den;
+                if (t >= 0 && t <= s + 1e-6 && sg >= 0 && sg <= 1 && t < tBest) {
+                    tBest = t;
+                    const el = Math.hypot(ex, ey) || 1;
+                    let mx = ey / el, my = -ex / el;
+                    if (mx * (ax + bx) + my * (ay + by) < 0) { mx = -mx; my = -my; }
+                    enx = mx; eny = my;
+                }
+            }
+            const qx = lx + dx * tBest, qy = ly + dy * tBest;
+            const wx = ox + (qx * cw - qy * sw), wy = oy + (qx * sw + qy * cw);
+            addSeg(out, wx0, wy0, wx, wy, f);
+            travelled += tBest;
+            // Out through the face (normal facing against the ray is -n_out).
+            if (refract(dx, dy, -enx, -eny, r.refractiveIndex)) {
+                const wdx = _rx * cw - _ry * sw, wdy = _rx * sw + _ry * cw;
+                pushRay(wx + wdx * 0.6, wy + wdy * 0.6, wdx, wdy, len - travelled, f, bounces, e, null);
+                return;
+            }
+            // Past the critical angle: it reflects back inside.
+            if (bounces >= MAX_BOUNCES) {
+                _at.x = wx; _at.y = wy; _from.x = wx0; _from.y = wy0;
+                depositLight(g, e, f, _from, _at, dep, ux, uy);
+                return;
+            }
+            bounces++;
+            const d2 = dx * enx + dy * eny;
+            dx -= 2 * d2 * enx; dy -= 2 * d2 * eny;
+            lx = qx - enx * 0.5; ly = qy - eny * 0.5;
+            continue;
+        }
+        // Across a GRAIN BOUNDARY.
+        const wx = ox + (nx * cw - ny * sw), wy = oy + (nx * sw + ny * cw);
+        addSeg(out, wx0, wy0, wx, wy, f);
+        travelled += s;
+        lx = nx; ly = ny;
+        const loss = f * r.boundaryLoss;
+        if (loss > 0) {
+            _at.x = wx; _at.y = wy; _from.x = wx0; _from.y = wy0;
+            depositLight(g, e, loss, _from, _at, dep, ux, uy);
+            f -= loss;
+        }
+        if (!e.active || (e.health ?? 1) <= 0) {
+            // The body broke under it: the light carries straight on.
+            const wdx = dx * cw - dy * sw, wdy = dx * sw + dy * cw;
+            pushRay(wx, wy, wdx, wdy, len - travelled, f, bounces, e, null);
+            return;
+        }
+        if (f < MIN_F) return;
+        if (r.boundarySplit > 0) {
+            // A split branch glances off at a wider angle than the main ray.
+            const sf = f * r.boundarySplit;
+            const a = jitter(e.id, stepN, 2) * Math.max(0.35, r.boundaryScatter * 3);
+            const ca = Math.cos(a), sa = Math.sin(a);
+            const bdx = dx * ca - dy * sa, bdy = dx * sa + dy * ca;
+            if (pushRay(wx, wy, bdx * cw - bdy * sw, bdx * sw + bdy * cw, len - travelled, sf, bounces, null, e, stepN + 101)) {
+                f -= sf;
+            }
+        }
+        if (r.boundaryScatter > 0) {
+            const a = jitter(e.id, stepN, 1) * r.boundaryScatter;
+            const ca = Math.cos(a), sa = Math.sin(a);
+            const tx = dx * ca - dy * sa; dy = dx * sa + dy * ca; dx = tx;
+        }
+    }
+}
+
+/** Trace light from (x, y) along (ux, uy) for `range`, carrying energy
+ *  fraction `f0`.  See the section note. */
+export function traceLight(g: GameEngine, x: number, y: number, ux: number, uy: number, range: number,
+                           width: number, f0: number, dep: LightDeposit, out: LightOut,
+                           skip: GameEntity | null = null): void {
+    out.nSeg = 0; out.nLeaf = 0; out.firstHit = null;
+    _nRays = 0;
+    pushRay(x, y, ux, uy, range, f0, 0, skip, null);
+    for (let ri = 0; ri < _nRays; ri++) {
+        const ray = _rays[ri];
+        if (ray.inside !== null) {
+            if (ray.inside.active) {
+                traverse(g, ray.inside, ray.x, ray.y, ray.ux, ray.uy, ray.f, ray.len, ray.bounces, ray.step, dep, out);
+            }
+            continue;
+        }
+        const hit = raycast(g, ray.x, ray.y, ray.ux, ray.uy, ray.len, width, ray.skip, _passed);
+        const e = _hitE, t = _hitT, hnx = _hitNx, hny = _hitNy;
+        const hx = ray.x + ray.ux * t, hy = ray.y + ray.uy * t;
+        addSeg(out, ray.x, ray.y, hx, hy, ray.f);
+        // A GAS in the path: thermal light warms it, a kinetic pulse breaks a
+        // static cloud tile it crosses and shoves a drifting puff.
+        for (let i = 0; i < _passed.length; i++) {
+            const n = _passed[i];
+            if (dep.heat > 0) depositHeat(g, n, dep.heat * ray.f * 0.5, null, dep.byPlayer);
+            if (dep.dmg > 0 && n.active) {
+                if (n.mass !== Infinity) { n.velocity.x += ray.ux * 1.5 * ray.f; n.velocity.y += ray.uy * 1.5 * ray.f; }
+                else if (dep.breaksCloud) disperseCloud(g, n, ray.ux * 6, ray.uy * 6, true);
+            }
+        }
+        if (!hit || e === null) {
+            // Still in flight: a leaf (the caller may keep flying it).
+            if (out.nLeaf < MAX_RAYS) {
+                const k = out.nLeaf++ * 5;
+                out.leaves[k] = hx; out.leaves[k + 1] = hy;
+                out.leaves[k + 2] = ray.ux; out.leaves[k + 3] = ray.uy; out.leaves[k + 4] = ray.f;
+            }
+            continue;
+        }
+        if (out.firstHit === null) out.firstHit = e;
+        const r = responseOf(materialOf(e));
+        const T = e.polygonPoints && e.polygonPoints.length >= 3
+            ? (dep.thermal ? r.thermalTransmissivity : r.transmissivity) : 0;
+        const fr = ray.f * r.reflectivity;
+        const ft = ray.f * (1 - r.reflectivity) * T;
+        const fa = ray.f - fr - ft;
+        _from.x = ray.x; _from.y = ray.y;
+        depositLight(g, e, fa, _from, null, dep, ray.ux, ray.uy);
+        const left = ray.len - t;
+        if (fr >= MIN_F && ray.bounces < MAX_BOUNCES) {
+            const d = ray.ux * hnx + ray.uy * hny;
+            const rx = ray.ux - 2 * d * hnx, ry = ray.uy - 2 * d * hny;
+            pushRay(hx + hnx * 0.6, hy + hny * 0.6, rx, ry, left, fr, ray.bounces + 1, e, null);
+        }
+        if (ft >= MIN_F && e.active) {
+            // Into the body, bent by the face (the normal against the ray is
+            // the outward one: the ray arrives from outside).
+            if (refract(ray.ux, ray.uy, hnx, hny, 1 / Math.max(1, r.refractiveIndex))) {
+                traverse(g, e, hx - hnx * 0.5, hy - hny * 0.5, _rx, _ry, ft, left, ray.bounces, 0, dep, out);
+            }
+        }
+    }
+}
+
+/** Break a STATIC cloud tile up the way a ship flying through it does — out
+ *  of the static grid, a fade rather than a pop, the ordinary nebula death —
+ *  or refuse (false) when its pieces would be too small to exist.  `vx, vy`
+ *  is the impact direction the pieces scatter along; `fast` fades it quickly. */
+function disperseCloud(g: GameEngine, e: GameEntity, vx: number, vy: number, fast: boolean): boolean {
+    if (e.health <= 0 || e.deathDispatched || !e.active) return false;
+    const childD = Math.max(e.size.x, e.size.y) * NEBULA_CONSTANTS.SHARD_LINEAR_RATIO;
+    if (childD < NEBULA_CONSTANTS.MIN_SHATTER_DIAMETER) return false;
+    e.lastImpactVelocity = { x: vx, y: vy };
+    e.lastImpactDamage = 1;
+    e.health = 0;
+    const fade = fast ? NEBULA_CONSTANTS.FADE_DURATION * 0.4 : NEBULA_CONSTANTS.FADE_DURATION;
+    e.mergeFadeTimer = fade;
+    e.mergeFadeDuration = fade;
+    g.physics.removeStaticEntity(e);
+    g.handleEntityDeath(e);
+    return true;
+}
+
+// ── The continuous beam ──────────────────────────────────────────────────────
+
+const _beamDep: LightDeposit = { dmg: 0, heat: 0, push: 0, thermal: false, breaksCloud: false, byPlayer: true };
+
 function tickBeam(g: GameEngine, dt: number): void {
     const b = g.energy.beam;
     if (!b) return;
@@ -738,6 +1228,7 @@ function tickBeam(g: GameEngine, dt: number): void {
 
     if (c.energy === 'electric' && c.electric) {
         // An ARC to the nearest conductor in a forward cone, then a chain.
+        b.light.nSeg = 0;
         const buf = g.energy.buf;
         gather(g, ox, oy, range, buf, ENERGY_CONSTANTS.CHAIN_CANDIDATES * 4);
         nearestK(buf, ox, oy, ENERGY_CONSTANTS.CHAIN_CANDIDATES);
@@ -749,7 +1240,7 @@ function tickBeam(g: GameEngine, dt: number): void {
             if (d > range || d < 1) continue;
             if ((dx * ux + dy * uy) / d < Math.cos(Math.PI / 3)) continue;
             const cond = responseOf(materialOf(e)).conductivity;
-            if (cond < 0.1) continue;
+            if (cond < ENERGY_CONSTANTS.CHAIN_MIN_CONDUCTIVITY) continue;
             const s = d / cond;
             if (s < bestS) { bestS = s; best = e; }
         }
@@ -766,34 +1257,107 @@ function tickBeam(g: GameEngine, dt: number): void {
         return;
     }
 
-    const passed = _passed;
-    const hit = raycast(g, ox, oy, ux, uy, range, c.beamWidth ?? 3, passed);
-    const hx = ox + ux * hit.t, hy = oy + uy * hit.t;
-    b.x1 = hx; b.y1 = hy; b.hit = hit.e !== null;
-    g.energy.lastBeamHitId = hit.e ? hit.e.id : null;
-    const from = { x: ox, y: oy };
+    // LIGHT: the plain beam (a kinetic bite and a shove) and the heat lance
+    // (heat, almost no bite) — both traced through the material optics.
+    const dep = _beamDep;
+    dep.dmg = c.damage;
+    dep.heat = c.energy === 'thermal' ? (c.heat ?? 0) : 0;
+    dep.push = c.energy === 'thermal' ? 0 : (c.push ?? 0);
+    dep.thermal = c.energy === 'thermal';
+    dep.breaksCloud = false;
+    dep.byPlayer = true;
+    traceLight(g, ox, oy, ux, uy, range, c.beamWidth ?? 3, 1, dep, b.light);
+    const L = b.light;
+    // The first segment's end is the classic "beam end" (tests, the HUD).
+    if (L.nSeg > 0) { b.x1 = L.segs[2]; b.y1 = L.segs[3]; }
+    else { b.x1 = ox + ux * range; b.y1 = oy + uy * range; }
+    b.hit = L.firstHit !== null;
+    g.energy.lastBeamHitId = L.firstHit ? L.firstHit.id : null;
+}
 
-    switch (c.energy) {
-        case 'thermal':
-            if (hit.e) {
-                depositHeat(g, hit.e, c.heat ?? 0, from, true);
-                if (c.damage > 0) damageBody(g, hit.e, c.damage, from, 'mechanical', true, false);
+// ── Pulses: the kinetic beam ─────────────────────────────────────────────────
+//
+// A burst of short beams that FLY (user call: like the old bolt-style beam),
+// each traced through the same optics as a continuous beam over the distance
+// it covers this step — so a pulse reflects off metal, splits and scatters in
+// glass and dies in rock.  A split's extra branches become extra pulses, out
+// of a bounded pool.
+
+const MAX_PULSES = 48;
+interface Pulse {
+    x: number; y: number; ux: number; uy: number; f: number;
+    travelled: number; range: number; speed: number; length: number;
+    dmg: number; push: number; color: string; width: number; alive: boolean;
+}
+interface Burst { config: WeaponConfig; left: number; acc: number; angle: number }
+const _pulseDep: LightDeposit = { dmg: 0, heat: 0, push: 0, thermal: false, breaksCloud: true, byPlayer: true };
+const _pulseOut = makeLightOut();
+
+function spawnPulse(g: GameEngine, x: number, y: number, ux: number, uy: number, f: number,
+                    travelled: number, c: { range: number; speed: number; length: number; dmg: number;
+                    push: number; color: string; width: number }): void {
+    const list = g.energy.pulses;
+    let p: Pulse | undefined;
+    for (let i = 0; i < list.length; i++) if (!list[i].alive) { p = list[i]; break; }
+    if (!p) {
+        if (list.length >= MAX_PULSES) return;
+        p = { x: 0, y: 0, ux: 0, uy: 0, f: 0, travelled: 0, range: 0, speed: 0, length: 0,
+              dmg: 0, push: 0, color: '', width: 0, alive: false };
+        list.push(p);
+    }
+    p.x = x; p.y = y; p.ux = ux; p.uy = uy; p.f = f; p.travelled = travelled;
+    p.range = c.range; p.speed = c.speed; p.length = c.length; p.dmg = c.dmg; p.push = c.push;
+    p.color = c.color; p.width = c.width; p.alive = true;
+}
+
+function tickPulses(g: GameEngine, dt: number): void {
+    const s = g.energy;
+    // Emit the bursts in progress.
+    const bu = s.burst;
+    if (bu) {
+        const pl = g.player;
+        if (!pl.active || pl.isExploding || pl.systemsDisabled) { s.burst = null; }
+        else {
+            bu.acc -= dt;
+            while (bu && bu.left > 0 && bu.acc <= 0) {
+                const c = bu.config;
+                const a = bu.angle + (Math.random() - 0.5) * 0.03;
+                const ux = Math.cos(a), uy = Math.sin(a);
+                const muzzle = Math.max(pl.size.x, pl.size.y) * 0.6;
+                spawnPulse(g, pl.position.x + ux * muzzle, pl.position.y + uy * muzzle, ux, uy, 1, 0, {
+                    range: c.beamRange ?? 360, speed: c.pulseSpeed ?? 1500, length: c.pulseLength ?? 24,
+                    dmg: c.damage, push: c.push ?? 0, color: c.color, width: c.beamWidth ?? 3 });
+                bu.left--;
+                bu.acc += c.pulseInterval ?? 0.05;
             }
-            for (const n of passed) depositHeat(g, n, (c.heat ?? 0) * 0.5, from, true);
-            break;
-        default: {
-            // Unmodified / kinetic: a bite and a shove along the beam.
-            if (hit.e) {
-                damageBody(g, hit.e, c.damage, from, 'mechanical', true, false);
-                const push = c.push ?? 0;
-                if (push > 0 && hit.e.mass !== Infinity && hit.e.active) {
-                    const k = push * Math.min(2, Math.sqrt(60 / Math.max(1, hit.e.mass)));
-                    hit.e.velocity.x += ux * k; hit.e.velocity.y += uy * k;
-                }
-            }
-            // Mechanical energy DISPLACES a gas in its path — never fractures it.
-            for (const n of passed) {
-                if (n.mass !== Infinity) { n.velocity.x += ux * 1.5; n.velocity.y += uy * 1.5; }
+            if (bu.left <= 0) s.burst = null;
+        }
+    }
+    const list = s.pulses;
+    const n = list.length;
+    for (let i = 0; i < n; i++) {
+        const p = list[i];
+        if (!p.alive) continue;
+        const L = Math.min(p.speed * dt, p.range - p.travelled);
+        if (!(L > 0) || p.f < MIN_F) { p.alive = false; continue; }
+        const dep = _pulseDep;
+        dep.dmg = p.dmg; dep.push = p.push; dep.heat = 0; dep.thermal = false;
+        dep.breaksCloud = true; dep.byPlayer = true;
+        traceLight(g, p.x, p.y, p.ux, p.uy, L, p.width, p.f, dep, _pulseOut);
+        if (_pulseOut.firstHit) s.lastPulseHitId = _pulseOut.firstHit.id;
+        p.travelled += L;
+        if (_pulseOut.nLeaf === 0) { p.alive = false; continue; }
+        // The STRONGEST ray still in flight IS this pulse; any others are new
+        // pulses split off it this step (a weak reflection, a prism branch).
+        const lv = _pulseOut.leaves;
+        let main = 0;
+        for (let k = 1; k < _pulseOut.nLeaf; k++) if (lv[k * 5 + 4] > lv[main * 5 + 4]) main = k;
+        for (let k = 0; k < _pulseOut.nLeaf; k++) {
+            const o = k * 5;
+            if (k === main) {
+                p.x = lv[o]; p.y = lv[o + 1]; p.ux = lv[o + 2]; p.uy = lv[o + 3]; p.f = lv[o + 4];
+            } else {
+                spawnPulse(g, lv[o], lv[o + 1], lv[o + 2], lv[o + 3], lv[o + 4], p.travelled, p);
             }
         }
     }
@@ -834,4 +1398,5 @@ export function tickEnergy(g: GameEngine, dt: number): void {
         if (s.energized.length !== n) s.energized.length = n;
     }
     tickBeam(g, dt);
+    if (s.burst || s.pulses.length > 0) tickPulses(g, dt);
 }

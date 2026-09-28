@@ -320,7 +320,21 @@ export interface WeaponConfig {
   // it bores exactly like any other round.  That is what lets a heavy shell
   // BE heavy — it should punch through gravel, not be stopped and wasted by
   // the first pebble in its path.
-  detonateOn?: 'impact' | 'enemy';
+  // 'fuse' → NOTHING trips it: the shell passes through actors and
+  // terrain alike and goes off only when its fuse runs out (the bare Cannon,
+  // user call) — wherever it has got to, even if it stopped inside a body.
+  detonateOn?: 'impact' | 'enemy' | 'fuse';
+  // A multiplier on the DERIVED blast (`blastDamageFor`), per weapon.  The
+  // bare Cannon's shell is heavy so it can bore deep, and without this its
+  // charge would grow with the bank; a light charge in a deep penetrator is
+  // what the design asks for.  Absent → 1.
+  blastScale?: number;
+  // A NARROW PENETRATOR: the fraction of each grain's price the round pays
+  // (and deposits) as it bores a grain body.  Below 1 the round slips between
+  // grains — it goes proportionally DEEPER and leaves proportionally less on
+  // each boundary.  Energy is still conserved: what it pays is what the body
+  // takes.  Absent → 1 (a full-bore round).
+  boreCostScale?: number;
   // Seconds of flight before the charge goes off on its own, so a shell that
   // never meets an actor still ends as a blast rather than silently expiring.
   // The FALLBACK half of `detonateOn: 'enemy'`; absent → no self-detonation.
@@ -370,6 +384,15 @@ export interface WeaponConfig {
   beamRange?: number;
   beamWidth?: number;
   beamTick?: number;
+  /** BEAM as a BURST OF PULSES (the kinetic beam): instead of a continuous
+   *  beam, `pulseCount` short beams leave `pulseInterval` s apart and FLY at
+   *  `pulseSpeed` (world units/s), each drawn `pulseLength` long and each
+   *  carrying `damage` — reflecting, splitting and passing through by the
+   *  same optics as a continuous beam.  They travel `beamRange` at most. */
+  pulseCount?: number;
+  pulseInterval?: number;
+  pulseSpeed?: number;
+  pulseLength?: number;
   /** SPREAD-instant: reach of the cone, and its half-angle
    *  (degrees) for a spread that resolves instantly rather than as rounds. */
   pulseRadius?: number;
@@ -549,7 +572,9 @@ export interface GameEntity {
   detonated?: boolean;
   /** Copied from the weapon at spawn so the on-hit path can ask what trips
    *  this shell without reaching back to its config. */
-  detonateOn?: 'impact' | 'enemy';
+  detonateOn?: 'impact' | 'enemy' | 'fuse';
+  /** See WeaponConfig.boreCostScale. */
+  boreCostScale?: number;
   /** The bolt's world speed at spawn — its MUZZLE energy reference.  Damage
    *  is kinetic (constants.kineticDamage), so under the shipped 'muzzle'
    *  impact-velocity mode the hit is the authored figure scaled by how much

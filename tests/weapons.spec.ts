@@ -104,6 +104,11 @@ async function glassField(page: any) {
 /** WEAPONS[CANNON].fuseSeconds, hard-coded (harness rule: a test that
  *  imports the constant it is checking pins nothing). */
 const CANNON_FUSE = 0.42;
+/** The old Plasma Cannon's shell lives on as the HEAVY SHELL (cannon +
+ *  kinetic): tripped by an actor, by its fuse or by stopping in terrain, with
+ *  the full derived blast.  The BARE cannon became a time-fused penetrator
+ *  (user call) and is pinned in energy.spec.ts. */
+// (Written as the literal 'cannon+kinetic' inside each in-page body.)
 const SIM_DT = 1 / 120;
 
 test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
@@ -122,7 +127,7 @@ test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
         if (!t) throw new Error('no fresh glass tile');
 
         p.velocity.x = 0; p.velocity.y = 0;
-        p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+        p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
         const before = e.currentMap.entities.length;
         e.weapons.firePlayerWeapon(e.currentMap.entities, p,
           { x: p.position.x + 500, y: p.position.y }, undefined, false);
@@ -172,7 +177,7 @@ test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
       foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6;
 
       p.velocity.x = 0; p.velocity.y = 0;
-      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
       const before = e.currentMap.entities.length;
       e.weapons.firePlayerWeapon(e.currentMap.entities, p,
         { x: p.position.x + 500, y: p.position.y }, undefined, false);
@@ -206,7 +211,7 @@ test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
           .filter((x: any) => x.active && x.isExplosionRing).length;
 
         p.velocity.x = 0; p.velocity.y = 0;
-        p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+        p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
         const before = e.currentMap.entities.length;
         e.weapons.firePlayerWeapon(e.currentMap.entities, p,
           { x: p.position.x + 500, y: p.position.y }, undefined, false);
@@ -873,7 +878,7 @@ test.describe('the base bank, and the blast derived from it', () => {
         const p = e.player;
         const fire = (mult: number) => {
           p.velocity.x = 0; p.velocity.y = 0;
-          p.currentWeapon = 'CANNON'; p.weaponCooldown = 0; p.damageMult = mult;
+          p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0; p.damageMult = mult;
           const before = new Set(e.currentMap.entities.map((x: any) => x.id));
           e.weapons.firePlayerWeapon(e.currentMap.entities, p,
             { x: p.position.x + 500, y: p.position.y });
@@ -891,9 +896,9 @@ test.describe('the base bank, and the blast derived from it', () => {
         };
         const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
         return {
-          authored: M.WEAPONS.cannon.explosionDamage ?? null,
-          authoredRadius: M.WEAPONS.cannon.explosionRadius ?? null,
-          bite: M.WEAPONS.cannon.damage,
+          authored: M.WEAPONS['cannon+kinetic'].explosionDamage ?? null,
+          authoredRadius: M.WEAPONS['cannon+kinetic'].explosionRadius ?? null,
+          bite: M.WEAPONS['cannon+kinetic'].damage,
           base: fire(1), gunned: fire(g3), g3,
           coupling: M.BLAST_ENERGY_COUPLING,
           perDamage: M.IMPACT_ENERGY_PER_DAMAGE,
@@ -901,7 +906,7 @@ test.describe('the base bank, and the blast derived from it', () => {
       });
 
       // (4a) the config authors NO splash — absent is what "derive it" means.
-      expect(r.authored, 'the player Cannon authors no explosionDamage').toBeNull();
+      expect(r.authored, 'the Heavy Shell authors no explosionDamage').toBeNull();
 
       // (4b) the shell flies a blast derived from its OWN energy.
       const expected = 0.5 * r.base.mass! * r.base.speed! * r.base.speed!
@@ -1036,7 +1041,7 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
       witness.shield = 0; witness.maxShield = 0;
 
       p.velocity.x = 0; p.velocity.y = 0;
-      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
       const before = new Set(e.currentMap.entities.map((x: any) => x.id));
       e.weapons.firePlayerWeapon(e.currentMap.entities, p,
         { x: p.position.x + 500, y: p.position.y });
@@ -1106,7 +1111,7 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
       const direct = mk(400, 0);
       const bystander = mk(400, 55);
       p.velocity.x = 0; p.velocity.y = 0;
-      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
       const before = new Set(e.currentMap.entities.map((x: any) => x.id));
       e.weapons.firePlayerWeapon(e.currentMap.entities, p,
         { x: p.position.x + 500, y: p.position.y });

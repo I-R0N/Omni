@@ -178,14 +178,38 @@ export interface MaterialResponse {
   disperseAt: number;
 
   // ── ELECTRIC ──────────────────────────────────────────────────────────────
-  /** 0..1: 1 conducts perfectly, <CHAIN_MIN_CONDUCTIVITY is a terminal (the
-   *  arc lands, nothing propagates). */
+  /** 0..1: 1 conducts perfectly.  A chain passes ON through a body at its
+   *  conductivity (the arc out of it carries that fraction), so a poor
+   *  conductor passes a weak arc and only a near-perfect insulator
+   *  (< CHAIN_MIN_CONDUCTIVITY) is a dead end. */
   conductivity: number;
   /** Fraction of an arc's magnitude that becomes damage. */
   electricDamage: number;
-  /** Seconds an arc leaves the body ENERGISED (the cyan rim) instead of
-   *  damaging it.  0 = never energised. */
+  /** Seconds an arc leaves the body ENERGISED (it glitters with sparks)
+   *  instead of damaging it.  0 = never energised. */
   energizeSec: number;
+
+  // ── OPTICAL (light: beams, and the radiant heat of hot bodies) ────────────
+  /** Fraction of arriving light REFLECTED at the surface (a mirror image of
+   *  the ray, which carries on).  Metal is the mirror. */
+  reflectivity: number;
+  /** Fraction of the light that is not reflected that ENTERS the body and
+   *  travels through it (the rest is absorbed at the surface).  0 = opaque. */
+  transmissivity: number;
+  /** The same, for THERMAL light (infrared).  Glass is clear to a visible
+   *  beam and nearly opaque to heat — which is what lets a heat lance make a
+   *  pane fail while an ordinary beam passes through it. */
+  thermalTransmissivity: number;
+  /** Refractive index: how far a ray bends crossing the surface (Snell). */
+  refractiveIndex: number;
+  /** Inside the body, each GRAIN BOUNDARY a ray crosses turns it by up to
+   *  this many radians (deflection inside tiles and shards)... */
+  boundaryScatter: number;
+  /** ...takes this fraction of its energy (deposited on that boundary — the
+   *  low per-boundary damage of a deep pass-through)... */
+  boundaryLoss: number;
+  /** ...and SPLITS this fraction of it off as a new ray (bounded). */
+  boundarySplit: number;
 }
 
 /** How a material LOOKS hot: `heatRamp` maps local temperature (0..1) to a
@@ -233,6 +257,9 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     heatAbsorb: 0.8, specificHeat: 0.8,  coolingPerSec: 0.25, thermalConductivity: 0.12,
     thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
     conductivity: 0.15, electricDamage: 0.3, energizeSec: 0,
+    // Opaque and dull: absorbs almost all light.
+    reflectivity: 0.06, transmissivity: 0, thermalTransmissivity: 0, refractiveIndex: 1,
+    boundaryScatter: 0, boundaryLoss: 0, boundarySplit: 0,
     grain: { grainCountMin: 3, grainCountMax: 16, grainSize: 14, impactBias: 0.75, regularity: 0.5,
              progressive: true, bondStrength: 0.4 },
     density: 0.18,
@@ -248,7 +275,13 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     gas: false, heatWeakening: 1.0,
     heatAbsorb: 0.9, specificHeat: 0.84, coolingPerSec: 0.15, thermalConductivity: 0.08,
     thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-    conductivity: 0.05, electricDamage: 0.2, energizeSec: 0,
+    // Low but NOT zero (user call): an arc lands on glass, cracks it and
+    // passes on weakly, rather than glass being a dead end.
+    conductivity: 0.1, electricDamage: 0.35, energizeSec: 0,
+    // Clear: most light passes through, bending at the faces, glancing off each
+    // grain boundary and splitting a little at each one (a prism); opaque to heat.
+    reflectivity: 0.12, transmissivity: 0.95, thermalTransmissivity: 0.15, refractiveIndex: 1.5,
+    boundaryScatter: 0.14, boundaryLoss: 0.05, boundarySplit: 0.2,
     grain: { grainCountMin: 6, grainCountMax: 10, grainSize: 15, impactBias: 0.75, regularity: 0.5,
              progressive: true, bondStrength: 0.4 },
     density: 0.10,
@@ -266,6 +299,9 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     heatAbsorb: 0.7, specificHeat: 0.45, coolingPerSec: 0.1, thermalConductivity: 1.0,
     thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
     conductivity: 1.0, electricDamage: 1.0, energizeSec: 0,
+    // The mirror: reflects most light, absorbs the rest, lets none through.
+    reflectivity: 0.8, transmissivity: 0, thermalTransmissivity: 0, refractiveIndex: 1,
+    boundaryScatter: 0, boundaryLoss: 0, boundarySplit: 0,
     grain: { grainCountMin: 8, grainCountMax: 22, grainSize: 8, impactBias: 0.35, regularity: 0.95,
              sizeSpread: 0, bondSpread: 0, grainDent: 0.05, progressive: true, bondStrength: 1.8 },
     density: 0.30,
@@ -283,6 +319,10 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     heatAbsorb: 1.0, specificHeat: 1.5, coolingPerSec: 0.2, thermalConductivity: 0.03,
     thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3, agitation: 0, disperseAt: Infinity,
     conductivity: 0.03, electricDamage: 0.1, energizeSec: 0,
+    // Translucent and cloudy: light gets in, is scattered hard by every grain
+    // and soaked up quickly.
+    reflectivity: 0.05, transmissivity: 0.5, thermalTransmissivity: 0.3, refractiveIndex: 1.45,
+    boundaryScatter: 0.45, boundaryLoss: 0.2, boundarySplit: 0.1,
     grain: { grainCountMin: 8, grainCountMax: 16, grainSize: 6, impactBias: 0.5, regularity: 0.55,
              sizeSpread: 0, bondSpread: 0, grainDent: 0.10, dentRecoverSeconds: 2.5,
              progressive: true, bondStrength: 1.8 },
@@ -303,6 +343,9 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     heatAbsorb: 1.0, specificHeat: 1.0, coolingPerSec: 0.5, thermalConductivity: 0.05,
     thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0.4, disperseAt: 1.0,
     conductivity: 0.7, electricDamage: 0, energizeSec: 3.5,
+    // A gas: light passes straight through (the beam's gas branch).
+    reflectivity: 0, transmissivity: 1, thermalTransmissivity: 1, refractiveIndex: 1,
+    boundaryScatter: 0, boundaryLoss: 0, boundarySplit: 0,
     grain: { grainCountMin: 3, grainCountMax: 14, grainSize: 20, impactBias: 0.5, regularity: 0.15,
              sizeSpread: 0.6 },
     density: null,
@@ -321,6 +364,9 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     heatAbsorb: 0.8, specificHeat: 0.5, coolingPerSec: 0.4, thermalConductivity: 0.8,
     thermalDps: 5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
     conductivity: 1.0, electricDamage: 1.0, energizeSec: 0,
+    // A hull: dull metal paint — some glint, mostly absorbed.
+    reflectivity: 0.15, transmissivity: 0, thermalTransmissivity: 0, refractiveIndex: 1,
+    boundaryScatter: 0, boundaryLoss: 0, boundarySplit: 0,
     grain: null,
     density: null,
     fracture: { mechanical: { siteScale: 1, impulse: 1 },
@@ -359,6 +405,9 @@ export const ENERGY_CONSTANTS = {
   MAX_HEAT: 5,
   /** Below this a body is COLD and leaves the active-heated set. */
   HEAT_EPSILON: 0.02,
+  /** A burn rate (damage units/s) below this is not handed to a fragment:
+   *  a share that small would only spend a heated-set slot. */
+  MIN_SHARED_BURN: 0.5,
   /** PRESENTATION: the drawn temperature eases toward the real one — this
    *  fast when heating, this slowly when cooling (seconds, time constant).
    *  Deposits, conduction and the cold snap all move the true peak in steps;
@@ -377,6 +426,23 @@ export const ENERGY_CONSTANTS = {
   CONDUCT_INTERVAL_SEC: 0.25,
   CONDUCT_NEIGHBOURS: 3,
   CONDUCT_RADIUS: 70,
+  /** A hull (the player's, an enemy's) TOUCHING a hot body takes heat by
+   *  conduction when their surfaces are within this gap. */
+  CONTACT_GAP: 6,
+
+  // RADIANT HEAT — light carries heat (user call).  A hot body is a light
+  // source whose power follows T⁴ (`heatRadiance`) × the material's
+  // emissivity (`look.heatEmit`), and what reaches a neighbour is the share
+  // of that light its silhouette intercepts at that distance.
+  /** Radiant power (damage units/s) of a body at heat 1 with emissivity 1. */
+  RADIATE_POWER: 60,
+  /** How far radiant heat is worth tracking. */
+  RADIATE_RADIUS: 130,
+  /** Bodies below this heat do not radiate enough to matter. */
+  RADIATE_MIN_HEAT: 0.25,
+  /** At most this many radiators per effect tick, and receivers each. */
+  RADIATE_MAX_SOURCES: 48,
+  RADIATE_MAX_RECEIVERS: 8,
 
   // ELECTRIC chain caps (§6).  Every chain respects ALL of these.
   CHAIN_MAX_HOPS: 4,
@@ -384,8 +450,8 @@ export const ENERGY_CONSTANTS = {
   CHAIN_MAX_RADIUS: 420,       // from the chain's ORIGIN
   CHAIN_HOP_RANGE: 150,        // per hop
   CHAIN_BRANCHES: 2,
-  CHAIN_ATTENUATION: 0.72,     // magnitude × this × target conductivity per hop
-  CHAIN_MIN_CONDUCTIVITY: 0.3, // below: the arc lands but does not propagate
+  CHAIN_ATTENUATION: 0.72,     // magnitude × this × the conductivity of the body it passes through
+  CHAIN_MIN_CONDUCTIVITY: 0.02, // below: a true insulator — the arc lands and goes no further
   CHAIN_MIN_MAGNITUDE: 0.25,   // below: the chain has run out
   CHAIN_CANDIDATES: 48,        // max bodies considered per hop query
 
@@ -568,9 +634,11 @@ export function defaultChainCaps(): ChainCaps {
  *  - no body is visited twice (a visited set by id — cycles terminate);
  *  - at most `maxHops` levels, `maxTargets` bodies, all within `maxRadius`
  *    of the origin and `hopRange` of their parent;
- *  - magnitude attenuates every hop by CHAIN_ATTENUATION × conductivity, and
- *    a body below CHAIN_MIN_CONDUCTIVITY is a TERMINAL: it takes its arc and
- *    the chain does not continue through it (glass, plastic, rock);
+ *  - magnitude attenuates every hop by CHAIN_ATTENUATION × the conductivity
+ *    of the body the current passes THROUGH to make that hop, so a poor
+ *    conductor (glass, rock, plastic) passes on only a weak arc and a metal
+ *    plate passes on nearly all of it.  Only a body below
+ *    CHAIN_MIN_CONDUCTIVITY is a dead end (it takes its arc, nothing more);
  *  - it stops when magnitude falls below CHAIN_MIN_MAGNITUDE.
  *
  * Candidate order is conductivity-weighted distance (d / conductivity), so an
@@ -631,8 +699,11 @@ export function planChain(
       for (const s of scored) {
         if (taken >= caps.branches || out.length >= maxTargets) break;
         if (visited.has(s.e.id)) continue;
+        // The current reaches this body THROUGH the parent, so it carries the
+        // parent's conductivity (an arc from the origin is not attenuated
+        // by a body).  Continuous, not a switch: glass passes a weak arc.
         const pc = parent.e ? responseOf(materialOf(parent.e)).conductivity : 1;
-        const mag = parent.mag * C.CHAIN_ATTENUATION * Math.min(1, Math.max(pc, s.c));
+        const mag = parent.mag * C.CHAIN_ATTENUATION * Math.min(1, pc);
         if (mag < C.CHAIN_MIN_MAGNITUDE) continue;
         visited.add(s.e.id);
         const node: ChainNode = { e: s.e, mag, depth, from: parent.e ?? null };

@@ -5,7 +5,9 @@
  *
  *   - HEAT: the material ITSELF changes colour and gives off light — see
  *     `renderHeat`.  Nothing else draws heat: no rings, discs or sparks.
- *   - ENERGISED nebula: a flickering cyan rim while a cloud is steerable.
+ *   - ENERGISED nebula GLITTERS (user call): quick, bright sparks inside the
+ *     cloud — the nebula twinkle, faster and hotter — with an occasional
+ *     faint crackle line to a neighbouring energised puff.
  *   - THE BEAM: the live beam pulse from the ship to what it touches.
  *
  *  Electric arcs reuse the existing lightning-arc particle, magnetism reuses
@@ -20,11 +22,20 @@ import { heatRadiance, materialOf, materialDef, MATERIAL_IDS, type MaterialId, t
 export interface EnergyBeamView {
     x0: number; y0: number; x1: number; y1: number;
     width: number; color: string; energy: string | undefined; hit: boolean;
+    /** The traced light path — x0,y0,x1,y1,f per segment, flat — including
+     *  every reflection, refraction and split. */
+    segs: number[]; nSeg: number;
+}
+/** A kinetic-beam pulse in flight (the pool GameEngine hands over). */
+export interface EnergyPulseView {
+    x: number; y: number; ux: number; uy: number; f: number;
+    length: number; width: number; color: string; alive: boolean;
 }
 export interface EnergyFxView {
     heated: readonly GameEntity[];
     energized: readonly GameEntity[];
     beam: EnergyBeamView | null;
+    pulses: readonly EnergyPulseView[];
     simClock: number;
     /** Enemies a player seeker has LOCKED (distinct, ≤ 16). */
     locks: GameEntity[];
@@ -36,53 +47,150 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
     if (!view) return;
     const camX = camera.position.x, camY = camera.position.y;
     renderLocks(ctx, view.locks, camX, camY);
-    const { heated, energized, beam } = view;
-    if (heated.length === 0 && energized.length === 0 && !beam) return;
+    const { heated, energized, beam, pulses } = view;
+    if (heated.length === 0 && energized.length === 0 && !beam && pulses.length === 0) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
     if (heated.length > 0) renderHeat(ctx, heated, camX, camY);
     ctx.globalCompositeOperation = 'lighter';
 
-    for (let i = 0; i < energized.length; i++) {
-        const e = energized[i];
-        if (!e.active) continue;
-        const left = (e.energizedUntil ?? 0) - view.simClock;
-        if (left <= 0) continue;
-        const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
-        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
-        ctx.globalAlpha = Math.min(0.6, left) * (0.5 + 0.5 * Math.random());
-        ctx.strokeStyle = '#67e8f9';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(x, y, Math.max(e.size.x, e.size.y) * 0.55, 0, Math.PI * 2);
-        ctx.stroke();
-    }
+    if (energized.length > 0) renderSparks(ctx, energized, view.simClock, camX, camY);
 
-    // Electric beams draw as arcs (lightning particles); everything else is
-    // a line from the muzzle to the contact.
+    // Electric beams draw as arcs (lightning particles); a light beam draws
+    // its whole traced path — every reflection, refraction and split — each
+    // segment as bright as the share of the energy it still carries.
     if (beam && beam.energy !== 'electric') {
-        const x0 = shiftX(camX, beam.x0), y0 = shiftY(camY, beam.y0);
-        const x1 = x0 + (shiftX(beam.x0, beam.x1) - beam.x0);
-        const y1 = y0 + (shiftY(beam.y0, beam.y1) - beam.y0);
         ctx.lineCap = 'round';
-        ctx.globalAlpha = 0.45;
-        ctx.strokeStyle = beam.color;
-        ctx.lineWidth = beam.width * 2.2;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        ctx.globalAlpha = 0.9;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(1, beam.width * 0.5);
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        // A thermal beam's contact reads through the body it heats (the
-        // heat pass above), so it draws no contact disc of its own.
-        if (beam.hit && beam.energy !== 'thermal') {
+        const sg = beam.segs;
+        for (let k = 0; k < beam.nSeg; k++) {
+            const o = k * 5;
+            const f = Math.min(1, sg[o + 4]);
+            const x0 = shiftX(camX, sg[o]), y0 = shiftY(camY, sg[o + 1]);
+            const x1 = x0 + (shiftX(sg[o], sg[o + 2]) - sg[o]);
+            const y1 = y0 + (shiftY(sg[o + 1], sg[o + 3]) - sg[o + 1]);
+            ctx.globalAlpha = 0.45 * (0.25 + 0.75 * f);
+            ctx.strokeStyle = beam.color;
+            ctx.lineWidth = beam.width * 2.2 * (0.5 + 0.5 * f);
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+            ctx.globalAlpha = 0.9 * (0.2 + 0.8 * f);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = Math.max(1, beam.width * 0.5);
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        }
+        // A thermal beam's contact reads through the body it heats (the heat
+        // pass above), so only a plain beam draws a contact disc.
+        if (beam.hit && beam.energy !== 'thermal' && beam.nSeg > 0) {
+            const x1 = shiftX(camX, sg[2]), y1 = shiftY(camY, sg[3]);
             ctx.globalAlpha = 0.6;
             ctx.fillStyle = beam.color;
             ctx.beginPath(); ctx.arc(x1, y1, beam.width * 1.6 + 3, 0, Math.PI * 2); ctx.fill();
         }
     }
+    // Pulses: short streaks along their heading.
+    for (let i = 0; i < pulses.length; i++) {
+        const p = pulses[i];
+        if (!p.alive) continue;
+        const x = shiftX(camX, p.x), y = shiftY(camY, p.y);
+        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
+        const f = Math.min(1, p.f);
+        const tx = x - p.ux * p.length, ty = y - p.uy * p.length;
+        ctx.lineCap = 'round';
+        ctx.globalAlpha = 0.5 * (0.3 + 0.7 * f);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = p.width * 2.4;
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+        ctx.globalAlpha = 0.95 * (0.3 + 0.7 * f);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = Math.max(1, p.width * 0.6);
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+    }
     ctx.restore();
+}
+
+// ── ENERGISED NEBULA: SPARKS ────────────────────────────────────────────────
+//
+// An arc through a cloud leaves it crackling.  Each energised body shows a
+// couple of short, bright sparks that jump to a fresh spot every SPARK_SLOT
+// seconds (the nebula twinkle's star, faster and brighter), and now and then
+// a faint jagged line to the next energised puff nearby.  Positions are a
+// hash of the body and the time slot, so nothing is stored per body and the
+// whole pass is a fixed handful of drawImage calls per body on a list capped
+// at 200.  Fades out over the last SPARK_FADE seconds of the charge.
+
+const SPARK_SLOT = 0.09;
+const SPARK_FADE = 0.8;
+const SPARKS_PER_BODY = 2;
+const SPARK_SIZE = 9;
+const SPARK_LINK = 110;
+let _sparkBmp: HTMLCanvasElement | null = null;
+function sparkBitmap(): HTMLCanvasElement {
+    if (_sparkBmp) return _sparkBmp;
+    const n = 24, c = document.createElement('canvas');
+    c.width = n; c.height = n;
+    const g = c.getContext('2d')!;
+    const m = n / 2;
+    const rg = g.createRadialGradient(m, m, 0, m, m, m);
+    rg.addColorStop(0, 'rgba(255,255,255,1)');
+    rg.addColorStop(0.25, 'rgba(190,250,255,0.8)');
+    rg.addColorStop(0.6, 'rgba(103,232,249,0.22)');
+    rg.addColorStop(1, 'rgba(103,232,249,0)');
+    g.fillStyle = rg;
+    g.fillRect(0, 0, n, n);
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.fillRect(m - 0.5, 2, 1, n - 4);
+    g.fillRect(2, m - 0.5, n - 4, 1);
+    _sparkBmp = c;
+    return c;
+}
+/** Deterministic 0..1 from a body, a slot and a lane — no state, no garbage. */
+function hash01(id: string, slot: number, lane: number): number {
+    let h = 2166136261 ^ (slot * 374761393) ^ (lane * 668265263);
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+    h ^= h >>> 13; h = Math.imul(h, 1274126177); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+}
+
+function renderSparks(ctx: CanvasRenderingContext2D, energized: readonly GameEntity[], clock: number,
+                      camX: number, camY: number): void {
+    const bmp = sparkBitmap();
+    const slot = Math.floor(performance.now() / 1000 / SPARK_SLOT);
+    let prevX = 0, prevY = 0, havePrev = false;
+    for (let i = 0; i < energized.length; i++) {
+        const e = energized[i];
+        if (!e.active) { havePrev = false; continue; }
+        const left = (e.energizedUntil ?? 0) - clock;
+        if (left <= 0) { havePrev = false; continue; }
+        const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
+        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) { havePrev = false; continue; }
+        const fade = Math.min(1, left / SPARK_FADE);
+        const R = Math.max(e.size.x, e.size.y) * 0.45;
+        let sx0 = x, sy0 = y;
+        for (let k = 0; k < SPARKS_PER_BODY; k++) {
+            const a = hash01(e.id, slot, k) * Math.PI * 2;
+            const r = Math.sqrt(hash01(e.id, slot, k + 7)) * R;
+            const sx = x + Math.cos(a) * r, sy = y + Math.sin(a) * r;
+            if (k === 0) { sx0 = sx; sy0 = sy; }
+            const size = SPARK_SIZE * (0.6 + 0.8 * hash01(e.id, slot, k + 13));
+            ctx.globalAlpha = fade * (0.55 + 0.45 * hash01(e.id, slot, k + 19));
+            ctx.drawImage(bmp, sx - size / 2, sy - size / 2, size, size);
+        }
+        // A faint crackle to the previous energised puff, when it is close,
+        // on roughly a third of the slots.
+        if (havePrev && hash01(e.id, slot, 29) < 0.35) {
+            const dx = prevX - sx0, dy = prevY - sy0;
+            if (dx * dx + dy * dy < SPARK_LINK * SPARK_LINK) {
+                const mx = (sx0 + prevX) / 2 + (hash01(e.id, slot, 31) - 0.5) * 14;
+                const my = (sy0 + prevY) / 2 + (hash01(e.id, slot, 37) - 0.5) * 14;
+                ctx.globalAlpha = fade * 0.35;
+                ctx.strokeStyle = '#a5f3fc';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(mx, my); ctx.lineTo(prevX, prevY); ctx.stroke();
+            }
+        }
+        prevX = sx0; prevY = sy0; havePrev = true;
+    }
+    ctx.globalAlpha = 1;
 }
 
 // ── SEEKER LOCK BRACKETS ────────────────────────────────────────────────────

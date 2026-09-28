@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  491 tests.  All run at
+                          whatever happened next).  496 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -290,7 +290,9 @@ engine/
                           trails, pooled particles, lightning arcs
       energyFx.ts         Energy feedback: heat colour + emitted light on
                           the heated set,
-                          the energised-nebula rim, the live beam line
+                          the energised-nebula sparks, the traced
+                          light path (every reflection and split) and
+                          the kinetic-beam pulses
       shardBlend.ts   The bonded-pair "goo" layer: one metaball
                       connector per live cohesion bond, filled
                       UNDER both hulls so a stuck pair reads as
@@ -1445,12 +1447,20 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `WeaponKey` string (`'projectile'`, `'beam+thermal'`); `WEAPONS` holds all
   20 keys, precomputed from `DELIVERY_BASE` + `COMBOS`.  UNMODIFIED
   deliveries are the weak base: plain kinetic at ~60% of the retired
-  Blaster's 28.6 dmg/s (four sit at 16.7; the Cannon's direct bite is 12.9,
-  its blast carrying the rest).  MAGNETIC AND EXPLOSIVE ENERGIES ARE REMOVED
-  and the PULSE delivery BECAME THE CANNON (user call): the bare `cannon` IS
-  the old Plasma Cannon (shell, fuse, derived blast), and its three
-  combinations are PLACEHOLDERS pending delivery feedback — Heavy Shell
-  (kinetic), Arc Shell (electric: the chain starts at the BLAST, wherever it
+  Blaster's 28.6 dmg/s (four sit at 16.7).  MAGNETIC AND EXPLOSIVE ENERGIES
+  ARE REMOVED and the PULSE delivery BECAME THE CANNON (user call).  THE BARE
+  CANNON IS A WHITE, TIME-FUSED PENETRATOR (user call): `detonateOn: 'fuse'`
+  means NOTHING trips it — not an enemy, not terrain, not stopping — so it
+  goes off exactly on its 0.42 s fuse wherever it has got to (a shell that
+  stops dead waits there).  The shell is a tiny bite (3) on a big bank with
+  `boreCostScale` 0.25 — a NARROW PENETRATOR that pays, and so deposits, a
+  quarter of each grain's price, going four times deeper and gentler on each
+  boundary — and its blast (`blastScale` 0.2, ~12.5 peak against the old
+  20.8) is still the weapon's main damage, only weaker.  Its three
+  combinations keep the OLD Plasma Cannon shell (`detonateOn: 'enemy'`, stop
+  = blast, full derived blast) and are PLACEHOLDERS pending delivery feedback
+  — Heavy Shell (kinetic, which is what `weapons.spec`'s contact-mine rules
+  now pin), Arc Shell (electric: the chain starts at the BLAST, wherever it
   goes off — `queueElectric`) and Incendiary Shell (thermal: `blastHeat`, so
   heat on a blast is a property of that shell, never of every explosion).
   Removed keys resolve through `LEGACY_WEAPON_MAP` (the old shell and every
@@ -1465,7 +1475,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   BOUNCER→beam+thermal, LIGHTNING→projectile+electric,
   HOMING→homing+kinetic, CANNON→cannon, and the `wpn_*`
   catalog ids likewise) and those combinations inherit the old gun's
-  tuning, so `weaponConfig('CANNON')` IS the old Cannon.  Old ids resolve
+  tuning (the old CANNON id resolves to the bare cannon, which is now the
+  time-fused penetrator above; its old shell lives on as the Heavy Shell).  Old ids resolve
   anywhere a key is read (`currentWeapon`, `debugGrantWeapon`); unknown
   ids fail safe to the bare projector.  The ricochet (bouncer) primitive
   and the enum-keyed lightning chain are GONE; the charged bolt's chain is
@@ -3442,6 +3453,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     with charges left, it flies on** and may strike the next thing.  That
     is the whole difference from the body-level rule, and it is what makes
     penetration read as depth rather than as a pass.
+  - **THE ROUND IS MOVED TO WHERE ITS WALK ENDED** — out of the far side, or
+    to the grain it stopped in — written as a displacement so it holds in
+    whichever frame the broadphase shifted the pair into.  Before this the
+    walk was only virtual: the round stayed at the entry face, was still
+    inside a tile wider than its own step on the next substep, and that
+    re-contact was damaged AGAIN on the single-spend path and then STOPPED —
+    so no bored round ever came out of a 36px tile.  Beside it, **a body a
+    round has already struck is not struck again** (`hitEntityIds`, checked
+    at the top of the projectile branch): an overlap with it is the round
+    passing through or resting, not a hit.  A ricochet that should re-hit
+    clears the list at the bounce, as it always did.  `WeaponConfig.
+    boreCostScale` (< 1, the bare Cannon's 0.25) makes a round a NARROW
+    PENETRATOR: it pays, and deposits, that fraction of each grain's price.
   - **It allocates nothing and is bounded by the charges bought** — one
     reused scratch point, and `charges` strictly decreases each iteration.
   Bodies with no grain model (nebula, metal-shard composites, enemies,
@@ -3947,8 +3971,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the audio used to disagree about it).  `gas` (nebula) means not a solid: no damage from any energy, no
     fracture profile, no impact stamp, beams pass through it, and kinetic
     ROUNDS shove a drifting gas body along their travel (`GAS_DISPLACE_*` in
-    PhysicsSystem) — as a kinetic beam always did; a static cloud tile is
-    untouched.  `agitation` / `disperseAt` are how a gas answers heat,
+    PhysicsSystem) — as a kinetic beam always did — and a STATIC cloud tile is
+    BROKEN UP by a round passing through it exactly as a ship flying through
+    it breaks it (user call; the round flies on uncharged, once per tile via
+    its hit list).  `agitation` / `disperseAt` are how a gas answers heat,
     `energizeSec` how long an arc energises instead of damaging.  THREE HEAT
     QUANTITIES ARE DERIVED, not authored: `specificHeat` (J/g·K, roughly
     the real material's) gives both the energy a unit of heat costs
@@ -3963,9 +3989,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
   - **ELECTRIC is instantaneous and planned by `planChain`** under hop /
     target / origin-radius / hop-range caps, per-hop attenuation and a
     visited set — no recursion, cycles cannot recur.  Candidates are
-    conductivity-weighted; a body below `CHAIN_MIN_CONDUCTIVITY` (glass,
-    plastic, rock) is a TERMINAL.  A material with `energizeSec` (nebula)
-    is ENERGISED (`energizedUntil`, the cyan rim) rather than damaged.
+    conductivity-weighted, and CONDUCTION IS CONTINUOUS, NOT A SWITCH (user
+    call: glass has a low but not zero conductivity): the arc OUT of a body
+    carries `CHAIN_ATTENUATION ×` that body's conductivity, so glass (0.1),
+    rock and plastic pass on only a weak arc and a metal plate nearly all of
+    it; only a true insulator below `CHAIN_MIN_CONDUCTIVITY` (0.02) is a dead
+    end.  A material with `energizeSec` (nebula) is ENERGISED
+    (`energizedUntil`) rather than damaged, and an energised cloud GLITTERS
+    (user call) — a couple of bright sparks per body jumping to a fresh,
+    hashed spot every ~0.09 s, and now and then a faint crackle line to the
+    next energised puff (`renderSparks`, no per-body state).
   - **FRACTURE PROFILES drive the existing Voronoi through three existing
     knobs**: `siteScale` (the pattern's site count, applied after the
     material clamp, bounded to [2, 1.5×max]), `bias` (impact bias) and
@@ -3990,22 +4023,63 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     after physics, because the dynamic grid is only safe between substeps.
     Every query is a grid radius walk with a hard cap; `nearestK` makes an
     overflowing cap drop the FAR bodies.
-  - **Beams** are timed pulses (one per trigger pull — there is no hold-to-
-    fire), aimed at the pull, ticking a capped raycast; an electric beam
-    arcs to the nearest conductor in a forward cone or fizzles.  THE BEAM
-    STOPS ON THE DRAWN SHAPE (user report): the raycast's circle — sized to
-    a body's LONGEST extent — is only the broadphase, and a body with a
-    polygon is hit where the beam (centre and both edges) meets that
-    polygon, in its local rotated frame (`rayPolygonEntry`).  On an
-    irregular shard the circle had ended the beam visibly short of it.
-  - **A FRAGMENT IS AS HOT AS WHAT IT BROKE OFF** (user call;
-    `inheritHeat`).  Heat is a temperature, so a piece takes the parent's
-    heat, not a share of it — at the two places children are born, the
-    death shatter (the same appended-slice seam `blastImpulse` uses) and the
-    mid-life grain detach.  Burns and the byPlayer stamp carry too, and it
-    goes through the bounded heated set like any deposit.  Capped just under
-    the material's `thermalFailAt`, or a glass pane that failed from heat
-    would hand its pieces enough heat to fail again and cascade to dust.
+  - **Beams** are timed (one per trigger pull — there is no hold-to-fire),
+    aimed at the pull; an electric beam arcs to the nearest conductor in a
+    forward cone or fizzles.  Every other beam is LIGHT, and **WHAT LIGHT
+    DOES AT A BODY IS A MATERIAL PROPERTY** (user call): six optical columns
+    in `MATERIALS` — `reflectivity` (metal is the mirror), `transmissivity`
+    and `thermalTransmissivity` (glass is clear to a beam and nearly opaque
+    to heat, which is what still lets a heat lance make a pane fail),
+    `refractiveIndex`, and per-GRAIN-BOUNDARY `boundaryScatter` / `boundaryLoss`
+    / `boundarySplit`.  `traceLight` (energyEffects.ts) is a BOUNDED ray set
+    — ≤10 rays, ≤4 reflections a ray, ≤48 grain steps inside a body, ≤48
+    drawn segments, from a fixed module pool, so a trace allocates nothing:
+    at a face the light splits into reflected, transmitted and absorbed
+    shares; inside, it steps a grain at a time, each boundary taking its
+    loss (a DEEP pass-through that leaves LOW damage on each boundary),
+    turning it by the scatter and splitting a share off; leaving, it
+    refracts out (or reflects back in past the critical angle).  Internal
+    deflection is SEEDED by body and step, so a path through a pane is stable
+    rather than jittering tick to tick.  A gas lets it through (thermal
+    light warms it).  THE BEAM STOPS ON THE DRAWN SHAPE (user report): the
+    raycast's circle is only the broadphase and a polygon body is hit where
+    the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
+    also returns the face normal the optics need).  THE KINETIC BEAM IS A
+    BURST OF PULSES that FLY (user call — like the old bolt beams): six short
+    beams 0.05 s apart at 1500 u/s, each traced through the SAME optics over
+    the distance it covers each step; a split's extra branches become extra
+    pulses out of a bounded pool (48), and a pulse carries on as its
+    STRONGEST branch.  The thermal beam is the only other beam that fires
+    continuously like the base beam.
+  - **A BREAK CONSERVES HEAT** (user call; `shareHeat`).  Heat in this model
+    is an AMOUNT per body (a deposit heats any body by the same step, whatever
+    its size), so when pieces come off a hot body its heat ENERGY is DIVIDED
+    between the pieces and whatever remains, by area — at the two places
+    children are born, the death shatter (the appended-slice seam
+    `blastImpulse` uses) and the mid-life grain detach.  It USED to be copied
+    onto every piece, which multiplied the energy by the piece count, and on
+    plastic (heat is a 60 dps DoT) every hot piece burned, broke and passed
+    its heat on again: an incendiary shell on plastic set off a chain reaction
+    of ~1000 plastic-shard deaths and as many nebula puffs in six seconds
+    (measured; ~47 after).  A burn — a heat SOURCE — divides the same way, a
+    share too small to register leaves the piece cold, and it stays capped
+    under `thermalFailAt` so a pane that failed from heat cannot hand a piece
+    enough to fail again.
+  - **LIGHT CARRIES HEAT** (user call).  A hot body is a light source: its
+    radiant power follows T⁴ (`heatRadiance`, the curve its glow already
+    uses) × emissivity (`look.heatEmit`), and a HULL near it — the player's
+    or an enemy's — takes the share of that light its silhouette intercepts,
+    paid out of the source's heat (`radiate` / `radiateHeat`, on the 5 Hz
+    effect cadence, ≤48 sources × ≤8 receivers).  A hull TOUCHING a hot body
+    (surfaces within `CONTACT_GAP`) is also heated by conduction.  Either way
+    it BURNS: hull heat is the `generic` material's DoT, and `damageBody`
+    has a player branch (shield first, then hull).  Terrain does not take
+    radiant heat — between neighbouring bodies conduction already moves
+    heat, and a hot plate radiating into every cold tile around it drained
+    in a second, undoing "metal holds heat longest".  `radiate(power)` is the
+    general case: the ship's Light module is a light of ~zero power, a hot
+    tile or shard is a source powered by its own heat, and a future heat
+    source is one more caller.  No occlusion is modelled.
   - **HEAT SHOWS IN THE MATERIAL AND NOWHERE ELSE, AND IT RADIATES FROM
     WHERE IT WENT IN** (user call).  A heated body CHANGES COLOUR and EMITS
     LIGHT (`render/energyFx.ts` `renderHeat`); there is deliberately NO
