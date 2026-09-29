@@ -52,7 +52,7 @@ export interface SeekerDotsView {
 }
 /** Kept in step with `SeekerDots` in energyEffects (the renderer does not
  *  import the sim module). */
-const DOT_LIFE = 1.0, DOT_R = 1.8, DOT_PEAK = 0.75;
+const DOT_LIFE = 2.0, DOT_R = 1.8, DOT_PEAK = 0.75;
 
 const CULL = 1400;
 

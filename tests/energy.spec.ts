@@ -1402,7 +1402,7 @@ test.describe('the weapons, fired into the world', () => {
       p.currentWeapon = 'homing'; p.weaponCooldown = 0;
       const D = e.energy.dots;
       const t0 = e.simClock;
-      const live = () => { let n = 0; for (let i = 0; i < D.born.length; i++) if (D.born[i] >= t0 && e.simClock - D.born[i] < 1.0) n++; return n; };
+      const live = () => { let n = 0; for (let i = 0; i < D.born.length; i++) if (D.born[i] >= t0 && e.simClock - D.born[i] < 2.0) n++; return n; };
       const before = new Set(e.currentMap.entities.map((x: any) => x.id));
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
       const m = e.currentMap.entities.find((x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
@@ -1417,12 +1417,16 @@ test.describe('the weapons, fired into the world', () => {
       m.active = false;
       for (let i = 0; i < 24; i++) { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); }
       const afterHit = live();
-      for (let i = 0; i < 120; i++) { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); }
-      return { flying, afterHit, gone: live(), gaps };
+      // The trail lasts 2 s (user call): still there at 1.5 s, gone by 2.1 s.
+      for (let i = 0; i < 150; i++) { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); }
+      const lingering = live();
+      for (let i = 0; i < 90; i++) { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); }
+      return { flying, afterHit, lingering, gone: live(), gaps };
     });
     expect(r.flying, 'the round is laying dots').toBeGreaterThan(5);
     for (const g of r.gaps) { expect(g).toBeGreaterThan(8); expect(g).toBeLessThan(30); }
     expect(r.afterHit, 'they outlive the round').toBeGreaterThan(0);
+    expect(r.lingering, 'they last well past a second').toBeGreaterThan(0);
     expect(r.gone, 'and fade out').toBe(0);
     watch.assertClean();
   });
@@ -1641,14 +1645,19 @@ test.describe('the weapons, fired into the world', () => {
       p.velocity.x = 0; p.velocity.y = 0;
       p.currentWeapon = 'beam+kinetic'; p.weaponCooldown = 0;
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
-      const seen = new Map<any, { y: number; ux: number; uy: number }>();
+      // A pulse's first step covers speed x dt (12.5 units), so one that has
+      // travelled no further than that left the muzzle THIS step — which
+      // counts launches even though the pool reuses pulse objects.
+      const seen: { y: number; ux: number; uy: number; length: number }[] = [];
       for (let i = 0; i < 50; i++) {
         e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
-        for (const q of e.energy.pulses) if (q.alive && !seen.has(q)) seen.set(q, { y: q.y - p.position.y, ux: q.ux, uy: q.uy });
+        for (const q of e.energy.pulses) if (q.alive && q.travelled <= 13) seen.push({ y: q.y - p.position.y, ux: q.ux, uy: q.uy, length: q.length });
       }
-      return [...seen.values()];
+      return seen;
     });
-    expect(r.length, 'the whole burst left').toBeGreaterThanOrEqual(6);
+    // Eighteen short pulses (user call: 75% shorter, clearly more of them).
+    expect(r.length, 'the whole burst left').toBe(18);
+    for (const q of r) expect(q.length).toBeCloseTo(6.5, 3);
     const ys = r.map(q => q.y);
     // ±3 either side of the aim line (user call), not a sweep in firing
     // order: some pair of consecutive pulses steps BACK across the lane.

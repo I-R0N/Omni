@@ -70,9 +70,9 @@ const HEAT_EFFECT_INTERVAL = 0.2;
 /** A bounded ring of trail dots: position, birth (sim clock) and colour,
  *  overwritten oldest first, so emitting never allocates. */
 export class SeekerDots {
-    static readonly MAX = 384;
+    static readonly MAX = 2048;
     /** How long a dot lasts, how far apart they are dropped, how big. */
-    static readonly LIFE = 1.0;
+    static readonly LIFE = 2.0;
     static readonly SPACING = 9;
     static readonly RADIUS = 1.8;
     readonly x = new Float32Array(SeekerDots.MAX);
@@ -882,7 +882,7 @@ export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, 
     const aim = Math.atan2(wrapDeltaY(player.position.y, target.y), wrapDeltaX(player.position.x, target.x));
     if (c.delivery === 'beam' && (c.pulseCount ?? 0) > 0) {
         // A BURST OF PULSES (the kinetic beam): they leave one by one.
-        g.energy.burst = { config: c, left: Math.min(12, c.pulseCount!), acc: 0, angle: aim };
+        g.energy.burst = { config: c, left: Math.min(32, c.pulseCount!), acc: 0, angle: aim };
         return;
     }
     if (c.delivery === 'beam') {
@@ -1523,7 +1523,7 @@ function tickBeam(g: GameEngine, dt: number): void {
 // glass and dies in rock.  A split's extra branches become extra pulses, out
 // of a bounded pool.
 
-const MAX_PULSES = 48;
+const MAX_PULSES = 64;
 interface Pulse {
     x: number; y: number; ux: number; uy: number; f: number;
     travelled: number; range: number; speed: number; length: number;

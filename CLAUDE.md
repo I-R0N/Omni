@@ -4084,12 +4084,13 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     raycast's circle is only the broadphase and a polygon body is hit where
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
-    BURST OF PULSES that FLY (user call — like the old bolt beams): six short
-    beams 0.05 s apart at 1500 u/s, flying PARALLEL from RANDOM points
+    BURST OF PULSES that FLY (user call — like the old bolt beams): eighteen
+    very short beams (6.5 units, a third of the old bite each) 0.02 s apart
+    at 1500 u/s, flying PARALLEL from RANDOM points
     across a narrow lane (`pulseSpread`, ±3 units — not a fan, and not a
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over
     the distance it covers each step; a split's extra branches become extra
-    pulses out of a bounded pool (48), and a pulse carries on as its
+    pulses out of a bounded pool (64), and a pulse carries on as its
     STRONGEST branch.  The thermal beam is the only other beam that fires
     continuously like the base beam.
   - **A BREAK CONSERVES HEAT, AND A PIECE IS AS HOT AS WHAT IT CAME OFF**
@@ -4127,7 +4128,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     readout row is width-bound at 390px.
   - **A SEEKER DRAWS A DOT TRAIL** (user call), not the ribbon every other
     round draws: a filled dot every `SeekerDots.SPACING` units, fading
-    linearly over `LIFE` like the player trail's dots.  The dots live in a
+    linearly over `LIFE` (2 s) like the player trail's dots.  The dots live in a
     fixed ring on `EnergyState` rather than on the projectile, so they
     OUTLIVE the round — a hit does not snatch its trail away — and emitting
     never allocates.
