@@ -73,11 +73,11 @@ stubbed.
 CI (`.github/workflows/pr-checks.yml`) runs typecheck, build and then the
 tests on every pull request, on pushes to `main` (the workflow still also
 lists the merged `claude/plan-completion` branch) and on manual runs, and
-it is the gate before a merge. It picks one of two scopes: the FULL suite
-for pushes, manual runs, PRs labelled `full-tests`, and every PR whose
-base is `main` — which, since `claude/plan-completion` was merged into
-`main` (PR #93, 2026-09-21), is effectively every PR — and the SMOKE
-scope for PRs against any other base. There is still no linter.
+it is the gate before a merge. It picks one of two scopes: the SMOKE
+scope (boot + loop) on every pull-request push, whatever its base, and
+the FULL suite for pushes, manual runs and PRs labelled `full-tests` — so
+a regression outside the smoke surfaces when the merge lands, unless the
+PR asks for the whole net first. There is still no linter.
 
 ## Deploying
 

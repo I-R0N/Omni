@@ -3,15 +3,19 @@ name: PR checks
 # The merge gate, in TWO SCOPES (user call, 2026-08-21: the full suite costs
 # ~12 minutes and was running on every push of every PR).
 #
-#   SMOKE — every PR push: typecheck + build + the boot/loop canary suites.
-#           A bundle that will not boot, a type error, or a broken core loop
-#           still fails in ~3 minutes; nothing merges without this green.
+#   SMOKE — every PR push, whatever the PR's base: typecheck + build + the
+#           boot/loop canary suites.  A bundle that will not boot, a type
+#           error, or a broken core loop still fails in ~3 minutes; nothing
+#           merges without this green.
 #   FULL  — the entire Playwright suite, at the MAJOR SEAMS only:
 #           pushes to `main` and `claude/plan-completion` (i.e. immediately
-#           after a merge lands), PRs whose BASE is `main` (the
-#           plan-completion → main promotion), any PR carrying the
-#           `full-tests` label (the opt-in for pre-merge full validation),
-#           and manual dispatch.
+#           after a merge lands), any PR carrying the `full-tests` label
+#           (the opt-in for pre-merge full validation), and manual dispatch.
+#
+# A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs against
+# `main` used to run FULL — meant for the plan-completion → main promotion —
+# but once that branch merged (PR #93) every PR targets `main`, so every push
+# of every PR was paying for the ~20-minute suite again.
 #
 # Both scopes are npm scripts (`test:smoke` / `test:full`), so the smoke set
 # is defined ONCE, in package.json, and a bare `npm test` on a contributor's
@@ -129,11 +133,11 @@ jobs:
         run: npx playwright install-deps chromium
 
       # Which scope this run is (see the header): FULL at the merge seams,
-      # SMOKE on ordinary PR pushes.  The smoke set is the harness canary
-      # (boot — bundle parsed, engine constructed, handles live, console
-      # clean) plus the full-game loop (dock, outfit, portal, boss, home) —
-      # the two suites that prove the game IS a game before a merge-point
-      # run proves everything else.
+      # SMOKE on every PR push without the `full-tests` label.  The smoke
+      # set is the harness canary (boot — bundle parsed, engine constructed,
+      # handles live, console clean) plus the full-game loop (dock, outfit,
+      # portal, boss, home) — the two suites that prove the game IS a game
+      # before a merge-point run proves everything else.
       #
       # WHICH SUITES the smoke set contains is NOT decided here.  It is
       # `test:smoke` in package.json, and this step only picks which npm
@@ -147,7 +151,6 @@ jobs:
         id: scope
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ] \
-             || [ "${{ github.base_ref }}" = "main" ] \
              || [ "${{ contains(github.event.pull_request.labels.*.name, 'full-tests') }}" = "true" ]; then
             echo "script=test:full" >> "$GITHUB_OUTPUT"
             echo "label=full suite" >> "$GITHUB_OUTPUT"

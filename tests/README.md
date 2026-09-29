@@ -138,14 +138,11 @@ Two things worth knowing:
 | `audio.spec.ts` | 14 | **The sound system as shipped.** The four CINEMATIC BANKS (`CinematicBank.json` cues over `public/assets/audio/*.mp3`) decode with full id coverage — 304 takes, finite and audible, nothing rejected or unmatched, under 96 MB; the mix controls (master / SFX / music), no back-to-back repeat takes, the pan sign, and the pause WHITELIST (a frozen world drops `weapon.charge.ready` and keeps `ui.confirm`); a 400-trigger burst collapses, the voice ceiling holds, and critical player feedback displaces background voices; and the streamed BATTLE LAYER — ducked (never rewound) by a lull, cut to a new song by a boss warp-in or a map change, stood down by a portal out of a fight but held up by a lull inside one arena — with long player tails never suppressing the next attack. Plus the contracts that lived in the retired, ungated `scripts/smoke/`: `docs/SFX_INVENTORY.md` and the registry name the SAME ids in both directions, triggers fire their own ids with ambient shard breaks kept near-field, and audio survives what iOS does to a page (the ring switch, interruptions, backgrounding). Runnable alone as `npm run test:audio`. |
 
 **467 tests** (`npx playwright test --list`). CI runs them in two scopes (user
-call): the SMOKE — `boot.spec.ts` + `loop.spec.ts` — and the FULL suite. FULL
-runs at the merge seams: pushes to `main` / `claude/plan-completion`, PRs
-whose base is `main`, the `full-tests` PR label, and manual dispatch. Since
-`claude/plan-completion` was merged into `main` (PR #93, 2026-09-21), PRs
-target `main` and so run FULL on every push; SMOKE applies to PRs against any
-other base. Locally: the smoke plus the touched suites per commit and per
-push, the full run when the user gives notice the PR is ready to merge (see
-Running, above).
+call): the SMOKE — `boot.spec.ts` + `loop.spec.ts` — on every PR push,
+whatever its base, and the FULL suite at the merge seams: pushes to `main` /
+`claude/plan-completion`, the `full-tests` PR label, and manual dispatch.
+Locally: the smoke plus the touched suites per commit and per push, the full
+run when the user gives notice the PR is ready to merge (see Running, above).
 
 All but `viewports.spec.ts` run at **390×844** — the phone
 this game is played on, and the size every layout assertion is written

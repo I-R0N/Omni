@@ -2472,17 +2472,20 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   suite, then ~12 minutes in CI, was running on every push of every PR) —
   `.github/workflows/pr-checks.yml`, job `validate`, in this order:
   typecheck → build → install the Playwright browser → test:
-  - **SMOKE, on every PR push**: typecheck + build + the boot/loop canary
-    suites (~1.5 minutes end to end, measured 2026-09-22).  A type error,
-    a broken bundle, or a broken core loop still blocks every merge.
+  - **SMOKE, on every PR push, whatever its base**: typecheck + build +
+    the boot/loop canary suites (~1.5 minutes end to end, measured
+    2026-09-22).  A type error, a broken bundle, or a broken core loop
+    still blocks every merge.
   - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
-    `claude/plan-completion` (immediately after a merge lands), on PRs
-    whose BASE is `main`, on any PR carrying the **`full-tests` label**
-    (the opt-in for pre-merge full validation), and on manual dispatch.
-    Full CI runs took 18–22 minutes in late September 2026.
-  SINCE PR #93 (2026-09-21) merged `claude/plan-completion` into `main`,
-  PRs target `main`, so every PR push runs FULL; SMOKE now applies only
-  to PRs against another base.
+    `claude/plan-completion` (immediately after a merge lands), on any PR
+    carrying the **`full-tests` label** (the opt-in for pre-merge full
+    validation), and on manual dispatch.  Full CI runs took 18–22 minutes
+    in late September 2026.
+  A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs whose
+  base was `main` used to run FULL — meant for the `plan-completion` →
+  `main` promotion — but once PR #93 (2026-09-21) merged that branch every
+  PR targeted `main`, and every push of every PR paid for the full suite
+  again.
   The check keeps ONE name (`typecheck · build · test`) in both scopes, so
   branch protection points at one required check.  The honest trade: a
   regression outside the smoke surfaces at the merge point rather than per
@@ -2501,11 +2504,11 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     per push buys nothing and costs the session's momentum.  CI's SMOKE
     scope is the backstop on every push, which is exactly what it is for.
   - **THE FULL SUITE RUNS WHEN THE USER SAYS THEY ARE READY TO MERGE** a
-    PR into its parent branch (not always `main`) — the same seam CI
-    reserves it for, alongside the `plan-completion` → `main` promotion
-    and a PR deliberately labelled `full-tests`.  That notice is the
-    trigger; the session does not decide it has arrived.  Also run it
-    after a base sync, since a merge can break what neither side broke.
+    PR into its parent branch (not always `main`) — the merge seam CI
+    reserves it for, where it runs once the merge lands, or before it on a
+    PR deliberately labelled `full-tests`.  That notice is the trigger;
+    the session does not decide it has arrived.  Also run it after a base
+    sync, since a merge can break what neither side broke.
   So a red touched-suite blocks a push; a full-suite run without that
   notice is optional diligence, not a gate to wait behind.  And in a
   software-rendering container a full run is worse than merely slow: the
@@ -5554,15 +5557,16 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `i-r0n/omni-standalone` mirror, linked in a PR comment — not Netlify),
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
-  a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
-  merge seams — which include every PR against `main`, i.e. every PR
-  since #93 — and on the `full-tests` label (§7).  Locally: typecheck +
-  build + the touched suites per commit AND per push to a working branch;
-  the FULL `npm run test:full` when the USER gives notice they are ready
-  to merge the PR into its parent branch, not on the session's own
-  judgement that it looks ready (§7).  Never merge past a pending or
-  failing `typecheck · build · test`.  The other two workflows still gate
-  nothing — a preview build or a standalone release is not validation.
+  a merge.**  Per PR push it runs the SMOKE scope, whatever the base; the
+  FULL suite runs on pushes to `main` / `claude/plan-completion` (once a
+  merge lands), on the `full-tests` label and on manual dispatch (§7).
+  Locally: typecheck + build + the touched suites per commit AND per push
+  to a working branch; the FULL `npm run test:full` when the USER gives
+  notice they are ready to merge the PR into its parent branch, not on the
+  session's own judgement that it looks ready (§7).  Never merge past a
+  pending or failing `typecheck · build · test`.  The other two workflows
+  still gate nothing — a preview build or a standalone release is not
+  validation.
 
 ---
 
