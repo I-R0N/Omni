@@ -1655,9 +1655,9 @@ test.describe('the weapons, fired into the world', () => {
       }
       return seen;
     });
-    // Eighteen short pulses (user call: 75% shorter, clearly more of them).
-    expect(r.length, 'the whole burst left').toBe(18);
-    for (const q of r) expect(q.length).toBeCloseTo(6.5, 3);
+    // A tap: the guaranteed 24 pulses, one a step, each 13 long.
+    expect(r.length, 'the whole burst left').toBe(24);
+    for (const q of r) expect(q.length).toBeCloseTo(13, 3);
     const ys = r.map(q => q.y);
     // ±3 either side of the aim line (user call), not a sweep in firing
     // order: some pair of consecutive pulses steps BACK across the lane.
@@ -1665,6 +1665,52 @@ test.describe('the weapons, fired into the world', () => {
     expect(Math.max(...ys) - Math.min(...ys), 'from points spread across the lane').toBeGreaterThan(1.5);
     for (let i = 1; i < ys.length; i++) expect(Math.abs(ys[i] - ys[i - 1]), 'two in a row never overlap').toBeGreaterThan(0.5);
     for (const q of r) { expect(q.ux).toBeCloseTo(1, 3); expect(q.uy).toBeCloseTo(0, 3); }
+    watch.assertClean();
+  });
+
+  test('LIGHT: held, the kinetic beam is a near-continuous line of short beams that follows the aim', async ({ page }) => {
+    // User call: not a fixed burst but a line of short beams with basically
+    // no gap between them, flowing for as long as the trigger is held.
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player, P: any = e.physics, I: any = e.input;
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' || x.type === 'ENEMY') x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+      p.currentWeapon = 'beam+kinetic'; p.weaponCooldown = 0;
+      let held = true;
+      I.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
+      const orig = I.isFireHeld;
+      I.isFireHeld = () => held;
+      const step = () => { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); };
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
+      // Well past the 24-pulse tap: still flowing.
+      for (let i = 0; i < 60; i++) step();
+      const flowing = e.energy.burst !== null;
+      // The line: gaps between neighbouring pulse heads along the aim.
+      const xs = e.energy.pulses.filter((q: any) => q.alive).map((q: any) => q.x - p.position.x).sort((a: number, b: number) => a - b);
+      const gaps: number[] = [];
+      for (let k = 1; k < xs.length; k++) gaps.push(xs[k] - xs[k - 1]);
+      const len = e.energy.pulses.find((q: any) => q.alive)?.length ?? 0;
+      // Aim down: the ship turns and the stream follows.
+      I.mousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 + 200 };
+      for (let i = 0; i < 40; i++) step();
+      const fresh = e.energy.pulses.filter((q: any) => q.alive && q.travelled <= 13);
+      const followed = fresh.length > 0 && fresh.every((q: any) => q.uy > 0.99);
+      // Let go: the stream stops.
+      held = false;
+      for (let i = 0; i < 4; i++) step();
+      const stopped = e.energy.burst === null;
+      I.isFireHeld = orig;
+      return { flowing, gaps, n: xs.length, len, followed, stopped };
+    });
+    expect(r.flowing, 'held past the tap, the stream keeps flowing').toBe(true);
+    expect(r.n, 'a whole line of pulses in flight').toBeGreaterThan(20);
+    // Each pulse is longer than the spacing between them: no visible gap.
+    for (const g of r.gaps) expect(g).toBeLessThan(r.len);
+    expect(r.followed, 'the stream follows the aim').toBe(true);
+    expect(r.stopped, 'and stops when released').toBe(true);
     watch.assertClean();
   });
 

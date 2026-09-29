@@ -881,8 +881,16 @@ export function queueElectric(g: GameEngine, at: Vector2, spec: NonNullable<Weap
 export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, target: Vector2): void {
     const aim = Math.atan2(wrapDeltaY(player.position.y, target.y), wrapDeltaX(player.position.x, target.x));
     if (c.delivery === 'beam' && (c.pulseCount ?? 0) > 0) {
-        // A BURST OF PULSES (the kinetic beam): they leave one by one.
-        g.energy.burst = { config: c, left: Math.min(32, c.pulseCount!), acc: 0, angle: aim };
+        // A STREAM OF PULSES (the kinetic beam): a pull guarantees
+        // `pulseCount` of them, and the stream then runs for as long as the
+        // trigger is held (see tickPulses).  A pull while it is still running
+        // tops it up rather than restarting it, so the line never breaks.
+        const bu = g.energy.burst;
+        if (bu && bu.config.name === c.name) {
+            bu.config = c; bu.left = Math.max(bu.left, Math.min(64, c.pulseCount!)); bu.angle = aim;
+            return;
+        }
+        g.energy.burst = { config: c, left: Math.min(64, c.pulseCount!), acc: 0, angle: aim };
         return;
     }
     if (c.delivery === 'beam') {
@@ -1523,7 +1531,7 @@ function tickBeam(g: GameEngine, dt: number): void {
 // glass and dies in rock.  A split's extra branches become extra pulses, out
 // of a bounded pool.
 
-const MAX_PULSES = 64;
+const MAX_PULSES = 128;
 interface Pulse {
     x: number; y: number; ux: number; uy: number; f: number;
     travelled: number; range: number; speed: number; length: number;
@@ -1558,8 +1566,13 @@ function tickPulses(g: GameEngine, dt: number): void {
         const pl = g.player;
         if (!pl.active || pl.isExploding || pl.systemsDisabled) { s.burst = null; }
         else {
+            // HELD, the stream keeps flowing and follows the aim, exactly as
+            // the light beam's blade does (user call: a near-continuous line
+            // of short beams, not a fixed burst).
+            const held = g.input.isFireHeld() && weaponConfig(pl.currentWeapon).name === bu.config.name;
+            if (held) { bu.angle = pl.rotation; if (bu.left < 1) bu.left = 1; }
             bu.acc -= dt;
-            while (bu && bu.left > 0 && bu.acc <= 0) {
+            while (bu && bu.left > 0 && bu.acc <= 1e-9) {
                 const c = bu.config;
                 // Every pulse flies PARALLEL to the aim (no angle between
                 // them) but leaves from a RANDOM point across a narrow lane
@@ -1582,6 +1595,7 @@ function tickPulses(g: GameEngine, dt: number): void {
                     dmg: c.damage, push: c.push ?? 0, color: c.color, width: c.beamWidth ?? 3 });
                 bu.left--;
                 bu.acc += c.pulseInterval ?? 0.05;
+                if (held && bu.left < 1) bu.left = 1;
             }
             if (bu.left <= 0) s.burst = null;
         }

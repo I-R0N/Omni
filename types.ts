@@ -384,11 +384,13 @@ export interface WeaponConfig {
   beamRange?: number;
   beamWidth?: number;
   beamTick?: number;
-  /** BEAM as a BURST OF PULSES (the kinetic beam): instead of a continuous
-   *  beam, `pulseCount` short beams leave `pulseInterval` s apart and FLY at
-   *  `pulseSpeed` (world units/s), each drawn `pulseLength` long and each
-   *  carrying `damage` — reflecting, splitting and passing through by the
-   *  same optics as a continuous beam.  They travel `beamRange` at most. */
+  /** BEAM as a STREAM OF PULSES (the kinetic beam): instead of a continuous
+   *  beam, short beams leave `pulseInterval` s apart — at least `pulseCount`
+   *  of them per pull, and for as long as the trigger is held after that —
+   *  and FLY at `pulseSpeed` (world units/s), each drawn `pulseLength` long
+   *  and each carrying `damage` as kinetic (mechanical) damage, reflecting,
+   *  splitting and passing through by the same optics as a continuous beam.
+   *  They travel `beamRange` at most. */
   pulseCount?: number;
   pulseInterval?: number;
   pulseSpeed?: number;

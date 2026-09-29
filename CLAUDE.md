@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  506 tests.  All run at
+                          whatever happened next).  507 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -4084,13 +4084,17 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     raycast's circle is only the broadphase and a polygon body is hit where
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
-    BURST OF PULSES that FLY (user call — like the old bolt beams): eighteen
-    very short beams (6.5 units, a third of the old bite each) 0.02 s apart
-    at 1500 u/s, flying PARALLEL from RANDOM points
+    NEAR-CONTINUOUS STREAM OF SHORT BEAMS that FLY (user call): one 13-unit
+    pulse per sim step at 1500 u/s, so each trails the last by 12.5 and the
+    line shows no gap; a pull fires at least `pulseCount` (0.2 s) and HOLDING
+    keeps the stream flowing and following the aim, like the light blade.
+    Each pulse carries 0.225 of KINETIC (mechanical) damage and a matching
+    sliver of push, so a held stream lands the 27 dmg/s the old six-pulse
+    burst did.  They fly PARALLEL from RANDOM points
     across a narrow lane (`pulseSpread`, ±3 units — not a fan, and not a
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over
     the distance it covers each step; a split's extra branches become extra
-    pulses out of a bounded pool (64), and a pulse carries on as its
+    pulses out of a bounded pool (128), and a pulse carries on as its
     STRONGEST branch.  The thermal beam is the only other beam that fires
     continuously like the base beam.
   - **A BREAK CONSERVES HEAT, AND A PIECE IS AS HOT AS WHAT IT CAME OFF**
