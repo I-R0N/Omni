@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  502 tests.  All run at
+                          whatever happened next).  503 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -4043,9 +4043,22 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     after physics, because the dynamic grid is only safe between substeps.
     Every query is a grid radius walk with a hard cap; `nearestK` makes an
     overflowing cap drop the FAR bodies.
-  - **Beams** are timed (one per trigger pull — there is no hold-to-fire),
-    aimed at the pull; an electric beam arcs to the nearest conductor in a
-    forward cone or fizzles.  Every other beam is LIGHT, and **WHAT LIGHT
+  - **A BEAM IS A BLADE, HELD** (user call).  A pull lights it for at least
+    its own `beamDuration`, aimed at the pull; after that it stays out for as
+    long as a fire control is held (`InputSystem.isFireHeld` — the pad's fire
+    point, the fire button, Space/Enter, and a pointer press only where the
+    pointer does not fly the ship) and FOLLOWS THE AIM while held.  A light
+    beam EXTENDS from the muzzle over `BEAM_EXTEND_SEC` (0.1 s) and on release
+    RETRACTS into it over `BEAM_RETRACT_SEC` (0.1 s) and is gone.  Its path is
+    RE-TRACED EVERY STEP from where the muzzle is now, so it stays attached to
+    a moving ship — tracing only on the damage tick and drawing the stored
+    path between ticks is what made fast flight flash lines; the in-between
+    traces are DRY (zero deposit).  Damage still lands only where the light
+    meets bodies (the tip, plus each passed-through boundary's share), on the
+    `beamTick` cadence, and a held beam scales each tick by the gun's duty
+    cycle (`beamDuration / cooldown`) so holding delivers the DPS tapping
+    does.  An electric beam arcs to the nearest conductor in a
+    forward cone or fizzles; it has no blade, so it is simply on while held.  Every other beam is LIGHT, and **WHAT LIGHT
     DOES AT A BODY IS A MATERIAL PROPERTY** (user call): six optical columns
     in `MATERIALS` — `reflectivity` (metal is the mirror), `transmissivity`
     and `thermalTransmissivity` (glass is clear to a beam and nearly opaque

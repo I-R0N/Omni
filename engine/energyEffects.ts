@@ -28,7 +28,7 @@ import {
 } from './systems/energy';
 import {
     breakYieldsNothing, noteTraitDamage, markDamaged, hitReactStrength,
-    isCollectibleDrop, grainSpecFor, UI_CONSTANTS, SHIELD_CONSTANTS, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
+    isCollectibleDrop, grainSpecFor, weaponConfig, UI_CONSTANTS, SHIELD_CONSTANTS, HOMING_ACQUIRE_RANGE, LIGHTNING_ARC_LIFETIME, ENERGY_COLORS, NEBULA_CONSTANTS,
 } from '../constants';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { polygonArea, pointInPolygon } from './systems/fracture';
@@ -46,9 +46,13 @@ interface PendingEvent {
 }
 interface BeamState {
     config: WeaponConfig;
-    time: number;       // seconds left
-    acc: number;        // time since last tick
-    angle: number;      // aim, fixed at the trigger pull (a pulse goes where it was fired)
+    time: number;       // seconds of the pull's own minimum left
+    acc: number;        // time since last damage tick
+    angle: number;      // aim: the pull's, then the ship's while the trigger is held
+    /** How far the blade reaches right now (0..range): it EXTENDS from the
+     *  muzzle when fired and RETRACTS back into it when released. */
+    reach: number;
+    retracting: boolean;
     // Drawn this frame (renderer reads).
     x0: number; y0: number; x1: number; y1: number; hit: boolean;
     /** The traced light path: every segment of it, reflections and splits
@@ -810,9 +814,17 @@ export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, 
     }
     if (c.delivery === 'beam') {
         const prev = g.energy.beam;
-        g.energy.beam = { config: c, time: c.beamDuration ?? 0.3, acc: c.beamTick ?? 0.05, angle: aim,
+        // A pull while the blade is still out (held, or retracting) keeps it
+        // out rather than re-igniting it from the muzzle.
+        if (prev && prev.config.name === c.name) {
+            prev.config = c; prev.time = c.beamDuration ?? 0.3; prev.angle = aim; prev.retracting = false;
+            return;
+        }
+        // The first damage tick lands one tick in, once the blade is out.
+        g.energy.beam = { config: c, time: c.beamDuration ?? 0.3, acc: 0, angle: aim,
                           x0: player.position.x, y0: player.position.y,
                           x1: player.position.x, y1: player.position.y, hit: false,
+                          reach: 0, retracting: false,
                           light: prev ? prev.light : makeLightOut() };
         g.energy.beam.light.nSeg = 0;
         return;
@@ -1335,21 +1347,35 @@ function tickBeam(g: GameEngine, dt: number): void {
     if (!b) return;
     const p = g.player;
     if (!p.active || p.isExploding || p.systemsDisabled) { g.energy.beam = null; return; }
-    b.time -= dt;
-    if (b.time <= 0) { g.energy.beam = null; return; }
     const c = b.config;
+    // THE BLADE IS HELD, NOT TIMED (user call).  A pull lights it for at
+    // least its own `beamDuration`; after that it stays out for as long as a
+    // fire control is held, and the moment nothing holds it, it RETRACTS into
+    // the muzzle over BEAM_RETRACT_SEC and is gone.  Swapping off the gun
+    // retracts it too.
+    const held = g.input.isFireHeld() && weaponConfig(p.currentWeapon).name === c.name;
+    b.time -= dt;
+    // Half a step of slack: `beamDuration` is a whole number of ticks, and the
+    // last one must land rather than lose a float race with the countdown.
+    if (!b.retracting && b.time <= -0.5 * dt && !held) b.retracting = true;
+    // While held it FOLLOWS THE AIM (the ship's facing is the pointer's
+    // bearing on every device); a tap-length pull keeps the aim it was fired
+    // at, which is also what a pull at a target means.
+    if (held && b.time <= 0) b.angle = p.rotation;
     const ang = b.angle;
     const ux = Math.cos(ang), uy = Math.sin(ang);
     const muzzle = Math.max(p.size.x, p.size.y) * 0.6;
     const ox = p.position.x + ux * muzzle, oy = p.position.y + uy * muzzle;
     const range = c.beamRange ?? 260;
     b.x0 = ox; b.y0 = oy;
-    b.acc += dt;
-    const tick = c.beamTick ?? 0.05;
-    if (b.acc < tick) return;
-    b.acc -= tick;
 
     if (c.energy === 'electric' && c.electric) {
+        // An arc has no blade to extend: it is on while held and gone after.
+        if (b.retracting) { g.energy.beam = null; return; }
+        b.acc += dt;
+        const tick = c.beamTick ?? 0.05;
+        if (b.acc < tick - 1e-9) return;
+        b.acc -= tick;
         // An ARC to the nearest conductor in a forward cone, then a chain.
         b.light.nSeg = 0;
         const buf = g.energy.buf;
@@ -1380,20 +1406,38 @@ function tickBeam(g: GameEngine, dt: number): void {
         return;
     }
 
-    // LIGHT: the plain beam (a kinetic bite and a shove) and the heat lance
-    // (heat, almost no bite) — both traced through the material optics.
+    // LIGHT: the blade grows out of the muzzle and shrinks back into it.
+    if (b.retracting) {
+        b.reach -= range * dt / ENERGY_CONSTANTS.BEAM_RETRACT_SEC;
+        if (b.reach <= 0) { g.energy.beam = null; return; }
+    } else {
+        b.reach = Math.min(range, b.reach + range * dt / ENERGY_CONSTANTS.BEAM_EXTEND_SEC);
+    }
+    // THE PATH IS RE-TRACED EVERY STEP from where the muzzle is NOW, so the
+    // blade stays attached to a moving ship (a path traced on the damage tick
+    // and drawn between ticks lagged the ship and snapped — the flashing
+    // lines).  Only a damage tick deposits anything; the other steps trace
+    // DRY, which the deposit rules make a pure path query.
+    b.acc += dt;
+    const tick = c.beamTick ?? 0.05;
+    const live = !b.retracting && b.acc >= tick - 1e-9;
+    if (live) b.acc -= tick;
     const dep = _beamDep;
-    dep.dmg = c.damage;
-    dep.heat = c.energy === 'thermal' ? (c.heat ?? 0) : 0;
-    dep.push = c.energy === 'thermal' ? 0 : (c.push ?? 0);
+    // Held past the pull's own duration, each tick is scaled by the gun's
+    // duty cycle, so holding delivers the damage per second tapping does.
+    const duty = b.time > 0 ? 1
+        : Math.min(1, (c.beamDuration ?? 0.3) / Math.max(1e-3, c.cooldown));
+    dep.dmg = live ? c.damage * duty : 0;
+    dep.heat = live && c.energy === 'thermal' ? (c.heat ?? 0) * duty : 0;
+    dep.push = live && c.energy !== 'thermal' ? (c.push ?? 0) : 0;
     dep.thermal = c.energy === 'thermal';
     dep.breaksCloud = false;
     dep.byPlayer = true;
-    traceLight(g, ox, oy, ux, uy, range, c.beamWidth ?? 3, 1, dep, b.light);
+    traceLight(g, ox, oy, ux, uy, b.reach, c.beamWidth ?? 3, 1, dep, b.light);
     const L = b.light;
     // The first segment's end is the classic "beam end" (tests, the HUD).
     if (L.nSeg > 0) { b.x1 = L.segs[2]; b.y1 = L.segs[3]; }
-    else { b.x1 = ox + ux * range; b.y1 = oy + uy * range; }
+    else { b.x1 = ox + ux * b.reach; b.y1 = oy + uy * b.reach; }
     b.hit = L.firstHit !== null;
     g.energy.lastBeamHitId = L.firstHit ? L.firstHit.id : null;
 }

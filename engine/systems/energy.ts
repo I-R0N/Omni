@@ -457,6 +457,11 @@ export const ENERGY_CONSTANTS = {
   CHAIN_MIN_MAGNITUDE: 0.25,   // below: the chain has run out
   CHAIN_CANDIDATES: 48,        // max bodies considered per hop query
 
+  // THE BLADE (user call): a light beam extends from the muzzle, stays out
+  // while held, and retracts into it on release.
+  BEAM_EXTEND_SEC: 0.1,
+  BEAM_RETRACT_SEC: 0.1,
+
   // CHARGED BODIES (user call: electrified tiles and shards jump to ships).
   /** How close (surface to surface) a ship must be for a charge to jump. */
   JUMP_RANGE: 45,

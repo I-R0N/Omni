@@ -1111,7 +1111,8 @@ test.describe('the weapons, fired into the world', () => {
       }, variant);
       await page.waitForFunction(() => {
         const e = (window as any).__omniEngine, b = e.energy.beam;
-        if (!(b && b.hit && b.light.nSeg > 0)) return false;
+        // The blade EXTENDS over 0.1 s: judge the path once it is fully out.
+        if (!(b && b.hit && b.light.nSeg > 0 && !b.retracting && b.reach >= b.config.beamRange)) return false;
         (window as any).__light = { segs: b.light.segs.slice(0, b.light.nSeg * 5), n: b.light.nSeg };
         return true;
       }, null, { timeout: 5000, polling: 'raf' });
@@ -1441,7 +1442,8 @@ test.describe('the weapons, fired into the world', () => {
       }, variant);
       await page.waitForFunction(() => {
         const e = (window as any).__omniEngine, b = e.energy.beam;
-        if (!(b && b.hit && b.light.nSeg > 0)) return false;
+        // The blade EXTENDS over 0.1 s: judge the path once it is fully out.
+        if (!(b && b.hit && b.light.nSeg > 0 && !b.retracting && b.reach >= b.config.beamRange)) return false;
         (window as any).__light = { segs: b.light.segs.slice(0, b.light.nSeg * 5), n: b.light.nSeg,
                                     range: b.config.beamRange };
         return true;
@@ -1468,6 +1470,54 @@ test.describe('the weapons, fired into the world', () => {
     const metal = await lane('METAL_FIELD', 'metal-tile');
     expect(metal.full, 'to the mirror and back off it at full strength').toBeGreaterThanOrEqual(2);
     expect(metal.len, 'and the bounce spends range, nothing else').toBeGreaterThan(metal.range * 0.9);
+    watch.assertClean();
+  });
+
+  test('BEAM: a blade that extends from the muzzle, stays out while held, follows the aim and retracts', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player, P: any = e.physics, I: any = e.input;
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' || x.type === 'ENEMY') x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'beam'; p.weaponCooldown = 0;
+      // Aim straight RIGHT, then hold the trigger.
+      I.mousePosition = { x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 };
+      let held = true;
+      const real = I.isFireHeld;
+      I.isFireHeld = () => held;
+      const step = () => { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); };
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
+      const range = e.energy.beam.config.beamRange;
+      const reaches: number[] = [];
+      for (let i = 0; i < 14; i++) { step(); reaches.push(e.energy.beam.reach); }
+      // Held for a second — long past the pull's own 0.3 s.
+      for (let i = 0; i < 120; i++) step();
+      const heldOut = !!e.energy.beam && !e.energy.beam.retracting;
+      // Swing the aim DOWN while holding: the blade follows.
+      I.mousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 + 200 };
+      for (let i = 0; i < 4; i++) step();
+      const angle = e.energy.beam.angle;
+      // Let go: it retracts into the muzzle and is gone in about 0.1 s.
+      held = false;
+      const back: number[] = [];
+      let goneAt = -1;
+      for (let i = 0; i < 30 && goneAt < 0; i++) {
+        step();
+        if (!e.energy.beam) goneAt = (i + 1) / 120; else back.push(e.energy.beam.reach);
+      }
+      I.isFireHeld = real;
+      return { reaches, range, heldOut, angle, back, goneAt };
+    });
+    expect(r.reaches[0], 'it starts at the muzzle').toBeLessThan(r.range * 0.2);
+    for (let i = 1; i < r.reaches.length; i++) expect(r.reaches[i]).toBeGreaterThanOrEqual(r.reaches[i - 1]);
+    expect(r.reaches[12], 'and is fully out within ~0.1 s').toBeCloseTo(r.range, 3);
+    expect(r.heldOut, 'held, it stays out past the pull').toBe(true);
+    expect(r.angle, 'and follows the aim').toBeCloseTo(Math.PI / 2, 2);
+    for (let i = 1; i < r.back.length; i++) expect(r.back[i]).toBeLessThan(r.back[i - 1]);
+    expect(r.goneAt, 'released, it retracts and is gone').toBeGreaterThan(0);
+    expect(r.goneAt).toBeLessThanOrEqual(0.11);
     watch.assertClean();
   });
 

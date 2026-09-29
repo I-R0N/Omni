@@ -1595,6 +1595,17 @@ export class InputSystem {
         || this.padFireDown || this.fireBtnDown;
   }
 
+  /** Is a FIRE control held right now — what keeps a beam out.  Every
+   *  dedicated fire control counts (the pad's fire point, the onscreen fire
+   *  button, Space/Enter); a pointer press counts only where the pointer does
+   *  not fly the ship, because in the drag-to-fly schemes a held finger is
+   *  steering, not firing. */
+  public isFireHeld(): boolean {
+    if (this.keys.has('Space') || this.keys.has('Enter') || this.padFireDown || this.fireBtnDown) return true;
+    if (!this.mouseDown || !this.rules.tapFires) return false;
+    return this.pointerIsTouch ? !this.rules.touchDragMoves : !this.rules.mouseDragMoves;
+  }
+
   /** Returns true only when a keyboard fire key (Space/Enter) is held — excludes mouse/touch. */
   public isFireKeyHeld(): boolean {
     return this.keys.has('Space') || this.keys.has('Enter');
