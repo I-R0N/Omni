@@ -5620,7 +5620,12 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
 - Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
   build + Playwright on every PR and on pushes to `main` and
   `claude/plan-completion`),
-  `pr-preview.yml` (Netlify deploy previews),
+  `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
+  on every PR push and publishes it to the omni-standalone repo, linked
+  from a PR comment as a raw.githack URL — the link to play-test a PR on a
+  phone.  A push whose commit message carries `[skip ci]` skips it too,
+  since that skips every workflow; it can also be run by hand with a PR
+  number via `workflow_dispatch`),
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
   a merge.**  Per push it runs the SMOKE scope; the FULL suite runs at the
