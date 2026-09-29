@@ -3,33 +3,22 @@ name: PR preview
 on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
-  # MANUAL refresh: rebuild a PR's preview on demand.  A push carrying
-  # `[skip ci]` skips every workflow — this one included — so a branch that is
-  # holding off on the (expensive) PR checks can still put its latest build
-  # on the preview link.  `[skip ci]` does not apply to a manual dispatch.
-  workflow_dispatch:
-    inputs:
-      pr:
-        description: PR number to rebuild the preview for
-        required: true
-        type: number
 
 concurrency:
-  group: pr-preview-${{ github.event.pull_request.number || inputs.pr }}
+  group: pr-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   preview:
-    # Skip PRs from forks — they can't access secrets.  (A manual dispatch is
-    # started by someone with write access, so it needs no such guard.)
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    # Skip PRs from forks — they can't access secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     env:
-      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-      PREVIEW_URL: https://raw.githack.com/i-r0n/omni-standalone/main/previews/pr-${{ github.event.pull_request.number || inputs.pr }}/index.html
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PREVIEW_URL: https://raw.githack.com/i-r0n/omni-standalone/main/previews/pr-${{ github.event.pull_request.number }}/index.html
 
     steps:
       - name: Check if event SHA is still the PR head
@@ -41,9 +30,6 @@ jobs:
         run: |
           set -euo pipefail
           CURRENT_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')
-          # A manual dispatch builds whatever the PR's head is right now.
-          if [ -z "$EVENT_SHA" ]; then EVENT_SHA="$CURRENT_SHA"; fi
-          echo "sha=${EVENT_SHA}" >> "$GITHUB_OUTPUT"
           if [ "$EVENT_SHA" != "$CURRENT_SHA" ]; then
             echo "::notice::Event commit ${EVENT_SHA} is stale (current PR head is ${CURRENT_SHA}). Skipping preview build to avoid overwriting with older content."
             echo "stale=true" >> "$GITHUB_OUTPUT"
@@ -55,7 +41,7 @@ jobs:
         if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.guard.outputs.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Node
         if: github.event.action != 'closed' && steps.guard.outputs.stale != 'true'
@@ -81,7 +67,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.OMNI_STANDALONE_TOKEN }}
           ACTION: ${{ github.event.action }}
-          HEAD_SHA: ${{ steps.guard.outputs.sha }}
         run: |
           set -euo pipefail
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/i-r0n/omni-standalone.git" target
@@ -110,7 +95,7 @@ jobs:
             if git diff --cached --quiet; then
               echo "No content changes."
             else
-              SHORT="${HEAD_SHA:0:7}"
+              SHORT="${GITHUB_SHA:0:7}"
               git commit -m "Preview for PR #${PR_NUMBER} @ ${SHORT}"
               for i in 1 2 3; do
                 git push origin HEAD && break
@@ -125,7 +110,6 @@ jobs:
         env:
           PREVIEW_URL: ${{ env.PREVIEW_URL }}
           ACTION: ${{ github.event.action }}
-          HEAD_SHA: ${{ steps.guard.outputs.sha }}
         with:
           script: |
             const marker = '<!-- omni-preview -->';
@@ -135,20 +119,20 @@ jobs:
               body = `${marker}\nStandalone HTML preview removed (PR closed).`;
             } else {
               const url = process.env.PREVIEW_URL;
-              const sha = (process.env.HEAD_SHA || '').substring(0, 7);
+              const sha = context.payload.pull_request.head.sha.substring(0, 7);
               body = [
                 marker,
                 '### Standalone HTML preview',
                 '',
                 `Open on iPhone: ${url}`,
                 '',
-                `Built from \`${sha}\` — updates automatically on every push, or run the PR preview workflow by hand (a \`[skip ci]\` push skips it).`,
+                `Built from \`${sha}\` — updates automatically on every push.`,
               ].join('\n');
             }
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: Number(process.env.PR_NUMBER),
+              issue_number: context.issue.number,
             });
             const existing = comments.find(c => c.body && c.body.startsWith(marker));
             if (existing) {
@@ -162,7 +146,7 @@ jobs:
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: Number(process.env.PR_NUMBER),
+                issue_number: context.issue.number,
                 body,
               });
             }
