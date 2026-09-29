@@ -294,6 +294,19 @@ export async function waitForTransit(page: Page, timeoutMs = 15_000) {
  *  load restarts it), and an infinite keeper timer never counts down.  Then
  *  the movers already out there are cleared once, which is now durable.
  *
+ *  CLEARING THEM ENDS THE WAVE, AND THE END OF A WAVE IS NOT QUIET.  The
+ *  halted wave's field is now empty, so the very next step closes it
+ *  (`WaveSystem.endWave`) and the clear beat plays AT THE SHIP
+ *  (`GameEngine.playWaveClearCelebration` and its caller): 88 particles
+ *  living up to 1.1 s, two expanding rings, a camera punch, a salvage spray,
+ *  the "WAVE 1 CLEARED" banner and a score popup — all of it born after this
+ *  helper used to return, and all of it landing on the scene it promised to
+ *  hold still.  Measured: the lighting suite's emitter-fade test failed 2
+ *  runs in 12 locally, and once in CI, because one of those particles
+ *  crossed one of its four probe pixels.  So wait for the wave to close
+ *  (the beat fires in the same call that closes it), then sweep what the
+ *  beat left, once — nothing restarts it.
+ *
  *  Only for tests that do not NEED movers — a test about a bubble lighting up
  *  obviously must not call this. */
 export async function quietScene(page: Page) {
@@ -308,6 +321,34 @@ export async function quietScene(page: Page) {
     for (const t of g.currentMap.entities) {
       if (t.type === 'ENEMY' || t.isSnitch === true) t.active = false;
     }
+  });
+  await waitForEngine(page, e => e.waves.waveState !== 'active', 'the halted wave to close');
+  await engine(page, e => {
+    const g = e as unknown as {
+      shakeTimer: number;
+      camera: { shakeOffset: { x: number; y: number } };
+      damageTexts: Array<{ lifetime: number }>;
+      waves: { announcements: Array<{ lifetime: number }> };
+      currentMap: { entities: Array<{ type: string; dropType?: string; active: boolean }> };
+    };
+    // Particles and both rings are PARTICLE entities; the salvage spray is
+    // COLLECTIBLE drops (`isCollectibleDrop` — not the internal 'glass'
+    // debris, which also carries a dropType).  Flip them off and let the
+    // next sweep drop them.
+    for (const t of g.currentMap.entities) {
+      if (t.type === 'PARTICLE'
+          || (t.type === 'INTERACTABLE'
+              && (t.dropType === 'salvage' || t.dropType === 'health'))) {
+        t.active = false;
+      }
+    }
+    g.shakeTimer = 0;
+    g.camera.shakeOffset.x = 0;
+    g.camera.shakeOffset.y = 0;
+    // The banner and the popup expire through their own ticks, which retire
+    // anything at zero — the same flip-and-let-it-sweep rule.
+    for (const t of g.damageTexts) t.lifetime = 0;
+    for (const a of g.waves.announcements) a.lifetime = 0;
   });
 }
 

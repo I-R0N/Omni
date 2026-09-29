@@ -1272,6 +1272,16 @@ span.  The warm-up was reverted, because relocating a defect is not fixing it.
 defaults to `off`); movers repopulating the scene (this test already calls
 `quietScene`, which halts the wave ladder and stops the ambient keeper).
 
+**One correction to that last line (2026-09-29).**  `quietScene` did not
+keep the scene still: emptying the field closed the halted wave on the next
+step, and its clear beat — 88 particles and two rings, spawned at the ship
+— was live through the first reads (measured over eight local runs: 90
+particles at the first read, 34-54 at the second).  The helper now waits
+for that beat and sweeps it.  With the particles gone the reference STILL
+drifts (first read 15.8-20.1, third 21.2-22.9 across the same eight runs),
+so the beat was noise on top of this defect, not its cause, and the entry
+stays open.
+
 **What it needs:** find what varies in the light stack over ~2 s at ~200
 units from a stationary player, then give the bound a reference that does not
 move — averaging it across the settle window it already runs, or anchoring it
