@@ -88,7 +88,9 @@ repository get the same build as a preview: `pr-preview.yml` publishes it
 to that mirror under `previews/pr-<N>/`, links it (via raw.githack) in a
 PR comment, and removes it when the PR closes. Fork PRs get no preview,
 since publishing needs a secret. Netlify deploys are separate and come
-from `netlify.toml` (build `npm run build`, publish `dist/`).
+from `netlify.toml` (build `npm run build`, publish `dist/`). To make the
+single file yourself, run `node scripts/inline-build.mjs` after a build; it
+writes `omniverse-standalone.html` at the repo root, which is gitignored.
 
 ## License
 

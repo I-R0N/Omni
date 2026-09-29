@@ -2443,7 +2443,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 - `node scripts/inline-build.mjs` after a build → writes
   `omniverse-standalone.html`, a single-file build: CSS, JS and images
   inlined, plus the recorded SFX (`window.__omniSfxInline`) and every
-  `public/assets/audio/` MP3 (`window.__omniAudioInline`).
+  `public/assets/audio/` MP3 (`window.__omniAudioInline`).  It is a BUILD
+  OUTPUT, gitignored and never committed (user call, 2026-09-29): the
+  preview and release workflows rebuild it from source, so a committed
+  copy only ever went stale.
 - **THREE validation gates, and all three are expected to be green
   before a commit** (roadmap 5b, decision #46a — this REPLACES the old
   "no test runner is configured; don't invent one" stance, which held
