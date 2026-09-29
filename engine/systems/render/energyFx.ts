@@ -36,6 +36,8 @@ export interface EnergyFxView {
     energized: readonly GameEntity[];
     beam: EnergyBeamView | null;
     pulses: readonly EnergyPulseView[];
+    /** The electric spread's ring around the ship, while it lasts. */
+    ring: { x: number; y: number; radius: number; time: number; life: number; color: string } | null;
     simClock: number;
     /** Enemies a player seeker has LOCKED (distinct, ≤ 16). */
     locks: GameEntity[];
@@ -47,8 +49,8 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
     if (!view) return;
     const camX = camera.position.x, camY = camera.position.y;
     renderLocks(ctx, view.locks, camX, camY);
-    const { heated, energized, beam, pulses } = view;
-    if (heated.length === 0 && energized.length === 0 && !beam && pulses.length === 0) return;
+    const { heated, energized, beam, pulses, ring } = view;
+    if (heated.length === 0 && energized.length === 0 && !beam && pulses.length === 0 && !ring) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
@@ -56,36 +58,17 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
     ctx.globalCompositeOperation = 'lighter';
 
     if (energized.length > 0) renderSparks(ctx, energized, view.simClock, camX, camY);
+    if (ring) renderRing(ctx, ring, camX, camY);
 
     // Electric beams draw as arcs (lightning particles); a light beam draws
-    // its whole traced path — every reflection, refraction and split — each
-    // segment as bright as the share of the energy it still carries.
-    if (beam && beam.energy !== 'electric') {
-        ctx.lineCap = 'round';
-        const sg = beam.segs;
-        for (let k = 0; k < beam.nSeg; k++) {
-            const o = k * 5;
-            const f = Math.min(1, sg[o + 4]);
-            const x0 = shiftX(camX, sg[o]), y0 = shiftY(camY, sg[o + 1]);
-            const x1 = x0 + (shiftX(sg[o], sg[o + 2]) - sg[o]);
-            const y1 = y0 + (shiftY(sg[o + 1], sg[o + 3]) - sg[o + 1]);
-            ctx.globalAlpha = 0.45 * (0.25 + 0.75 * f);
-            ctx.strokeStyle = beam.color;
-            ctx.lineWidth = beam.width * 2.2 * (0.5 + 0.5 * f);
-            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-            ctx.globalAlpha = 0.9 * (0.2 + 0.8 * f);
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = Math.max(1, beam.width * 0.5);
-            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        }
-        // A thermal beam's contact reads through the body it heats (the heat
-        // pass above), so only a plain beam draws a contact disc.
-        if (beam.hit && beam.energy !== 'thermal' && beam.nSeg > 0) {
-            const x1 = shiftX(camX, sg[2]), y1 = shiftY(camY, sg[3]);
-            ctx.globalAlpha = 0.6;
-            ctx.fillStyle = beam.color;
-            ctx.beginPath(); ctx.arc(x1, y1, beam.width * 1.6 + 3, 0, Math.PI * 2); ctx.fill();
-        }
+    // its whole traced path — every reflection, refraction and split — as
+    // GLOWING LINES and nothing else (user call): full brightness whatever
+    // share of the energy a branch carries, BUTT caps, and each connected run
+    // of segments stroked as ONE polyline.  Separate round-capped segments
+    // overlapped at every joint, and under additive blending each overlap
+    // doubled into a bright dot — the "dots at the ends of beam elements".
+    if (beam && beam.energy !== 'electric' && beam.nSeg > 0) {
+        strokeLightPath(ctx, beam.segs, beam.nSeg, camX, camY, beam.color, beam.width);
     }
     // Pulses: short streaks along their heading.
     for (let i = 0; i < pulses.length; i++) {
@@ -93,19 +76,85 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
         if (!p.alive) continue;
         const x = shiftX(camX, p.x), y = shiftY(camY, p.y);
         if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
-        const f = Math.min(1, p.f);
         const tx = x - p.ux * p.length, ty = y - p.uy * p.length;
-        ctx.lineCap = 'round';
-        ctx.globalAlpha = 0.5 * (0.3 + 0.7 * f);
-        ctx.strokeStyle = p.color;
-        ctx.lineWidth = p.width * 2.4;
-        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
-        ctx.globalAlpha = 0.95 * (0.3 + 0.7 * f);
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(1, p.width * 0.6);
-        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+        ctx.lineCap = 'butt';
+        for (let k = 0; k < GLOW.length; k++) {
+            const [wMul, alpha, white] = GLOW[k];
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = white ? '#ffffff' : p.color;
+            ctx.lineWidth = Math.max(1, p.width * wMul);
+            ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+        }
     }
     ctx.restore();
+}
+
+// ── LIGHT PATHS ─────────────────────────────────────────────────────────────
+
+/** A glowing line: wide and faint, then narrower and brighter, then a white
+ *  core — [width × beam width, alpha, white core?].  Every layer at full
+ *  brightness whatever share of the energy the path carries. */
+const GLOW: ReadonlyArray<readonly [number, number, boolean]> = [
+    [4.0, 0.14, false], [2.0, 0.35, false], [0.6, 0.95, true],
+];
+/** Two segment ends closer than this are one joint of the same path. */
+const JOIN_EPS = 2.5;
+
+function strokeLightPath(ctx: CanvasRenderingContext2D, sg: readonly number[], n: number,
+                         camX: number, camY: number, color: string, width: number): void {
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'round';
+    for (let layer = 0; layer < GLOW.length; layer++) {
+        const [wMul, alpha, white] = GLOW[layer];
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = white ? '#ffffff' : color;
+        ctx.lineWidth = Math.max(1, width * wMul);
+        ctx.beginPath();
+        let px = NaN, py = NaN;
+        for (let k = 0; k < n; k++) {
+            const o = k * 5;
+            // Screen position of the segment's start (torus-shifted to the
+            // camera), and its end relative to that start.
+            const x0 = shiftX(camX, sg[o]), y0 = shiftY(camY, sg[o + 1]);
+            const x1 = x0 + (shiftX(sg[o], sg[o + 2]) - sg[o]);
+            const y1 = y0 + (shiftY(sg[o + 1], sg[o + 3]) - sg[o + 1]);
+            if (!(Math.abs(x0 - px) < JOIN_EPS && Math.abs(y0 - py) < JOIN_EPS)) ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            px = x1; py = y1;
+        }
+        ctx.stroke();
+    }
+}
+
+// ── THE ELECTRIC SPREAD'S RING ──────────────────────────────────────────────
+//
+// A jagged, crackling circle around the ship: RING_PTS vertices whose radii
+// jitter by a hash of the time slot (so it flickers, with no per-frame state),
+// stroked as a wide faint glow and a thin bright core, fading over its life.
+
+const RING_PTS = 28;
+const RING_SLOT = 0.04;
+function renderRing(ctx: CanvasRenderingContext2D,
+                    r: { x: number; y: number; radius: number; time: number; life: number; color: string },
+                    camX: number, camY: number): void {
+    const x = shiftX(camX, r.x), y = shiftY(camY, r.y);
+    const t = Math.max(0, Math.min(1, r.time / r.life));
+    const slot = Math.floor(performance.now() / 1000 / RING_SLOT);
+    ctx.lineJoin = 'miter';
+    for (let layer = 0; layer < 2; layer++) {
+        ctx.globalAlpha = (layer === 0 ? 0.35 : 0.95) * (0.35 + 0.65 * t);
+        ctx.strokeStyle = layer === 0 ? r.color : '#e0fbff';
+        ctx.lineWidth = layer === 0 ? 5 : 1.3;
+        ctx.beginPath();
+        for (let k = 0; k <= RING_PTS; k++) {
+            const i = k % RING_PTS;
+            const a = (i / RING_PTS) * Math.PI * 2;
+            const rr = r.radius * (0.86 + 0.28 * hash01('ring', slot, i));
+            const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+            if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+    }
 }
 
 // ── ENERGISED NEBULA: SPARKS ────────────────────────────────────────────────

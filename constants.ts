@@ -6215,7 +6215,7 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // since a burst lands it six times.
     kinetic: { name: 'Pulse Beam', damage: 4.5, cooldown: 1.0, beamRange: 420,
       beamWidth: 3, push: 2.5, color: ENERGY_COLORS.kinetic,
-      pulseCount: 6, pulseInterval: 0.05, pulseSpeed: 1500, pulseLength: 26 },
+      pulseCount: 6, pulseInterval: 0.05, pulseSpeed: 1500, pulseLength: 26, pulseSpread: 20 },
     // An ARC from the ship to the nearest conductor in range, then a bounded
     // chain.  Nothing conductive in range → a fizzle and nothing else.
     electric: { name: 'Arc Beam', damage: 0, cooldown: 0.8, beamDuration: 0.4, beamRange: 320,
@@ -6239,7 +6239,10 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // FLAME CONE — brief, slow heat particles.
     thermal: { name: 'Flamer', damage: 0.4, cooldown: 0.15, speed: 9, lifetime: 0.35, count: 6,
       spread: 36, size: 5, recoil: 0.2, color: ENERGY_COLORS.thermal, heat: 2.5,
-      mass: 0.12 / BASE_BANK_DIVISOR, speedRetain: 0.2 },
+      mass: 0.12 / BASE_BANK_DIVISOR, speedRetain: 0.2,
+      // Each pellet CURLS (user call): its own bend up to 4 rad/s either way,
+      // with a weave on top, so the spray reads as licking flame.
+      curve: 4, wobble: 5, wobbleHz: 3 },
   },
   homing: {
     // SEEKER (was HOMING) — the old Seeker Missiles verbatim.

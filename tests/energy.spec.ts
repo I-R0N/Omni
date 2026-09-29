@@ -755,14 +755,20 @@ test.describe('the weapons, fired into the world', () => {
         p.currentWeapon = k; p.weaponCooldown = 0;
         e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: s.position.x, y: s.position.y }, undefined, false);
         // The puff's own drag bleeds a shove off quickly, so watch its PEAK.
-        (window as any).__iv = setInterval(() => {
+        // Sampled after EVERY physics step, not on a wall-clock timer: a slow
+        // frame drains several substeps at once, and a timer then only ever
+        // sees the puff after its drag has already bled the shove off.
+        const up = e.updatePhysics;
+        (window as any).__up = up;
+        e.updatePhysics = function (this: any, dt: number) {
+          up.call(this, dt);
           const v = Math.hypot(s.velocity.x, s.velocity.y);
           if (v > (window as any).__max) (window as any).__max = v;
-        }, 4);
+        };
       }, key);
       await page.waitForTimeout(500);
       return engine(page, e => {
-        clearInterval((window as any).__iv);
+        e.updatePhysics = (window as any).__up;
         const s = (window as any).__s;
         const hitId = e.energy.lastBeamHitId;
         const h = hitId ? e.currentMap.entities.find((x: any) => x.id === hitId) : null;
@@ -1239,6 +1245,253 @@ test.describe('the weapons, fired into the world', () => {
     const near = await hold();
     expect(near.peak, 'at a distance, with nothing touching, radiant heat still reaches it').toBeGreaterThan(0.01);
     expect(near.peak).toBeLessThan(touching.peak);
+    watch.assertClean();
+  });
+
+  test('ELECTRIC: a charged tile jumps to a ship close by — an enemy or the player — and hurts it', async ({ page }) => {
+    // User call: electrified tiles and shards jump to ships.  An arc leaves a
+    // conductor CHARGED; while charged it arcs to the nearest hull in reach.
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    // An arc through a metal plate leaves it charged.
+    const charged = await engine(page, e => {
+      const p = e.player, P: any = e.physics;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'metal-tile' && x.mass === Infinity);
+      for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      (window as any).__t = t;
+      p.position.x = t.position.x - 150; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'beam+electric'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      return true;
+    });
+    void charged;
+    await page.waitForTimeout(250);
+    const c = await engine(page, e => {
+      const t = (window as any).__t;
+      return { until: (t.energizedUntil ?? 0) - e.simClock, charge: t.charge ?? 0,
+               tracked: e.energy.energized.includes(t) };
+    });
+    expect(c.tracked, 'the arc left the plate charged').toBe(true);
+    expect(c.charge).toBeGreaterThan(0.4);
+
+    const jump = (who: 'enemy' | 'player', gap: number) => engine(page, (e, a: any) => {
+      const p = e.player, t = (window as any).__t;
+      const W = e.currentMap.width;
+      e.energy.beam = null;
+      // Charge the plate by hand so the claim is the JUMP, not the chain.
+      t.charge = 8; t.energizedUntil = e.simClock + 5;
+      if (!t.energizedTracked) { t.energizedTracked = true; e.energy.energized.push(t); }
+      const tr = Math.max(t.size.x, t.size.y) / 2;
+      let hull: any;
+      if (a.who === 'enemy') {
+        p.position.x = (t.position.x + 900) % W; p.position.y = t.position.y;
+        hull = e.waves.spawnAt('RAMMER_1', { x: t.position.x, y: t.position.y }, e.waveContext(), false);
+        hull.maxSpeed = 0; hull.health = hull.maxHealth = 1e6; hull.shield = 0; hull.maxShield = 0;
+      } else {
+        hull = p;
+        p.health = p.maxHealth = 1000; p.shield = 0; p.maxShield = 0;
+      }
+      const hr = Math.max(hull.size.x, hull.size.y) / 2;
+      hull.position.x = t.position.x - tr - hr - a.gap; hull.position.y = t.position.y;
+      hull.velocity.x = 0; hull.velocity.y = 0;
+      const hp0 = hull.health;
+      for (let i = 0; i < 60; i++) {
+        hull.position.x = t.position.x - tr - hr - a.gap; hull.position.y = t.position.y;
+        hull.velocity.x = 0; hull.velocity.y = 0;
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+      }
+      const lost = hp0 - hull.health;
+      if (a.who === 'enemy') hull.active = false;
+      return { lost, charge: t.charge ?? 0 };
+    }, { who, gap });
+
+    const enemy = await jump('enemy', 10);
+    expect(enemy.lost, 'the charge jumped to an enemy beside it').toBeGreaterThan(1);
+    const player = await jump('player', 10);
+    expect(player.lost, 'and to the player beside it').toBeGreaterThan(1);
+    const far = await jump('player', 200);
+    expect(far.lost, 'but not across open space').toBe(0);
+    watch.assertClean();
+  });
+
+  test('ELECTRIC SPREAD: a ring around the ship lasts a moment, and whatever it touches in that moment is struck', async ({ page }) => {
+    // User call: the electric spread throws a short-lived ring around the
+    // ship; a body the ship reaches a beat AFTER the trigger still triggers a
+    // chain, while the ring lasts.
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const run = (delay: number) => engine(page, (e, d: number) => {
+      const p = e.player, P: any = e.physics;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'metal-tile' && x.mass === Infinity);
+      for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      e.energy.ring = null;
+      t.energizedUntil = undefined; t.charge = undefined;
+      // Far from the plate, aiming AWAY from it: the cone's forks find nothing.
+      p.position.x = t.position.x - 400; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'spread+electric'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x - 300, y: p.position.y }, undefined, false);
+      const ringUp = e.energy.ring !== null;
+      let struck = false;
+      const steps = Math.round(d * 120);
+      for (let i = 0; i < steps + 20; i++) {
+        // A fast pass: after `d` seconds the ship arrives beside the plate.
+        if (i >= steps) { p.position.x = t.position.x - 40; p.position.y = t.position.y; }
+        p.velocity.x = 0; p.velocity.y = 0;
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        if ((t.energizedUntil ?? 0) > e.simClock) struck = true;
+      }
+      return { ringUp, struck };
+    }, delay);
+    const early = await run(0.15);
+    expect(early.ringUp, 'firing throws the ring').toBe(true);
+    expect(early.struck, 'reaching the plate while the ring lasts strikes it').toBe(true);
+    const late = await run(0.8);
+    expect(late.struck, 'after the ring has gone, reaching it does nothing').toBe(false);
+    watch.assertClean();
+  });
+
+  test('SEEKER: steers along a smooth curve onto its target instead of orbiting it', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player, P: any = e.physics;
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' || x.type === 'ENEMY') x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.velocity.x = 0; p.velocity.y = 0;
+      const foe = e.waves.spawnAt('RAMMER_1', { x: p.position.x + 220, y: p.position.y }, e.waveContext(), false);
+      foe.position.x = p.position.x + 220; foe.position.y = p.position.y;
+      foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6; foe.shield = 0; foe.maxShield = 0;
+      p.currentWeapon = 'homing+kinetic'; p.weaponCooldown = 0;
+      const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+      // Fired straight UP, with the target off to the side.
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x, y: p.position.y - 300 }, undefined, false);
+      const m = e.currentMap.entities.find((x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+      let path = 0, hitAt = -1, lx = m.position.x, ly = m.position.y, maxTurn = 0, lastA = Math.atan2(m.velocity.y, m.velocity.x);
+      const hp0 = foe.health;
+      for (let i = 0; i < 240 && hitAt < 0; i++) {
+        foe.velocity.x = 0; foe.velocity.y = 0;
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        path += Math.hypot(m.position.x - lx, m.position.y - ly); lx = m.position.x; ly = m.position.y;
+        const a = Math.atan2(m.velocity.y, m.velocity.x);
+        let da = Math.abs(a - lastA); if (da > Math.PI) da = 2 * Math.PI - da;
+        maxTurn = Math.max(maxTurn, da); lastA = a;
+        if (foe.health < hp0) hitAt = (i + 1) / 120;
+      }
+      foe.active = false;
+      return { hitAt, path, straight: 220, maxTurn };
+    });
+    expect(r.hitAt, 'it reaches the target').toBeGreaterThan(0);
+    expect(r.path, 'by a short curve, not a loop around it').toBeLessThan(r.straight * 2.2);
+    watch.assertClean();
+  });
+
+  test('FLAMER: every pellet curls; a plain spread flies straight', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const turn = (key: string) => engine(page, (e, k: string) => {
+      const p = e.player, P: any = e.physics;
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' || x.type === 'ENEMY') x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = k; p.weaponCooldown = 0;
+      const before = new Set(e.currentMap.entities.map((x: any) => x.id));
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
+      const shots = e.currentMap.entities.filter((x: any) => !before.has(x.id) && x.type === 'PROJECTILE');
+      const a0 = shots.map((x: any) => Math.atan2(x.velocity.y, x.velocity.x));
+      // Total TURNING (Σ|dθ|): a curl that weaves back still curls.
+      const turned = shots.map(() => 0), last = a0.slice();
+      for (let i = 0; i < 24; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        shots.forEach((x: any, j: number) => {
+          if (!x.active) return;
+          const a = Math.atan2(x.velocity.y, x.velocity.x);
+          let d = Math.abs(a - last[j]); if (d > Math.PI) d = 2 * Math.PI - d;
+          turned[j] += d; last[j] = a;
+        });
+      }
+      return turned;
+    }, key);
+    const flame = await turn('spread+thermal');
+    const plain = await turn('spread');
+    expect(flame.length).toBeGreaterThan(2);
+    expect(Math.min(...flame), 'every flame pellet has turned').toBeGreaterThan(0.2);
+    expect(Math.max(...plain), 'a plain pellet has not').toBeLessThan(0.03);
+    watch.assertClean();
+  });
+
+  test('LIGHT: a beam keeps its full strength through glass and off a mirror, and its reach is the weapon range', async ({ page }) => {
+    const watch = await boot(page);
+    const lane = async (map: string, variant: string) => {
+      await onMap(page, map);
+      await engine(page, (e, v: string) => {
+        const p = e.player, P: any = e.physics;
+        const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === v && x.mass === Infinity);
+        for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+        t.rotation = 0; t.health = t.maxHealth = 1e9;
+        P.initializeStaticGrid(e.currentMap.entities);
+        p.position.x = t.position.x - 120; p.position.y = t.position.y;
+        p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+        p.currentWeapon = 'beam'; p.weaponCooldown = 0;
+        (window as any).__light = null;
+        e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      }, variant);
+      await page.waitForFunction(() => {
+        const e = (window as any).__omniEngine, b = e.energy.beam;
+        if (!(b && b.hit && b.light.nSeg > 0)) return false;
+        (window as any).__light = { segs: b.light.segs.slice(0, b.light.nSeg * 5), n: b.light.nSeg,
+                                    range: b.config.beamRange };
+        return true;
+      }, null, { timeout: 5000, polling: 'raf' });
+      return engine(page, () => {
+        const L = (window as any).__light;
+        // The MAIN path is every segment still at full strength: a split
+        // branch leaves at a share (< 1), so the full-strength ones are the
+        // beam itself however the trace interleaved them.
+        let len = 0, full = 0;
+        for (let k = 0; k < L.n; k++) {
+          const o = k * 5;
+          if (L.segs[o + 4] < 0.999) continue;
+          full++;
+          len += Math.hypot(L.segs[o + 2] - L.segs[o], L.segs[o + 3] - L.segs[o + 1]);
+        }
+        return { len, full, range: L.range };
+      });
+    };
+    const glass = await lane('GLASS_FIELD', 'glass-tile');
+    expect(glass.full, 'into, through and out of the pane at full strength').toBeGreaterThanOrEqual(3);
+    expect(glass.len, 'and out to the weapon range').toBeGreaterThan(glass.range * 0.9);
+    expect(glass.len).toBeLessThan(glass.range * 1.05);
+    const metal = await lane('METAL_FIELD', 'metal-tile');
+    expect(metal.full, 'to the mirror and back off it at full strength').toBeGreaterThanOrEqual(2);
+    expect(metal.len, 'and the bounce spends range, nothing else').toBeGreaterThan(metal.range * 0.9);
+    watch.assertClean();
+  });
+
+  test('LIGHT: kinetic pulses fly parallel, from their own points across a lane', async ({ page }) => {
+    const watch = await boot(page);
+    await onMap(page, 'METAL_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player, P: any = e.physics;
+      for (const x of e.currentMap.entities) if (x.type === 'STRUCTURE' || x.type === 'ENEMY') x.active = false;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.velocity.x = 0; p.velocity.y = 0;
+      p.currentWeapon = 'beam+kinetic'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
+      const seen = new Map<any, { y: number; ux: number; uy: number }>();
+      for (let i = 0; i < 50; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        for (const q of e.energy.pulses) if (q.alive && !seen.has(q)) seen.set(q, { y: q.y - p.position.y, ux: q.ux, uy: q.uy });
+      }
+      return [...seen.values()];
+    });
+    expect(r.length, 'the whole burst left').toBeGreaterThanOrEqual(6);
+    const ys = r.map(q => q.y);
+    expect(Math.max(...ys) - Math.min(...ys), 'from points spread across a lane').toBeGreaterThan(25);
+    for (const q of r) { expect(q.ux).toBeCloseTo(1, 3); expect(q.uy).toBeCloseTo(0, 3); }
     watch.assertClean();
   });
 

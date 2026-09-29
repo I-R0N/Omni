@@ -393,6 +393,17 @@ export interface WeaponConfig {
   pulseInterval?: number;
   pulseSpeed?: number;
   pulseLength?: number;
+  /** Half-width of the lane the pulses leave across: each one is PARALLEL to
+   *  the aim but starts at its own sideways offset, sweeping the lane from one
+   *  edge to the other in firing order.  0 = every pulse from the muzzle. */
+  pulseSpread?: number;
+  /** A CURVING round (the flamer): each pellet turns at its own rate, up to
+   *  `curve` rad/s either way, with a `wobble` (rad/s amplitude) weaving on top
+   *  at `wobbleHz` — so a spray traces curling lines instead of straight
+   *  ones.  Steering only: speed is untouched. */
+  curve?: number;
+  wobble?: number;
+  wobbleHz?: number;
   /** SPREAD-instant: reach of the cone, and its half-angle
    *  (degrees) for a spread that resolves instantly rather than as rounds. */
   pulseRadius?: number;
@@ -574,6 +585,12 @@ export interface GameEntity {
    *  this shell without reaching back to its config. */
   detonateOn?: 'impact' | 'enemy' | 'fuse';
   /** See WeaponConfig.boreCostScale. */
+  /** A curving round's own turn rate (rad/s), wobble amplitude, wobble rate
+   *  and phase — rolled per pellet at spawn (see WeaponConfig.curve). */
+  curveRate?: number;
+  curveWobble?: number;
+  curveHz?: number;
+  curvePhase?: number;
   boreCostScale?: number;
   /** The bolt's world speed at spawn — its MUZZLE energy reference.  Damage
    *  is kinetic (constants.kineticDamage), so under the shipped 'muzzle'
@@ -617,9 +634,13 @@ export interface GameEntity {
    *  `easeShownHeat`).  A body stays in the heated set until it fades. */
   heatShown?: number;
   energizedTracked?: boolean;
-  /** Sim-clock time until which a nebula body is electrically energised
-   *  (steerable by magnetism). */
+  /** Sim-clock time until which a body is electrically CHARGED (it sparkles,
+   *  and can jump to a nearby ship while `charge` lasts). */
   energizedUntil?: number;
+  /** The charge a charged body still holds (damage units). */
+  charge?: number;
+  /** Did the player's arc charge it (a jump to an enemy pays the player)? */
+  chargeByPlayer?: boolean;
   /** The fracture profile of the last energy event that touched this body:
    *  read at first decomposition (site scale + bias) and at shatter
    *  (impulse), so the break takes the character of what broke it. */

@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  496 tests.  All run at
+                          whatever happened next).  502 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -1469,7 +1469,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `homingPrefers` is gone): `ProjectileSystem.updateHoming` holds the lock on
   `GameEntity.homingTarget` while the target lives and stays inside 1.5×
   the acquire range, and `render/energyFx.ts` draws a small turning bracket
-  on each locked enemy, fading in on lock and out when it ends.  The OLD roster maps onto
+  on each locked enemy, fading in on lock and out when it ends.  GUIDANCE
+  IS A HERMITE CURVE (user call, `steerHermite`): every step the round plans
+  a cubic Hermite from its own velocity to where the target WILL be, arriving
+  along the line of sight, and applies that curve's START acceleration —
+  lateral only, capped by a turn authority fixed at LAUNCH speed, so a slower
+  round turns tighter.  When the target is inside its turning circle (the
+  case that used to orbit forever) it BRAKES to what that circle allows (≥40%
+  of launch) and accelerates back once the target is ahead.  The THERMAL
+  SPREAD's pellets CURL (`WeaponConfig.curve` / `wobble` / `wobbleHz`): each
+  rolls its own bend and weave, turned in `updateProjectileFuses`.  The OLD roster maps onto
   the combinations it already was (`LEGACY_WEAPON_MAP` in energy.ts:
   BLASTER→projectile, BURST→projectile+kinetic, SHOTGUN→spread+kinetic,
   BOUNCER→beam+thermal, LIGHTNING→projectile+electric,
@@ -3994,8 +4003,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     carries `CHAIN_ATTENUATION ×` that body's conductivity, so glass (0.1),
     rock and plastic pass on only a weak arc and a metal plate nearly all of
     it; only a true insulator below `CHAIN_MIN_CONDUCTIVITY` (0.02) is a dead
-    end.  A material with `energizeSec` (nebula) is ENERGISED
-    (`energizedUntil`) rather than damaged, and an energised cloud GLITTERS
+    end.  A material with `energizeSec` is CHARGED by an arc
+    (`energizedUntil`, `charge`, `chargeByPlayer`, on the bounded
+    `energized` set): nebula is charged instead of damaged, and every solid
+    carries its charge for its own time (metal 1.5 s, rock / glass 0.6,
+    plastic 0.3).  A CHARGED BODY JUMPS (user call): every `JUMP_INTERVAL` it
+    arcs to the nearest ship — an enemy OR THE PLAYER — within `JUMP_RANGE`
+    of its surface, spending `JUMP_FRACTION` of its charge as electric damage
+    (`chargeJumps`), so flying through an electrified field hurts.  The
+    ELECTRIC SPREAD is a RING (user call): a short-lived jagged circle around
+    the ship (`EnergyState.ring`, 64 units, 0.4 s) that FOLLOWS it, and
+    whatever conductor it touches during that window is discharged into — a
+    ship fired while charging into a pack still chains on arrival.  An
+    energised cloud GLITTERS
     (user call) — a couple of bright sparks per body jumping to a fresh,
     hashed spot every ~0.09 s, and now and then a faint crackle line to the
     next energised puff (`renderSparks`, no per-body state).
@@ -4032,13 +4052,19 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     to heat, which is what still lets a heat lance make a pane fail),
     `refractiveIndex`, and per-GRAIN-BOUNDARY `boundaryScatter` / `boundaryLoss`
     / `boundarySplit`.  `traceLight` (energyEffects.ts) is a BOUNDED ray set
-    — ≤10 rays, ≤4 reflections a ray, ≤48 grain steps inside a body, ≤48
+    — ≤10 rays, ≤8 reflections a ray, ≤48 grain steps inside a body, ≤48
     drawn segments, from a fixed module pool, so a trace allocates nothing:
     at a face the light splits into reflected, transmitted and absorbed
     shares; inside, it steps a grain at a time, each boundary taking its
     loss (a DEEP pass-through that leaves LOW damage on each boundary),
     turning it by the scatter and splitting a share off; leaving, it
-    refracts out (or reflects back in past the critical angle).  Internal
+    refracts out (or reflects back in past the critical angle).  THE BEAM
+    ITSELF KEEPS FULL STRENGTH (user call: the losses read too accurate) —
+    whichever of reflection / transmission dominates at a face (≥30% of the
+    ray) carries the WHOLE ray on, the minority share still branches off as
+    a split, and a grain boundary still takes its damage without dimming the
+    ray; so what limits a beam's travel is only its weapon RANGE.  It is
+    DRAWN as joined glowing polylines with butt caps — no dot at any end.  Internal
     deflection is SEEDED by body and step, so a path through a pane is stable
     rather than jittering tick to tick.  A gas lets it through (thermal
     light warms it).  THE BEAM STOPS ON THE DRAWN SHAPE (user report): the
@@ -4046,7 +4072,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
     BURST OF PULSES that FLY (user call — like the old bolt beams): six short
-    beams 0.05 s apart at 1500 u/s, each traced through the SAME optics over
+    beams 0.05 s apart at 1500 u/s, flying PARALLEL from their own points
+    across a lane (`pulseSpread`, ±20 units — not a fan), each traced through the SAME optics over
     the distance it covers each step; a split's extra branches become extra
     pulses out of a bounded pool (48), and a pulse carries on as its
     STRONGEST branch.  The thermal beam is the only other beam that fires

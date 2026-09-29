@@ -72,8 +72,12 @@ export class EnergyState {
     pulses: Pulse[] = [];
     burst: Burst | null = null;
     lastPulseHitId: string | null = null;
+    /** The electric spread's RING: a short-lived crackle around the ship;
+     *  anything it touches while it lasts starts a chain (renderer reads). */
+    ring: ElectricRing | null = null;
     effectAcc = 0;
     conductAcc = 0;
+    jumpAcc = 0;
     /** Diagnostics (tests + DBG): the size of the last electric chain. */
     lastChainSize = 0;
     lastBeamHitId: string | null = null;
@@ -90,12 +94,15 @@ export class EnergyState {
         for (const e of this.energized) {
             e.energizedTracked = undefined;
             e.energizedUntil = undefined;
+            e.charge = undefined;
+            e.chargeByPlayer = undefined;
         }
         this.heated.length = 0;
         this.energized.length = 0;
         this.pending.length = 0;
         this.beam = null;
         this.burst = null;
+        this.ring = null;
         for (const p of this.pulses) p.alive = false;
         this.effectAcc = 0;
         this.conductAcc = 0;
@@ -688,15 +695,17 @@ export function dischargeElectric(g: GameEngine, origin: Vector2, first: GameEnt
         if (node.depth > 0 || !first) arcVisual(g, fromPos.x, fromPos.y, e.position.x, e.position.y, color);
         if (node.depth === 0 && !damageFirst) continue;
         const r = responseOf(materialOf(e));
-        if (r.energizeSec > 0) {
-            // Same rule as heat: only a body in the set carries the state,
-            // so the rim and the state can never disagree about it.
-            if (!e.energizedTracked) {
-                if (g.energy.energized.length >= MAX_ENERGIZED) continue;
-                e.energizedTracked = true;
-                g.energy.energized.push(e);
+        if (r.energizeSec > 0 && e.type === EntityType.STRUCTURE) {
+            // Same rule as heat: only a body in the set carries the state, so
+            // the sparks and the charge can never disagree about it.  A full
+            // set leaves the body uncharged, never the arc undelivered.
+            if (e.energizedTracked || g.energy.energized.length < MAX_ENERGIZED) {
+                if (!e.energizedTracked) { e.energizedTracked = true; g.energy.energized.push(e); }
+                e.energizedUntil = now + r.energizeSec;
+                // It holds the charge that reached it (the strongest arc wins).
+                e.charge = Math.max(e.charge ?? 0, node.mag * Math.min(1, r.conductivity + 0.3));
+                if (byPlayer) e.chargeByPlayer = true;
             }
-            e.energizedUntil = now + r.energizeSec;
         }
         if (r.gas) continue;   // a gas is energised, never damaged
         const dmg = node.mag * r.electricDamage;
@@ -704,6 +713,59 @@ export function dischargeElectric(g: GameEngine, origin: Vector2, first: GameEnt
         e.hitFlash = Math.max(e.hitFlash ?? 0, 0.12);
     }
     return nodes.length;
+}
+
+// ── Charged bodies jump to ships ─────────────────────────────────────────────
+//
+// ELECTRIFIED TILES AND SHARDS JUMP TO SHIPS (user call).  A body an arc
+// passed through holds a CHARGE for its material's `energizeSec`, and while
+// it holds one it arcs to the nearest ship within JUMP_RANGE — an enemy's or
+// the PLAYER'S — spending JUMP_FRACTION of the charge as damage (× the
+// ship's own `electricDamage`, so it is the same material rule as a chain).
+// A charged field is therefore a hazard to fly through as well as a trap to
+// lure enemies into.  Ships, not terrain: between bodies the chain already
+// did its work.  Bounded: the candidate hulls are the enemy index plus the
+// player, and at most JUMP_MAX_PER_TICK jumps happen per tick.
+
+function chargeJumps(g: GameEngine): void {
+    const C = ENERGY_CONSTANTS;
+    const list = g.energy.energized;
+    const enemies = g.entityIndex.enemies;
+    const p = g.player;
+    const playerOk = p.active && !p.isExploding;
+    let jumps = 0;
+    for (let i = 0; i < list.length && jumps < C.JUMP_MAX_PER_TICK; i++) {
+        const e = list[i];
+        const q = e.charge ?? 0;
+        if (q < C.JUMP_MIN_CHARGE || !e.active) continue;
+        const eR = Math.max(e.size.x, e.size.y) * 0.5;
+        let best: GameEntity | null = null, bestGap: number = C.JUMP_RANGE;
+        for (let k = 0; k < enemies.length; k++) {
+            const h = enemies[k];
+            if (!h.active || h.isExploding) continue;
+            const gap = dist(e.position.x, e.position.y, h.position.x, h.position.y)
+                - eR - Math.max(h.size.x, h.size.y) * 0.5;
+            if (gap < bestGap) { bestGap = gap; best = h; }
+        }
+        if (playerOk) {
+            const gap = dist(e.position.x, e.position.y, p.position.x, p.position.y)
+                - eR - Math.max(p.size.x, p.size.y) * 0.5;
+            if (gap < bestGap) { bestGap = gap; best = p; }
+        }
+        if (!best) continue;
+        const spend = q * C.JUMP_FRACTION;
+        e.charge = q - spend;
+        const dmg = spend * responseOf(materialOf(best)).electricDamage;
+        arcVisual(g, e.position.x, e.position.y, best.position.x, best.position.y, ENERGY_COLORS.electric);
+        if (dmg > 0.05) {
+            // A jump to an enemy pays whoever charged the body; a jump to the
+            // player is never "by the player".
+            const byPlayer = best !== p && e.chargeByPlayer === true;
+            damageBody(g, best, dmg, e.position, 'electric', byPlayer, true, 0.12);
+        }
+        jumps++;
+    }
+    if (jumps > 0) g.audio.play('impact.lightning.arc', { x: p.position.x, y: p.position.y });
 }
 
 // ── Projectile payloads ──────────────────────────────────────────────────────
@@ -758,12 +820,61 @@ export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, 
     fireCone(g, c, player, aim);
 }
 
+// ── The electric spread's ring ───────────────────────────────────────────────
+//
+// FIRING THE FORK ALSO THROWS A RING (user call): a small crackling circle
+// around the ship that lasts a moment and moves with it.  Anything it touches
+// while it lasts starts a chain — so a fast pass into enemies or terrain a
+// beat after the trigger still lands, and the shot reads as a shot even when
+// nothing was in the cone to fork to.  Each body is triggered at most once per
+// ring, at most RING_MAX_HITS per ring, on a short cadence.
+
+export interface ElectricRing {
+    x: number; y: number; radius: number; time: number; life: number;
+    acc: number; color: string; spec: NonNullable<WeaponConfig['electric']>;
+    hit: string[];
+}
+const RING_RADIUS = 64;
+const RING_LIFE = 0.4;
+const RING_TICK = 0.05;
+const RING_MAX_HITS = 6;
+
+function tickRing(g: GameEngine, dt: number): void {
+    const r = g.energy.ring;
+    if (!r) return;
+    const p = g.player;
+    if (!p.active || p.isExploding) { g.energy.ring = null; return; }
+    r.time -= dt;
+    if (r.time <= 0) { g.energy.ring = null; return; }
+    r.x = p.position.x; r.y = p.position.y;
+    r.acc += dt;
+    if (r.acc < RING_TICK || r.hit.length >= RING_MAX_HITS) return;
+    r.acc = 0;
+    const buf = g.energy.buf;
+    const reach = r.radius + Math.max(p.size.x, p.size.y) * 0.5;
+    gather(g, r.x, r.y, reach + 40, buf, 48);
+    nearestK(buf, r.x, r.y, 12);
+    for (let i = 0; i < buf.length && r.hit.length < RING_MAX_HITS; i++) {
+        const e = buf[i];
+        if (r.hit.includes(e.id)) continue;
+        const d = dist(r.x, r.y, e.position.x, e.position.y) - Math.max(e.size.x, e.size.y) * 0.5;
+        if (d > r.radius) continue;
+        if (responseOf(materialOf(e)).conductivity < ENERGY_CONSTANTS.CHAIN_MIN_CONDUCTIVITY) continue;
+        r.hit.push(e.id);
+        const q = { x: r.x, y: r.y };
+        arcVisual(g, r.x, r.y, e.position.x, e.position.y, r.color);
+        dischargeElectric(g, q, e, r.spec, r.color, true, true);
+    }
+}
+
 /** An instant cone (spread + electric forks). */
 function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: number): void {
     const px = player.position.x, py = player.position.y;
     const R = c.pulseRadius ?? 200;
     const half = ((c.coneHalfDeg ?? 25) * Math.PI) / 180;
     if (c.energy === 'electric' && c.electric) {
+        g.energy.ring = { x: px, y: py, radius: RING_RADIUS, time: RING_LIFE, life: RING_LIFE, acc: RING_TICK,
+                          color: c.color, spec: c.electric, hit: [] };
         const buf = g.energy.buf;
         gather(g, px, py, R, buf, ENERGY_CONSTANTS.CHAIN_CANDIDATES * 4);
         nearestK(buf, px, py, ENERGY_CONSTANTS.CHAIN_CANDIDATES);
@@ -786,6 +897,7 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
         const forks = Math.min(c.count, picks.length, 8);
         for (let i = 0; i < forks; i++) {
             const t = picks[i].e;
+            g.energy.ring!.hit.push(t.id);   // the ring will not strike it twice
             arcVisual(g, px, py, t.position.x, t.position.y, c.color);
             dischargeElectric(g, player.position, t, c.electric, c.color, true, true);
         }
@@ -816,7 +928,7 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
 // beam's path through a pane is stable from tick to tick instead of jittering.
 
 const MAX_RAYS = 10;
-const MAX_BOUNCES = 4;
+const MAX_BOUNCES = 8;
 const MAX_INTERNAL_STEPS = 48;
 const MAX_SEGS = 48;
 /** A ray carrying less than this fraction of its trace's energy is spent. */
@@ -1089,11 +1201,13 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
         addSeg(out, wx0, wy0, wx, wy, f);
         travelled += s;
         lx = nx; ly = ny;
+        // Each boundary takes a LITTLE damage — but the light keeps its
+        // strength (user call: a beam through glass stays at full energy; how
+        // far it goes is the weapon's range, not a loss per boundary).
         const loss = f * r.boundaryLoss;
         if (loss > 0) {
             _at.x = wx; _at.y = wy; _from.x = wx0; _from.y = wy0;
             depositLight(g, e, loss, _from, _at, dep, ux, uy);
-            f -= loss;
         }
         if (!e.active || (e.health ?? 1) <= 0) {
             // The body broke under it: the light carries straight on.
@@ -1104,13 +1218,14 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
         if (f < MIN_F) return;
         if (r.boundarySplit > 0) {
             // A split branch glances off at a wider angle than the main ray.
+            // It carries its own share for DAMAGE (a prism must not multiply
+            // a beam's damage by its branch count) but is drawn at full
+            // brightness like every other segment.
             const sf = f * r.boundarySplit;
             const a = jitter(e.id, stepN, 2) * Math.max(0.35, r.boundaryScatter * 3);
             const ca = Math.cos(a), sa = Math.sin(a);
             const bdx = dx * ca - dy * sa, bdy = dx * sa + dy * ca;
-            if (pushRay(wx, wy, bdx * cw - bdy * sw, bdx * sw + bdy * cw, len - travelled, sf, bounces, null, e, stepN + 101)) {
-                f -= sf;
-            }
+            pushRay(wx, wy, bdx * cw - bdy * sw, bdx * sw + bdy * cw, len - travelled, sf, bounces, null, e, stepN + 101);
         }
         if (r.boundaryScatter > 0) {
             const a = jitter(e.id, stepN, 1) * r.boundaryScatter;
@@ -1163,9 +1278,17 @@ export function traceLight(g: GameEngine, x: number, y: number, ux: number, uy: 
         const r = responseOf(materialOf(e));
         const T = e.polygonPoints && e.polygonPoints.length >= 3
             ? (dep.thermal ? r.thermalTransmissivity : r.transmissivity) : 0;
-        const fr = ray.f * r.reflectivity;
-        const ft = ray.f * (1 - r.reflectivity) * T;
-        const fa = ray.f - fr - ft;
+        let fr = ray.f * r.reflectivity;
+        let ft = ray.f * (1 - r.reflectivity) * T;
+        // What the surface ABSORBS is what it takes as damage.
+        const fa = Math.max(0, ray.f - fr - ft);
+        // THE LIGHT CARRIES ON AT FULL STRENGTH (user call): whichever way
+        // most of it goes — reflected off a mirror, through a pane — keeps the
+        // whole beam; only the minor branch carries just its own share.  So a
+        // beam's reach is its weapon's RANGE, not a loss per bounce.  A dull
+        // absorber (rock) sends nothing on that is worth keeping.
+        if (fr >= ft && fr >= 0.3 * ray.f) fr = ray.f;
+        else if (ft > fr && ft >= 0.3 * ray.f) ft = ray.f;
         _from.x = ray.x; _from.y = ray.y;
         depositLight(g, e, fa, _from, null, dep, ray.ux, ray.uy);
         const left = ray.len - t;
@@ -1321,10 +1444,16 @@ function tickPulses(g: GameEngine, dt: number): void {
             bu.acc -= dt;
             while (bu && bu.left > 0 && bu.acc <= 0) {
                 const c = bu.config;
-                const a = bu.angle + (Math.random() - 0.5) * 0.03;
-                const ux = Math.cos(a), uy = Math.sin(a);
+                // Every pulse flies PARALLEL to the aim (no angle between
+                // them) but leaves from its own point across a lane, swept
+                // edge to edge in firing order (user call).
+                const ux = Math.cos(bu.angle), uy = Math.sin(bu.angle);
                 const muzzle = Math.max(pl.size.x, pl.size.y) * 0.6;
-                spawnPulse(g, pl.position.x + ux * muzzle, pl.position.y + uy * muzzle, ux, uy, 1, 0, {
+                const count = Math.max(1, c.pulseCount ?? 1);
+                const idx = count - bu.left;
+                const lane = c.pulseSpread ?? 0;
+                const off = count > 1 ? (-1 + (2 * idx) / (count - 1)) * lane : 0;
+                spawnPulse(g, pl.position.x + ux * muzzle - uy * off, pl.position.y + uy * muzzle + ux * off, ux, uy, 1, 0, {
                     range: c.beamRange ?? 360, speed: c.pulseSpeed ?? 1500, length: c.pulseLength ?? 24,
                     dmg: c.damage, push: c.push ?? 0, color: c.color, width: c.beamWidth ?? 3 });
                 bu.left--;
@@ -1387,16 +1516,25 @@ export function tickEnergy(g: GameEngine, dt: number): void {
     if (doEffects) s.effectAcc -= HEAT_EFFECT_INTERVAL;
     if (doConduct) s.conductAcc -= ENERGY_CONSTANTS.CONDUCT_INTERVAL_SEC;
     if (s.heated.length > 0) tickHeat(g, dt, doEffects, doConduct);
-    // Energised nebula decays by clock; the list only prunes.
+    // Charged bodies decay by clock; the list only prunes.
     if (s.energized.length > 0) {
         let n = 0;
         for (let i = 0; i < s.energized.length; i++) {
             const e = s.energized[i];
-            if (!e.active || (e.energizedUntil ?? 0) <= g.simClock) { e.energizedTracked = undefined; continue; }
+            if (!e.active || (e.energizedUntil ?? 0) <= g.simClock) {
+                e.energizedTracked = undefined; e.charge = undefined; e.chargeByPlayer = undefined;
+                continue;
+            }
             s.energized[n++] = e;
         }
         if (s.energized.length !== n) s.energized.length = n;
+        s.jumpAcc += dt;
+        if (s.jumpAcc >= ENERGY_CONSTANTS.JUMP_INTERVAL) {
+            s.jumpAcc = 0;
+            chargeJumps(g);
+        }
     }
     tickBeam(g, dt);
     if (s.burst || s.pulses.length > 0) tickPulses(g, dt);
+    if (s.ring) tickRing(g, dt);
 }

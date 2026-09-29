@@ -185,8 +185,10 @@ export interface MaterialResponse {
   conductivity: number;
   /** Fraction of an arc's magnitude that becomes damage. */
   electricDamage: number;
-  /** Seconds an arc leaves the body ENERGISED (it glitters with sparks)
-   *  instead of damaging it.  0 = never energised. */
+  /** Seconds an arc leaves the body CHARGED: it glitters with sparks and,
+   *  while it holds charge, JUMPS to a ship close by (an enemy's or the
+   *  player's) and hurts it.  A good conductor holds it longest.  0 = never
+   *  charged (a hull passes a chain on but does not hold it). */
   energizeSec: number;
 
   // ── OPTICAL (light: beams, and the radiant heat of hot bodies) ────────────
@@ -256,7 +258,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     gas: false, heatWeakening: 1.5,
     heatAbsorb: 0.8, specificHeat: 0.8,  coolingPerSec: 0.25, thermalConductivity: 0.12,
     thermalDps: 1.5, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-    conductivity: 0.15, electricDamage: 0.3, energizeSec: 0,
+    conductivity: 0.15, electricDamage: 0.3, energizeSec: 0.6,
     // Opaque and dull: absorbs almost all light.
     reflectivity: 0.06, transmissivity: 0, thermalTransmissivity: 0, refractiveIndex: 1,
     boundaryScatter: 0, boundaryLoss: 0, boundarySplit: 0,
@@ -277,7 +279,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     thermalDps: 0, thermalFailAt: 1.0, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
     // Low but NOT zero (user call): an arc lands on glass, cracks it and
     // passes on weakly, rather than glass being a dead end.
-    conductivity: 0.1, electricDamage: 0.35, energizeSec: 0,
+    conductivity: 0.1, electricDamage: 0.35, energizeSec: 0.6,
     // Clear: most light passes through, bending at the faces, glancing off each
     // grain boundary and splitting a little at each one (a prism); opaque to heat.
     reflectivity: 0.12, transmissivity: 0.95, thermalTransmissivity: 0.15, refractiveIndex: 1.5,
@@ -298,7 +300,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     gas: false, heatWeakening: 2.5,
     heatAbsorb: 0.7, specificHeat: 0.45, coolingPerSec: 0.1, thermalConductivity: 1.0,
     thermalDps: 0, thermalFailAt: Infinity, bondReleaseAt: Infinity, agitation: 0, disperseAt: Infinity,
-    conductivity: 1.0, electricDamage: 1.0, energizeSec: 0,
+    conductivity: 1.0, electricDamage: 1.0, energizeSec: 1.5,
     // The mirror: reflects most light, absorbs the rest, lets none through.
     reflectivity: 0.8, transmissivity: 0, thermalTransmissivity: 0, refractiveIndex: 1,
     boundaryScatter: 0, boundaryLoss: 0, boundarySplit: 0,
@@ -318,7 +320,7 @@ export const MATERIALS: Readonly<Record<MaterialId, MaterialDef>> = {
     gas: false, heatWeakening: 0.5,
     heatAbsorb: 1.0, specificHeat: 1.5, coolingPerSec: 0.2, thermalConductivity: 0.03,
     thermalDps: 60, thermalFailAt: Infinity, bondReleaseAt: 0.3, agitation: 0, disperseAt: Infinity,
-    conductivity: 0.03, electricDamage: 0.1, energizeSec: 0,
+    conductivity: 0.03, electricDamage: 0.1, energizeSec: 0.3,
     // Translucent and cloudy: light gets in, is scattered hard by every grain
     // and soaked up quickly.
     reflectivity: 0.05, transmissivity: 0.5, thermalTransmissivity: 0.3, refractiveIndex: 1.45,
@@ -454,6 +456,19 @@ export const ENERGY_CONSTANTS = {
   CHAIN_MIN_CONDUCTIVITY: 0.02, // below: a true insulator — the arc lands and goes no further
   CHAIN_MIN_MAGNITUDE: 0.25,   // below: the chain has run out
   CHAIN_CANDIDATES: 48,        // max bodies considered per hop query
+
+  // CHARGED BODIES (user call: electrified tiles and shards jump to ships).
+  /** How close (surface to surface) a ship must be for a charge to jump. */
+  JUMP_RANGE: 45,
+  /** How often a charged body may jump (seconds). */
+  JUMP_INTERVAL: 0.2,
+  /** Share of a body's charge one jump spends (and deals, × the ship's
+   *  `electricDamage`). */
+  JUMP_FRACTION: 0.5,
+  /** Below this charge a body has nothing left worth jumping. */
+  JUMP_MIN_CHARGE: 0.4,
+  /** At most this many jumps per jump tick, across the whole map. */
+  JUMP_MAX_PER_TICK: 16,
 
   // MATERIAL → HEAT DERIVATIONS.  Each is calibrated so ROCK is unchanged
   // from the hand-set table these replaced (capacity 30, ceiling 2.5).

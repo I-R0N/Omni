@@ -379,7 +379,7 @@ export class GameEngine {
   /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
   energy: EnergyState = new EnergyState();
   /** The render view of it — one object, refilled per frame (no allocation). */
-  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], simClock: 0, locks: [] };
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], ring: null, simClock: 0, locks: [] };
   private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false, segs: [], nSeg: 0 };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
@@ -6455,6 +6455,7 @@ export class GameEngine {
           v.beam = null;
       }
       v.pulses = this.energy.pulses;
+      v.ring = this.energy.ring;
       this.renderer.energyFx = v;
   }
 
@@ -6516,6 +6517,17 @@ export class GameEngine {
           if (p.speedRetain !== undefined && p.speedRetain < 1 && p.active) {
               const k = Math.pow(p.speedRetain, dt);
               p.velocity.x *= k; p.velocity.y *= k;
+          }
+          // CURVING rounds (the flamer): turn by the pellet's own rate plus a
+          // weave, so a spray draws curling lines.  Speed is untouched.
+          if (p.curveRate !== undefined && p.active) {
+              const age = (p.maxLifetime ?? 0) - (p.lifetime ?? 0);
+              const w = p.curveRate + (p.curveWobble ?? 0)
+                  * Math.sin((p.curvePhase ?? 0) + 2 * Math.PI * (p.curveHz ?? 0) * age);
+              const a = w * dt, c = Math.cos(a), sn = Math.sin(a);
+              const vx = p.velocity.x, vy = p.velocity.y;
+              p.velocity.x = vx * c - vy * sn; p.velocity.y = vx * sn + vy * c;
+              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
           }
           // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
           // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
