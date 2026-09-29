@@ -457,6 +457,14 @@ export const ENERGY_CONSTANTS = {
   CHAIN_MIN_MAGNITUDE: 0.25,   // below: the chain has run out
   CHAIN_CANDIDATES: 48,        // max bodies considered per hop query
 
+  // ENERGY DAMAGE FEEDBACK (user call): how long a hull reads as burning /
+  // shocked after it last took thermal / electric damage.  The burn window
+  // outlasts the 0.2 s DoT cadence so a steady burn reads as continuous.
+  BURN_INDICATOR_SEC: 0.6,
+  SHOCK_INDICATOR_SEC: 0.45,
+  /** Embers a burning player sheds per second. */
+  EMBER_RATE: 18,
+
   // THE BLADE (user call): a light beam extends from the muzzle, stays out
   // while held, and retracts into it on release.
   BEAM_EXTEND_SEC: 0.1,

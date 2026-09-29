@@ -43,8 +43,8 @@ import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentD
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
 import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
-import { materialOf, materialDef } from './systems/energy';
-import { EnergyState, tickEnergy, fireInstant, applyProjectilePayload, depositHeat, shareHeat } from './energyEffects';
+import { materialOf, materialDef, ENERGY_CONSTANTS } from './systems/energy';
+import { EnergyState, SeekerDots, tickEnergy, fireInstant, applyProjectilePayload, depositHeat, shareHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
@@ -379,7 +379,7 @@ export class GameEngine {
   /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
   energy: EnergyState = new EnergyState();
   /** The render view of it — one object, refilled per frame (no allocation). */
-  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], ring: null, simClock: 0, locks: [] };
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], ring: null, simClock: 0, locks: [], dots: null, shocked: [] };
   private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false, segs: [], nSeg: 0 };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
@@ -1228,6 +1228,10 @@ export class GameEngine {
         maxHealth: Math.round(this.player.maxHealth),
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: Math.round(this.player.maxShield ?? 0),
+      },
+      hazards: {
+        burn: Math.max(0, (this.player.burnIndicator ?? 0) / ENERGY_CONSTANTS.BURN_INDICATOR_SEC),
+        shock: Math.max(0, (this.player.shockTimer ?? 0) / ENERGY_CONSTANTS.SHOCK_INDICATOR_SEC),
       },
       scanner: this.scannerMk > 0 ? {
         mk: this.scannerMk,
@@ -2546,6 +2550,10 @@ export class GameEngine {
         maxHealth: Math.round(this.player.maxHealth),
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: Math.round(this.player.maxShield ?? 0),
+      },
+      hazards: {
+        burn: Math.max(0, (this.player.burnIndicator ?? 0) / ENERGY_CONSTANTS.BURN_INDICATOR_SEC),
+        shock: Math.max(0, (this.player.shockTimer ?? 0) / ENERGY_CONSTANTS.SHOCK_INDICATOR_SEC),
       },
       scanner: this.scannerMk > 0 ? {
         mk: this.scannerMk,
@@ -6429,6 +6437,8 @@ export class GameEngine {
       v.heated = this.energy.heated;
       v.energized = this.energy.energized;
       v.simClock = this.simClock;
+      v.dots = this.energy.dots;
+      v.shocked = this.energy.shocked;
       // SEEKER LOCKS: the distinct enemies the player's homing rounds hold
       // (refill idiom — no per-frame allocation; a handful of rounds at most).
       const locks = v.locks;
@@ -6511,6 +6521,17 @@ export class GameEngine {
           // A shell detonates AT MOST ONCE.  A round that already went off on
           // an actor is not blasted again by the stop rule below.
           if (p.detonated) continue;
+          // SEEKER DOTS: a player seeker drops a dot every SPACING units it
+          // flies (torus-wrapped), into the energy layer's fixed ring.
+          if (p.homing && p.active && p.ownerType === EntityType.PLAYER) {
+              const lx = p.dotLastX, ly = p.dotLastY;
+              const dx = lx === undefined ? Infinity : wrapDeltaX(lx, p.position.x);
+              const dy = ly === undefined ? 0 : wrapDeltaY(ly!, p.position.y);
+              if (dx * dx + dy * dy >= SeekerDots.SPACING * SeekerDots.SPACING) {
+                  this.energy.dots.emit(p.position.x, p.position.y, this.simClock, p.color);
+                  p.dotLastX = p.position.x; p.dotLastY = p.position.y;
+              }
+          }
           // Range falloff for rounds that SLOW in flight (spread pellets,
           // flame): damage is measured from the speed a round still has, so
           // bleeding speed is bleeding damage — no curve authored anywhere.

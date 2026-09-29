@@ -33,6 +33,7 @@ import {
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { polygonArea, pointInPolygon } from './systems/fracture';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
+import { HEX_AREA } from './maps/TileGenerator';
 import { nextId } from './systems/IdAllocator';
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -66,6 +67,27 @@ const MAX_ENERGIZED = 200;
  *  conduction) are applied — heat itself cools every step. */
 const HEAT_EFFECT_INTERVAL = 0.2;
 
+/** A bounded ring of trail dots: position, birth (sim clock) and colour,
+ *  overwritten oldest first, so emitting never allocates. */
+export class SeekerDots {
+    static readonly MAX = 384;
+    /** How long a dot lasts, how far apart they are dropped, how big. */
+    static readonly LIFE = 1.0;
+    static readonly SPACING = 9;
+    static readonly RADIUS = 1.8;
+    readonly x = new Float32Array(SeekerDots.MAX);
+    readonly y = new Float32Array(SeekerDots.MAX);
+    readonly born = new Float64Array(SeekerDots.MAX).fill(-1e9);
+    readonly color: string[] = new Array(SeekerDots.MAX).fill('#ffffff');
+    head = 0;
+    emit(x: number, y: number, t: number, color: string): void {
+        const i = this.head;
+        this.x[i] = x; this.y[i] = y; this.born[i] = t; this.color[i] = color;
+        this.head = (i + 1) % SeekerDots.MAX;
+    }
+    clear(): void { this.born.fill(-1e9); this.head = 0; }
+}
+
 export class EnergyState {
     heated: GameEntity[] = [];
     energized: GameEntity[] = [];
@@ -79,6 +101,13 @@ export class EnergyState {
     /** The electric spread's RING: a short-lived crackle around the ship;
      *  anything it touches while it lasts starts a chain (renderer reads). */
     ring: ElectricRing | null = null;
+    /** SEEKER DOT TRAILS (user call): a fixed ring of dots dropped behind
+     *  each player seeker, fading like the player trail — and outliving the
+     *  round, so a hit does not snatch its trail away. */
+    readonly dots = new SeekerDots();
+    /** Hulls crackling from a recent shock (bounded; renderer reads). */
+    shocked: GameEntity[] = [];
+    emberAcc = 0;
     effectAcc = 0;
     conductAcc = 0;
     jumpAcc = 0;
@@ -107,6 +136,9 @@ export class EnergyState {
         this.beam = null;
         this.burst = null;
         this.ring = null;
+        this.dots.clear();
+        for (const e of this.shocked) e.shockTimer = undefined;
+        this.shocked.length = 0;
         for (const p of this.pulses) p.alive = false;
         this.effectAcc = 0;
         this.conductAcc = 0;
@@ -211,6 +243,29 @@ function killBody(g: GameEngine, e: GameEntity, from: Vector2 | null, byPlayer: 
  *  - A grain body spends it on its boundaries from the contact side and may
  *    shed a grain (the ordinary chip path); anything else loses health.
  */
+const MAX_SHOCKED = 32;
+/** Stamp the burning / shocked read on a hull that just took energy damage,
+ *  and give a shock to the PLAYER a jolt it can feel (a flash, a small shake,
+ *  a buzz).  Burning is felt through its embers and the HUD, not a shake —
+ *  a DoT that shook the camera five times a second would be noise. */
+function noteEnergyHit(g: GameEngine, e: GameEntity, domain: EnergyDomain): void {
+    const C = ENERGY_CONSTANTS;
+    if (domain === 'thermal') {
+        e.burnIndicator = C.BURN_INDICATOR_SEC;
+        // The player FEELS a burn as a soft buzz on the DoT's own cadence.
+        if (e.type === EntityType.PLAYER) g.handleRumble(2);
+    } else if (domain === 'electric') {
+        const fresh = !((e.shockTimer ?? 0) > 0);
+        e.shockTimer = C.SHOCK_INDICATOR_SEC;
+        const list = g.energy.shocked;
+        if (fresh && list.length < MAX_SHOCKED && list.indexOf(e) < 0) list.push(e);
+        if (e.type === EntityType.PLAYER) {
+            e.hitFlash = Math.max(e.hitFlash ?? 0, 0.15);
+            if (fresh) g.handleScreenShake(4, { rumble: 'impact' });
+        }
+    }
+}
+
 export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vector2 | null,
                            domain: EnergyDomain, byPlayer: boolean, text = true, flash = 0.12,
                            at: Vector2 | null = null): void {
@@ -244,6 +299,10 @@ export function damageBody(g: GameEngine, e: GameEntity, dmg: number, from: Vect
         }
         return;
     }
+    // A hull that takes heat or electricity SHOWS it (user call): it reads as
+    // burning / shocked for a moment after — embers and crackle on the ship,
+    // and for the player the HUD's flame and bolt.
+    noteEnergyHit(g, e, domain);
     // THE PLAYER takes energy damage too (heat on contact, radiant heat):
     // shield first, then hull, the same order every other player-damage path
     // uses.
@@ -365,42 +424,56 @@ function heatArea(e: GameEntity): number {
     return Math.PI * r * r;
 }
 
-/** A BREAK CONSERVES HEAT (user call).  When pieces come off a hot body the
- *  heat ENERGY it held is DIVIDED between the pieces and whatever of the body
- *  remains, by area — it is not copied onto every piece.  In this model heat
- *  behaves as an amount per body (a deposit heats any body by the same
- *  step, whatever its size), so copying the parent's heat onto N fragments
- *  multiplied the energy by N — and on plastic, whose heat is a strong DoT,
- *  every hot fragment then burned to death within a tick, shattered, and
- *  handed its full heat on again: the incendiary chain reaction that filled
- *  the screen with nebula dust and salvage (user report).
+/** How much MATERIAL a body is, relative to one hex tile — what its heat
+ *  capacity and its burn scale with.  Floored so a speck still burns a
+ *  little, and capped at a tile so large merged boulders burn as tiles do. */
+export function heatAmountOf(e: GameEntity): number {
+    return Math.min(1, Math.max(0.05, heatArea(e) / HEX_AREA));
+}
+
+/** A BREAK CONSERVES HEAT (user call), AND A PIECE IS AS HOT AS WHAT IT CAME
+ *  OFF (user report: metal fragments came off a glowing tile cold).  Heat is
+ *  a TEMPERATURE, and what a body can hold of it scales with how much
+ *  material it has (`heatAmountOf`), so a piece of a quarter of the area
+ *  holds a quarter of the energy AT THE SAME TEMPERATURE — every piece and
+ *  the remainder keep the parent's heat and the energy is conserved exactly.
+ *  Dividing the heat itself by area (the previous rule) conserved the energy
+ *  too, but only by making each piece colder the more pieces there were: a
+ *  metal tile breaks into ~22 grains against rock's ~8, so its fragments
+ *  arrived at a twentieth of the tile's heat and read as cold.
+ *
+ *  What stops this re-igniting the plastic CHAIN REACTION is that burning is
+ *  also per unit of material (`tickHeat` scales the thermal DoT by
+ *  `heatAmountOf`), so a small hot fragment burns proportionally slowly and
+ *  cools before it breaks — the reaction came from every tiny piece burning
+ *  as fast as the whole tile.  A burn — a heat SOURCE — is still DIVIDED by
+ *  area.  The dust a chip throws is NOT a piece of the body (it is new
+ *  material sized off the chip) and stays cold.  Capped under
+ *  the material's thermal-failure heat: a pane that failed from heat must not
+ *  hand a piece enough to fail again.
  *
  *  `list[from..to)` are the new pieces; `keepArea` is the area the PARENT
- *  keeps (0 when it died).  Energy is carried in damage units (heat ×
- *  the material's capacity), so a piece of a different material (a chip's
- *  nebula dust) takes its share at its OWN capacity.  A burn — a heat
- *  SOURCE — is divided the same way.  A share too small to register leaves
- *  the piece cold rather than spending a slot in the bounded set on it.
- *  Capped under the material's thermal-failure heat: a pane that failed from
- *  heat must not hand a piece enough to fail again. */
+ *  keeps (0 when it died). */
 export function shareHeat(g: GameEngine, parent: GameEntity, list: GameEntity[], from: number, to: number,
                           keepArea: number): void {
     const h = parent.heat ?? 0;
     const burn = (parent.burnTimer ?? 0) > 0 ? (parent.burnRate ?? 0) : 0;
     if (!(h > 0) && !(burn > 0)) return;
-    let total = keepArea > 0 ? keepArea : 0;
-    for (let i = from; i < to; i++) if (list[i].active) total += heatArea(list[i]);
-    if (!(total > 0)) return;
+    // Only pieces OF the body share its heat: the dust a chip throws is new
+    // material (a puff sized off the chip), not a piece of the parent.
     const pMat = materialOf(parent);
-    const energy = h * heatCapacityOf(pMat);
+    const pCap = heatCapacityOf(pMat);
+    let total = keepArea > 0 ? keepArea : 0;
+    for (let i = from; i < to; i++) if (list[i].active && materialOf(list[i]) === pMat) total += heatArea(list[i]);
+    if (!(total > 0)) return;
     for (let i = from; i < to; i++) {
         const child = list[i];
-        if (!child.active) continue;
+        if (!child.active || materialOf(child) !== pMat) continue;
         const share = heatArea(child) / total;
         const mat = materialOf(child);
         const r = responseOf(mat);
         const cap = heatCapacityOf(mat);
-        let heat = cap > 0 ? clampHeat(energy * share / cap, maxHeatOf(mat)) : 0;
+        let heat = cap > 0 ? clampHeat(h * pCap / cap, maxHeatOf(mat)) : 0;
         if (r.thermalFailAt > 0) heat = Math.min(heat, r.thermalFailAt * 0.9);
         const rate = burn * share;
         const burns = rate >= ENERGY_CONSTANTS.MIN_SHARED_BURN;
@@ -413,15 +486,11 @@ export function shareHeat(g: GameEngine, parent: GameEntity, list: GameEntity[],
         if (parent.heatByPlayer) child.heatByPlayer = true;
         if (burns) { child.burnTimer = parent.burnTimer; child.burnRate = rate; }
     }
-    // What the body keeps is its own share of both.
-    if (keepArea > 0 && parent.active) {
-        const keep = keepArea / total;
-        parent.heat = clampHeat(h * keep, maxHeatOf(pMat));
-        if (burn > 0) {
-            const rate = burn * keep;
-            if (rate >= ENERGY_CONSTANTS.MIN_SHARED_BURN) parent.burnRate = rate;
-            else { parent.burnTimer = undefined; parent.burnRate = undefined; }
-        }
+    // What the body keeps: its own temperature, and its share of any burn.
+    if (keepArea > 0 && parent.active && burn > 0) {
+        const rate = burn * (keepArea / total);
+        if (rate >= ENERGY_CONSTANTS.MIN_SHARED_BURN) parent.burnRate = rate;
+        else { parent.burnTimer = undefined; parent.burnRate = undefined; }
     }
 }
 
@@ -502,7 +571,11 @@ function tickHeat(g: GameEngine, dt: number, doEffects: boolean, doConduct: bool
                 // A burn is not a HIT (flash 0): the damage path whitens a body
                 // for a blow, and a DoT on this cadence strobed it at 5 Hz —
                 // the rock "flash".  The heat colour is the feedback.
-                damageBody(g, e, r.thermalDps * heat * effDt, null, 'thermal', e.heatByPlayer === true, false, 0);
+                // Burning is per unit of MATERIAL: a small fragment burns as slowly
+                // as it is small (see `shareHeat`), a tile at the full rate.
+                // Hulls are not terrain and burn at the full rate.
+                const amount = e.type === EntityType.STRUCTURE ? heatAmountOf(e) : 1;
+                damageBody(g, e, r.thermalDps * heat * amount * effDt, null, 'thermal', e.heatByPlayer === true, false, 0);
             }
             if (e.active) applyHeatThresholds(g, e);
         }
@@ -1456,7 +1529,7 @@ interface Pulse {
     travelled: number; range: number; speed: number; length: number;
     dmg: number; push: number; color: string; width: number; alive: boolean;
 }
-interface Burst { config: WeaponConfig; left: number; acc: number; angle: number }
+interface Burst { config: WeaponConfig; left: number; acc: number; angle: number; lastOff?: number }
 const _pulseDep: LightDeposit = { dmg: 0, heat: 0, push: 0, thermal: false, breaksCloud: true, byPlayer: true };
 const _pulseOut = makeLightOut();
 
@@ -1489,14 +1562,21 @@ function tickPulses(g: GameEngine, dt: number): void {
             while (bu && bu.left > 0 && bu.acc <= 0) {
                 const c = bu.config;
                 // Every pulse flies PARALLEL to the aim (no angle between
-                // them) but leaves from its own point across a lane, swept
-                // edge to edge in firing order (user call).
+                // them) but leaves from a RANDOM point across a narrow lane
+                // (user call: variety rather than a sweep in series), rolled
+                // clear of the last one so two in a row never overlap.
                 const ux = Math.cos(bu.angle), uy = Math.sin(bu.angle);
                 const muzzle = Math.max(pl.size.x, pl.size.y) * 0.6;
-                const count = Math.max(1, c.pulseCount ?? 1);
-                const idx = count - bu.left;
                 const lane = c.pulseSpread ?? 0;
-                const off = count > 1 ? (-1 + (2 * idx) / (count - 1)) * lane : 0;
+                let off = 0;
+                if (lane > 0) {
+                    off = (Math.random() * 2 - 1) * lane;
+                    if (bu.lastOff !== undefined && Math.abs(off - bu.lastOff) < lane * 0.5) {
+                        off = bu.lastOff > 0 ? off - lane : off + lane;
+                        off = Math.max(-lane, Math.min(lane, off));
+                    }
+                    bu.lastOff = off;
+                }
                 spawnPulse(g, pl.position.x + ux * muzzle - uy * off, pl.position.y + uy * muzzle + ux * off, ux, uy, 1, 0, {
                     range: c.beamRange ?? 360, speed: c.pulseSpeed ?? 1500, length: c.pulseLength ?? 24,
                     dmg: c.damage, push: c.push ?? 0, color: c.color, width: c.beamWidth ?? 3 });
@@ -1539,6 +1619,40 @@ function tickPulses(g: GameEngine, dt: number): void {
 // ── The per-step tick ────────────────────────────────────────────────────────
 
 /** Called once per sim step from `updateGameLogic`, after physics. */
+/** The burning / shocked reads: count them down, prune the crackle list, and
+ *  let a burning player shed embers. */
+function tickHazards(g: GameEngine, dt: number): void {
+    const s = g.energy;
+    const p = g.player;
+    if ((p.burnIndicator ?? 0) > 0) {
+        p.burnIndicator! -= dt;
+        if (p.burnIndicator! <= 0) p.burnIndicator = undefined;
+        else if (p.active && !p.isExploding) {
+            s.emberAcc += dt * ENERGY_CONSTANTS.EMBER_RATE;
+            while (s.emberAcc >= 1) {
+                s.emberAcc -= 1;
+                const r = Math.max(p.size.x, p.size.y) * 0.45;
+                g.spawnParticles(p.position, 1,
+                    Math.random() < 0.5 ? '#ffb347' : '#ff6a2b', {
+                        speedMin: 0.4, speedMax: 1.6, sizeMin: 1.2, sizeMax: 2.6,
+                        lifetimeMin: 0.25, lifetimeMax: 0.55, positionJitter: r,
+                        baseVelocity: { x: p.velocity.x * 0.6, y: p.velocity.y * 0.6 },
+                    });
+            }
+        }
+    }
+    if (s.shocked.length > 0) {
+        let n = 0;
+        for (let i = 0; i < s.shocked.length; i++) {
+            const e = s.shocked[i];
+            e.shockTimer = (e.shockTimer ?? 0) - dt;
+            if (!e.active || e.isExploding || e.shockTimer <= 0) { e.shockTimer = undefined; continue; }
+            s.shocked[n++] = e;
+        }
+        if (s.shocked.length !== n) s.shocked.length = n;
+    }
+}
+
 export function tickEnergy(g: GameEngine, dt: number): void {
     const s = g.energy;
     // Queued payloads from this step's collisions.
@@ -1580,5 +1694,6 @@ export function tickEnergy(g: GameEngine, dt: number): void {
     }
     tickBeam(g, dt);
     if (s.burst || s.pulses.length > 0) tickPulses(g, dt);
+    tickHazards(g, dt);
     if (s.ring) tickRing(g, dt);
 }

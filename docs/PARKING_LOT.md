@@ -5,6 +5,18 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Holding a beam on TOUCH — fold into a hold-to-shoot design (parked 2026-09-29)
+
+The beam is now a held blade (PR #104): it extends from the muzzle, stays out
+while a fire control is held, follows the aim, and retracts on release.
+`InputSystem.isFireHeld` counts the pad's fire point, the onscreen fire
+button, Space/Enter, and a mouse press only in schemes where the pointer does
+not fly the ship.  In the default TOUCH scheme a held finger is STEERING, so a
+touch player can only tap — the beam lights for its own `beamDuration` and
+retracts.  User call: park it, because the user may move the whole game to a
+HOLD-TO-SHOOT design, and holding a beam on touch belongs to that pass rather
+than a one-off gesture (second finger, etc.) now.
+
 ## Controller schemes — refinement pass (parked 2026-08-15)
 
 > **Now THREE pad schemes, not two** (2026-08-19): `gamepad-left` joined

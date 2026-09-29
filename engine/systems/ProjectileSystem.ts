@@ -318,6 +318,7 @@ export class ProjectileSystem {
         pooled.energyBlastHeat = config.blastHeat;
         pooled.speedRetain = config.speedRetain;
         pooled.homingTarget = undefined;
+        pooled.dotLastX = undefined; pooled.dotLastY = undefined;
         pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
         // Rival-shot flags (Stage 7) are stamped by GameEngine AFTER spawn, so a
         // recycled rival projectile MUST clear them or a reused player/enemy shot

@@ -33,6 +33,8 @@ export function renderTrails(
             if (r.trailShape === TrailShape.NONE) return;
             drawPlayerTrail(r, ctx, entity.trail, camera);
         } else if ((entity.type === EntityType.PROJECTILE || entity.isSnitch) && entity.trail.length >= 2) {
+            // A player SEEKER draws a dot trail instead (render/energyFx.ts).
+            if (entity.homing && entity.ownerType === EntityType.PLAYER) return;
             // Snitch comet tail reuses the projectile strip — entity.color
             // is the snitch's gold core colour.
             drawTrailStrip(r, ctx, entity.trail, 'projectile', camera, entity.color);

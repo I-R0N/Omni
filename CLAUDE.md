@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  503 tests.  All run at
+                          whatever happened next).  506 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -4085,26 +4085,52 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
     BURST OF PULSES that FLY (user call — like the old bolt beams): six short
-    beams 0.05 s apart at 1500 u/s, flying PARALLEL from their own points
-    across a lane (`pulseSpread`, ±20 units — not a fan), each traced through the SAME optics over
+    beams 0.05 s apart at 1500 u/s, flying PARALLEL from RANDOM points
+    across a narrow lane (`pulseSpread`, ±3 units — not a fan, and not a
+    sweep in series; each is rolled clear of the last), each traced through the SAME optics over
     the distance it covers each step; a split's extra branches become extra
     pulses out of a bounded pool (48), and a pulse carries on as its
     STRONGEST branch.  The thermal beam is the only other beam that fires
     continuously like the base beam.
-  - **A BREAK CONSERVES HEAT** (user call; `shareHeat`).  Heat in this model
-    is an AMOUNT per body (a deposit heats any body by the same step, whatever
-    its size), so when pieces come off a hot body its heat ENERGY is DIVIDED
-    between the pieces and whatever remains, by area — at the two places
-    children are born, the death shatter (the appended-slice seam
-    `blastImpulse` uses) and the mid-life grain detach.  It USED to be copied
-    onto every piece, which multiplied the energy by the piece count, and on
-    plastic (heat is a 60 dps DoT) every hot piece burned, broke and passed
-    its heat on again: an incendiary shell on plastic set off a chain reaction
-    of ~1000 plastic-shard deaths and as many nebula puffs in six seconds
-    (measured; ~47 after).  A burn — a heat SOURCE — divides the same way, a
-    share too small to register leaves the piece cold, and it stays capped
-    under `thermalFailAt` so a pane that failed from heat cannot hand a piece
-    enough to fail again.
+  - **A BREAK CONSERVES HEAT, AND A PIECE IS AS HOT AS WHAT IT CAME OFF**
+    (user calls; `shareHeat`).  Heat is a TEMPERATURE, and what a body can
+    hold of it scales with how much material it is (`heatAmountOf`, area
+    relative to a hex tile), so at the two places children are born — the
+    death shatter (the appended-slice seam `blastImpulse` uses) and the
+    mid-life grain detach — every piece AND the remainder keep the parent's
+    heat, and Σ heat × capacity × area is conserved.  Two earlier rules are
+    the history: COPYING heat onto pieces whose capacity did not scale with
+    size multiplied the energy (an incendiary shell on plastic, whose heat is
+    a 60 dps DoT, set off ~1000 plastic-shard deaths in six seconds), and
+    DIVIDING the heat itself by area fixed that but made each piece colder
+    the more pieces there were — a metal tile breaks into ~22 grains, so its
+    fragments came off at a twentieth of its heat and read as cold (user
+    report).  What now keeps the chain reaction dead is that BURNING is per
+    unit of material too: the thermal DoT on a STRUCTURE scales by
+    `heatAmountOf` (capped at a tile), so a small hot fragment burns slowly
+    and cools before it breaks.  A burn — a heat SOURCE — is still divided by
+    area; the dust a chip throws is new material, not a piece, and stays
+    cold; and a piece stays capped under `thermalFailAt` so a pane that
+    failed from heat cannot hand a piece enough to fail again.
+  - **ENERGY DAMAGE SHOWS ON WHAT IT HITS, AND ON THE HUD** (user call).
+    `damageBody` stamps a hull (player or enemy) that takes THERMAL damage as
+    burning (`burnIndicator`, `BURN_INDICATOR_SEC` — longer than the 0.2 s
+    DoT cadence, so a steady burn reads as continuous) and ELECTRIC damage as
+    shocked (`shockTimer`, `SHOCK_INDICATOR_SEC`, on the bounded
+    `EnergyState.shocked` list).  A shocked hull CRACKLES (`renderShock`:
+    three hashed jagged arcs hugging it, fading with the timer); a burning
+    player SHEDS EMBERS (`EMBER_RATE`) on top of its heat glow.  The player
+    also FEELS them: a shock is a hit flash, a small shake and a buzz; a burn
+    a soft buzz on the DoT cadence (never a shake — five a second would be
+    noise).  `EngineStats.hazards` (every frame, like `vitals`) drives the
+    HUD's 🔥 and ⚡ chips (`hud-burn` / `hud-shock`), icon-only because the
+    readout row is width-bound at 390px.
+  - **A SEEKER DRAWS A DOT TRAIL** (user call), not the ribbon every other
+    round draws: a filled dot every `SeekerDots.SPACING` units, fading
+    linearly over `LIFE` like the player trail's dots.  The dots live in a
+    fixed ring on `EnergyState` rather than on the projectile, so they
+    OUTLIVE the round — a hit does not snatch its trail away — and emitting
+    never allocates.
   - **LIGHT CARRIES HEAT** (user call).  A hot body is a light source: its
     radiant power follows T⁴ (`heatRadiance`, the curve its glow already
     uses) × emissivity (`look.heatEmit`), and a HULL near it — the player's

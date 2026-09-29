@@ -394,8 +394,8 @@ export interface WeaponConfig {
   pulseSpeed?: number;
   pulseLength?: number;
   /** Half-width of the lane the pulses leave across: each one is PARALLEL to
-   *  the aim but starts at its own sideways offset, sweeping the lane from one
-   *  edge to the other in firing order.  0 = every pulse from the muzzle. */
+   *  the aim but starts at a random sideways offset within ±this.  0 = every
+   *  pulse from the muzzle. */
   pulseSpread?: number;
   /** A CURVING round (the flamer): each pellet turns at its own rate, up to
    *  `curve` rad/s either way, with a `wobble` (rad/s amplitude) weaving on top
@@ -581,6 +581,14 @@ export interface GameEntity {
    *  not blasted a second time by the stop rule above.  MUST be cleared when
    *  a pooled projectile is recycled, or that round never explodes again. */
   detonated?: boolean;
+  /** ENERGY DAMAGE FEEDBACK (user call): seconds left of the "burning" and
+   *  "shocked" read after a hull last took thermal / electric damage — the
+   *  embers and crackle on the ship, and the player's HUD flame and bolt. */
+  burnIndicator?: number;
+  shockTimer?: number;
+  /** Where a player seeker last dropped a trail dot (per life). */
+  dotLastX?: number;
+  dotLastY?: number;
   /** Copied from the weapon at spawn so the on-hit path can ask what trips
    *  this shell without reaching back to its config. */
   detonateOn?: 'impact' | 'enemy' | 'fuse';
@@ -1833,6 +1841,10 @@ export interface EngineStats {
     health: number; maxHealth: number;
     shield: number; maxShield: number;
   };
+  /** Energy damage being taken RIGHT NOW (every frame, like `vitals`): 0..1
+   *  of the indicator window left, 0 = not burning / not shocked.  Drives the
+   *  HUD's flame and lightning-bolt chips. */
+  hazards?: { burn: number; shock: number };
   /** SCANNER, every frame (like `vitals`, unlike `playerStats`): the in-game
    *  HUD's scan button needs all three during play.  `mk` is 0 with no
    *  scanner aboard, which is what hides the button entirely — a control for

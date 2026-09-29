@@ -41,7 +41,18 @@ export interface EnergyFxView {
     simClock: number;
     /** Enemies a player seeker has LOCKED (distinct, ≤ 16). */
     locks: GameEntity[];
+    /** The seekers' trail dots (a fixed ring). */
+    dots: SeekerDotsView | null;
+    /** Hulls crackling from a recent shock (each carries `shockTimer`). */
+    shocked: readonly GameEntity[];
 }
+export interface SeekerDotsView {
+    readonly x: Float32Array; readonly y: Float32Array; readonly born: Float64Array;
+    readonly color: readonly string[];
+}
+/** Kept in step with `SeekerDots` in energyEffects (the renderer does not
+ *  import the sim module). */
+const DOT_LIFE = 1.0, DOT_R = 1.8, DOT_PEAK = 0.75;
 
 const CULL = 1400;
 
@@ -49,8 +60,10 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
     if (!view) return;
     const camX = camera.position.x, camY = camera.position.y;
     renderLocks(ctx, view.locks, camX, camY);
-    const { heated, energized, beam, pulses, ring } = view;
-    if (heated.length === 0 && energized.length === 0 && !beam && pulses.length === 0 && !ring) return;
+    if (view.dots) renderDots(ctx, view.dots, view.simClock, camX, camY);
+    const { heated, energized, beam, pulses, ring, shocked } = view;
+    if (heated.length === 0 && energized.length === 0 && !beam && pulses.length === 0 && !ring
+        && shocked.length === 0) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
@@ -59,6 +72,7 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
 
     if (energized.length > 0) renderSparks(ctx, energized, view.simClock, camX, camY);
     if (ring) renderRing(ctx, ring, camX, camY);
+    if (shocked.length > 0) renderShock(ctx, shocked, camX, camY);
 
     // Electric beams draw as arcs (lightning particles); a light beam draws
     // its whole traced path — every reflection, refraction and split — as
@@ -154,6 +168,49 @@ function renderRing(ctx: CanvasRenderingContext2D,
             if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
         }
         ctx.stroke();
+    }
+}
+
+// ── SHOCKED HULLS ──────────────────────────────────────────────────────────
+//
+// A hull that just took ELECTRIC damage crackles (user call: energy damage
+// shows on what it hits): three short jagged arcs hugging the hull, re-rolled
+// every SHOCK_SLOT seconds from a hash of the body and the time slot, fading
+// with the shock timer.  No per-body state beyond the timer.
+
+const SHOCK_SLOT = 0.05;
+const SHOCK_LIFE = 0.45;          // matches ENERGY_CONSTANTS.SHOCK_INDICATOR_SEC
+const SHOCK_ARCS = 3;
+const SHOCK_PTS = 6;
+const SHOCK_COLOR = '#7dd3fc';
+
+function renderShock(ctx: CanvasRenderingContext2D, list: readonly GameEntity[], camX: number, camY: number): void {
+    const slot = Math.floor(performance.now() / 1000 / SHOCK_SLOT);
+    ctx.lineJoin = 'miter';
+    for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        const t = Math.max(0, Math.min(1, (e.shockTimer ?? 0) / SHOCK_LIFE));
+        if (!(t > 0) || !e.active) continue;
+        const x = shiftX(camX, e.position.x), y = shiftY(camY, e.position.y);
+        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
+        const R = Math.max(e.size.x, e.size.y) * 0.55 + 3;
+        for (let a = 0; a < SHOCK_ARCS; a++) {
+            const a0 = hash01(e.id, slot, a * 17) * Math.PI * 2;
+            const span = 0.7 + 0.6 * hash01(e.id, slot, a * 17 + 1);
+            for (let layer = 0; layer < 2; layer++) {
+                ctx.globalAlpha = (layer === 0 ? 0.35 : 0.95) * t;
+                ctx.strokeStyle = layer === 0 ? SHOCK_COLOR : '#f0fbff';
+                ctx.lineWidth = layer === 0 ? 4 : 1.2;
+                ctx.beginPath();
+                for (let k = 0; k <= SHOCK_PTS; k++) {
+                    const ang = a0 + span * (k / SHOCK_PTS);
+                    const rr = R * (0.85 + 0.35 * hash01(e.id, slot, a * 17 + 2 + k));
+                    const px = x + Math.cos(ang) * rr, py = y + Math.sin(ang) * rr;
+                    if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+        }
     }
 }
 
@@ -255,6 +312,24 @@ const LOCK_FADE_OUT = 0.25;
 const _lockEnt: GameEntity[] = [];
 const _lockA: number[] = [];
 let _lockT = 0;
+
+/** SEEKER DOT TRAILS: filled dots that fade linearly over their life, like
+ *  the player trail's dots — no growth, only alpha. */
+function renderDots(ctx: CanvasRenderingContext2D, d: SeekerDotsView, now: number, camX: number, camY: number): void {
+    const n = d.x.length;
+    let any = false;
+    for (let i = 0; i < n; i++) {
+        const age = now - d.born[i];
+        if (age < 0 || age >= DOT_LIFE) continue;
+        const x = shiftX(camX, d.x[i]), y = shiftY(camY, d.y[i]);
+        if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
+        if (!any) { ctx.save(); any = true; }
+        ctx.globalAlpha = DOT_PEAK * (1 - age / DOT_LIFE);
+        ctx.fillStyle = d.color[i];
+        ctx.beginPath(); ctx.arc(x, y, DOT_R, 0, Math.PI * 2); ctx.fill();
+    }
+    if (any) ctx.restore();
+}
 
 function renderLocks(ctx: CanvasRenderingContext2D, locks: readonly GameEntity[], camX: number, camY: number): void {
     if (locks.length === 0 && _lockEnt.length === 0) { _lockT = 0; return; }

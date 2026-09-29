@@ -1133,6 +1133,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </span>
                 </div>
               );})}
+              {/* ENERGY DAMAGE (user call): a FLAME while the ship is burning
+                  and a BOLT while it is being shocked — lit for as long as the
+                  damage is landing, fading out after the last of it. */}
+              {(stats.hazards?.burn ?? 0) > 0 && (
+                <div
+                  data-testid="hud-burn"
+                  className={`pointer-events-none ${HUD_CHIP} border-orange-500/60 animate-pulse`}
+                  style={{ opacity: Math.max(0.45, stats.hazards!.burn) }}
+                >
+                  <span aria-label="burning" className={`${T_ROW} leading-none`}>🔥</span>
+                </div>
+              )}
+              {(stats.hazards?.shock ?? 0) > 0 && (
+                <div
+                  data-testid="hud-shock"
+                  className={`pointer-events-none ${HUD_CHIP} border-sky-400/60 animate-pulse`}
+                  style={{ opacity: Math.max(0.45, stats.hazards!.shock) }}
+                >
+                  <span aria-label="shocked" className={`${T_ROW} leading-none`}>⚡</span>
+                </div>
+              )}
               {stats.wavesEnabled !== false && (
               <div
                 onClick={isGrace ? onSkipWave : undefined}
