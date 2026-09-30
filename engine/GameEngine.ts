@@ -379,7 +379,7 @@ export class GameEngine {
   /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
   energy: EnergyState = new EnergyState();
   /** The render view of it — one object, refilled per frame (no allocation). */
-  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], ring: null, simClock: 0, locks: [], dots: null, shocked: [] };
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], ring: null, simClock: 0, locks: [], dots: null, trail: null, shocked: [] };
   private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false, segs: [], nSeg: 0 };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
@@ -6438,6 +6438,7 @@ export class GameEngine {
       v.energized = this.energy.energized;
       v.simClock = this.simClock;
       v.dots = this.energy.dots;
+      v.trail = this.energy.pulseTrail;
       v.shocked = this.energy.shocked;
       // SEEKER LOCKS: the distinct enemies the player's homing rounds hold
       // (refill idiom — no per-frame allocation; a handful of rounds at most).

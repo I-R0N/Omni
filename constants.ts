@@ -6213,15 +6213,16 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // splitting and passing through by the material optics.  Six pulses of
     // 4.5 per 1.0 s ≈ 27/s — the old Ram Beam's 25.5 — with a smaller shove,
     // since a burst lands it six times.
-    // A near-CONTINUOUS LINE of short beams (user call): one 13-unit pulse
-    // per sim step at 1500 u/s, so each is spaced 12.5 behind the last and
-    // the line has no visible gap.  A pull fires at least `pulseCount`
-    // (0.2 s); holding keeps the stream flowing.  At 120 pulses a second
-    // each carries 0.225, so a held stream lands the 27 dmg/s six 4.5-bite
-    // pulses a second always did.
-    kinetic: { name: 'Pulse Beam', damage: 0.225, cooldown: 1.0, beamRange: 420,
-      beamWidth: 3, push: 0.125, color: ENERGY_COLORS.kinetic,
-      pulseCount: 24, pulseInterval: 1 / 120, pulseSpeed: 1500, pulseLength: 13, pulseSpread: 3 },
+    // A STREAM of short beams with a line TRAIL behind each (user call).
+    // 40 pulses a second (one every third sim step), 13 units long at
+    // 1500 u/s, so they fly ~37 apart and the trail joins them into a line.
+    // It was 120 a second, which read as far too many beams once glass split
+    // them.  A pull fires at least `pulseCount` (0.2 s); holding keeps the
+    // stream flowing.  Each carries 0.675, so a held stream still lands the
+    // same 27 dmg/s.
+    kinetic: { name: 'Pulse Beam', damage: 0.675, cooldown: 1.0, beamRange: 420,
+      beamWidth: 3, push: 0.375, color: ENERGY_COLORS.kinetic,
+      pulseCount: 8, pulseInterval: 1 / 40, pulseSpeed: 1500, pulseLength: 13, pulseSpread: 3 },
     // An ARC from the ship to the nearest conductor in range, then a bounded
     // chain.  Nothing conductive in range → a fizzle and nothing else.
     electric: { name: 'Arc Beam', damage: 0, cooldown: 0.8, beamDuration: 0.4, beamRange: 320,

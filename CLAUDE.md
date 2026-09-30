@@ -4084,18 +4084,24 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     raycast's circle is only the broadphase and a polygon body is hit where
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
-    NEAR-CONTINUOUS STREAM OF SHORT BEAMS that FLY (user call): one 13-unit
-    pulse per sim step at 1500 u/s, so each trails the last by 12.5 and the
-    line shows no gap; a pull fires at least `pulseCount` (0.2 s) and HOLDING
+    STREAM OF SHORT BEAMS that FLY, JOINED BY A LINE TRAIL (user calls): one
+    13-unit pulse every third sim step (40 a second) at 1500 u/s, so they fly
+    ~37 apart; a pull fires at least `pulseCount` (8, 0.2 s) and HOLDING
     keeps the stream flowing and following the aim, like the light blade.
-    Each pulse carries 0.225 of KINETIC (mechanical) damage and a matching
-    sliver of push, so a held stream lands the 27 dmg/s the old six-pulse
-    burst did.  They fly PARALLEL from RANDOM points
+    It was 120 a second with unlimited splitting, which read as far too many
+    beams once glass split them.  Each pulse carries 0.675 of KINETIC
+    (mechanical) damage and a matching push, so a held stream still lands 27
+    dmg/s.  Every pulse leaves a thin fading LINE TRAIL in the beam's colour
+    (`PulseTrail`, a fixed ring of the segments each pulse actually traced —
+    reflections and passes through glass included — living 0.35 s; drawn in
+    `renderPulseTrail`, batched into eight alpha steps), which is what joins
+    the stream into one line.  They fly PARALLEL from RANDOM points
     across a narrow lane (`pulseSpread`, ±3 units — not a fan, and not a
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over
-    the distance it covers each step; a split's extra branches become extra
-    pulses out of a bounded pool (128), and a pulse carries on as its
-    STRONGEST branch.  A PULSE THAT RUNS OUT OF A STEP'S LENGTH IS A LEAF,
+    the distance it covers each step.  A pulse sheds AT MOST ONE branch in its
+    flight — the strongest of the others, if it carries ≥ `PULSE_SPLIT_MIN_F`
+    (0.1) — and a branch never splits again, out of a bounded pool (48); a
+    pulse carries on as its STRONGEST branch.  A PULSE THAT RUNS OUT OF A STEP'S LENGTH IS A LEAF,
     WHEREVER IT IS (user report: pulses stopped dead in glass) — a pulse
     traces only ~12.5 units a step against a ~15-unit grain, so it is almost
     always mid-pane at the end of one, and the trace used to drop any ray that

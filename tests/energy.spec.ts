@@ -1655,8 +1655,8 @@ test.describe('the weapons, fired into the world', () => {
       }
       return seen;
     });
-    // A tap: the guaranteed 24 pulses, one a step, each 13 long.
-    expect(r.length, 'the whole burst left').toBe(24);
+    // A tap: the guaranteed 8 pulses, one every third step, each 13 long.
+    expect(r.length, 'the whole burst left').toBe(8);
     for (const q of r) expect(q.length).toBeCloseTo(13, 3);
     const ys = r.map(q => q.y);
     // ±3 either side of the aim line (user call), not a sweep in firing
@@ -1687,7 +1687,7 @@ test.describe('the weapons, fired into the world', () => {
       const W = e.currentMap.width;
       const rel = (x: number) => { let d = x - t.position.x; return d - Math.round(d / W) * W; };
       const half = Math.max(t.size.x, t.size.y) / 2;
-      let beyond = 0, inside = 0, most = 0;
+      let beyond = 0, inside = 0, most = 0, split = 0, deep = 0;
       for (let i = 0; i < 90; i++) {
         e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
         const a = e.energy.pulses.filter((q: any) => q.alive);
@@ -1695,21 +1695,26 @@ test.describe('the weapons, fired into the world', () => {
         for (const q of a) {
           if (q.inside === t) inside++;
           if (rel(q.x) > half + 5) beyond++;
+          if (q.gen === 1) split++;
+          if (q.gen > 1) deep++;
         }
       }
-      return { beyond, inside, most, lit: (t.fractureEdgeFill ?? []).some((f: number) => f > 0) };
+      return { beyond, inside, most, split, deep, lit: (t.fractureEdgeFill ?? []).some((f: number) => f > 0) };
     });
     expect(r.inside, 'pulses carried on INSIDE the pane between steps').toBeGreaterThan(0);
     expect(r.beyond, 'and came out the far side').toBeGreaterThan(0);
-    // 24 pulses from the tap; more than that alive at once means some split.
-    expect(r.most, 'the pane split pulses off').toBeGreaterThan(24);
+    expect(r.split, 'the pane split pulses off').toBeGreaterThan(0);
+    // User call: far too many beams came out of glass.  A split branch never
+    // splits again, and the pool never holds more than a handful at once.
+    expect(r.deep, 'a split branch never splits again').toBe(0);
+    expect(r.most, 'a modest number of beams in flight').toBeLessThanOrEqual(16);
     expect(r.lit, 'and left a little on the boundaries they crossed').toBe(true);
     watch.assertClean();
   });
 
-  test('LIGHT: held, the kinetic beam is a near-continuous line of short beams that follows the aim', async ({ page }) => {
-    // User call: not a fixed burst but a line of short beams with basically
-    // no gap between them, flowing for as long as the trigger is held.
+  test('LIGHT: held, the kinetic beam is a stream of short beams joined by a line trail that follows the aim', async ({ page }) => {
+    // User calls: a line of short beams flowing for as long as the trigger is
+    // held; then FEWER of them, with a line trail in the beam's colour.
     const watch = await boot(page);
     await onMap(page, 'METAL_FIELD');
     const r = await engine(page, e => {
@@ -1724,32 +1729,64 @@ test.describe('the weapons, fired into the world', () => {
       I.isFireHeld = () => held;
       const step = () => { e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120); };
       e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: p.position.x + 300, y: p.position.y }, undefined, false);
-      // Well past the 24-pulse tap: still flowing.
+      // Well past the 8-pulse tap: still flowing.
       for (let i = 0; i < 60; i++) step();
       const flowing = e.energy.burst !== null;
-      // The line: gaps between neighbouring pulse heads along the aim.
-      const xs = e.energy.pulses.filter((q: any) => q.alive).map((q: any) => q.x - p.position.x).sort((a: number, b: number) => a - b);
+      // The pulses: heads along the aim, and the gaps between them.
+      const W = e.currentMap.width;
+      const rel = (x: number) => { let d = x - p.position.x; return d - Math.round(d / W) * W; };
+      const xs = e.energy.pulses.filter((q: any) => q.alive).map((q: any) => rel(q.x)).sort((a: number, b: number) => a - b);
       const gaps: number[] = [];
       for (let k = 1; k < xs.length; k++) gaps.push(xs[k] - xs[k - 1]);
       const len = e.energy.pulses.find((q: any) => q.alive)?.length ?? 0;
+      // The trail: every live segment, as an interval along the aim.  Their
+      // union from the muzzle to the lead pulse must have no hole in it.
+      const T = e.energy.pulseTrail, now = e.simClock;
+      const iv: [number, number][] = [];
+      let colours = new Set<string>();
+      for (let i = 0; i < T.born.length; i++) {
+        if (now - T.born[i] >= 0.35 || now < T.born[i]) continue;
+        const a = rel(T.x0[i]), b = rel(T.x1[i]);
+        iv.push([Math.min(a, b), Math.max(a, b)]);
+        colours.add(T.color[i]);
+      }
+      iv.sort((a, b) => a[0] - b[0]);
+      let hole = 0, reach = iv.length ? iv[0][1] : 0;
+      for (const [a, b] of iv) { if (a > reach + 0.5) hole = Math.max(hole, a - reach); reach = Math.max(reach, b); }
+      const lead = xs[xs.length - 1];
       // Aim down: the ship turns and the stream follows.
       I.mousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 + 200 };
-      for (let i = 0; i < 40; i++) step();
-      const fresh = e.energy.pulses.filter((q: any) => q.alive && q.travelled <= 13);
+      const fresh: any[] = [];
+      for (let i = 0; i < 40; i++) {
+        step();
+        // A pulse leaves every third step; collect the launches of the last few.
+        if (i >= 34) for (const q of e.energy.pulses) if (q.alive && q.gen === 0 && q.travelled <= 13) fresh.push({ uy: q.uy });
+      }
       const followed = fresh.length > 0 && fresh.every((q: any) => q.uy > 0.99);
-      // Let go: the stream stops.
+      // Let go: the stream stops, and the trail has faded shortly after.
       held = false;
       for (let i = 0; i < 4; i++) step();
       const stopped = e.energy.burst === null;
+      for (let i = 0; i < 90; i++) step();
+      let left = 0;
+      for (let i = 0; i < T.born.length; i++) if (e.simClock - T.born[i] < 0.35) left++;
       I.isFireHeld = orig;
-      return { flowing, gaps, n: xs.length, len, followed, stopped };
+      return { flowing, gaps, n: xs.length, len, segs: iv.length, hole, reach, lead,
+               colours: [...colours], beam: e.energy.pulses[0]?.color, followed, stopped, left };
     });
     expect(r.flowing, 'held past the tap, the stream keeps flowing').toBe(true);
-    expect(r.n, 'a whole line of pulses in flight').toBeGreaterThan(20);
-    // Each pulse is longer than the spacing between them: no visible gap.
-    for (const g of r.gaps) expect(g).toBeLessThan(r.len);
+    // Fewer, spaced beams: one every third step, ~37 apart against 13 long.
+    expect(r.n, 'a line of pulses in flight').toBeGreaterThanOrEqual(6);
+    expect(r.n, 'but not a crowd of them').toBeLessThanOrEqual(14);
+    for (const g of r.gaps) expect(g).toBeGreaterThan(r.len);
+    // The trail joins them into one line, in the beam's colour.
+    expect(r.segs, 'a trail behind the pulses').toBeGreaterThan(10);
+    expect(r.hole, 'with no hole along it').toBe(0);
+    expect(r.reach, 'reaching the lead pulse').toBeGreaterThanOrEqual(r.lead - 1);
+    expect(r.colours, 'in the beam colour').toEqual([r.beam]);
     expect(r.followed, 'the stream follows the aim').toBe(true);
     expect(r.stopped, 'and stops when released').toBe(true);
+    expect(r.left, 'and its trail fades out').toBe(0);
     watch.assertClean();
   });
 

@@ -88,6 +88,30 @@ export class SeekerDots {
     clear(): void { this.born.fill(-1e9); this.head = 0; }
 }
 
+/** THE KINETIC BEAM'S TRAIL (user call): a line/path behind every pulse in
+ *  the beam's own colour, fading like the seeker's dots.  A bounded ring of
+ *  the segments each pulse actually traced — reflections and passes through
+ *  glass included — overwritten oldest first, so emitting never allocates. */
+export class PulseTrail {
+    static readonly MAX = 4096;
+    /** How long a stretch of trail lasts before it has faded out. */
+    static readonly LIFE = 0.35;
+    readonly x0 = new Float32Array(PulseTrail.MAX);
+    readonly y0 = new Float32Array(PulseTrail.MAX);
+    readonly x1 = new Float32Array(PulseTrail.MAX);
+    readonly y1 = new Float32Array(PulseTrail.MAX);
+    readonly born = new Float64Array(PulseTrail.MAX).fill(-1e9);
+    readonly color: string[] = new Array(PulseTrail.MAX).fill('#ffffff');
+    head = 0;
+    emit(x0: number, y0: number, x1: number, y1: number, t: number, color: string): void {
+        const i = this.head;
+        this.x0[i] = x0; this.y0[i] = y0; this.x1[i] = x1; this.y1[i] = y1;
+        this.born[i] = t; this.color[i] = color;
+        this.head = (i + 1) % PulseTrail.MAX;
+    }
+    clear(): void { this.born.fill(-1e9); this.head = 0; }
+}
+
 export class EnergyState {
     heated: GameEntity[] = [];
     energized: GameEntity[] = [];
@@ -105,6 +129,8 @@ export class EnergyState {
      *  each player seeker, fading like the player trail — and outliving the
      *  round, so a hit does not snatch its trail away. */
     readonly dots = new SeekerDots();
+    /** The kinetic beam's fading line trail (see `PulseTrail`). */
+    readonly pulseTrail = new PulseTrail();
     /** Hulls crackling from a recent shock (bounded; renderer reads). */
     shocked: GameEntity[] = [];
     emberAcc = 0;
@@ -137,6 +163,7 @@ export class EnergyState {
         this.burst = null;
         this.ring = null;
         this.dots.clear();
+        this.pulseTrail.clear();
         for (const e of this.shocked) e.shockTimer = undefined;
         this.shocked.length = 0;
         for (const p of this.pulses) p.alive = false;
@@ -1562,9 +1589,14 @@ function tickBeam(g: GameEngine, dt: number): void {
 // each traced through the same optics as a continuous beam over the distance
 // it covers this step — so a pulse reflects off metal, splits and scatters in
 // glass and dies in rock.  A split's extra branches become extra pulses, out
-// of a bounded pool.
+// of a bounded pool — but at most ONE branch per pulse, one generation deep,
+// and only a branch strong enough to read (user call: passing through glass
+// made far too many beams).
+// Every pulse leaves a fading line trail in the beam's colour.
 
-const MAX_PULSES = 128;
+const MAX_PULSES = 48;
+/** A split-off branch weaker than this share of the ray is not a new pulse. */
+const PULSE_SPLIT_MIN_F = 0.1;
 interface Pulse {
     x: number; y: number; ux: number; uy: number; f: number;
     travelled: number; range: number; speed: number; length: number;
@@ -1572,6 +1604,11 @@ interface Pulse {
     /** The body the pulse is inside mid-flight (glass it is passing
      *  through), and the grain step it reached there. */
     inside: GameEntity | null; step: number;
+    /** 0 for a pulse from the muzzle, 1 for a branch split off one; a
+     *  branch never splits again. */
+    gen: number;
+    /** A pulse sheds at most ONE branch in its whole flight. */
+    split: boolean;
 }
 interface Burst { config: WeaponConfig; left: number; acc: number; angle: number; lastOff?: number }
 const _pulseDep: LightDeposit = { dmg: 0, heat: 0, push: 0, thermal: false, breaksCloud: true, byPlayer: true };
@@ -1580,20 +1617,20 @@ const _pulseOut = makeLightOut();
 function spawnPulse(g: GameEngine, x: number, y: number, ux: number, uy: number, f: number,
                     travelled: number, c: { range: number; speed: number; length: number; dmg: number;
                     push: number; color: string; width: number },
-                    inside: GameEntity | null = null, step = 0): void {
+                    inside: GameEntity | null = null, step = 0, gen = 0): void {
     const list = g.energy.pulses;
     let p: Pulse | undefined;
     for (let i = 0; i < list.length; i++) if (!list[i].alive) { p = list[i]; break; }
     if (!p) {
         if (list.length >= MAX_PULSES) return;
         p = { x: 0, y: 0, ux: 0, uy: 0, f: 0, travelled: 0, range: 0, speed: 0, length: 0,
-              dmg: 0, push: 0, color: '', width: 0, alive: false, inside: null, step: 0 };
+              dmg: 0, push: 0, color: '', width: 0, alive: false, inside: null, step: 0, gen: 0, split: false };
         list.push(p);
     }
     p.x = x; p.y = y; p.ux = ux; p.uy = uy; p.f = f; p.travelled = travelled;
     p.range = c.range; p.speed = c.speed; p.length = c.length; p.dmg = c.dmg; p.push = c.push;
     p.color = c.color; p.width = c.width; p.alive = true;
-    p.inside = inside; p.step = step;
+    p.inside = inside; p.step = step; p.gen = gen; p.split = false;
 }
 
 function tickPulses(g: GameEngine, dt: number): void {
@@ -1650,6 +1687,11 @@ function tickPulses(g: GameEngine, dt: number): void {
         dep.breaksCloud = true; dep.byPlayer = true;
         traceLight(g, p.x, p.y, p.ux, p.uy, L, p.width, p.f, dep, _pulseOut, null, p.inside, p.step);
         if (_pulseOut.firstHit) s.lastPulseHitId = _pulseOut.firstHit.id;
+        const sg = _pulseOut.segs;
+        for (let k = 0; k < _pulseOut.nSeg; k++) {
+            const o = k * 5;
+            s.pulseTrail.emit(sg[o], sg[o + 1], sg[o + 2], sg[o + 3], g.simClock, p.color);
+        }
         p.travelled += L;
         if (_pulseOut.nLeaf === 0) { p.alive = false; continue; }
         // The STRONGEST ray still in flight IS this pulse; any others are new
@@ -1657,16 +1699,24 @@ function tickPulses(g: GameEngine, dt: number): void {
         const lv = _pulseOut.leaves;
         let main = 0;
         for (let k = 1; k < _pulseOut.nLeaf; k++) if (lv[k * 5 + 4] > lv[main * 5 + 4]) main = k;
-        for (let k = 0; k < _pulseOut.nLeaf; k++) {
-            const o = k * 5;
-            if (k === main) {
-                p.x = lv[o]; p.y = lv[o + 1]; p.ux = lv[o + 2]; p.uy = lv[o + 3]; p.f = lv[o + 4];
-                p.inside = _pulseOut.leafIn[k]; p.step = _pulseOut.leafStep[k];
-            } else {
-                spawnPulse(g, lv[o], lv[o + 1], lv[o + 2], lv[o + 3], lv[o + 4], p.travelled, p,
-                           _pulseOut.leafIn[k], _pulseOut.leafStep[k]);
+        // At most one branch: the strongest of the others, from a pulse that
+        // came out of the muzzle and has not split yet.
+        let branch = -1;
+        if (p.gen === 0 && !p.split) {
+            for (let k = 0; k < _pulseOut.nLeaf; k++) {
+                if (k === main || lv[k * 5 + 4] < PULSE_SPLIT_MIN_F) continue;
+                if (branch < 0 || lv[k * 5 + 4] > lv[branch * 5 + 4]) branch = k;
             }
         }
+        if (branch >= 0) {
+            const o = branch * 5;
+            p.split = true;
+            spawnPulse(g, lv[o], lv[o + 1], lv[o + 2], lv[o + 3], lv[o + 4], p.travelled, p,
+                       _pulseOut.leafIn[branch], _pulseOut.leafStep[branch], 1);
+        }
+        const o = main * 5;
+        p.x = lv[o]; p.y = lv[o + 1]; p.ux = lv[o + 2]; p.uy = lv[o + 3]; p.f = lv[o + 4];
+        p.inside = _pulseOut.leafIn[main]; p.step = _pulseOut.leafStep[main];
     }
 }
 

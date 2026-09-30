@@ -43,6 +43,8 @@ export interface EnergyFxView {
     locks: GameEntity[];
     /** The seekers' trail dots (a fixed ring). */
     dots: SeekerDotsView | null;
+    /** The kinetic beam's fading line trail (a fixed ring of segments). */
+    trail: PulseTrailView | null;
     /** Hulls crackling from a recent shock (each carries `shockTimer`). */
     shocked: readonly GameEntity[];
 }
@@ -50,9 +52,18 @@ export interface SeekerDotsView {
     readonly x: Float32Array; readonly y: Float32Array; readonly born: Float64Array;
     readonly color: readonly string[];
 }
-/** Kept in step with `SeekerDots` in energyEffects (the renderer does not
- *  import the sim module). */
+export interface PulseTrailView {
+    readonly x0: Float32Array; readonly y0: Float32Array;
+    readonly x1: Float32Array; readonly y1: Float32Array;
+    readonly born: Float64Array; readonly color: readonly string[];
+}
+/** Kept in step with `SeekerDots` / `PulseTrail` in energyEffects (the
+ *  renderer does not import the sim module). */
 const DOT_LIFE = 2.0, DOT_R = 1.8, DOT_PEAK = 0.75;
+const TRAIL_LIFE = 0.35, TRAIL_PEAK = 0.6, TRAIL_WIDTH = 1.5;
+/** Alpha steps the trail is batched into: one stroke per step (and colour),
+ *  never one per segment. */
+const TRAIL_BUCKETS = 8;
 
 const CULL = 1400;
 
@@ -61,6 +72,7 @@ export function renderEnergyFx(ctx: CanvasRenderingContext2D, view: EnergyFxView
     const camX = camera.position.x, camY = camera.position.y;
     renderLocks(ctx, view.locks, camX, camY);
     if (view.dots) renderDots(ctx, view.dots, view.simClock, camX, camY);
+    if (view.trail) renderPulseTrail(ctx, view.trail, view.simClock, camX, camY);
     const { heated, energized, beam, pulses, ring, shocked } = view;
     if (heated.length === 0 && energized.length === 0 && !beam && pulses.length === 0 && !ring
         && shocked.length === 0) return;
@@ -327,6 +339,45 @@ function renderDots(ctx: CanvasRenderingContext2D, d: SeekerDotsView, now: numbe
         ctx.globalAlpha = DOT_PEAK * (1 - age / DOT_LIFE);
         ctx.fillStyle = d.color[i];
         ctx.beginPath(); ctx.arc(x, y, DOT_R, 0, Math.PI * 2); ctx.fill();
+    }
+    if (any) ctx.restore();
+}
+
+/** THE KINETIC BEAM'S TRAIL: a thin line along every path a pulse traced,
+ *  in the beam's colour, fading linearly over its life.  Batched into a few
+ *  alpha steps; consecutive segments that join draw as one path, so a trail
+ *  has no bright dots at its joints. */
+function renderPulseTrail(ctx: CanvasRenderingContext2D, t: PulseTrailView, now: number, camX: number, camY: number): void {
+    const n = t.born.length;
+    let any = false;
+    for (let b = 0; b < TRAIL_BUCKETS; b++) {
+        let color = '';
+        let open = false;
+        let px = NaN, py = NaN;
+        for (let i = 0; i < n; i++) {
+            const age = now - t.born[i];
+            if (age < 0 || age >= TRAIL_LIFE) continue;
+            if (Math.min(TRAIL_BUCKETS - 1, Math.floor((age / TRAIL_LIFE) * TRAIL_BUCKETS)) !== b) continue;
+            const x0 = shiftX(camX, t.x0[i]), y0 = shiftY(camY, t.y0[i]);
+            if (Math.abs(x0 - camX) > CULL || Math.abs(y0 - camY) > CULL) continue;
+            if (!any) {
+                ctx.save(); any = true;
+                ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = TRAIL_WIDTH;
+            }
+            if (t.color[i] !== color) {
+                if (open) ctx.stroke();
+                color = t.color[i];
+                ctx.strokeStyle = color;
+                ctx.globalAlpha = TRAIL_PEAK * (1 - (b + 0.5) / TRAIL_BUCKETS);
+                ctx.beginPath(); open = true; px = NaN;
+            }
+            const x1 = x0 + (shiftX(t.x0[i], t.x1[i]) - t.x0[i]);
+            const y1 = y0 + (shiftY(t.y0[i], t.y1[i]) - t.y0[i]);
+            if (!(Math.abs(x0 - px) < JOIN_EPS && Math.abs(y0 - py) < JOIN_EPS)) ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            px = x1; py = y1;
+        }
+        if (open) ctx.stroke();
     }
     if (any) ctx.restore();
 }
