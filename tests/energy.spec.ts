@@ -1668,6 +1668,45 @@ test.describe('the weapons, fired into the world', () => {
     watch.assertClean();
   });
 
+  test('LIGHT: kinetic pulses pass THROUGH glass and split in it, like the base beam', async ({ page }) => {
+    // User report: the pulses stopped in glass.  A pulse flies only one step's
+    // length per trace, so a pulse that ran out of length inside a pane was
+    // dropped; it now carries on through the body from where it reached.
+    const watch = await boot(page);
+    await onMap(page, 'GLASS_FIELD');
+    const r = await engine(page, e => {
+      const p = e.player, P: any = e.physics;
+      const t = e.currentMap.entities.find((x: any) => x.active && x.shardVariant === 'glass-tile' && x.mass === Infinity);
+      for (const x of e.currentMap.entities) if (x !== t && (x.type === 'STRUCTURE' || x.type === 'ENEMY')) x.active = false;
+      t.rotation = 0; t.health = t.maxHealth = 1e9;
+      P.initializeStaticGrid(e.currentMap.entities);
+      p.position.x = t.position.x - 150; p.position.y = t.position.y;
+      p.velocity.x = 0; p.velocity.y = 0; p.rotation = 0;
+      p.currentWeapon = 'beam+kinetic'; p.weaponCooldown = 0;
+      e.weapons.firePlayerWeapon(e.currentMap.entities, p, { x: t.position.x, y: t.position.y }, undefined, false);
+      const W = e.currentMap.width;
+      const rel = (x: number) => { let d = x - t.position.x; return d - Math.round(d / W) * W; };
+      const half = Math.max(t.size.x, t.size.y) / 2;
+      let beyond = 0, inside = 0, most = 0;
+      for (let i = 0; i < 90; i++) {
+        e.prepareFrameEntities(); e.updatePhysics(1 / 120); e.updateGameLogic(1 / 120);
+        const a = e.energy.pulses.filter((q: any) => q.alive);
+        most = Math.max(most, a.length);
+        for (const q of a) {
+          if (q.inside === t) inside++;
+          if (rel(q.x) > half + 5) beyond++;
+        }
+      }
+      return { beyond, inside, most, lit: (t.fractureEdgeFill ?? []).some((f: number) => f > 0) };
+    });
+    expect(r.inside, 'pulses carried on INSIDE the pane between steps').toBeGreaterThan(0);
+    expect(r.beyond, 'and came out the far side').toBeGreaterThan(0);
+    // 24 pulses from the tap; more than that alive at once means some split.
+    expect(r.most, 'the pane split pulses off').toBeGreaterThan(24);
+    expect(r.lit, 'and left a little on the boundaries they crossed').toBe(true);
+    watch.assertClean();
+  });
+
   test('LIGHT: held, the kinetic beam is a near-continuous line of short beams that follows the aim', async ({ page }) => {
     // User call: not a fixed burst but a line of short beams with basically
     // no gap between them, flowing for as long as the trigger is held.

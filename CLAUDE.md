@@ -97,7 +97,7 @@ tests/                    Playwright smoke suites (roadmap 5b) — boot,
                           `advanceSim` waits on a clock that has halted),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  507 tests.  All run at
+                          whatever happened next).  508 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts, which sets
                           its own and covers six sizes plus a
                           mid-session resize
@@ -4095,7 +4095,15 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over
     the distance it covers each step; a split's extra branches become extra
     pulses out of a bounded pool (128), and a pulse carries on as its
-    STRONGEST branch.  The thermal beam is the only other beam that fires
+    STRONGEST branch.  A PULSE THAT RUNS OUT OF A STEP'S LENGTH IS A LEAF,
+    WHEREVER IT IS (user report: pulses stopped dead in glass) — a pulse
+    traces only ~12.5 units a step against a ~15-unit grain, so it is almost
+    always mid-pane at the end of one, and the trace used to drop any ray that
+    ran out of length inside a body or just past a face.  Every out-of-length
+    ray now becomes a leaf (`addLeaf`), one inside a body remembering the body
+    and the grain step it reached (`LightOut.leafIn` / `leafStep`, carried on
+    the pulse as `inside` / `step`), so the next step resumes the traverse
+    exactly where it stopped.  The thermal beam is the only other beam that fires
     continuously like the base beam.
   - **A BREAK CONSERVES HEAT, AND A PIECE IS AS HOT AS WHAT IT CAME OFF**
     (user calls; `shareHeat`).  Heat is a TEMPERATURE, and what a body can

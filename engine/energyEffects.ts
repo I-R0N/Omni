@@ -1043,7 +1043,10 @@ for (let i = 0; i < MAX_RAYS; i++) {
 let _nRays = 0;
 function pushRay(x: number, y: number, ux: number, uy: number, len: number, f: number,
                  bounces: number, skip: GameEntity | null, inside: GameEntity | null, step = 0): boolean {
-    if (_nRays >= MAX_RAYS || !(f >= MIN_F) || !(len > 0.5)) return false;
+    if (!(f >= MIN_F)) return false;
+    // Out of length: still in flight, so it is a leaf, not a loss.
+    if (!(len > 0.5)) { addLeaf(x, y, ux, uy, f, inside, step); return false; }
+    if (_nRays >= MAX_RAYS) return false;
     const r = _rays[_nRays++];
     r.x = x; r.y = y; r.ux = ux; r.uy = uy; r.len = len; r.f = f;
     r.bounces = bounces; r.skip = skip; r.inside = inside; r.step = step;
@@ -1067,10 +1070,32 @@ export interface LightDeposit {
 export interface LightOut {
     segs: number[]; nSeg: number;
     leaves: number[]; nLeaf: number;
+    /** Per leaf: the body it is still INSIDE (a pulse that ran out of this
+     *  step's length mid-pane), and the grain-step count it had reached, so
+     *  the next step carries on through the body rather than losing it. */
+    leafIn: (GameEntity | null)[]; leafStep: number[];
     firstHit: GameEntity | null;
 }
 export function makeLightOut(): LightOut {
-    return { segs: [], nSeg: 0, leaves: [], nLeaf: 0, firstHit: null };
+    return { segs: [], nSeg: 0, leaves: [], nLeaf: 0, leafIn: [], leafStep: [], firstHit: null };
+}
+
+/** The trace currently being written, so a ray that runs out of length
+ *  anywhere — in open space, just past a face, or inside a body — becomes a
+ *  leaf the caller can keep flying.  A beam traces its whole range and
+ *  ignores leaves; a PULSE flies only one step's length per trace, so for it
+ *  a dropped ray is a pulse that silently vanished (user report: kinetic
+ *  pulses neither passed through glass nor split). */
+let _curOut: LightOut | null = null;
+function addLeaf(x: number, y: number, ux: number, uy: number, f: number,
+                 inside: GameEntity | null, step: number): void {
+    const out = _curOut;
+    if (!out || out.nLeaf >= MAX_RAYS || !(f >= MIN_F)) return;
+    const i = out.nLeaf++;
+    const k = i * 5;
+    out.leaves[k] = x; out.leaves[k + 1] = y;
+    out.leaves[k + 2] = ux; out.leaves[k + 3] = uy; out.leaves[k + 4] = f;
+    out.leafIn[i] = inside; out.leafStep[i] = step;
 }
 
 function addSeg(out: LightOut, x0: number, y0: number, x1: number, y1: number, f: number): void {
@@ -1244,8 +1269,9 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
     // point written out stays continuous with where the ray came from.
     const ox = x - (lx * cw - ly * sw), oy = y - (lx * sw + ly * cw);
     let travelled = 0;
+    let stepN = step0;
     for (let k = 0; k < MAX_INTERNAL_STEPS && travelled < len; k++) {
-        const stepN = step0 + k;
+        stepN = step0 + k;
         const nx = lx + dx * s, ny = ly + dy * s;
         const wx0 = ox + (lx * cw - ly * sw), wy0 = oy + (lx * sw + ly * cw);
         if (!pointInPolygon(nx, ny, poly)) {
@@ -1326,23 +1352,34 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
             const tx = dx * ca - dy * sa; dy = dx * sa + dy * ca; dx = tx;
         }
     }
+    // Out of LENGTH while still inside: the ray is in flight in here, so it
+    // is a leaf that remembers the body (a pulse carries on through it next
+    // step, from the grain it reached).
+    if (travelled >= len && e.active) {
+        addLeaf(ox + (lx * cw - ly * sw), oy + (lx * sw + ly * cw),
+                dx * cw - dy * sw, dx * sw + dy * cw, f, e, stepN + 1);
+    }
 }
 
 /** Trace light from (x, y) along (ux, uy) for `range`, carrying energy
  *  fraction `f0`.  See the section note. */
 export function traceLight(g: GameEngine, x: number, y: number, ux: number, uy: number, range: number,
                            width: number, f0: number, dep: LightDeposit, out: LightOut,
-                           skip: GameEntity | null = null): void {
+                           skip: GameEntity | null = null, inside: GameEntity | null = null,
+                           step = 0): void {
     out.nSeg = 0; out.nLeaf = 0; out.firstHit = null;
     _nRays = 0;
-    pushRay(x, y, ux, uy, range, f0, 0, skip, null);
+    _curOut = out;
+    pushRay(x, y, ux, uy, range, f0, 0, skip, inside, step);
     for (let ri = 0; ri < _nRays; ri++) {
         const ray = _rays[ri];
         if (ray.inside !== null) {
             if (ray.inside.active) {
                 traverse(g, ray.inside, ray.x, ray.y, ray.ux, ray.uy, ray.f, ray.len, ray.bounces, ray.step, dep, out);
+                continue;
             }
-            continue;
+            // The body it was inside is gone: the light carries straight on.
+            ray.skip = ray.inside; ray.inside = null;
         }
         const hit = raycast(g, ray.x, ray.y, ray.ux, ray.uy, ray.len, width, ray.skip, _passed);
         const e = _hitE, t = _hitT, hnx = _hitNx, hny = _hitNy;
@@ -1360,11 +1397,7 @@ export function traceLight(g: GameEngine, x: number, y: number, ux: number, uy: 
         }
         if (!hit || e === null) {
             // Still in flight: a leaf (the caller may keep flying it).
-            if (out.nLeaf < MAX_RAYS) {
-                const k = out.nLeaf++ * 5;
-                out.leaves[k] = hx; out.leaves[k + 1] = hy;
-                out.leaves[k + 2] = ray.ux; out.leaves[k + 3] = ray.uy; out.leaves[k + 4] = ray.f;
-            }
+            addLeaf(hx, hy, ray.ux, ray.uy, ray.f, null, 0);
             continue;
         }
         if (out.firstHit === null) out.firstHit = e;
@@ -1536,6 +1569,9 @@ interface Pulse {
     x: number; y: number; ux: number; uy: number; f: number;
     travelled: number; range: number; speed: number; length: number;
     dmg: number; push: number; color: string; width: number; alive: boolean;
+    /** The body the pulse is inside mid-flight (glass it is passing
+     *  through), and the grain step it reached there. */
+    inside: GameEntity | null; step: number;
 }
 interface Burst { config: WeaponConfig; left: number; acc: number; angle: number; lastOff?: number }
 const _pulseDep: LightDeposit = { dmg: 0, heat: 0, push: 0, thermal: false, breaksCloud: true, byPlayer: true };
@@ -1543,19 +1579,21 @@ const _pulseOut = makeLightOut();
 
 function spawnPulse(g: GameEngine, x: number, y: number, ux: number, uy: number, f: number,
                     travelled: number, c: { range: number; speed: number; length: number; dmg: number;
-                    push: number; color: string; width: number }): void {
+                    push: number; color: string; width: number },
+                    inside: GameEntity | null = null, step = 0): void {
     const list = g.energy.pulses;
     let p: Pulse | undefined;
     for (let i = 0; i < list.length; i++) if (!list[i].alive) { p = list[i]; break; }
     if (!p) {
         if (list.length >= MAX_PULSES) return;
         p = { x: 0, y: 0, ux: 0, uy: 0, f: 0, travelled: 0, range: 0, speed: 0, length: 0,
-              dmg: 0, push: 0, color: '', width: 0, alive: false };
+              dmg: 0, push: 0, color: '', width: 0, alive: false, inside: null, step: 0 };
         list.push(p);
     }
     p.x = x; p.y = y; p.ux = ux; p.uy = uy; p.f = f; p.travelled = travelled;
     p.range = c.range; p.speed = c.speed; p.length = c.length; p.dmg = c.dmg; p.push = c.push;
     p.color = c.color; p.width = c.width; p.alive = true;
+    p.inside = inside; p.step = step;
 }
 
 function tickPulses(g: GameEngine, dt: number): void {
@@ -1610,7 +1648,7 @@ function tickPulses(g: GameEngine, dt: number): void {
         const dep = _pulseDep;
         dep.dmg = p.dmg; dep.push = p.push; dep.heat = 0; dep.thermal = false;
         dep.breaksCloud = true; dep.byPlayer = true;
-        traceLight(g, p.x, p.y, p.ux, p.uy, L, p.width, p.f, dep, _pulseOut);
+        traceLight(g, p.x, p.y, p.ux, p.uy, L, p.width, p.f, dep, _pulseOut, null, p.inside, p.step);
         if (_pulseOut.firstHit) s.lastPulseHitId = _pulseOut.firstHit.id;
         p.travelled += L;
         if (_pulseOut.nLeaf === 0) { p.alive = false; continue; }
@@ -1623,8 +1661,10 @@ function tickPulses(g: GameEngine, dt: number): void {
             const o = k * 5;
             if (k === main) {
                 p.x = lv[o]; p.y = lv[o + 1]; p.ux = lv[o + 2]; p.uy = lv[o + 3]; p.f = lv[o + 4];
+                p.inside = _pulseOut.leafIn[k]; p.step = _pulseOut.leafStep[k];
             } else {
-                spawnPulse(g, lv[o], lv[o + 1], lv[o + 2], lv[o + 3], lv[o + 4], p.travelled, p);
+                spawnPulse(g, lv[o], lv[o + 1], lv[o + 2], lv[o + 3], lv[o + 4], p.travelled, p,
+                           _pulseOut.leafIn[k], _pulseOut.leafStep[k]);
             }
         }
     }
