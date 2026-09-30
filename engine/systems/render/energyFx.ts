@@ -60,7 +60,7 @@ export interface PulseTrailView {
 /** Kept in step with `SeekerDots` / `PulseTrail` in energyEffects (the
  *  renderer does not import the sim module). */
 const DOT_LIFE = 2.0, DOT_R = 1.8, DOT_PEAK = 0.75;
-const TRAIL_LIFE = 0.35, TRAIL_PEAK = 0.6, TRAIL_WIDTH = 1.5;
+const TRAIL_LIFE = 0.875, TRAIL_PEAK = 0.6, TRAIL_WIDTH = 1.5;
 /** Alpha steps the trail is batched into: one stroke per step (and colour),
  *  never one per segment. */
 const TRAIL_BUCKETS = 8;

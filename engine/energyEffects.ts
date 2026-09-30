@@ -93,9 +93,9 @@ export class SeekerDots {
  *  the segments each pulse actually traced — reflections and passes through
  *  glass included — overwritten oldest first, so emitting never allocates. */
 export class PulseTrail {
-    static readonly MAX = 4096;
+    static readonly MAX = 6144;
     /** How long a stretch of trail lasts before it has faded out. */
-    static readonly LIFE = 0.35;
+    static readonly LIFE = 0.875;
     readonly x0 = new Float32Array(PulseTrail.MAX);
     readonly y0 = new Float32Array(PulseTrail.MAX);
     readonly x1 = new Float32Array(PulseTrail.MAX);

@@ -6222,7 +6222,7 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // same 27 dmg/s.
     kinetic: { name: 'Pulse Beam', damage: 0.675, cooldown: 1.0, beamRange: 420,
       beamWidth: 3, push: 0.375, color: ENERGY_COLORS.kinetic,
-      pulseCount: 8, pulseInterval: 1 / 40, pulseSpeed: 1500, pulseLength: 13, pulseSpread: 3 },
+      pulseCount: 8, pulseInterval: 1 / 40, pulseSpeed: 1500, pulseLength: 13, pulseSpread: 1.8 },
     // An ARC from the ship to the nearest conductor in range, then a bounded
     // chain.  Nothing conductive in range → a fizzle and nothing else.
     electric: { name: 'Arc Beam', damage: 0, cooldown: 0.8, beamDuration: 0.4, beamRange: 320,

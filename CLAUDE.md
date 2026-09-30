@@ -4093,10 +4093,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     (mechanical) damage and a matching push, so a held stream still lands 27
     dmg/s.  Every pulse leaves a thin fading LINE TRAIL in the beam's colour
     (`PulseTrail`, a fixed ring of the segments each pulse actually traced —
-    reflections and passes through glass included — living 0.35 s; drawn in
+    reflections and passes through glass included — living 0.875 s; drawn in
     `renderPulseTrail`, batched into eight alpha steps), which is what joins
     the stream into one line.  They fly PARALLEL from RANDOM points
-    across a narrow lane (`pulseSpread`, ±3 units — not a fan, and not a
+    across a narrow lane (`pulseSpread`, ±1.8 units — not a fan, and not a
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over
     the distance it covers each step.  A pulse sheds AT MOST ONE branch in its
     flight — the strongest of the others, if it carries ≥ `PULSE_SPLIT_MIN_F`

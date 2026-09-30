@@ -1659,11 +1659,12 @@ test.describe('the weapons, fired into the world', () => {
     expect(r.length, 'the whole burst left').toBe(8);
     for (const q of r) expect(q.length).toBeCloseTo(13, 3);
     const ys = r.map(q => q.y);
-    // ±3 either side of the aim line (user call), not a sweep in firing
-    // order: some pair of consecutive pulses steps BACK across the lane.
-    for (const y of ys) expect(Math.abs(y)).toBeLessThanOrEqual(3.001);
-    expect(Math.max(...ys) - Math.min(...ys), 'from points spread across the lane').toBeGreaterThan(1.5);
-    for (let i = 1; i < ys.length; i++) expect(Math.abs(ys[i] - ys[i - 1]), 'two in a row never overlap').toBeGreaterThan(0.5);
+    // ±1.8 either side of the aim line (user call: tighter than the old ±3),
+    // not a sweep in firing order: some pair of consecutive pulses steps BACK
+    // across the lane.
+    for (const y of ys) expect(Math.abs(y)).toBeLessThanOrEqual(1.801);
+    expect(Math.max(...ys) - Math.min(...ys), 'from points spread across the lane').toBeGreaterThan(0.9);
+    for (let i = 1; i < ys.length; i++) expect(Math.abs(ys[i] - ys[i - 1]), 'two in a row never overlap').toBeGreaterThan(0.3);
     for (const q of r) { expect(q.ux).toBeCloseTo(1, 3); expect(q.uy).toBeCloseTo(0, 3); }
     watch.assertClean();
   });
@@ -1745,7 +1746,7 @@ test.describe('the weapons, fired into the world', () => {
       const iv: [number, number][] = [];
       let colours = new Set<string>();
       for (let i = 0; i < T.born.length; i++) {
-        if (now - T.born[i] >= 0.35 || now < T.born[i]) continue;
+        if (now - T.born[i] >= 0.875 || now < T.born[i]) continue;
         const a = rel(T.x0[i]), b = rel(T.x1[i]);
         iv.push([Math.min(a, b), Math.max(a, b)]);
         colours.add(T.color[i]);
@@ -1767,9 +1768,11 @@ test.describe('the weapons, fired into the world', () => {
       held = false;
       for (let i = 0; i < 4; i++) step();
       const stopped = e.energy.burst === null;
-      for (let i = 0; i < 90; i++) step();
+      // Pulses in flight lay trail for up to ~0.3 s after release, then it
+      // lives its 0.875 s.
+      for (let i = 0; i < 150; i++) step();
       let left = 0;
-      for (let i = 0; i < T.born.length; i++) if (e.simClock - T.born[i] < 0.35) left++;
+      for (let i = 0; i < T.born.length; i++) if (e.simClock - T.born[i] < 0.875) left++;
       I.isFireHeld = orig;
       return { flowing, gaps, n: xs.length, len, segs: iv.length, hole, reach, lead,
                colours: [...colours], beam: e.energy.pulses[0]?.color, followed, stopped, left };
