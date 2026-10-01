@@ -1779,9 +1779,9 @@ test.describe('the weapons, fired into the world', () => {
     });
     expect(r.flowing, 'held past the tap, the stream keeps flowing').toBe(true);
     // Fewer, spaced beams: one every third step, ~37 apart against 13 long.
-    // 630 range at 1500 u/s is 0.42 s of flight, so ~17 alive.
-    expect(r.n, 'a line of pulses in flight').toBeGreaterThanOrEqual(10);
-    expect(r.n, 'but not a crowd of them').toBeLessThanOrEqual(22);
+    // 420 range at 1500 u/s is 0.28 s of flight, so ~11 alive.
+    expect(r.n, 'a line of pulses in flight').toBeGreaterThanOrEqual(6);
+    expect(r.n, 'but not a crowd of them').toBeLessThanOrEqual(14);
     for (const g of r.gaps) expect(g).toBeGreaterThan(r.len);
     // The trail joins them into one line, in the beam's colour.
     expect(r.segs, 'a trail behind the pulses').toBeGreaterThan(10);

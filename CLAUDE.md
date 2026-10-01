@@ -4085,7 +4085,7 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
     STREAM OF SHORT BEAMS that FLY, JOINED BY A LINE TRAIL (user calls): one
-    13-unit pulse every third sim step (40 a second) at 1500 u/s to a 630
+    13-unit pulse every third sim step (40 a second) at 1500 u/s to a 420
     range, so they fly ~37 apart; a pull fires at least `pulseCount` (8, 0.2 s) and HOLDING
     keeps the stream flowing and following the aim, like the light blade.
     It was 120 a second with unlimited splitting, which read as far too many
