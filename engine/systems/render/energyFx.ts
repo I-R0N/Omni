@@ -60,9 +60,9 @@ export interface PulseTrailView {
 /** Kept in step with `SeekerDots` / `PulseTrail` in energyEffects (the
  *  renderer does not import the sim module). */
 const DOT_LIFE = 2.0, DOT_R = 1.8, DOT_PEAK = 0.75;
-const TRAIL_LIFE = 0.875, TRAIL_PEAK = 0.6, TRAIL_WIDTH = 1.5;
-/** Alpha steps the trail is batched into: one stroke per step (and colour),
- *  never one per segment. */
+const TRAIL_LIFE = 1.5, TRAIL_PEAK = 0.6, TRAIL_WIDTH = 1.5;
+/** Alpha steps the trail fades through; a stroke is issued per change of
+ *  step or colour, never per segment. */
 const TRAIL_BUCKETS = 8;
 
 const CULL = 1400;
@@ -344,41 +344,42 @@ function renderDots(ctx: CanvasRenderingContext2D, d: SeekerDotsView, now: numbe
 }
 
 /** THE KINETIC BEAM'S TRAIL: a thin line along every path a pulse traced,
- *  in the beam's colour, fading linearly over its life.  Batched into a few
- *  alpha steps; consecutive segments that join draw as one path, so a trail
- *  has no bright dots at its joints. */
+ *  in the beam's colour, fading linearly over its life.  ONE pass over the
+ *  ring: segments are stored in emission order, so neighbours share an age
+ *  step and colour, and a stroke is issued only when either changes (a few
+ *  dozen per frame, never one per segment).  Consecutive segments that join
+ *  draw as one path, so a trail has no bright dots at its joints. */
 function renderPulseTrail(ctx: CanvasRenderingContext2D, t: PulseTrailView, now: number, camX: number, camY: number): void {
     const n = t.born.length;
     let any = false;
-    for (let b = 0; b < TRAIL_BUCKETS; b++) {
-        let color = '';
-        let open = false;
-        let px = NaN, py = NaN;
-        for (let i = 0; i < n; i++) {
-            const age = now - t.born[i];
-            if (age < 0 || age >= TRAIL_LIFE) continue;
-            if (Math.min(TRAIL_BUCKETS - 1, Math.floor((age / TRAIL_LIFE) * TRAIL_BUCKETS)) !== b) continue;
-            const x0 = shiftX(camX, t.x0[i]), y0 = shiftY(camY, t.y0[i]);
-            if (Math.abs(x0 - camX) > CULL || Math.abs(y0 - camY) > CULL) continue;
-            if (!any) {
-                ctx.save(); any = true;
-                ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = TRAIL_WIDTH;
-            }
-            if (t.color[i] !== color) {
-                if (open) ctx.stroke();
-                color = t.color[i];
-                ctx.strokeStyle = color;
-                ctx.globalAlpha = TRAIL_PEAK * (1 - (b + 0.5) / TRAIL_BUCKETS);
-                ctx.beginPath(); open = true; px = NaN;
-            }
-            const x1 = x0 + (shiftX(t.x0[i], t.x1[i]) - t.x0[i]);
-            const y1 = y0 + (shiftY(t.y0[i], t.y1[i]) - t.y0[i]);
-            if (!(Math.abs(x0 - px) < JOIN_EPS && Math.abs(y0 - py) < JOIN_EPS)) ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
-            px = x1; py = y1;
+    let open = false;
+    let color = '';
+    let bucket = -1;
+    let px = NaN, py = NaN;
+    for (let i = 0; i < n; i++) {
+        const age = now - t.born[i];
+        if (age < 0 || age >= TRAIL_LIFE) continue;
+        const x0 = shiftX(camX, t.x0[i]), y0 = shiftY(camY, t.y0[i]);
+        if (Math.abs(x0 - camX) > CULL || Math.abs(y0 - camY) > CULL) continue;
+        if (!any) {
+            ctx.save(); any = true;
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = TRAIL_WIDTH;
         }
-        if (open) ctx.stroke();
+        const b = Math.min(TRAIL_BUCKETS - 1, Math.floor((age / TRAIL_LIFE) * TRAIL_BUCKETS));
+        if (b !== bucket || t.color[i] !== color) {
+            if (open) ctx.stroke();
+            bucket = b; color = t.color[i];
+            ctx.strokeStyle = color;
+            ctx.globalAlpha = TRAIL_PEAK * (1 - (b + 0.5) / TRAIL_BUCKETS);
+            ctx.beginPath(); open = true; px = NaN;
+        }
+        const x1 = x0 + (shiftX(t.x0[i], t.x1[i]) - t.x0[i]);
+        const y1 = y0 + (shiftY(t.y0[i], t.y1[i]) - t.y0[i]);
+        if (!(Math.abs(x0 - px) < JOIN_EPS && Math.abs(y0 - py) < JOIN_EPS)) ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        px = x1; py = y1;
     }
+    if (open) ctx.stroke();
     if (any) ctx.restore();
 }
 

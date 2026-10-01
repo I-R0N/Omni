@@ -1746,7 +1746,7 @@ test.describe('the weapons, fired into the world', () => {
       const iv: [number, number][] = [];
       let colours = new Set<string>();
       for (let i = 0; i < T.born.length; i++) {
-        if (now - T.born[i] >= 0.875 || now < T.born[i]) continue;
+        if (now - T.born[i] >= 1.5 || now < T.born[i]) continue;
         const a = rel(T.x0[i]), b = rel(T.x1[i]);
         iv.push([Math.min(a, b), Math.max(a, b)]);
         colours.add(T.color[i]);
@@ -1769,18 +1769,19 @@ test.describe('the weapons, fired into the world', () => {
       for (let i = 0; i < 4; i++) step();
       const stopped = e.energy.burst === null;
       // Pulses in flight lay trail for up to ~0.3 s after release, then it
-      // lives its 0.875 s.
-      for (let i = 0; i < 150; i++) step();
+      // lives its 1.5 s.
+      for (let i = 0; i < 260; i++) step();
       let left = 0;
-      for (let i = 0; i < T.born.length; i++) if (e.simClock - T.born[i] < 0.875) left++;
+      for (let i = 0; i < T.born.length; i++) if (e.simClock - T.born[i] < 1.5) left++;
       I.isFireHeld = orig;
       return { flowing, gaps, n: xs.length, len, segs: iv.length, hole, reach, lead,
                colours: [...colours], beam: e.energy.pulses[0]?.color, followed, stopped, left };
     });
     expect(r.flowing, 'held past the tap, the stream keeps flowing').toBe(true);
     // Fewer, spaced beams: one every third step, ~37 apart against 13 long.
-    expect(r.n, 'a line of pulses in flight').toBeGreaterThanOrEqual(6);
-    expect(r.n, 'but not a crowd of them').toBeLessThanOrEqual(14);
+    // 630 range at 1500 u/s is 0.42 s of flight, so ~17 alive.
+    expect(r.n, 'a line of pulses in flight').toBeGreaterThanOrEqual(10);
+    expect(r.n, 'but not a crowd of them').toBeLessThanOrEqual(22);
     for (const g of r.gaps) expect(g).toBeGreaterThan(r.len);
     // The trail joins them into one line, in the beam's colour.
     expect(r.segs, 'a trail behind the pulses').toBeGreaterThan(10);

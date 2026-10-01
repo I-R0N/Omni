@@ -4085,16 +4085,16 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     the beam meets its polygon, in its local frame (`rayPolygonEntry`, which
     also returns the face normal the optics need).  THE KINETIC BEAM IS A
     STREAM OF SHORT BEAMS that FLY, JOINED BY A LINE TRAIL (user calls): one
-    13-unit pulse every third sim step (40 a second) at 1500 u/s, so they fly
-    ~37 apart; a pull fires at least `pulseCount` (8, 0.2 s) and HOLDING
+    13-unit pulse every third sim step (40 a second) at 1500 u/s to a 630
+    range, so they fly ~37 apart; a pull fires at least `pulseCount` (8, 0.2 s) and HOLDING
     keeps the stream flowing and following the aim, like the light blade.
     It was 120 a second with unlimited splitting, which read as far too many
     beams once glass split them.  Each pulse carries 0.675 of KINETIC
     (mechanical) damage and a matching push, so a held stream still lands 27
     dmg/s.  Every pulse leaves a thin fading LINE TRAIL in the beam's colour
     (`PulseTrail`, a fixed ring of the segments each pulse actually traced —
-    reflections and passes through glass included — living 0.875 s; drawn in
-    `renderPulseTrail`, batched into eight alpha steps), which is what joins
+    reflections and passes through glass included — living 1.5 s; drawn in
+    `renderPulseTrail` in one pass, stroked per change of alpha step), which is what joins
     the stream into one line.  They fly PARALLEL from RANDOM points
     across a narrow lane (`pulseSpread`, ±1.8 units — not a fan, and not a
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over

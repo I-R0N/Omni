@@ -6220,7 +6220,7 @@ const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = 
     // them.  A pull fires at least `pulseCount` (0.2 s); holding keeps the
     // stream flowing.  Each carries 0.675, so a held stream still lands the
     // same 27 dmg/s.
-    kinetic: { name: 'Pulse Beam', damage: 0.675, cooldown: 1.0, beamRange: 420,
+    kinetic: { name: 'Pulse Beam', damage: 0.675, cooldown: 1.0, beamRange: 630,
       beamWidth: 3, push: 0.375, color: ENERGY_COLORS.kinetic,
       pulseCount: 8, pulseInterval: 1 / 40, pulseSpeed: 1500, pulseLength: 13, pulseSpread: 1.8 },
     // An ARC from the ship to the nearest conductor in range, then a bounded
