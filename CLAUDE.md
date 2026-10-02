@@ -4147,7 +4147,10 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     readout row is width-bound at 390px.
   - **A SEEKER DRAWS A DOT TRAIL** (user call), not the ribbon every other
     round draws: a filled dot every `SeekerDots.SPACING` units, fading
-    linearly over `LIFE` (2 s) like the player trail's dots.  The dots live in a
+    linearly over `LIFE` (2 s) like the player trail's dots, and drawn the way
+    the kinetic trail is — one fill per change of a 64-step alpha, never one
+    per dot (the player trail's every shape mode batches the same way, in
+    `render/effects.ts`).  The dots live in a
     fixed ring on `EnergyState` rather than on the projectile, so they
     OUTLIVE the round — a hit does not snatch its trail away — and emitting
     never allocates.

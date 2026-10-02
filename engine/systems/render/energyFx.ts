@@ -328,20 +328,34 @@ const _lockA: number[] = [];
 let _lockT = 0;
 
 /** SEEKER DOT TRAILS: filled dots that fade linearly over their life, like
- *  the player trail's dots — no growth, only alpha. */
+ *  the player trail's dots — no growth, only alpha.  Batched like the pulse
+ *  trail: the ring is in emission order, so neighbouring dots share an alpha
+ *  step and a colour, and ONE fill is issued per change of either rather than
+ *  one per dot.  64 steps, so the fade cannot be seen stepping. */
 function renderDots(ctx: CanvasRenderingContext2D, d: SeekerDotsView, now: number, camX: number, camY: number): void {
     const n = d.x.length;
     let any = false;
+    let open = false;
+    let color = '';
+    let bucket = -1;
     for (let i = 0; i < n; i++) {
         const age = now - d.born[i];
         if (age < 0 || age >= DOT_LIFE) continue;
         const x = shiftX(camX, d.x[i]), y = shiftY(camY, d.y[i]);
         if (Math.abs(x - camX) > CULL || Math.abs(y - camY) > CULL) continue;
         if (!any) { ctx.save(); any = true; }
-        ctx.globalAlpha = DOT_PEAK * (1 - age / DOT_LIFE);
-        ctx.fillStyle = d.color[i];
-        ctx.beginPath(); ctx.arc(x, y, DOT_R, 0, Math.PI * 2); ctx.fill();
+        const b = Math.min(TRAIL_BUCKETS - 1, Math.floor((age / DOT_LIFE) * TRAIL_BUCKETS));
+        if (b !== bucket || d.color[i] !== color) {
+            if (open) ctx.fill();
+            bucket = b; color = d.color[i];
+            ctx.fillStyle = color;
+            ctx.globalAlpha = DOT_PEAK * (1 - b / TRAIL_BUCKETS);
+            ctx.beginPath(); open = true;
+        }
+        ctx.moveTo(x + DOT_R, y);
+        ctx.arc(x, y, DOT_R, 0, Math.PI * 2);
     }
+    if (open) ctx.fill();
     if (any) ctx.restore();
 }
 
