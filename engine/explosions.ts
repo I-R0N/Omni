@@ -240,8 +240,9 @@ export function updateExplosionRings(g: GameEngine) {
                 // Player shield soaks the blast first (kamikaze AoE and any
                 // future enemy-owned explosion) so an AoE hit isn't a raw
                 // shield-bypass — mirrors the projectile / ram absorption.
-                // UNREACHABLE today: the ring walks `currentMap.entities`,
-                // which never holds the player (enemy blasts reach it through
+                // UNREACHABLE today: the ring walks its spawn-time snapshot of
+                // `currentMap.entities`, which never holds the player (enemy
+                // blasts reach it through
                 // `applyBlastToPlayer`), and no other entity's shield is
                 // consulted here — so splash bypasses enemy shields.
                 if (e.id === 'player' && (e.shield ?? 0) > 0 && !e.systemsDisabled) {
@@ -378,8 +379,8 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         queueElectric(g, impactPos, proj.energyElectric, proj.color || '#22d3ee');
     }
 
-    // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
-    // Plasma Cannon, splash and all) must actually threaten the player —
+    // An ENEMY-owned explosive shell ((h) Bastion lobs a boss variant of the
+    // player's Cannon) must actually threaten the player —
     // otherwise its signature weapon is a light show.  Same direct,
     // shield-respecting blast the kamikaze uses, and for the same reason:
     // the ring sweep never reaches the player.  A player-owned Cannon

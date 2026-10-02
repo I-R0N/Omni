@@ -858,24 +858,25 @@ test.describe('the weapons, fired into the world', () => {
       const tiles = e.currentMap.entities.filter((x: any) => x.active && x.shardVariant === 'plastic-tile').slice(0, 30);
       for (const t of tiles) { t.health = 0; t.lastImpactVelocity = { x: 0, y: 0 }; e.physics.removeStaticEntity(t); e.handleEntityDeath(t); t.active = false; }
     });
-    let bonded: any = null;
-    for (let i = 0; i < 20 && !bonded; i++) {
+    // Find a live bond and heat its shard in ONE evaluate.  The sim keeps
+    // stepping between evaluates, so a bond found in one can have broken by
+    // the next — which read `before` as 0 (measured: 1 run in 16).
+    let r: any = null;
+    for (let i = 0; i < 20 && !r; i++) {
       await page.waitForTimeout(500);
-      bonded = await engine(page, e => {
+      r = await engine(page, e => {
         const b = e.shards.liveBonds.find((x: any) => x.a.shardVariant === 'plastic-shard' && x.a.active);
-        return b ? { id: b.a.id } : null;
+        if (!b) return null;
+        const s = b.a;
+        const before = e.shards.liveBonds.filter((x: any) => x.a === s || x.b === s).length;
+        // Heat it past its release point (the rule under test is the
+        // material's `bondReleaseAt`, whatever delivers the heat).
+        e.debugHeat(s, 40, { x: s.position.x - 30, y: s.position.y });
+        const after = e.shards.liveBonds.filter((x: any) => x.a === s || x.b === s).length;
+        return { before, after, heat: s.heat };
       });
     }
-    test.skip(!bonded, 'no plastic bond formed in this run');
-    const r = await engine(page, (e, id: string) => {
-      const s = e.currentMap.entities.find((x: any) => x.id === id);
-      const before = e.shards.liveBonds.filter((b: any) => b.a === s || b.b === s).length;
-      // Heat it past its release point (the rule under test is the
-      // material's `bondReleaseAt`, whatever delivers the heat).
-      e.debugHeat(s, 40, { x: s.position.x - 30, y: s.position.y });
-      const after = e.shards.liveBonds.filter((b: any) => b.a === s || b.b === s).length;
-      return { before, after, heat: s.heat };
-    }, bonded.id);
+    test.skip(!r, 'no plastic bond formed in this run');
     expect(r.before).toBeGreaterThan(0);
     expect(r.after).toBe(0);
     expect(r.heat).toBeGreaterThan(0.3);

@@ -155,8 +155,8 @@ export enum EnemySubtype {
   //   BOSS_WARDEN  — the chassis boss: a shielded, armored siege platform.
   //   BOSS_SCATTER — "Reaver": an EVASIVE brawler wielding a themed variant of
   //   the player's own Shotgun (WEAPONS_AMMO_PLAN §6 weapon parity).
-  //   BOSS_SIEGE   — "Bastion": a long-range plated fortress wielding the
-  //   player's own Plasma Cannon; front-shield + regen.
+  //   BOSS_SIEGE   — "Bastion": a long-range plated fortress lobbing shells
+  //   spread from the player's own Cannon; front-shield + regen.
   BOSS_WARDEN = 'BOSS_WARDEN',
   BOSS_SCATTER = 'BOSS_SCATTER',
   BOSS_SIEGE = 'BOSS_SIEGE',
@@ -347,8 +347,9 @@ export interface WeaponConfig {
   // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
   glow?: boolean;
   // Charged-shot render hint — ProjectileSystem.spawn copies this onto
-  // the projectile so RenderSystem can pick a custom visual (today only
-  // the charged Blaster fireball uses it).
+  // the projectile so RenderSystem can pick a custom visual (today the
+  // fireball, set for a charged plain or kinetic round of the projectile
+  // delivery).
   isCharged?: boolean;
   // Status effect this shot applies to the player on hit (e.g. corrosion).
   // ProjectileSystem.spawn copies it onto the projectile.
@@ -563,7 +564,8 @@ export interface GameEntity {
   damage?: number;
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
-  // Unread: only ever cleared — homing re-picks its target every tick.
+  // Unread: only ever cleared.  A player seeker's lock lives on
+  // `homingTarget`; enemy homing steers at the player and stores no target.
   targetEntityId?: string;
   // How many bodies (or GRAINS — see the bore track in PhysicsSystem) this
   // bolt has already struck.  DIAGNOSTIC since step 5: the falloff comes from
@@ -613,10 +615,9 @@ export interface GameEntity {
    *  however the ship was moving when it fired. */
   spawnSpeed?: number;
   /** The factor actually applied to THIS hit relative to the shot's authored
-   *  damage, stashed by PhysicsSystem so the on-hit consumers in GameEngine
-   *  (the Cannon's AoE splash, the Lightning chain) scale by the same number
-   *  the direct damage did.  They cannot re-derive it: the bolt has already
-   *  shed the energy this hit cost by the time their callback runs. */
+   *  damage, stashed by PhysicsSystem.  Written but UNREAD since the energy
+   *  modules: the blast is payload and no longer scales by it, and the
+   *  Lightning chain that read it is gone. */
   hitFalloff?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
@@ -703,11 +704,10 @@ export interface GameEntity {
   shieldRechargeRate?: number;
   // Unlock + loadout gating (player only; set by GameEngine
   // .syncUnlocksToPlayer):
-  //  - ownedWeapons: what CAN be equipped (always ≥ Blaster)
+  //  - ownedWeapons: the INSTALLED guns (weaponless flight is legal)
   //  - equippedWeapons: the 2-slot loadout — what cycle/select may pick and
   //    fire.  Exactly 2 entries; null = empty slot.  New run =
-  //    [BLASTER, null].  Loadout swaps happen in the pause-menu Drydock
-  //    (interim home until the station POI lands).
+  //    ['projectile', null].  Loadout changes happen at a station drydock.
   //  - overchargeUnlocked: whether charged shots are allowed
   ownedWeapons?: WeaponType[];
   equippedWeapons?: (WeaponType | null)[];
@@ -1286,7 +1286,8 @@ export interface GameEntity {
   // bodies it may reach (≤ the blast cap) instead of the whole map.
   validHitEntities?: GameEntity[];
 
-  // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
+  // Marks the Arc Bolt (projectile + electric) round: electric rendering and
+  // lightning gravity.  Its chain is the `energyElectric` payload.
   isLightningProjectile?: boolean;
 
   // When true, handleEntityDeath skips drop spawning (e.g. explosion kills)
@@ -1302,9 +1303,9 @@ export interface GameEntity {
   // brighter bloom so heavy / status shots read at a glance.
   glow?: boolean;
   // Charged-shot render hint — set on the projectile when the charged
-  // variant should render with a custom visual (e.g. fireball gradient
-  // for charged Blaster).  Other charged variants (Burst / Shotgun /
-  // Homing / Cannon) leave this unset and render with the standard
+  // variant should render with a custom visual: the fireball gradient, for
+  // a charged plain or kinetic round of the projectile delivery.  Every
+  // other charged variant leaves this unset and renders with the standard
   // weapon-color gradient.
   isCharged?: boolean;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild

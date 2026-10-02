@@ -66,11 +66,15 @@ recomputed number can; the one mass with a DBG ladder, the hull, is read live
 off `e.player.mass`.
 
 §8 is PENETRATION and the BLAST, fired through the real resolver because
-neither is authored any more.  It counts how many 1-HP gnats each gun's live
-round punches, at base and at three Gunnery Mk III — that count IS the bank,
-since a body is charged only what it could absorb — and what a Cannon shell's
-derived blast costs a bystander 55 units away, on an ACTOR contact and on
-ENERGY DEPLETION against terrain.
+neither is authored any more.  It counts how many 1-HP gnats each
+round-firing weapon's live round punches — the energy-module roster's
+Projector, Slug, Shotgun, Arc Bolt, Seeker, Heavy Shell and bare Cannon (a
+beam fires no round, so it has no bank to count) — at base and at three
+Gunnery Mk III; that count IS the bank, since a body is charged only what it
+could absorb.  And it reports what the Heavy Shell's derived blast costs a
+bystander 55 units away, on an ACTOR contact and on ENERGY DEPLETION against
+terrain: the Heavy Shell carries the old Plasma Cannon shell's three
+triggers, while the bare Cannon goes off on its fuse alone.
 
 Its results are recorded in the unified-impact entry of `docs/PARKING_LOT.md`:
 §7 is the step-1 baseline, and §8, "What shipped (steps 2–5 and their

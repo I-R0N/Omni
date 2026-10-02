@@ -37,16 +37,14 @@ guessing at them from here is how G12 shipped three bugs.
 
 ### PS5 / full-pad scheme (`gamepad`)
 
-The seven adaptive-trigger profiles in `WEAPON_TRIGGERS` plus the two
-state-driven ones (`chargeTrigger`, `THRUST_TRIGGER`) are authored, not
-tuned. Open:
+The five adaptive-trigger profiles in `WEAPON_TRIGGERS` (one per DELIVERY
+since the energy modules) plus the two state-driven ones (`chargeTrigger`,
+`THRUST_TRIGGER`) are authored, not tuned. Open:
 
-- **Is the Blaster's rattle better than a click?** It fires 7x/s, so a click
-  is fatigue — but a low-frequency `vibration` may just read as mush. This is
-  the single most likely wrong call in the table.
-- **Do Burst's three notches read as three?** `texture` quantises to ten
-  travel zones; three notches inside one pull may blur into one texture.
-- **Is the Cannon's ramp a deep pull or just heavy?** And does Homing's
+- **Is the Projector's rattle better than a click?** It fires ~5.5x/s, so a
+  click is fatigue — but a low-frequency `vibration` may just read as mush.
+  This is the single most likely wrong call in the table.
+- **Is the Cannon's ramp a deep pull or just heavy?** And does the Seeker's
   shallower ramp feel distinct from it, or are two `slope` guns one gun?
 - **Do the state-driven pair land?** Does the charge wall growing under the
   finger read as CHARGING, and does the thrust trigger stiffening near the
@@ -172,8 +170,9 @@ bolts also ricochet into nearby entities. Implications for future waves:
 ## Generalize the projectile-deflection function — DONE (5d P2/P3)
 
 `PhysicsSystem.deflectProjectile(proj, nx, ny, opts)` is the one reflection
-primitive — the arc-shield intercept, every non-arc shield (at contact) and
-the bouncer's tile face all call it — and `DeflectOptions` carries re-own /
+primitive — the arc-shield intercept and every non-arc shield (at contact)
+call it (the bouncer's tile face went with the Laser) — and `DeflectOptions`
+carries re-own /
 speed-scale / spread / keepHoming; the player's shield uses the re-own as a
 PARRY.  See CLAUDE.md §8 "EVERY live shield DEFLECTS".  Still unbuilt:
 reflective tiles / mirror walls, a boss spin-reflect phase or a timed enemy
@@ -241,10 +240,12 @@ composition.
 ## Trail Gradient Caching
 
 **Context (updated 2026-09):** the PLAYER trail no longer uses a gradient —
-it is stamped shapes, or per-segment strokes in PATH mode (`drawPlayerTrail`,
+it is stamped shapes or a PATH polyline, both batched — one fill/stroke per
+change of a 64-step alpha (`drawPlayerTrail`,
 `engine/systems/render/effects.ts`).  The per-frame `ctx.createLinearGradient`
 now lives in `drawTrailStrip` (same file): one per visible PROJECTILE trail
-(bouncers excepted) and one for the snitch's comet tail.  Trail points move
+(player seekers excepted — they draw a dot trail in `render/energyFx.ts`) and
+one for the snitch's comet tail.  Trail points move
 every frame, so the gradient can't trivially be reused.  Measure a
 projectile-heavy scene before doing anything.
 
@@ -2066,7 +2067,10 @@ follow-up after it by 09-21.  The RULES they left are current, and live in
 CLAUDE.md: §5 (WEAPONS — the energy bank, the base-bank trim, the Cannon's
 detonation and derived blast) and §8 (the crash spend, the sweep, the glass
 rule, the mass scale, the nebula condensation ledger, the blast-and-cloud
-rule).  `perf/impact-audit.mjs` re-measures what they left (its §5 crash
+rule).  (The energy modules kept these rules but retired the roster they
+were tuned on: the old Cannon's actor-or-stop detonation now belongs to the
+three cannon combinations, and the bare Cannon goes off on its fuse
+alone.)  `perf/impact-audit.mjs` re-measures what they left (its §5 crash
 counts, §7 mass scale, §8 penetration and blast).  The per-step ledger that
 stood here — steps 2–5 and follow-ups 12–23, with every measurement, bug and
 lesson — is in git history at `ca0ad8e` (this file, before the 2026-09 docs

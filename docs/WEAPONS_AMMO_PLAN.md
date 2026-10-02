@@ -2,8 +2,11 @@
 
 > **HISTORICAL design record (2026-07-11)** for the economy pivot,
 > implemented in PRs #72–#77 and since extended.  `CLAUDE.md` is the source
-> of truth.  §6 (weapon parity) and §7 (the weapon × trait map) remain live
-> references.
+> of truth.  §6 (weapon parity) remains a live reference.  §7 (the weapon ×
+> trait map) is still the reasoning behind every trait, but its rows name the
+> seven-gun roster the energy modules (PR #104) retired — a weapon is now a
+> delivery module plus an optional energy modifier (CLAUDE.md §5 WEAPONS) —
+> and the table has not been redrawn.
 
 Design doc of record for the weapons-ammo design session (completion
 roadmap step 0, added 2026-07-08; session held 2026-07-11). Consumed by
@@ -286,7 +289,8 @@ high-payout node capstones with **no unlock plumbing** (no changes to
 > discount was removed.  A boss now pays score, a salvage spray and ONE
 > RANDOM MODULE into the inventory (`grantBossModule`, `engine/bosses.ts`),
 > drawn uniformly from every `MODULE_DEFS` entry that costs anything — which
-> includes the six purchasable guns, so a capstone can drop a weapon.  With
+> includes the four purchasable deliveries (Scatter, Seeker, Beam, Cannon)
+> and the three energy modifiers, so a capstone can drop a weapon.  With
 > the cargo full it pays that module's catalog value in salvage instead.
 > There is still no per-boss unlock plumbing (`UNLOCK_DEFS` no longer exists
 > at all).  The parity recommendation below is unaffected and live.

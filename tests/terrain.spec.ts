@@ -393,7 +393,7 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
           && !x.fractureEdgeFill);
         const ramToDeath = (t: any, preShoot: boolean) => {
           if (preShoot) {
-            // One ordinary Blaster bolt — enough to build the boundary model
+            // One ordinary bolt (the retired Blaster's 4) — enough to build the boundary model
             // and rewrite `maxHealth` onto the derived budget.  That rewrite
             // is what the old crash path then counted against, one point at a
             // time.
@@ -759,7 +759,7 @@ test.describe('a ram that cannot break through BOUNCES', () => {
 
       expect(r.alive, 'the tile holds at this speed').toBe(true);
       // IT IS DAMAGED, and by an amount worth a weapon's attention: a base
-      // Blaster bolt lands 4, so one ram at this speed is worth several of
+      // Projector bolt lands 3, so one ram at this speed is worth several of
       // them.  Stated as a floor rather than a measured figure so a re-tune
       // of the coupling does not read as this defect returning.
       expect(r.dealt, 'and it is really damaged').toBeGreaterThan(10);

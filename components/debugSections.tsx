@@ -12,10 +12,10 @@
  *
  *  - **A row's LABEL and ACTION are its identity.**  Docs, suites and muscle
  *    memory name rows by label ("Materials ▸ Nebula ▸ Neb bond"), so moving
- *    a row between sections is free and renaming one is not.  Every row here
- *    was moved verbatim from the old panel — label, readout and tooltip (the
- *    tooltip is now the row's `detail`) — and
- *    `tests/debugmenu.spec.ts` pins the full set of labels.
+ *    a row between sections is free and renaming one is not.  Every row that
+ *    came from the old panel was moved verbatim — label, readout and tooltip
+ *    (the tooltip is now the row's `detail`) — and `tests/debugmenu.spec.ts`
+ *    pins the labels; a new row joins its ROW_LABELS.
  *  - **Rows read ONLY the stats payload** (`c.s`), exactly as the old JSX
  *    did; nothing here polls the engine for data.  Actions call the engine
  *    directly (`dbg(e => e.dbg.cycleX())`) — the same method the old App
@@ -127,7 +127,7 @@ export type DebugRow =
   | { kind: 'chips'; label: string; chips: (c: DebugCtx) => readonly DebugChip[] }
   /** Lays itself out; `label` is what the filter matches. */
   | ({ kind: 'custom'; label: string; render: (c: DebugCtx) => React.ReactNode } & DebugHelp)
-  /** Rows only known at render time (the weapon catalog, perf tasks). */
+  /** Rows only known at render time (the weapon-module catalog, perf tasks). */
   | { kind: 'each'; label: string; rows: (c: DebugCtx) => readonly DebugRow[] };
 
 export interface DebugSection {
@@ -335,7 +335,7 @@ const BOSS_SPAWNS: readonly { k: string; label: string; summary: string }[] = [
   { k: 'BOSS_SCATTER', label: 'Reaver',
     summary: 'A fast, evasive brawler with a boss Shotgun; later phases add an arc shield, then armour and Kamikazes.' },
   { k: 'BOSS_SIEGE', label: 'Bastion',
-    summary: 'A huge siege boss lobbing Plasma Cannon salvos from long range; its front plate stops head-on fire, and later it regenerates too.' },
+    summary: 'A huge siege boss lobbing heavy cannon salvos from long range; its front plate stops head-on fire, and later it regenerates too.' },
 ];
 
 const DRAGON_SPAWNS: readonly string[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
@@ -443,7 +443,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Blast energy', dbg(e => e.dbg.cycleBlastEnergy()),
         c => c.s.blastEnergyName ?? '1x (def)',
         'How much of a cannon shell\'s energy becomes its explosion.',
-        'How much of a SHELL\'s kinetic energy becomes its BLAST (a multiplier over BLAST_ENERGY_COUPLING, which ships at 0.4). The splash was the last damage number in the roster still authored as a flat scalar: the direct bite went kinetic in step 3, the crash in step 4 and the bore in step 5, while explosionDamage sat at 10 as every round\'s bank grew tenfold and terrain started deriving ~50 HP a tile — so the blast shrank into a light show. It is now a fraction of the shell\'s own energy, which means it rides GUNNERY and the charge for free (both buy a heavier round) and the RING grows with the round too, by the square root, so its area is the energy. What it does NOT do is shrink when the shell spent its bank boring: the charge is PAYLOAD, sized at spawn, and travel energy only decides how far the round gets. The coupling is the sibling of "Crash energy" — a hull couples ~11% of a contact into breaking work, a shaped charge this much into the blast — and it is set so the charge is worth about one more hit (measured: peak 20.8 against the Cannon\'s 18 bite). The 0.5x step is the A/B against the pre-doubling blast.'),
+        'How much of a SHELL\'s kinetic energy becomes its BLAST (a multiplier over BLAST_ENERGY_COUPLING, which ships at 0.4). The splash was the last damage number in the roster still authored as a flat scalar: the direct bite went kinetic in step 3, the crash in step 4 and the bore in step 5, while explosionDamage sat at 10 as every round\'s bank grew tenfold and terrain started deriving ~50 HP a tile — so the blast shrank into a light show. It is now a fraction of the shell\'s own energy, which means it rides GUNNERY and the charge for free (both buy a heavier round) and the RING grows with the round too, by the square root, so its area is the energy. What it does NOT do is shrink when the shell spent its bank boring: the charge is PAYLOAD, sized at spawn, and travel energy only decides how far the round gets. The coupling is the sibling of "Crash energy" — a hull couples ~11% of a contact into breaking work, a shaped charge this much into the blast — and it is set so the charge is worth about one more hit (the Heavy Shell, cannon + kinetic: peak ~24.6 against its 24 bite; the bare Cannon scales its blast to 0.2, ~12.5). The 0.5x step is the A/B against the pre-doubling blast.'),
       ctrl('Hull density', dbg(e => e.dbg.cycleHullDensity()),
         c => c.s.hullDensityName ?? '0.250 / m100 (def)',
         'How heavy the ship is — moves crash damage, knockback, impact shake and tilt feel together.',
@@ -542,8 +542,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         c => c.s.outfitAnywhere ? 'On' : 'Off',
         'Lets the pause menu\'s ship and weapon flowers be edited anywhere on the map.',
         'DBG: drag, install and unmount work in the pause menu without a drydock. Off restores the station-only rule.'),
-      // The catalog is a PANEL-ONLY payload, expanded per render like the
-      // weapon rows above.
+      // The catalog is a PANEL-ONLY payload, expanded into a row per module
+      // on every render.
       each('Weapon module', c => (c.s.weaponModuleCatalog ?? []).map((m): DebugRow => {
         const where = [m.installed > 0 ? `on ${m.installed}` : '', m.stored > 0 ? `cargo ${m.stored}` : '']
           .filter(Boolean).join(' · ');
@@ -594,7 +594,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         'Grant the Light module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high (the beam style at the medium / high lighting tiers).'),
       ctrl('Outfit all', dbg(e => e.debugOutfitAll()),
         c => 'Max',
-        'Outfit a full Mk III loadout (plus a Mk V scanner) in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).'),
+        'Outfit a full Mk III loadout (plus a Mk V scanner and a projector + thermal / beam + electric pair) in a canonical layout that satisfies every adjacency requirement, spare deliveries and modifiers in the inventory (DBG).'),
       ctrl('Reset', dbg(e => e.resetOutfit()),
         c => 'Lean',
         'Reset to the lean run start: the free Base Hull on the centre ship hex, empty inventory, Projector on gun hex W1.'),
@@ -808,7 +808,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Bnd strength', dbg(e => e.dbg.cycleBoundaryStrength()),
         c => c.s.boundaryStrengthName ?? 'x1',
         'Master toughness for all terrain — a multiplier on every grain boundary\'s strength.',
-        'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which derives a 36px rock tile at ~55 HP and a glass pane at ~50 — about 14 and 13 hits at 4 damage a hit. Takes effect on the next hit (cached patterns rebuild).'),
+        'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which derives a 36px rock tile at ~55 HP and a glass pane at ~50. Takes effect on the next hit (cached patterns rebuild).'),
       ctrl('Dmg spread', dbg(e => e.dbg.cycleDamageSpread()),
         c => c.s.damageSpreadName ?? 'material',
         'How widely one hit\'s damage spreads through the grain (off = one grain at a time).',
@@ -1283,8 +1283,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       stat(' ·weapons', c => fmtMs(c.s.perf!.weaponsMs), 'Weapon firing and cooldowns.'),
       stat(' ·drops', c => fmtMs(c.s.perf!.dropsMs), 'Collecting and merging drops.'),
       stat(' ·homing', c => fmtMs(c.s.perf!.homingMs), 'Steering homing shots.'),
-      stat(' ·lightn', c => fmtMs(c.s.perf!.lightningMs), 'Lightning arcs and chains.'),
-      stat(' ·misc', c => fmtMs(c.s.perf!.logicMiscMs), 'The rest of updateGameLogic: input, HUD, the wave check, projectile trails.'),
+      stat(' ·lightn', c => fmtMs(c.s.perf!.lightningMs), 'The Arc Bolt\'s pull toward targets (its arcs are the energy layer\'s, in  ·misc).'),
+      stat(' ·misc', c => fmtMs(c.s.perf!.logicMiscMs), 'The rest of updateGameLogic: input, HUD, the wave check, projectile trails, and the energy layer (heat, arcs, beams).'),
       stat('render', c => fmtMs(c.s.perf!.renderMs), 'Average ms to issue the canvas draw (the JS side — the browser composites after this).'),
       stat(' ·neb', c => fmtMs(c.s.perf!.nebulaMs), 'Drawing nebula tiles and shards.'),
       stat(' ·vis-neb', c => c.s.perf!.nebulaVisible, 'Nebula bodies drawn this frame.'),

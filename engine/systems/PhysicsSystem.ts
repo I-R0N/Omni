@@ -1635,10 +1635,11 @@ export class PhysicsSystem {
   /**
    * Reflect a projectile off a surface — the ONE deflection primitive.
    *
-   * Three places in this engine bounce a bolt off something: a shield ring, a
-   * bouncer round off a tile face, and (eventually) a parry or a mirror
-   * hazard.  They differ only in WHERE the normal comes from and what happens
-   * to ownership afterwards, so the mirror itself lives here and the caller
+   * Both shield kinds bounce a bolt off themselves — an arc shield's ring
+   * before the body SAT, a non-arc pool at contact — and the retired Laser's
+   * tile-face bounce was a third caller.  They differ only in WHERE the
+   * normal comes from and what happens to ownership afterwards (a player
+   * PARRY re-owns the bolt), so the mirror itself lives here and the caller
    * decides when it fires.
    *
    * `nx`/`ny` must be a UNIT normal pointing OUT of the surface.  Returns false
@@ -1661,7 +1662,7 @@ export class PhysicsSystem {
       if (vdotn >= 0) return false;
 
       // v' = v − 2(v·n)n.  For an axis-aligned normal this reduces to negating
-      // one component, which is exactly what the bouncer's tile path did by
+      // one component, which is what the retired bouncer's tile path did by
       // hand before it was folded onto this.
       let rx = vx - 2 * vdotn * nx;
       let ry = vy - 2 * vdotn * ny;
@@ -3413,7 +3414,7 @@ export class PhysicsSystem {
       // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
       // a's frame for the duration of this check so vertex math stays
       // local.  After resolution we re-wrap both positions so anything
-      // the bouncer / positional-correction path wrote to a.position or
+      // the deflect / positional-correction path wrote to a.position or
       // b.position in the shifted frame returns to canonical coords.
       const offsetX = (a.position.x + wdx) - b.position.x;
       const offsetY = (a.position.y + wdy) - b.position.y;
@@ -3447,7 +3448,7 @@ export class PhysicsSystem {
 
       if (shifted) {
           // Normalize any positions the resolver may have written in b's
-          // shifted frame (bouncer reflection, SLOP correction, etc.).
+          // shifted frame (shield deflection, SLOP correction, etc.).
           wrapPosition(a.position);
           wrapPosition(b.position);
       }
@@ -3922,7 +3923,9 @@ export class PhysicsSystem {
           // through or resting, not hitting — before this it was damaged a
           // second time on the single-spend path and then STOPPED, so no
           // bored round ever came out of a tile wider than its own step.  A
-          // ricochet that should re-hit clears the list at the bounce.
+          // shield PARRY clears the list when it re-owns a bolt
+          // (`deflectProjectile`), so a parried bolt may strike what it was
+          // refused before.
           if (proj.hitEntityIds !== undefined && proj.hitEntityIds.includes(target.id)) return;
 
           // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
@@ -3932,15 +3935,14 @@ export class PhysicsSystem {
           // nothing bites exactly its authored damage and one that has
           // spent half its energy bites half.
           //
-          // EVERY WEAPON IS AFFECTED EQUALLY (user call).  The falloff is
-          // not direct-damage-only: the Cannon's AoE splash and the
-          // Lightning chain are applied in GameEngine, from a callback that
-          // fires LATER in this function — by which point the grain bore
-          // may already have advanced `pierceHits` past this hit's ordinal.
-          // So the factor actually used here is STASHED on the projectile
-          // and those consumers read it, rather than re-deriving an ordinal
-          // that no longer means the same thing.  One number, one hit, three
-          // damage paths.
+          // EVERY WEAPON WAS AFFECTED EQUALLY (user call): the Cannon's AoE
+          // splash and the Lightning chain, applied in GameEngine from a
+          // callback that fires LATER in this function, read the factor
+          // STASHED here (`hitFalloff`) rather than re-deriving an ordinal
+          // the grain bore may already have advanced.  Neither reads it
+          // now — the blast became PAYLOAD (sized at spawn from the shell's
+          // mass; see `applyExplosionAoE`) and the chain went with the energy
+          // modules — so the stash is written and unread.
           const projMass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
           let projDmg = PhysicsSystem.projectileBiteOn(proj, target);
           // `hitFalloff` keeps its meaning — this hit's size RELATIVE to the
@@ -4124,9 +4126,10 @@ export class PhysicsSystem {
                   // material's price per GRAIN and slowing by exactly what
                   // it deposited — instead of spending the whole shot on
                   // the entry cell.  It returns 0 for everything else
-                  // (nebula, enemies, and every body under the DBG legacy
-                  // fracture A/B), which is the single-spend path this
-                  // always was.
+                  // (enemies, and every body under the DBG legacy fracture
+                  // A/B), which is the single-spend path this always was.
+                  // A gas never gets here: a round crossing nebula returns in
+                  // the passThrough block above.
                   if (!alreadyHit) boredSteps = this.borePierceTrack(proj, target, projDmg);
                   if (boredSteps === 0) {
                       stampLocalImpact(target, proj.position);

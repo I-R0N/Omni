@@ -52,8 +52,8 @@ const DEBUG_KEY = 'Backquote';
 const PAD = { CROSS: 0, CIRCLE: 1, R2: 7, SELECT: 8, DPAD_DOWN: 13 };
 
 /** Every labelled row of the debug panel (`components/debugSections.tsx`),
- *  bar the data-driven ones — a row per weapon and per perf task, labelled
- *  from the payload.  A MULTISET: two rows are called "  ↳ live", the timing
+ *  bar the data-driven ones — a row per weapon module and per perf task,
+ *  labelled from the payload.  A MULTISET: two rows are called "  ↳ live", the timing
  *  tree has two "·misc", and "Hull" is both the Ship Tilt row and the Hull Mk
  *  grant row.  Labels are identity — suites, docs and muscle memory name rows
  *  by them — so a rename has to be a deliberate edit to this list.  BYTE for
@@ -106,6 +106,10 @@ const ROW_LABELS = [
   // The chip and custom rows, which the registry gave labels of their own.
   'Maps', 'Material Field Maps', 'Force one type', 'Warp in a boss',
   'Summon a dragon', 'Warp in a rival', 'Perf REC',
+  // Weapons & Modules ▸ Weapon Modules (energy modules) — its static rows;
+  // the per-module +/− rows are data-driven, like the perf tasks.
+  'Outfit anywhere', 'Equip projectile', 'Equip beam', 'Equip spread',
+  'Equip homing', 'Equip cannon', 'Clear',
 ];
 
 /** Chips on the panel's button GROUPS, by the label on each button (seeded

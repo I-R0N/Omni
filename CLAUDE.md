@@ -89,8 +89,9 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           modules (Gunnery, Scanner, hex slots, and
                           that the deleted Penetration family is gone
                           from every surface), weapons (what a SHOT
-                          does: the Plasma Cannon's fuse, and the whole
-                          energy model — falloff, the grain bore,
+                          does: the Heavy Shell's fuse — the old Plasma
+                          Cannon shell, now `'cannon+kinetic'` — and the
+                          whole energy model — falloff, the grain bore,
                           overkill carry-through, the far side), audio,
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 15
@@ -181,11 +182,15 @@ engine/
                           `statBreakdown`, the UI snapshots.  The
                           COMMERCE API (moveModule / purchaseModule /
                           sellModule / scrapModule) stays on GameEngine
-  debugControls.ts        `DebugControls` — every toggle and cycle behind
-                          the debug panel, reached as `engine.dbg.*`.
-                          A class, not free functions, because the UI is
-                          the caller.  The flags it writes are still
-                          GameEngine fields; only the methods moved
+  debugControls.ts        `DebugControls` — the toggles and cycles behind
+                          the debug panel, reached as `engine.dbg.*`,
+                          except three that live on GameEngine:
+                          `toggleTraits` (suites call it off the handle),
+                          `cycleTriggerEncoding` and Outfit anywhere's
+                          `debugToggleOutfitAnywhere`.  A class, not free
+                          functions, because the UI is the caller.  The
+                          flags it writes are still GameEngine fields;
+                          only the methods moved
   roamers/                The engine-managed roamers — each a bespoke
                           lifecycle the AISystem does not drive
     dragons.ts            Stage-6 serpent: flow-weave roam, the Snake
@@ -283,9 +288,9 @@ engine/
       nebulaTiles.ts      The cloud layer, both doors: the cached
                           fast path (one drawImage) and the slow path
                           (tint chain, sprite, twinkle) that refills it
-      projectileShapes.ts The four shot silhouettes — lightning, bouncer
-                          head, charged fireball, standard glow — and
-                          the two unit-radius gradient caches
+      projectileShapes.ts The three shot silhouettes — the electric bolt's
+                          tendrils, the charged fireball, the standard
+                          glow — and the two unit-radius gradient caches
       dropShapes.ts       Collectible drops (salvage / health / glass
                           debris) and the proximity-interactable POIs
                           (station, portal, snitch).  Like enemyShapes,
@@ -307,9 +312,12 @@ engine/
       effects.ts          World-space ephemera: player + projectile
                           trails, pooled particles, lightning arcs
       energyFx.ts         Energy feedback: heat colour + emitted light on
-                          the heated set, the energised-nebula sparks,
-                          the traced light path (every reflection and
-                          split) and the kinetic-beam pulses
+                          the heated set, the energised-nebula sparks, the
+                          electric spread's ring and a shocked hull's
+                          crackle, the traced light path (every reflection
+                          and split), the kinetic-beam pulses and their
+                          line trail, and a player seeker's target bracket
+                          and dot trail (effects.ts skips its ribbon)
       lighting.ts         UNIFIED TILE LIGHTING (PR #88; ships 'unified',
                           'legacy' is the A/B): occluders, shadows, glass
                           refraction, the beam, emitters, world lights and
@@ -331,10 +339,12 @@ engine/
                           detection, arc-shield slew
     ParticleSystem.ts     Pooled particle FX
     TrailSystem.ts        Generic trail point management
-    ProjectileSystem.ts   Projectile spawn (pooled), homing (the nearest-
-                          enemy lock + Hermite guidance), lightning gravity
-                          (the charged bolt), the hard cap (lifetime and
-                          penetration are PhysicsSystem's)
+    ProjectileSystem.ts   Projectile spawn (pooled), homing (a player
+                          seeker's held lock on the nearest ENEMY, a Turret
+                          missile's chase of the player — both Hermite-
+                          steered), lightning gravity (the Arc Bolt,
+                          `projectile+electric`, charged or not), the hard
+                          cap (lifetime and penetration are PhysicsSystem's)
     WeaponSystem.ts       Fire-rate, the generic charged variant,
                           Gunnery fold, dispatch by DELIVERY (rounds →
                           ProjectileSystem, beam/instant cone →
@@ -618,7 +628,10 @@ deliberately no `deathPending` short-circuit in `loop()` and it is
 excluded from the substep-drain break, so the field keeps fighting behind
 the (translucent) summary.  Three things make that safe: the dead player
 is already inert (`updateGameLogic` returns early while `isExploding`, so
-no input / weapons / docking / drop collection / wave progress), the
+everything after step 4b stops: input / weapons / docking / drop
+collection / wave progress, the snitch / dragon / rival ticks, the
+projectile post-pass and the energy layer — heat neither cools nor burns
+until the respawn), the
 explosion-timer branch is guarded on `explosionTimer > 0` so the PENALTY
 cannot be re-charged every step, and the summary is a SNAPSHOT
 (`deathSummary`, taken at the moment of death and republished verbatim)
@@ -772,8 +785,14 @@ Per-frame `loop()`:
         keeper (`OVERWORLD_CONSTANTS` timers).
      6. Player movement + input: thrust, speed cap, facing, `tickPlayerRoll`,
         the fire queues, adaptive-trigger profiles
-     7. Player weapon tick, then projectile homing / lightning gravity /
-        fuses (`updateProjectileFuses`) / trails
+     7. Player weapon-cooldown tick (`tickPlayerCooldown`), then projectile
+        homing / lightning gravity / the per-round pass
+        (`updateProjectileFuses`: seeker dots, in-flight speed bleed,
+        curving pellets, then the fuse and the stop blast), then
+        `tickEnergy` — the energy layer: the electric payloads this step's
+        hits queued (it reads the grids, so it waits for physics), the
+        heated set, charged-body jumps, the live beam and kinetic pulses,
+        the electric ring and the burn / shock timers — then trails
      8. Drop-collection scan (`activeDrops` cache; `dropScan` task) +
         same-type drop merge pass (`DropSystem.mergeDrops`;
         `dropMerge` task)
@@ -793,8 +812,14 @@ metal / rock / indestructible / nebula), mobile shards (rock / glass /
 plastic / metal / nebula), projectiles, particles, drops — is a
 `GameEntity` (see
 `types.ts`). Discriminated by `type: EntityType` plus optional role
-fields (`enemySubtype`, `shardVariant`, `dropType`, `isBouncer`,
-`isLightningArc`, `isLightningProjectile`, …).
+fields (`enemySubtype`, `shardVariant`, `dropType`, `isLightningArc`,
+`isLightningProjectile`, …).  The energy layer's weapon effects are
+NOT entities: a beam, a kinetic-beam pulse and its line trail, the
+seeker dot trail and the electric ring are plain state on
+`GameEngine.energy` (`EnergyState`, `engine/energyEffects.ts`), drawn
+by `render/energyFx.ts`; the beam, pulses and ring find what they hit by
+walking the physics grids themselves (`raycast` / `gather`), not through
+PhysicsSystem's collision pass.
 
 Every shard-family entity (tiles AND shards, of every material)
 shares a single `EntityType.STRUCTURE` carrier; per-variant behaviour
@@ -838,10 +863,16 @@ Notable existing field categories on `GameEntity`:
 - AI / enemy: `enemySubtype`, `aiState`, `aiTimer`, `maxSpeed`,
   `aggroTimer`, `orbitRadius`/`orbitSpin`/`preferredDistance`, `enemyTier`
   (kill points + death shake).  `visionRange` is written, never read.
-- Projectile: `damage`, `homing`, `homingStrength`, `ownerType`,
-  `mass`, `spawnSpeed`, `hitEntityIds`, `isBouncer`,
-  `isLightningProjectile`, `isLightningArc`, `arcPoints` (`targetEntityId`
-  is only ever cleared)
+- Projectile: `damage`, `homing`, `homingStrength`, `homingTarget` (a
+  player seeker's held lock on an ENEMY; the target bracket reads it),
+  `ownerType`, `mass`, `spawnSpeed`, `hitEntityIds`,
+  `isLightningProjectile` (the `projectile+electric` bolt), the energy
+  payload copied off its config (`energyHeat` / `energyBurnSeconds` /
+  `energyBurnRate` / `energyElectric` / `energyBlastHeat`), and the
+  in-flight shaping `speedRetain` + `curveRate` / `curveWobble` /
+  `curveHz` / `curvePhase` (`targetEntityId` is only ever cleared).
+  `isLightningArc` / `arcPoints` belong to the arc PARTICLE a discharge
+  spawns (`energyEffects.ts` `arcVisual`), not to a round.
 - Drop / reward: `dropType` (`'health' | 'glass' | 'salvage'`),
   `dropValue`, `salvagePickupFlash`, `dropComposition`.  Note: `gold`
   (player) and `powerupWeapon` exist but nothing reads them.  (The ammo
@@ -895,6 +926,17 @@ Notable existing field categories on `GameEntity`:
   `nebulaCachedSize` — populated by RenderSystem after a slow-path
   draw and invalidated at every site that mutates the inputs
   (composition, neighbour count, tile area).
+- Energy (energy modules — set only on bodies that have any; §8):
+  `material` (opt-in; terrain reads its variant row's), `heat`
+  (normalised, 1 = the material's critical heat; absent = cold) with its
+  latched `burnTimer` / `burnRate`, `heatTracked` / `heatByPlayer` (the
+  bounded heated set's flag and kill attribution), the presentation-only
+  hot spot `heatSpotX` / `heatSpotY` / `heatSpread` and eased
+  `heatShown`, the electric charge `energizedUntil` / `charge` /
+  `chargeByPlayer` (+ `energizedTracked`), `fractureProfile` /
+  `fractureSiteRatio` (how the last energy event makes it break, and the
+  ratio that keeps its derived toughness), and on a hull the feedback
+  timers `burnIndicator` / `shockTimer`
 - Station POI: `isStation` (station entities — INTERACTABLE + mass ∞ +
   no dropType, so broadphase / static grid / flow-field obstacles all
   skip them), `stationKind` (`'home' | 'shipwright' | 'armory' |
@@ -988,9 +1030,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   halves stay separate because only the Gunnery anchor is pinned to
   `MODULE_DEFS`;
   `BLAST_ENERGY_COUPLING` / `blastDamageFor` — a shell's blast is a
-  fraction of its own kinetic energy, not an authored scalar, and a
-  Gunnery mark grows its RING too (√mult, so the area tracks the energy;
-  the charged Cannon's ×2 ring is authored);
+  fraction of its own kinetic energy (times its weapon's `blastScale`, the
+  bare Cannon's 0.2), not an authored scalar, and a Gunnery mark grows its
+  RING too (√mult, so the area tracks the energy; a charged shell's ×2
+  ring is authored);
   `breakYieldsNothing` — the derived predicate saying a body's death
   would hand back no children, which is what a blast may not damage
 - `PHYSICS_CONSTANTS` (`PLAYER_MASS` is DERIVED from `IMPACT_DENSITY`,
@@ -1294,8 +1337,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   rather than a silent one.
 - `EXPLOSION_CONSTANTS`, `PARTICLE_CONSTANTS`, `REGEN_POP_CONSTANTS`,
   `WAVE_ANNOUNCE_CONSTANTS`
-- `LIGHTNING_CHAIN_RANGE/COUNT`, `LIGHTNING_ARC_LIFETIME`,
-  `LIGHTNING_GRAVITY_STRENGTH/RANGE`, `HOMING_ACQUIRE_RANGE`
+- `LIGHTNING_ARC_LIFETIME` (how long a drawn arc lingers),
+  `LIGHTNING_GRAVITY_STRENGTH/RANGE` (the Arc Bolt's curve toward targets;
+  the CHAIN itself is the energy layer's `ENERGY_CONSTANTS.CHAIN_*`),
+  `HOMING_ACQUIRE_RANGE`
 - `PROJECTILE_CONSTANTS`, `MAX_PROJECTILES`, `MAX_PARTICLES`
 - `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
   optional `burst` fire pattern + `glow` shot hint — the per-archetype
@@ -1497,15 +1542,21 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   mid-range, phase 2 blows the barrier + plating off and calls a SWARM
   escort) and BOSS_SCATTER ("Reaver", the first WEAPON-boss — a fast brawler
   that wields a themed variant of the PLAYER'S OWN Shotgun via
-  `BOSS_WEAPONS.SCATTER`, spread from `WEAPONS[SHOTGUN]` so the cone, colour
-  and pellet family are the ones the player knows: WEAPONS_AMMO_PLAN §6
-  weapon parity, no parallel weapon table.  Its identity is the EVASIVE
+  `BOSS_WEAPONS.SCATTER`, spread from `WEAPONS['spread+kinetic']` (the
+  Scatter delivery + Kinetic modifier, still named Shotgun) so the cone,
+  colour and pellet family are the ones the player knows: WEAPONS_AMMO_PLAN
+  §6 weapon parity, no parallel weapon table.  Its identity is the EVASIVE
   trait; phase 2 raises a tracking arc shield on top, phase 3 trades evasion
   for ARMOR and calls a KAMIKAZE escort, so the right answer flips from
   Seeker to a big-hit weapon mid-fight) and BOSS_SIEGE ("Bastion", the
-  Reaver's inverse on every axis — slow, huge and plated, lobbing the
-  PLAYER'S OWN Plasma Cannon (`BOSS_WEAPONS.SIEGE`, splash and all) in
-  2-shell salvos from a LONG stand-off.  It is the only archetype that
+  Reaver's inverse on every axis — slow, huge and plated, lobbing shells
+  spread from the PLAYER'S OWN Cannon (`BOSS_WEAPONS.SIEGE`) in 2-shell
+  salvos from a LONG stand-off.  It spreads the BARE `WEAPONS.cannon` and
+  restates damage, speed, mass and an AUTHORED splash but not `detonateOn`,
+  `boreCostScale` or `color`, so since the energy modules it inherits the
+  bare Cannon's fuse-only detonation, narrow bore and white shell — at
+  odds with its own "splashes on impact" comment, and open.  It is the
+  only archetype that
   overrides the shared skirmisher stand-off, via the ENEMY_VARIANTS
   `preferredDistance` field — that is what gives it its own RANGE BAND.
   Its traits are FRONT-SHIELD over REGEN; phase 2 runs both at once and
@@ -1549,8 +1600,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   now pin), Arc Shell (electric: the chain starts at the BLAST, wherever it
   goes off — `queueElectric`) and Incendiary Shell (thermal: `blastHeat`, so
   heat on a blast is a property of that shell, never of every explosion).
-  Removed keys resolve through `LEGACY_WEAPON_MAP` (the old shell and every
-  `radial*` key → the cannon; any other `*+magnetic` / `*+explosive` → its
+  Removed keys resolve through `LEGACY_WEAPON_MAP` (the old
+  `projectile+explosive` shell, `radial`, `radial+magnetic` and
+  `radial+explosive` → the cannon; `radial+kinetic|electric|thermal` → the
+  matching cannon combination; any other `*+magnetic` / `*+explosive` → its
   bare delivery).  EVERY SEEKER LOCKS THE NEAREST ENEMY (user call —
   `homingPrefers` is gone): `ProjectileSystem.updateHoming` holds the lock on
   `GameEntity.homingTarget` while the target lives and stays inside 1.5×
@@ -1569,18 +1622,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   BLASTER→projectile, BURST→projectile+kinetic, SHOTGUN→spread+kinetic,
   BOUNCER→beam+thermal, LIGHTNING→projectile+electric,
   HOMING→homing+kinetic, CANNON→cannon, and the `wpn_*`
-  catalog ids likewise) and those combinations inherit the old gun's
-  tuning (the old CANNON id resolves to the bare cannon, which is now the
-  time-fused penetrator above; its old shell lives on as the Heavy Shell).  Old ids resolve
+  catalog ids likewise).  Three keep their old gun's numbers — the Shotgun
+  (plus a range falloff, `speedRetain` 0.3), the Arc Bolt (LIGHTNING) and
+  the Seeker (HOMING); the rest were retuned: BLASTER's Projector is the
+  deliberately weaker base (3 dmg / 0.18 s against `LEGACY_BASE_WEAPON`'s
+  4 / 0.14), BURST's Slug is one 7-damage round at 24 rather than a
+  3-round burst, BOUNCER's Heat Lance is a heat beam, and the old CANNON id
+  resolves to the bare cannon, the time-fused penetrator above (its old
+  shell's behaviour lives on in the Heavy Shell).  Old ids resolve
   anywhere a key is read (`currentWeapon`, `debugGrantWeapon`); unknown
   ids fail safe to the bare projector.  The ricochet (bouncer) primitive
-  and the enum-keyed lightning chain are GONE; the charged bolt's chain is
+  and the enum-keyed lightning chain are GONE; the Arc Bolt's chain is
   the energy layer's bounded discharge.  The rest of this entry describes
   the projectile rules every round-firing combination still lives by.
   **A HEAVY SHELL IS NOT A CONTACT MINE** (user
   call, unified impact physics step 5a).  `WeaponConfig.detonateOn`
-  (`'impact'` | `'enemy'`) says what trips an AoE charge and `fuseSeconds`
-  is its fallback; the Plasma Cannon is `'enemy'` + 0.42 s.  It was always
+  (`'impact'` | `'enemy'` | `'fuse'`) says what trips an AoE charge and
+  `fuseSeconds` is its fallback; the three cannon combinations (the old
+  Plasma Cannon's shell) are `'enemy'` + 0.42 s, and the bare Cannon's
+  `'fuse'` lets nothing but the fuse set it off (above).  It was always
   meant to be a heavy round with ONE blast at the end of it, and the
   penetration system quietly made it something else — `applyExplosionAoE`
   fired on EVERY hit, so a shell carrying N penetration detonated N+1
@@ -1600,8 +1660,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   weapon pressure is cooldown + the 2-SLOT EQUIP LOADOUT.
   `GameEngine.equippedWeapons` holds exactly 2 slots — DERIVED from the
   weapon hex group since the module system (see MODULE_DEFS below):
-  `syncLoadoutFromSlots()` fills it with the guns mounted anywhere in the
-  weapon flower, in slot order, at most `MAX_INSTALLED_GUNS` (2) of them
+  `syncLoadoutFromSlots()` fills it with the weapon KEY of each gun mounted
+  anywhere in the weapon flower — its delivery plus the energy modifier
+  touching it (`energyForGunSlot`) — in slot order, at most
+  `MAX_INSTALLED_GUNS` (2) of them
   (more mounted guns is the designed future major upgrade; WeaponSystem is
   untouched).  Cycle/select run over the slots only
   (`WeaponSystem.cycleWeapon`/`selectWeapon`); outfit moves are
@@ -1611,9 +1673,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   2-slot readout
   (`renderLoadoutHUD` in `render/hud.ts` + `computeLoadoutHUDLayout`; active
   slot highlighted, charge ring unchanged on the ship).  Charged shots
-  cost only the 1.0s hold.  Bouncer/Lightning cooldowns were raised
-  (0.40→0.55, 0.50→0.65) in the same change to replace the ammo tax they
-  leaned on.
+  cost only the 1.0s hold.  The Laser's and Lightning's cooldowns were
+  raised (0.40→0.55, 0.50→0.65) in the same change to replace the ammo tax
+  they leaned on; both guns are retired, and those cooldowns live on in the
+  Heat Lance and the Arc Bolt.
 - `SHIELD_CONSTANTS`, `DAMAGE_TEXT_CONSTANTS`
 - `WAVE_CONSTANTS`, `TIMED_WAVE_CONFIG`, `WAVE_DEFINITIONS` (7 scripted
   teaching waves — W1 RAMMER_1, W2 SHOOTER_1, W3 the two mixed, then intros
@@ -1627,7 +1690,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   shard/tile destruction points — flat per shard, per-maxHealth for
   tiles, nebula variants excluded, attribution via the
   `GameEntity.killedByPlayer` stamp set by the projectile / crash /
-  lightning / cannon-AoE damage paths; snitch catch payout;
+  energy-layer (`damageBody`: arcs, beams, heat) / blast-ring damage
+  paths; snitch catch payout;
   early-clear wave bonus.  Gold "+N" popups are magnitude-tiered
   (`styleScorePopup`) and accumulate into ONE live popup
   (`_livePointsPopup`, O(1) — no per-award array scan) so
@@ -1642,8 +1706,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   one-shot majority and the kill-frame overlap are gone; damage chips
   render small + muted-red, distinct from gold points.)
 - The run starts LEAN (free Base Hull on the center ship hex — the
-  adjacency root, zero stats — + Blaster on gun hex W1, empty
-  inventory, no shield, no charged shots); everything else is bought as
+  adjacency root, zero stats — + the free Projector (`dlv_projectile`) on
+  gun hex W1, empty inventory, no shield, no charged shots); everything
+  else is bought as
   module items at the shop stations and outfitted at the drydock (see
   MODULE_DEFS below).  `applyModuleEffects` gates `maxShield` to 0
   until an ACTIVE Shield core is installed; Overcharge enables charged
@@ -1690,9 +1755,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   "right answer" somewhere is `docs/WEAPONS_AMMO_PLAN.md` §7).
   Four traits today — `armor`, `evasive`, `frontShield` and `regen`.
   `armor` (Tank / RAMMER_3 + the Warden boss): per-hit damage below
-  `chipThreshold` is cut by `reduction`, so chip weapons (Blaster,
-  Shotgun) plink while heavy hits (Cannon, Lightning, charged, a
-  Gunnery-boosted Blaster past the threshold) punch through.  Stamped
+  `chipThreshold` is cut by `reduction`, so 3-damage chip rounds (the
+  Projector, a Shotgun pellet, the bare Cannon's own bite) plink while
+  heavy hits (the cannon shells' 14–24, the Arc Bolt's 9, the Seeker's 8;
+  past the Tank's 6 only, the Slug's 7, a charged round's 7.5 and a
+  Projector behind three Gunnery Mk III at 6.24) punch through, and the
+  energy layer's beams, arcs and heat never meet the trait.  Stamped
   at spawn (`WaveSystem.buildEnemy`), applied in the PhysicsSystem
   projectile-damage path (gated by `physics.traitsEnabled`, DBG
   "Traits"); armored enemies show the REDUCED hit number as feedback.
@@ -1710,10 +1778,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   entity's FACING with NO pool to deplete — the Bulwark's arc geometry
   generalized through the shared `PhysicsSystem.sectorCoversHit`, so
   face-tanking never becomes viable.  Its answers fall out of WHERE damage
-  is applied rather than from special cases: lightning chains and shockwave
-  rings damage in GameEngine, OUTSIDE the projectile path, so they bypass
-  the plate for free; a Laser ricochet arrives from behind; and a slow
-  fortress can be flanked.
+  is applied rather than from special cases: the energy layer's arcs,
+  beams and heat (`damageBody`) and the shockwave rings land OUTSIDE the
+  projectile path, so they bypass the plate for free; and a slow fortress
+  can be flanked.
   `regen` heals `perSec` unless a damage BURST shuts it off, and the burst
   window is a FIXED BUCKET, not a sliding one — THAT is the mechanic.  The
   first damaging hit arms the bucket and it expires on schedule regardless
@@ -1722,8 +1790,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   damage would stop healing through and the trait would INVERT.  With fixed
   buckets the arithmetic lands on the §7 table by construction.
   `constants.noteTraitDamage()` feeds the bucket from EVERY player damage
-  path (projectile, lightning chain, shockwave ring), so splash and chain
-  damage count toward a burst like pellets do;
+  path (projectile, the energy layer's `damageBody`, shockwave ring), so
+  splash, arc and beam damage count toward a burst like pellets do;
   `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
   front-shield reduce damage BEFORE the bucket sees it, so bursting a
   plated target means bursting it FROM BEHIND.
@@ -1788,7 +1856,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
   Mk I/II/III varieties (own price ≈ the cumulative old level-curve
-  cost, own fixed effect — no levels, no in-place upgrades), guns and
+  cost, own fixed effect — no levels, no in-place upgrades), guns (the
+  five `dlv_*` deliveries), the three `nrg_*` energy modifiers and
   Shield/Overcharge/Light are single varieties.  The Mk families today
   are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
   (ship) and **Gunnery** / Autoloader (weapon-mod).  Purchases land in the
@@ -1800,7 +1869,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (a count guard in `moveModuleInternal`, surfaced as the "Guns N/2"
   chip; the ≤2 mounted guns in slot order ARE `equippedWeapons` via
   `syncLoadoutFromSlots`, badged W1/W2 dynamically).  WEAPONLESS flight
-  is allowed (the Blaster is removable): firing gates off while
+  is allowed (the starter Projector is removable): firing gates off while
   `player.currentWeapon` is undefined, and every gun carries a
   `weight` — and so does EVERY OTHER MODULE.  WEIGHT IS A SHIP
   ATTRIBUTE: the ship's total is `SHIP_WEIGHT.HULL_BASE + Σ (weight of
@@ -1809,7 +1878,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   and a Mk III weighs 3× its Mk I (`statMks` scales weight with the mark
   like effect and price).  Live total on `GameEngine.shipWeight`.
   Landmarks on the curve: stripped hull ×1.15, weaponless bare frame
-  ×1.10, lean start (Base Hull + Blaster) ×1.05, fully outfitted ×0.89
+  ×1.10, lean start (Base Hull + Projector) ×1.05, fully outfitted ×0.89
   (×0.92 without a scanner) even WITH Thrusters Mk III — so a maxed ship
   is genuinely heavy and
   leans on Engine/Thrusters to stay nimble.  WEIGHT IS ALSO PHYSICAL:
@@ -1914,8 +1983,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   being a THING TO SELL: it is emergent from a round's energy against what
   the target charges, so a module granting "+N bodies" was selling a
   quantity the sim no longer has.  GUNNERY ABSORBED IT: `damageFrac` now
-  scales the round's BITE and its MASS together (`WeaponSystem.withGunnery`),
-  so a mark buys a DENSER round — it bites harder AND carries further, which
+  scales the round's BITE and its MASS together (`WeaponSystem.withGunnery`)
+  — and its heat / arc payloads with them — so a mark buys a DENSER round
+  — it bites harder AND carries further, which
   under the energy model is one statement rather than two.  Scaling only the
   bite would make a Gunnery round hit harder and stop SOONER (fewer, bigger
   contacts out of a fixed bank), which is the opposite of a heavier shell and
@@ -1924,24 +1994,26 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   is the BITE — what one contact deposits, at the muzzle.  `mass` is the BANK
   — with `speed` it fixes the energy the round launches with, and so how many
   bites it can pay for.  Step 3 DERIVED the bank from the bite times an
-  authored `pierce`; step 5 AUTHORS it (every player gun states a `mass`, at
-  exactly the numbers that solve produced, so the roster rebalanced nothing)
-  and deletes `pierce`, because a count of bodies is not a property a
-  projectile has.  Charged shots took the same repricing — the Blaster's
-  charge is a 20× heavier round rather than "pierce 3" — and a boss weapon
-  spreading a player gun must RESTATE the mass when it overrides `damage` or
-  `speed`, or it inherits a bank sized for numbers it no longer has (measured:
-  the Reaver's scattergun would have flown with a third of one bite).
+  authored `pierce`; step 5 AUTHORS it (every round-firing gun states a
+  `mass`, at exactly the numbers that solve produced, so the roster
+  rebalanced nothing) and deletes `pierce`, because a count of bodies is not
+  a property a projectile has.  Charged shots took the same repricing — the
+  retired Blaster's charge was a 20× heavier round rather than "pierce 3",
+  and today's one-rule-per-delivery `chargedConfigOf` makes a plain round 6×
+  heavier at 2.5× the bite — and a boss weapon spreading a player gun must
+  RESTATE the mass when it overrides `damage` or `speed`, or it inherits a
+  bank sized for numbers it no longer has (measured: the Reaver's scattergun
+  would have flown with a third of one bite).
   **THE BASE BANK IS A FRACTION OF A FULLY-GUNNED ONE** (user call): the
   reach the shipped round had is what three Gunnery Mk III should buy, not
-  what a starter Blaster carries.  `MASS_SCALE` multiplied every bank by ten
-  along with every mass and penetration is bank-shaped, so a base bolt punched
-  THIRTY-ONE one-HP gnats where the pre-scale round managed four (measured,
-  `perf/impact-audit.mjs` §8).  Every player gun's authored `mass` is now
-  divided by `BASE_BANK_DIVISOR`, written as `3.5556 / BASE_BANK_DIVISOR` in
-  the table so the original solve stays readable.  THE DIVISOR IS TWO
-  FACTORS, deliberately kept apart because only ONE of them is a claim about
-  another table:
+  what the starter gun carries.  `MASS_SCALE` multiplied every bank by ten
+  along with every mass and penetration is bank-shaped, so a base Blaster
+  bolt punched THIRTY-ONE one-HP gnats where the pre-scale round managed
+  four (measured, `perf/impact-audit.mjs` §8).  Every player gun's authored
+  `mass` is now divided by `BASE_BANK_DIVISOR`, written as `3.5556 /
+  BASE_BANK_DIVISOR` in the table so the original solve stays readable.  THE
+  DIVISOR IS TWO FACTORS, deliberately kept apart because only ONE of them
+  is a claim about another table:
   - `GUNNERY_MK3_TRIPLE_MULT` = `1 + 3 × GUNNERY_MK3_DAMAGE_FRAC` = 2.08 —
     the PROGRESSION anchor, exactly what `withGunnery` multiplies the bank
     back by across three marks.  `tests/weapons.spec.ts` pins it against the
@@ -1956,10 +2028,16 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   anchor's — but they no longer restore the pre-rebase round; they land at
   0.6 of it, and reaching the old figure would take ~7 marks, which the
   hex-slot count puts out of range.  That is what the call asks for.
-  Measured base → 3× Mk III: Blaster 9 → 22, Burst 35 → 82, Laser 58 → 136,
-  Cannon 50 → 106 (against 15 → 36 / 58 → 136 / 97 → 226 / 82 → 176 before
-  the trim, and 31 / 121 / 201 / 171 before the re-base); every weapon's
-  base → gunned ratio lands on 2.12..2.58.
+  Measured base → 3× Mk III on the RETIRED roster (one-HP gnats): Blaster
+  9 → 22, Burst 35 → 82, Laser 58 → 136, Cannon 50 → 106 (against
+  15 → 36 / 58 → 136 / 97 → 226 / 82 → 176 before the trim, and
+  31 / 121 / 201 / 171 before the re-base); every weapon's base → gunned
+  ratio landed on 2.12..2.58.  Re-measured on the energy-module roster at
+  the merge (through the real resolver, 320 gnats deep): the Projector
+  6 → 16, Slug 52 → 118, Shotgun 12 → 31, Arc Bolt 24 → 52, Seeker
+  21 → 46, Heavy Shell 59 → 126, Arc Shell 49 → 105 and the bare Cannon
+  104 → 273 (2.14..2.67); the Heat Lance — the old Laser's id — is a beam
+  with no bank at all.
   ONE COUPLED CONSEQUENCE: the Cannon's BLAST derives from the shell's own
   mass, so it rode the trim down with the bank — the numbers, and the
   coupling that restored it, are under THE BLAST IS THE SHELL'S OWN ENERGY
@@ -1995,27 +2073,31 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     per point of damage) dissolves: that 10× spread was an artefact of every
     projectile flying at `mass: 1`, and freeing the mass moves it into
     SECTIONAL DENSITY (Laser 1.78, Blaster 1.00, Cannon and Seeker 3.56,
-    enemy bolt 7.90 at step 3; `MASS_SCALE` over `BASE_BANK_DIVISOR` has
-    since put the player rounds at 5.13 / 2.89 / 10.26 flown, while the
-    enemy bolt's DERIVED mass is unscaled and still 7.90).
+    enemy bolt 7.90 at step 3; `MASS_SCALE` over `BASE_BANK_DIVISOR` then
+    put those rounds at 5.13 / 2.89 / 10.26 flown.  Today the Seeker and
+    the Arc / Incendiary Shells still fly 10.26, the starter Projector
+    2.16, the Heavy Shell 15.38 and the bare Cannon 30.77, while the enemy
+    bolt's DERIVED mass is unscaled and still 7.90).
     WHAT FALLS OUT is the point: a bolt that has spent energy is slower
     (`speedAfterSpending`), and damage is measured from speed, so the next
     bite is smaller with no curve authored anywhere.  The decay is
     `1 - bite/energy` at the muzzle — at step 3 Laser 0.80/hit, Burst 0.67,
     Shotgun 0.50, and a one-bite round stopped dead; at the shipped bank
-    Laser 0.93, Burst 0.88, Shotgun 0.83, and the former one-bite rounds
-    (Blaster, Lightning, Seeker, Cannon) carry ~2.9 bites and decay 0.65 a
-    hit.  `PIERCE_FALLOFF_RATE` (shipped at 0)
+    the Slug 0.88 and the Shotgun 0.83, the former one-bite rounds (the
+    Projector, the Arc Bolt, the Seeker) carry ~2.9 bites and decay 0.65 a
+    hit, the Heavy Shell 0.61 (2.6 bites), the Arc / Incendiary Shells 0.73
+    (3.7) and the bare Cannon — a 3 bite on a 52-bite bank — 0.98.
+    `PIERCE_FALLOFF_RATE` (shipped at 0)
     and `PIERCE_SPEED_RETAIN` (shipped at 1.0) were the two halves of that
     one number and are DELETED rather than retuned; two knobs describing one
     phenomenon was the clearest symptom of the overlap this work exists to
     remove, and it is also why the shipped rate was 0 — nobody could say what
     the right number was, because the number should not have existed.
-    `GameEntity.hitFalloff` survives unchanged in MEANING (this hit's size
-    relative to the shot's authored damage), so the Cannon's AoE splash and
-    the Lightning chain still read it rather than re-deriving;
-    `GameEntity.spawnSpeed` is the launch reference the measurement divides
-    by.
+    `GameEntity.hitFalloff` is still WRITTEN with the same meaning (this
+    hit's size relative to the shot's authored damage), but nothing reads
+    it now: the blast is payload (below) and the lightning chain that read
+    it is gone; `GameEntity.spawnSpeed` is the launch reference the
+    measurement divides by.
     WHICH VELOCITY the energy is measured in is the one judgement call, and
     it is a DBG ladder (▸ Player & Ship ▸ Impact Model ▸ "Impact vel")
     because energy is FRAME-DEPENDENT and `INHERIT_SHOOTER_VELOCITY` is 1.0 —
@@ -2026,28 +2108,35 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     CLOSING energy, which finishes the unification — the crash paths already
     spend a relative velocity, so a weapon hit and a hull hit become the same
     formula — at the price of a charging ship hitting 2.2–5× harder
-    (measured at POCKET cruise 15; ~9.5× at ASTEROID_FIELD's 33.3) and a
-    shot at a target fleeing at matched speed landing nothing.
+    (measured on the retired roster at POCKET cruise 15; ~9.5× at
+    ASTEROID_FIELD's 33.3; the energy-module rounds span ~2.5× for the Arc
+    Bolt at speed 26 to ~7× for the Flamer at 9, by the same
+    ((v + 15) / v)² arithmetic) and a shot at a target fleeing at matched
+    speed landing nothing.
   - **INSIDE A GRAIN BODY THE TARGET SETS THE PRICE** — the bore track; see
     §8.  A round walks its own chord a grain at a time and each grain costs
     `grainSize × bondStrength`: glass 6.0, rock 5.6, plastic 10.8, metal
     14.4.  So the SAME round bores 2.4 times as many grains into glass as
     into metal (4.5 times the depth, since glass grains are also the
-    larger) with no per-weapon depth authored anywhere, and a round stops when
-    it can no longer afford the next grain.  ONE CONSEQUENCE IS WORTH
+    larger) with no per-weapon depth authored anywhere save one multiplier
+    — `boreCostScale`, the bare Cannon's 0.25, a NARROW PENETRATOR that
+    pays and deposits a quarter of each price — and a round stops when it
+    can no longer afford the next grain.  ONE CONSEQUENCE IS WORTH
     KNOWING because it is easy to read as a bug: no single shot can destroy
-    a grain tile however much energy it carries, because the deposit is
-    capped by the chord — a 36px glass pane is ~3 grains deep, so one
+    a COLD grain tile however much energy it carries (a HOT one breaks
+    `mechanicalScale`× per grain — §8's energy modules), because the deposit
+    is capped by the chord — a 36px glass pane is ~3 grains deep, so one
     contact can leave at most ~18 against a derived HP near 49.  That is
     "passage, not gouge" (user call) doing exactly what it says: a
     hyper-energetic round punches a clean hole and flies on rather than
     dumping its whole bank into the entry cell.
   - **AN ACTOR IS CHARGED ONLY WHAT IT COULD ABSORB** — overkill carries
     through, the actor-side half of step 4's "pay for what you broke".  A
-    body cannot take more than it had, so a 4-damage Blaster bolt is charged
-    1 by a 1-HP gnat and flies on with the rest: it punches NINE of them at
-    the shipped bank (22 behind three Gunnery Mk III; four at step 3, when
-    its whole bank was one bite) where it is stopped dead by one rock tile.
+    body cannot take more than it had, so a 3-damage Projector bolt is
+    charged 1 by a 1-HP gnat and flies on with the rest: it punches SIX of
+    them at the shipped bank (16 behind three Gunnery Mk III — the retired
+    4-damage Blaster measured nine and 22, and four at step 3, when its
+    whole bank was one bite) where it is stopped dead by one rock tile.
     The waste is read off the
     target's own overdrawn health, so it is zero by construction wherever a
     body cannot go negative (a saturating boundary spend, a hit-counted tile,
@@ -2060,23 +2149,25 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
     build let a bolt through it AND charged for the privilege, which was
     the worst artifact of the body-level rule.
   THE LASER'S OWN BUDGET went 99 → 4 bites in the same pass (user call),
-  and is now simply its authored mass (1.7778 against a 5 bite at step 3;
-  `1.7778 / BASE_BANK_DIVISOR` ≈ 0.51 today, a ~14.4-bite bank once
-  `MASS_SCALE` applies).
+  and from then until the energy modules it was simply its authored mass
+  (1.7778 against a 5 bite at step 3; `1.7778 / BASE_BANK_DIVISOR` ≈ 0.51,
+  a ~14.4-bite bank once `MASS_SCALE` applied).  The Laser is retired: its
+  id resolves to the Heat Lance, a beam, which carries no bank at all.
   "Effectively infinite" pre-dated there being any COST to piercing;
   with a falloff in play at all a beam gives up damage per body, so an
   unbounded budget just made the Laser the answer to every line of
   targets — and under the energy model 99 would have been 100 bites of fuel.
-  A RICOCHET MAY RE-HIT what it already struck, with no cap —
-  bought by CLEARING `hitEntityIds` at the bounce site rather than by
-  weakening the `alreadyHit` guard in the projectile branch, which is
-  load-bearing for an unrelated reason (it is what stops a bolt in
-  SUSTAINED OVERLAP re-damaging a body every substep at 120Hz).  ENERGY is
-  therefore a LIFETIME bank: a bouncing beam lands only what it can still
-  afford however many times it turns around, each bite further down the
-  curve its own mass sets.  Bounces buy COVERAGE, not extra damage.
-  **THE PLASMA CANNON IS A HEAVY ROUND, NOT A CONTACT MINE** — see the
-  `WEAPONS` bullet above (`detonateOn` / `fuseSeconds`).
+  A RICOCHET MAY RE-HIT what it already struck — that was the retired
+  Laser's tile bounce, which cleared `hitEntityIds` at the bounce site
+  rather than weakening the `alreadyHit` guard in the projectile branch,
+  and the bounce went with the Laser.  The guard stays load-bearing (it is
+  what stops a bolt in SUSTAINED OVERLAP re-damaging a body every substep
+  at 120Hz); the one path that still clears the list mid-flight is a
+  shield PARRY, which re-owns the bolt (§8).  ENERGY stays a LIFETIME
+  bank: nothing a round does in flight refills it.
+  **A CANNON SHELL IS A HEAVY ROUND, NOT A CONTACT MINE** — see the
+  `WEAPONS` bullet above (`detonateOn` / `fuseSeconds`; the old Plasma
+  Cannon's shell is the Heavy Shell now, and the bare Cannon is fuse-only).
   **THE BLAST IS THE SHELL'S OWN ENERGY** (user call).  `explosionDamage` was
   the last damage number in the roster still authored as a flat scalar: the
   direct bite went kinetic in step 3, the crash in step 4 and the bore in
@@ -2085,7 +2176,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   a light show (measured when this landed: a bystander at half the radius
   lost 5.2).  It is
   now `blastDamageFor(mass, speed)` — `kineticDamage` over the shell's OWN
-  flown mass, times `BLAST_ENERGY_COUPLING` (0.4), which is the sibling of
+  flown mass, times `BLAST_ENERGY_COUPLING` (0.4), then times the weapon's
+  own `blastScale` (absent = 1; the bare Cannon's 0.2).  The coupling is
+  the sibling of
   `CRASH_ENERGY_COUPLING`: a hull couples ~11% of a contact into breaking
   work, a shaped charge couples this much of its remaining energy into the
   blast.  "The charge is worth about one more hit" is the statement behind
@@ -2098,9 +2191,13 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   moved, so what the trim changed was the RATIO, not the gun, and the
   coupling is the right dial for it (DBG ▸ Player & Ship ▸ Impact Model ▸
   "Blast energy") — never the trim, which is about penetration.  Measured
-  after: **20.8 against the same 18 bite**, so the original statement holds
-  again.  The ladder keeps 1× meaning WHAT SHIPS, so its 0.5× step is now the
-  A/B against the pre-call blast.
+  after: **20.8 against the same 18 bite**, so the original statement held
+  again.  That was the Plasma Cannon; by the same arithmetic its mass and
+  speed still give the Arc and Incendiary Shells 20.8 (against a 14 bite),
+  the Heavy Shell ~24.6 against its 24 (`weapons.spec` pins 0.8..1.6
+  bites), and the bare Cannon, `blastScale` 0.2, ~12.5 against a 3 bite —
+  still its main damage, by design.  The ladder keeps 1× meaning WHAT SHIPS,
+  so its 0.5× step is now the A/B against the pre-call blast.
   THREE properties FALL OUT rather than being written: it rides GUNNERY for
   free (a mark buys a heavier round and the blast reads the round's mass);
   a CHARGED shell blasts harder by being heavier (the charge premium is
@@ -2113,15 +2210,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   ×2.08, 20.8 → 43.2 — but `explosionRadius` was AUTHORED FLAT, so the ring
   the player watches was pixel-for-pixel identical at every mark and the only
   tell was a damage number on a bystander.  A bigger charge reaches further,
-  so `withGunnery` now scales the reach by **√mult** (110 → 158.6 at three Mk
-  III).  SQUARE ROOT because this is a 2D world: the ring's AREA is what the
-  energy buys, so a linear radius would count the mark twice over (×2.08
-  radius is ×4.3 area).  Stated in the units that matter, the ring's area
-  scales by exactly the same 2.08 the peak does.  Gated on the blast being
-  DERIVED, the same rule the damage line beside it follows — an authored
-  `explosionDamage` (BOSS_WEAPONS.SIEGE) keeps its authored reach too.  The
-  lesson generalises past this gun: a derived quantity that only shows up in
-  a number nobody reads is indistinguishable from one that does not move.
+  so `withGunnery` now scales the reach by **√mult** (at three Mk III the
+  Arc and Incendiary Shells' 110 → 158.6, the Heavy Shell's 130 → 187.5, the
+  bare Cannon's 95 → 137).  SQUARE ROOT because this is a 2D world: the
+  ring's AREA is what the energy buys, so a linear radius would count the
+  mark twice over (×2.08 radius is ×4.3 area).  Stated in the units that
+  matter, the ring's area scales by exactly the same 2.08 the peak does.
+  Gated on the blast being DERIVED, the same rule the damage line beside it
+  follows — an authored `explosionDamage` (BOSS_WEAPONS.SIEGE) keeps its
+  authored reach too.  The lesson generalises past this gun: a derived
+  quantity that only shows up in a number nobody reads is indistinguishable
+  from one that does not move.
   **THREE THINGS DETONATE IT, AND "IT STOPPED" IS THE THIRD** (user call).
   `detonateOn: 'enemy'` is what stops a heavy round being a contact mine, and
   the gap it left was that a Cannon fired into tiles or shards simply
@@ -2131,6 +2230,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   can go no further (its bank ran dry, the grain bore ended mid-body, an
   indestructible wall took it) and `GameEngine.updateProjectileFuses` — already
   the "detonate where it is, with nothing to exclude" path — fires it.
+  A `detonateOn: 'fuse'` shell (the bare Cannon) answers to the FUSE
+  alone: `handleProjectileHit` lets no actor trip it, and the stop site
+  zeroes its velocity instead of arming `blastPending`, so it waits where
+  it stopped.
   TWO THINGS ARE LOAD-BEARING and both were learned by measuring:
   - **The stop site leaves the round ALIVE.**  The entity-compaction pass at
     the end of `updatePhysics` releases an INACTIVE projectile to the pool, and
@@ -3243,13 +3346,14 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     attached until it can leave: for a grain material the arc splice is
     NOT a fallback (the conservation rule above) — it survives only on the
     legacy reveal path.
-  EVERY damage path feeds the boundaries — projectile, lightning chain,
-  shockwave ring, the bubble's bite, AND the three CRASH paths (player
-  into a tile, shard into a tile, the tile-pressure trigger — the three
-  `killStructureByImpact` callers) — each stamping its own contact point
-  via the shared `stampLocalImpact`, so splash, chain, bite and crush
-  damage all erode from where they arrived.  DBG ▸ Materials ▸ Grain &
-  Fracture ▸ "Bnd strength" is the master multiplier over every material.
+  EVERY damage path feeds the boundaries — projectile, the energy layer's
+  `damageBody` (arcs, burns, light), shockwave ring, the bubble's bite,
+  AND the three CRASH paths (player into a tile, shard into a tile, the
+  tile-pressure trigger — the three `killStructureByImpact` callers) —
+  each stamping its own contact point via the shared `stampLocalImpact`,
+  so splash, chain, burn, bite and crush damage all erode from where they
+  arrived.  DBG ▸ Materials ▸ Grain & Fracture ▸ "Bnd strength" is the
+  master multiplier over every material.
 - **A CRUSH SPENDS ON THE BOUNDARIES TOO** (`PhysicsSystem.crashBoundaryDamage`
   / `crashContactOn`; step 2 of the unified-impact sequencing in
   docs/PARKING_LOT.md).  The crash paths used to decrement `health`
@@ -3399,8 +3503,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   base Blaster bolt punched thirty-one one-HP gnats where the pre-scale
   round managed four, and every weapon's falloff went far gentler (the
   Laser 49/50 a hit against its old 4/5).  `BASE_BANK_DIVISOR` has since
-  re-based every player bank: a base Blaster bolt now punches nine (§5)
-  and the Laser keeps ≈0.93 a hit.
+  re-based every player bank, and the energy-module rounds still divide by
+  it: the starter Projector's bolt punches six one-HP gnats, nine behind
+  one Gunnery Mk III (§5; `tests/modules.spec.ts`).
   NOTHING ELSE IS COMPENSATED EITHER, and each is a consequence rather than
   an oversight: `SHARD_CRASH_MOMENTUM` and `TILE_PRESSURE_MIN_MASS` are
   gates on `mass × speed` and mass, so ten times as many drifting shards now
@@ -3470,12 +3575,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   today's figures, and player rounds have since been divided by
   `BASE_BANK_DIVISOR` too: the four shard ladders span 0.0100..0.0300 — a
   coherent 3× band reading exactly as material density, and the natural
-  reference; ENEMIES sit inside it at 0.0102..0.0400; PROJECTILES run
-  0.0139..0.0960; and the PLAYER sat alone at **0.2500**, 25× glass, 8×
-  metal (14× rock) and twice the dragon.  A 20-unit hull massing 100 was
-  as dense as nothing else in the game and nothing said so.  Those RATIOS
-  are what the scale preserved, and they are what the section still
-  reports.
+  reference; ENEMIES sit inside it at 0.0102..0.0400; PROJECTILES (the
+  retired guns) ran 0.0139..0.0960; and the PLAYER sat alone at **0.2500**,
+  25× glass, 8× metal (14× rock) and twice the dragon.  A 20-unit hull
+  massing 100 was as dense as nothing else in the game and nothing said so.
+  Those RATIOS are what the scale preserved, and they are what the section
+  still reports.
   THE HULL IS DELIBERATELY THE DENSEST THING HERE (user call) — a ship is a
   machine, not a rock, and should plow through gravel rather than be batted
   about by it.  What changed is that 100 is now DERIVED
@@ -3497,9 +3602,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   quantity to a visual one.  PROJECTILES author `mass`, because it is the
   ENERGY BANK (§5's "a round carries two numbers") and deriving it from the
   drawn `size` would make a bolt's damage a function of its sprite — the
-  Cannon is the proof, drawn at 16 against the Blaster's 6 while massing
-  3.56× the Blaster, so its density is the LOWEST of any round and would
-  have to be authored low anyway.  ENEMIES author `mass` per archetype for
+  Cannon delivery is the proof: the bare shell, drawn at 12, masses two to
+  three times its modified shells drawn at 16–18 (a narrow penetrator's
+  bank), so a size-derived mass would get the family exactly backwards.
+  ENEMIES author `mass` per archetype for
   the reason a boss is bigger than a gnat without being proportionally
   heavier; the audit REPORTS their densities so the scale stays visible.
   Two enemy figures look wrong and are not: the DRAGON at 0.1221 is a
@@ -3567,9 +3673,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     it, so repeated rewinds place it at an ABSOLUTE point along the same
     path — and only ever further back, which is what `tNow` enforces.  Pooled
     and cleared per step; a step with no fast body in it allocates nothing.
-  - **NOT PROJECTILES.**  The fastest shot travels 15 units a substep against
-    that same ±28 window, so no bolt can tunnel, and the pierce bore already
-    owns what a shot does inside a body.
+  - **NOT PROJECTILES.**  The fastest shot (the Arc Bolt, speed 26) travels
+    13 units a substep against that same ±28 window, so no bolt can tunnel,
+    and the pierce bore already owns what a shot does inside a body.
   `PhysicsSystem.sweptRewinds` is a diagnostic counter — nothing in the sim
   reads it — and it is the one way a test can tell "the fast path never
   fired" from "it fired and did nothing".
@@ -3617,10 +3723,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   derived HP comes from — the bolt instead walks its own CHORD, one
   `grainSpecFor(variant).grainSize` at a time, paying `min(energy left,
   grainSize × bondStrength)` per grain (glass 6.0, rock 5.6, plastic
-  10.8, metal 14.4) and slowing by exactly what it deposited
-  (`spendProjectileEnergy`).  What that makes a round worth against each
-  material is §5's "INSIDE A GRAIN BODY THE TARGET SETS THE PRICE".
-  Five things hold it up:
+  10.8, metal 14.4) and slowing by exactly what it paid
+  (`spendProjectileEnergy`) — which is what a cold body takes; a HOT one
+  takes `mechanicalScale`× that for the same payment (the energy-modules
+  bullet below).  What that makes a round worth against each material is
+  §5's "INSIDE A GRAIN BODY THE TARGET SETS THE PRICE".
+  Six things hold it up:
   - **The step is read through `grainSpecFor`, never
     `SHARD_VARIANTS[..].grain`** (the `grainSpecFor` seam rule, below): a
     DBG per-material override that reached the pattern but not the track
@@ -3648,16 +3756,21 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     so no bored round ever came out of a 36px tile.  Beside it, **a body a
     round has already struck is not struck again** (`hitEntityIds`, checked
     at the top of the projectile branch): an overlap with it is the round
-    passing through or resting, not a hit.  A ricochet that should re-hit
-    clears the list at the bounce, as it always did.  `WeaponConfig.
-    boreCostScale` (< 1, the bare Cannon's 0.25) makes a round a NARROW
-    PENETRATOR: it pays, and deposits, that fraction of each grain's price.
+    passing through or resting, not a hit.  Nothing ricochets off terrain
+    any more (the bouncer went with the Laser), so the one thing that clears
+    the list mid-flight is a PARRY — `deflectProjectile`'s re-own, letting a
+    bolt the player's shield turned strike the enemies it was refused
+    before.  `WeaponConfig.boreCostScale` (< 1, the bare Cannon's 0.25)
+    makes a round a NARROW PENETRATOR: it pays, and deposits, that fraction
+    of each grain's price.
   - **It allocates nothing and is bounded by the chord, the energy and
     `MAX_BORE_STEPS`** — one reused scratch point; the chord leaving the
     body or the bank running dry ends the walk first, and the step cap is
     belt and braces.
-  Bodies with no grain model (nebula, enemies, the player, anything under
-  the legacy A/B) fall through to the single spend they always took; an
+  Bodies with no grain model (enemies, the player, anything under the
+  legacy A/B) fall through to the single spend they always took; a gas is
+  never charged at all — a round crosses nebula, breaking a static cloud
+  tile or shoving a drifting puff (the energy-modules bullet below); an
   indestructible tile takes neither and stops the bolt dead (§5).
 - **Progressive fracture (V8 — the boundary-highlight rework): what still
   holds, and what is now LEGACY.**  All four breakable materials run
@@ -3675,8 +3788,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   the damage read).  The damage path stamps the real contact point in
   entity-local coords (`lastImpactLocal`, V12 — it also biases the
   pattern, replacing a direction proxy), and detach candidates are ranked
-  by distance to each cell's OWN OUTLINE (a shot stops at the surface, so
-  a centroid comparison would nominate a piece buried on the far side).
+  by distance to each cell's OWN OUTLINE (the point is where the shot met
+  the body — for a bored round, where its walk ENDED, since it is moved
+  there before `onDamage` reads it — not a cell's centre, so a centroid
+  comparison would nominate a piece buried on the far side).
   A STATIC tile keeps its size and position through every detach (the
   dent contract — the static grid never rebuilds); a mobile body
   re-centres (the rigid-body note above).  LEGACY-ONLY: the HP-paced
@@ -3827,11 +3942,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   which is what stops a ricochet re-triggering every step.  It takes a UNIT
   OUTWARD normal and writes positions in the CALLER'S frame (the broadphase
   shifts across a seam and re-wraps, so the helper must not wrap on its
-  own).  All three reflection sites go through it: `tryShieldDeflect` (an
-  arc shield, radial normal), the non-arc shield's contact deflect in
-  `resolveCollision` (radial normal), and the bouncer's tile-face branch
-  there too (axis-aligned normal, for which the general mirror reduces to
-  negating one component — so the fold changed no arithmetic).
+  own).  Both reflection sites go through it: `tryShieldDeflect` (an arc
+  shield, radial normal) and the non-arc shield's contact deflect in
+  `resolveCollision` (radial normal).  The bouncer's tile-face branch, the
+  third, went with the retired Laser — no round in the energy-module
+  roster bounces off terrain (a light beam's reflections are `traceLight`
+  optics, not this primitive).
   `DeflectOptions` carries `reownType`/`reownId` (a PARRY — clears
   `hitEntityIds` so the redirected bolt can strike its new targets),
   `speedScale`, `spread`, `keepHoming`.
@@ -4141,13 +4257,15 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     metal/rock breaks far more easily with no combo bookkeeping.
   - **HEAT lives only on bodies that have some**: one bounded active set
     (`EnergyState.heated`, ≤ `MAX_HEATED`), cooled every step, slow effects
-    every 0.2 s, and a body LEAVES it the moment it is cold (heat snaps to 0
-    below `HEAT_EPSILON`).  UNTRACKED MEANS COLD, because the set is the only
+    every 0.2 s, and a body LEAVES it once it is cold (heat snaps to 0
+    below `HEAT_EPSILON`) and its drawn glow has faded (`SHOW_MIN`,
+    below).  UNTRACKED MEANS COLD, because the set is the only
     thing that ever cools a body: a FULL set refuses new heat (and burn, and
     conduction) rather than leave it on a body nothing will cool, and every
     exit — cooled, inactive, or the map-load `reset()` — clears it, so debris
     carried through a portal arrives cold instead of permanently weakened.
-    The energized-nebula set follows the same rule.  Glass FAILS at heat 1 under the THERMAL fracture
+    The `energized` set (every charged body — nebula and any solid an arc
+    crossed) follows the same rule.  Glass FAILS at heat 1 under the THERMAL fracture
     profile; plastic RELEASES its cohesion bonds (`ShardSystem.releaseBondsOf`
     — the existing physics pulls the goo apart); HEAT CONDUCTS between ANY
     two materials (≤3 cooler neighbours on a cadence) at the pair's
@@ -4173,15 +4291,18 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     BROKEN UP by a round passing through it exactly as a ship flying through
     it breaks it (user call; the round flies on uncharged, once per tile via
     its hit list).  `agitation` / `disperseAt` are how a gas answers heat,
-    `energizeSec` how long an arc energises instead of damaging.  THREE HEAT
-    QUANTITIES ARE DERIVED, not authored: `specificHeat` (J/g·K, roughly
+    `energizeSec` how long an arc energises instead of damaging.  FOUR HEAT
+    QUANTITIES ARE DERIVED from two authored ones: `specificHeat` (J/g·K, roughly
     the real material's) gives both the energy a unit of heat costs
     (`heatCapacityOf`) and the heat CEILING (`maxHeatOf`) — so plastic, the
     highest real specific heat, is the slowest solid to heat and holds the
     most, while metal heats fastest and tops out lowest; and
     `thermalConductivity` (0..1, real-world order compressed) gives both the
     hot-spot spreading speed (`thermalDiffusivityOf`) and the neighbour
-    transfer.  Each derivation is calibrated so ROCK is unchanged.  A hull
+    transfer (`conductShare`).  The two specific-heat derivations keep ROCK
+    unchanged (capacity 30, ceiling 2.5); the conductivity pair keeps
+    metal↔metal transfer at its old 0.15 and lets every material conduct,
+    rock included.  A hull
     (`generic`) conducts ELECTRICITY exactly as well as metal (user call), so
     an arc on a metal plate reaches the ship beyond the next plate.
   - **ELECTRIC is instantaneous and planned by `planChain`** under hop /
@@ -4248,7 +4369,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     cycle (`beamDuration / cooldown`) so holding delivers the DPS tapping
     does.  An electric beam arcs to the nearest conductor in a
     forward cone or fizzles; it has no blade, so it is simply on while held.  Every other beam is LIGHT, and **WHAT LIGHT
-    DOES AT A BODY IS A MATERIAL PROPERTY** (user call): six optical columns
+    DOES AT A BODY IS A MATERIAL PROPERTY** (user call): seven optical columns
     in `MATERIALS` — `reflectivity` (metal is the mirror), `transmissivity`
     and `thermalTransmissivity` (glass is clear to a beam and nearly opaque
     to heat, which is what still lets a heat lance make a pane fail),
@@ -4265,7 +4386,8 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     whichever of reflection / transmission dominates at a face (≥30% of the
     ray) carries the WHOLE ray on, the minority share still branches off as
     a split, and a grain boundary still takes its damage without dimming the
-    ray; so what limits a beam's travel is only its weapon RANGE.  It is
+    ray; so a beam is never dimmed by a bounce or a boundary — what ends it
+    is its weapon RANGE or a body that absorbs it (rock).  It is
     DRAWN as joined glowing polylines with butt caps — no dot at any end.  Internal
     deflection is SEEDED by body and step, so a path through a pane is stable
     rather than jittering tick to tick.  A gas lets it through (thermal
@@ -4366,24 +4488,27 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     SPOT — `heatSpotX/Y` in the body's local unrotated frame and a spread
     `heatSpread` — set at the contact point (`contactOn`), MERGED by moment
     matching when more heat lands (heat-weighted centre, second moment kept:
-    `mixHeatSpot`), and DIFFUSED at the material's
-    `MATERIAL_RESPONSE.thermalDiffusivity` as σ² += 4αt (`diffuseSpread`,
+    `mixHeatSpot`), and DIFFUSED at the material's derived
+    `thermalDiffusivityOf` (thermal conductivity × `SPREAD_PER_CONDUCTIVITY`)
+    as σ² += 4αt (`diffuseSpread`,
     capped at twice the body radius, where it is uniform).  So a spot on
     metal smears across the plate in ~half a second while one on glass or
-    rock stays where it landed; conduction between metal bodies lands on the
+    rock stays where it landed; conduction between any two bodies lands on the
     receiver's face nearest the source.  The render is the same Gaussian:
     the body's own polygon filled with a radial gradient centred on the
     spot, each stop coloured by its LOCAL temperature on the MATERIAL'S OWN
     ramp (peak = mean heat concentrated into σ, `heatPeak`), plus an
     additive glow whose brightness follows T⁴ radiance above ambient
-    (`heatRadiance`) × the material's emissivity.  `HEAT_LOOK` in
-    `energyFx.ts` is that table (user call: colours correspond to the
+    (`heatRadiance`) × the material's emissivity.  `MATERIALS[m].look`
+    (energy.ts — `heatRamp` / `heatTint` / `heatEmit`) is that table (user
+    call: colours correspond to the
     material, and the whole effect is toned down): metal incandesces cherry
     → orange → near-white, rock stays magma-red → amber, glass glows soft
     amber → straw and covers less of the body because it is clear, plastic
     SCORCHES yellow → brown with barely any glow, nebula warms rose-pink
-    and takes light only, hulls are a dimmer metal.  `tint` caps how much
-    of the body's own colour the heat covers, `emit` scales the glow.
+    and takes light only, hulls are a dimmer metal.  `heatTint` caps how
+    much of the body's own colour the heat covers, `heatEmit` scales the
+    glow.
     Cost is one path fill + one fillRect per on-screen heated body, from
     unit-radius gradients cached per material × peak-temperature bucket
     and scaled by transform.  Polygon-less hulls take the light only.  The glow is drawn in the world
@@ -4404,8 +4529,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     every burning rock.  METAL HOLDS HEAT LONGEST (`coolingPerSec` 0.1,
     half-life ~7 s — user call), which also keeps it weakened for longer.
 - **A BLAST BREAKS CLOUD UP; IT DOES NOT DELETE IT** (user call), which is
-  the sharpest consequence of the bullet above — and the rule was drawn ONE
-  VARIANT TOO WIDE at first, which is the part worth keeping.  Measured, the
+  the sharpest consequence of NEBULA TAKES THE VORONOI GEOMETRY (the bullet
+  before the energy modules) — and the rule was drawn ONE VARIANT TOO WIDE
+  at first, which is the part worth keeping.  Measured, the
   build before any of this did two different things to a nebula bank: it
   broke the TILES into their Voronoi cells (4 in the ring became 14 drifting
   shards — correct, and wanted) and it ANNIHILATED the shards (**0 of 15
@@ -5226,7 +5352,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `AUDIO_CONSTANTS.SHARD_FAR_RADIUS` instead of the normal `FAR_RADIUS`.
   The exception is the point: a shard destroyed BY the player is played at
   the NORMAL radius, keyed off the `killedByPlayer` stamp that already
-  exists for scoring (set by the projectile / crash / lightning / AoE
+  exists for scoring (set by the projectile / crash / energy / AoE
   paths) — so a shard you shot from range is still yours to hear.  Direct
   player↔shard contact is covered by `crash.player.shard` (and
   `crash.player.tile` for the static case), both at full range: the
@@ -5272,7 +5398,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns eleven, once, in its mount effect — except
+  them.**  `App.tsx` assigns twelve, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5324,6 +5450,14 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     tracking the body does not look broken — it looks like a cloud, which
     is exactly how the rule it replaced rotted unnoticed; an inverted
     ledger shows only as clouds creeping outward over minutes.
+  - `__omniEnergy` — the PURE half of the energy modules: everything
+    `engine/systems/energy.ts` exports (the `MATERIALS` table, the heat
+    arithmetic and the quantities derived from it, the `planChain`
+    planner, fracture profiles, `LEGACY_WEAPON_MAP`) plus the composed
+    `WEAPONS` table, `weaponConfig`, `nominalDps` and
+    `LEGACY_BASE_WEAPON`, pinned by `tests/energy.spec.ts`.  A chain cap
+    that stopped holding still draws arcs, and a thermal glass profile
+    that equals the mechanical one still shatters.
   - `__omniMass` — the mass scale (`IMPACT_DENSITY`, `massFor`,
     `hullDensity`, `MASS_SCALE`, `scaledMass`) and the tables it feeds (the
     enemy, weapon and shard rosters, the bank divisor and its two halves,
@@ -5459,9 +5593,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     TICK → THUMP: every event the game emits now buzzes (down to a shard
     ping), riding a magnitude FLOOR so the smallest is felt, with the two
     motors crossfading — small events lead with the high-frequency motor, a
-    crash with the low.  One event is haptic-ONLY (`GameEngine.handleRumble`,
-    no camera shake): the plain Blaster, because shaking the camera on the
-    fastest gun in the game would be unplayable.  Player weapon fire asks for
+    crash with the low.  Two events are haptic-ONLY (`GameEngine.handleRumble`,
+    no camera shake): an uncharged, blast-less round from the projectile or
+    homing delivery (the Projector and Seeker families —
+    `WeaponSystem.firePlayerWeapon`), where shaking the camera every shot
+    would be unplayable, and the player's BURN, a soft buzz on the DoT's own
+    cadence (`energyEffects.ts` `noteEnergyHit`).  Player weapon fire asks for
     the `'trigger'` `RumbleKind`, which plays `trigger-rumble` — whose
     parameters are a superset of `dual-rumble`'s, so ONE effect drives the
     handles and the trigger — but ONLY when the actuator's `effects` list
@@ -5488,18 +5625,20 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     identically without it, which is why it is not a control scheme and why
     the UI control renders only where `EngineStats.adaptiveTriggersSupported`
     is true — in BOTH the main menu and the pause menu, because one copy at
-    the bottom of the pause menu's scroll reads as a missing feature.  `WEAPON_TRIGGERS` (per gun) and `chargeTrigger(t)` (while a
-    charged shot winds up) are the profile table; the sync sits beside the
-    charge-ring update in `updateGameLogic`, because what the trigger should
-    feel like is a function of what the player is holding RIGHT NOW and
-    "charging" fires no weapon-change event.  Precedence: the trigger-thrust
-    scheme → `THRUST_TRIGGER` on both triggers; a face-fire scheme →
-    released; no gun or EMP'd → released (the disable made physical);
-    charging → `chargeTrigger(t)`, a ramp that stiffens as the ring fills;
-    otherwise the gun's own profile.  Profiles are authored in NORMALISED
-    units (0..1 of travel, 0..1 of strength) and converted at the wire,
-    because the two candidate ENCODINGS disagree about ranges while the
-    design intent does not.  The report FRAME matches the Linux kernel's
+    the bottom of the pause menu's scroll reads as a missing feature.
+    `WEAPON_TRIGGERS` (per DELIVERY — the energy modifier never changes the
+    feel) and `chargeTrigger(t)` (while a charged shot winds up) are the
+    profile table; the sync sits beside the charge-ring update in
+    `updateGameLogic`, because what the trigger should feel like is a
+    function of what the player is holding RIGHT NOW and "charging" fires no
+    weapon-change event.  Precedence: the trigger-thrust scheme →
+    `THRUST_TRIGGER` on both triggers; a face-fire scheme → released; no gun
+    or EMP'd → released (the disable made physical); charging →
+    `chargeTrigger(t)`, a ramp that stiffens as the ring fills; otherwise
+    the delivery's own profile.  Profiles are authored in NORMALISED units
+    (0..1 of travel, 0..1 of strength) and converted at the wire, because
+    the two candidate ENCODINGS disagree about ranges while the design
+    intent does not.  The report FRAME matches the Linux kernel's
     `dualsense_output_report_common` field for field — note the trigger blocks
     are at data offsets **10 and 21**, not the 11 and 22 most samples quote:
     those index a buffer whose byte 0 is the REPORT ID, which WebHID's

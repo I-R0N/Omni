@@ -176,6 +176,15 @@ const App: React.FC = () => {
       nebulaTileCost, nebulaMergeLoss,
     };
 
+    // Debug handle #12 — the PURE half of the energy-module pipeline (material
+    // table, heat arithmetic, chain planner, fracture profiles, the legacy
+    // weapon map) plus the composed weapon table.  Same terms as the handles
+    // around it: every one of these can be wrong with no symptom — a chain
+    // cap that stopped holding still draws arcs, a thermal glass profile
+    // that equals the mechanical one still shatters.  Nothing in the game
+    // reads it.
+    (window as any).__omniEnergy = { ...Energy, WEAPONS, weaponConfig, nominalDps, LEGACY_BASE_WEAPON };
+
     // Debug handle #9 — the MASS SCALE, on the __omniHid terms and with the
     // sharpest motive of the set.  Under the energy model a body's mass is
     // half of what its every impact SPENDS, so the masses authored across
@@ -188,14 +197,6 @@ const App: React.FC = () => {
     // `perf/impact-audit.mjs` §7 does with this.  Exposed as the TABLES
     // rather than as computed numbers so the audit cannot drift from what
     // the sim reads.  Nothing in the game reads this handle.
-    // __omniEnergy: the PURE half of the energy-module pipeline (material
-    // table, heat arithmetic, chain planner, fracture profiles, the legacy
-    // weapon map) plus the composed weapon table.  Same terms as the handles
-    // around it: every one of these can be wrong with no symptom — a chain
-    // cap that stopped holding still draws arcs, a thermal glass profile
-    // that equals the mechanical one still shatters.  Nothing in the game
-    // reads it.
-    (window as any).__omniEnergy = { ...Energy, WEAPONS, weaponConfig, nominalDps, LEGACY_BASE_WEAPON };
     (window as any).__omniMass = {
       ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
       projectileMassFor, PHYSICS_CONSTANTS,

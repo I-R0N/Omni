@@ -10,7 +10,10 @@
 
 **Status (2026-09-26):** Phase A is complete and was promoted to `main`
 with `plan-completion` (PR #93, 2026-09-21).  Phases B–G are the live
-queue; none of them has landed.
+queue; none of them has landed.  One D1 question has since been answered
+in code: the energy modules (PR #104, 2026-10-02) made each gun a DELIVERY
+module transformed by an adjacent ENERGY MODIFIER module (see D1 and §5
+#3); the rest of D is open.
 
 The user supplied a large list of major configuration/design changes to
 investigate **before** merging `claude/plan-completion` into `main`.  This
@@ -413,7 +416,12 @@ never replaces it.
   electricity, homing, explosion — i.e. the current *gun identities*
   refactored into gun-modifying modules.  This is the big call: majors as
   gun-transformers vs. majors staying separate guns.  Guidance decision
-  required before D1 starts (§5).  **Reframed by unified impact physics
+  required before D1 starts (§5).  **Partly settled by PR #104:** the
+  gun-transformer answer shipped for ENERGY — `dlv_*` deliveries
+  (projectile / beam / spread / homing / cannon) plus a per-gun `nrg_*`
+  modifier (kinetic / electric / thermal); burst and bounce were retired as
+  identities and the explosion moved onto the Cannon delivery.  The
+  minor/major taxonomy, D2 and D3 remain open.  **Reframed by unified impact physics
   (PR #102):** damage is KINETIC now — a gun authors a round `mass` and
   velocity, and damage, penetration and blast all derive from the round's
   energy — so minor modules must be defined in those terms, not as flat
@@ -643,12 +651,18 @@ milestones and decisions, per house pattern.
    renegotiated, or — the interesting option — the Mining Beam hits
    TERRAIN harder than the Blaster while staying weak against enemies,
    which gives the miner a real identity (a tool, not a gun) and leaves
-   combat balance untouched.  Decide alongside #2's weapon choice.
+   combat balance untouched.  Decide alongside #2's weapon choice.  **Since
+   PR #104** the starter is the deliberately weak bare Projector and a Beam
+   delivery exists (a heat beam with the Thermal modifier), so both halves
+   of the question now have a concrete module to start from.
 3. **(D1) Major modules: gun-transformers or guns?**  Whether
    burst/bounce/spread/homing/etc. become modifiers stacked on a base gun
    or remain the current discrete gun catalog.  This decision shapes all
    of D and should be made against WEAPONS_AMMO_PLAN §7's
-   "every weapon a right answer somewhere" table.
+   "every weapon a right answer somewhere" table.  **Since PR #104** the
+   discrete catalog no longer exists: spread and homing are deliveries,
+   electricity and heat are modifiers, explosion belongs to the Cannon,
+   and burst and bounce are gone.
 4. **(C1) Home arena flavour first ship** — isolated station (cheap) vs.
    planet-orbit (needs G3 backdrop).  Plan assumes isolated first.
 5. **(E4) "Basically indestructible" ceiling** — pick the elder HP target

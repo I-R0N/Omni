@@ -121,7 +121,8 @@ export function applyModuleEffects(g: GameEngine) {
     fold(g.weaponSlots, g.activeWeapon);
     g.moduleSpeedMult = 1 + speed;
     // Ship weight: flying light is faster — an unladen ship earns the
-    // BASE_BOOST, a heavy one drags (Blaster-only ≈ the 1.0 baseline).
+    // BASE_BOOST, a heavy one drags (the lean Base Hull + Projector, weight
+    // 2.0, is ×1.05).
     g.shipWeight = shipWeight;
     g.moduleThrustMult = (1 + accel)
         * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));

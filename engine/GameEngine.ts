@@ -632,7 +632,8 @@ export class GameEngine {
   // React station UI), and the station UI shows the panels its services
   // offer.  Undocked = committed outfit: the commerce API (moveModule /
   // purchaseModule / sellModule / repairHull / purchaseSlot) is guarded on
-  // this flag, bar a cargo-only reorder.
+  // this flag, bar a cargo-only reorder (and, for moveModule, the DBG
+  // "Outfit anywhere" override).
   private stations: GameEntity[] = [];
   private nearestStation: GameEntity | null = null; // nearest in dock range this step
   private dockedStation: GameEntity | null = null;
@@ -1617,7 +1618,7 @@ export class GameEngine {
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
-      this.resetOutfit(); // back to lean (bare hexes, empty inventory, Blaster on W1)
+      this.resetOutfit(); // back to lean (Base Hull on the centre hex, empty inventory, Projector on W1)
 
       // Clear the WRECK state too (A1).  Before the run-summary screen the
       // player could never be mid-explosion at a run reset — the auto-respawn
@@ -3128,8 +3129,9 @@ export class GameEngine {
   }
 
   /** Haptic feedback with NO camera shake.  Most impacts want both and go
-   *  through `handleScreenShake`; a few — the plain Blaster's shot — want the
-   *  hand to feel something the camera must not react to. */
+   *  through `handleScreenShake`; a few — an uncharged, blast-less projector
+   *  or seeker round, the player's burn — want the hand to feel something
+   *  the camera must not react to. */
   handleRumble = (amount: number, kind: RumbleKind = 'impact') => {
       this.input.rumble(amount, kind);
   }
@@ -4476,8 +4478,8 @@ export class GameEngine {
         ? THRUST_TRIGGER(this.playerSpeedFraction())
         : TRIGGER_OFF);
 
-    // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
-    // EMP-disabled (Stage 3c) so an in-flight burst halts too.
+    // Tick the weapon cooldown via WeaponSystem — frozen while EMP-disabled
+    // (Stage 3c).
     const tWeapons = performance.now();
     if (this.currentMap && !this.player.systemsDisabled) {
         this.weapons.tickPlayerCooldown(this.player, dt);
@@ -4838,7 +4840,7 @@ export class GameEngine {
 
   /** Run reset + DBG relock: back to the lean start — empty inventory,
    *  the free Base Hull on the center ship hex (adjacency root) and the
-   *  starter Blaster on gun hex W1. */
+   *  starter Projector (`dlv_projectile`) on gun hex W1. */
   public resetOutfit() {
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
@@ -5362,11 +5364,14 @@ export class GameEngine {
       return area === 'inventory' || idx < this.slotsUnlocked(area);
   }
 
-  /** DBG: mount one gun variety onto a gun hex (the debug panel's Weapons &
-   *  Modules ▸ Weapons rows — the wave-map test path; bypasses the drydock
-   *  guard).  Fills the first empty gun hex, else replaces the hex the
-   *  ACTIVE weapon is not in; a displaced gun drops to the inventory if
-   *  there is room (else it is scrapped — DBG only). */
+  /** DBG: equip a weapon (the debug panel's Weapons & Modules ▸ Weapon
+   *  Modules "Equip <delivery>" rows — the wave-map test path; bypasses the
+   *  drydock guard).  Re-lays the weapon flower deterministically: the
+   *  granted gun on hex 1 with its modifier on 2, the kept gun (the active
+   *  weapon's delivery when it differs, else any other) on 4 with its
+   *  modifier on 5, and the shared mods on 0 / 3 / 6.  Whatever no longer
+   *  fits goes to the inventory (dropped if it is full — DBG only), and the
+   *  weapon that was firing stays selected. */
   public debugGrantWeapon(id: string) {
       // Accepts a delivery ('beam'), a combination ('beam+thermal') or an
       // OLD id ('CANNON', 'wpn_cannon') — resolved through the legacy map.
@@ -5433,7 +5438,7 @@ export class GameEngine {
       if (keep) this.player.currentWeapon = keep;
   }
 
-  // ── DBG: the ten weapon modules (5 deliveries + 5 energy modifiers) ──
+  // ── DBG: the eight weapon modules (5 deliveries + 3 energy modifiers) ──
   //
   // The quick path for testing combinations without the shop: add a module
   // straight onto the weapon flower (or into cargo when the flower has no
@@ -5441,7 +5446,7 @@ export class GameEngine {
   // `syncLoadoutFromSlots`, so the loadout, the adjacency fixpoint and the
   // per-gun modifier are exactly what the real outfitting would produce.
 
-  /** The ten ids, deliveries first, in catalog order. */
+  /** The eight ids, deliveries first, in catalog order. */
   private weaponModuleIds(): string[] {
       return MODULE_DEFS
           .filter(d => d.weapon !== undefined || d.family === 'energy')
@@ -7040,8 +7045,8 @@ export class GameEngine {
    * and otherwise heal `perSec` toward maxHealth.
    *
    * The bucket is filled by constants.noteTraitDamage() from every player
-   * damage path (projectile, lightning chain, shockwave ring), so splash and
-   * chain damage count toward a burst like pellets do.  Gated by the same DBG
+   * damage path (projectile, the energy layer's damageBody, shockwave ring),
+   * so splash, arc and beam damage count toward a burst like pellets do.  Gated by the same DBG
    * "Traits" toggle as the damage-side traits.
    *
    * O(enemies) with an early field check — the same shape as the kamikaze /

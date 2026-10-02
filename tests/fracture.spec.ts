@@ -2612,7 +2612,7 @@ test.describe('deformation is bounded, conserving and elastic', () => {
       // metal at today's table.  The bar is set well under that floor, so a
       // floor retune is not read as this regression.
       expect(avg(rows, 'cells'), name).toBeGreaterThanOrEqual(2);
-      // ...and carries enough internal boundary to survive a few Blaster
+      // ...and carries enough internal boundary to survive a few Projector
       // hits.  Derived HP IS the total internal boundary, so a shard with
       // two grains and one short seam between them dies instantly.
       expect(avg(rows, 'derived'), name).toBeGreaterThan(12);

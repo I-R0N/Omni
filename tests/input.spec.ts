@@ -726,7 +726,7 @@ test.describe('fire — on the PRESS for a device control', () => {
       full: pad({ analog: { 7: 1 } }),
     });
 
-    // The starting Blaster is a RATTLE, not a click — it has no break, so
+    // The starting Projector is a RATTLE, not a click — it has no break, so
     // the fire point is where its buzz starts (0.30), inside the clamp band.
     expect(r.firePoint).toBeCloseTo(0.30, 5);
     // Below the fire point nothing fires, even though `pressed` is already
@@ -1150,7 +1150,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
       return {
         // MICRO (1) — a shard ping, the smallest thing the game emits.
         micro: at(1, 0),
-        // The plain Blaster's haptic-only tick.
+        // The plain Projector's haptic-only tick.
         weapon: at(2, 10_000),
         // A tier-1 kill.
         tierOneKill: at(3.5, 20_000),
@@ -1188,7 +1188,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
     watch.assertClean();
   });
 
-  test('the plain Blaster ticks the pad and shakes NO camera', async ({ page }) => {
+  test('the plain Projector ticks the pad and shakes NO camera', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -2110,7 +2110,7 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       const disabled = last();
       e.player.statusEffects = [];
 
-      // Weaponless flight is legal (the Blaster is removable) — nothing to
+      // Weaponless flight is legal (the Projector is removable) — nothing to
       // fire, nothing to resist.
       const weapon = e.player.currentWeapon;
       e.player.currentWeapon = undefined;
@@ -2127,7 +2127,7 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       };
     }, { press: pad({ down: [BTN.R2] }), release: pad() });
 
-    // The starting Blaster: a low rattle, because a click 7x/s is fatigue.
+    // The starting Projector: a low rattle, because a click ~5.5x/s is fatigue.
     expect(r.armedKind).toBe('vibration');
     expect(r.armedStrength).toBeCloseTo(0.45, 5);
     // A charge winding up replaces it with a RAMP that stiffens as the ring

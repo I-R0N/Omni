@@ -1,18 +1,20 @@
 /** ENERGY FEEDBACK — the world-space layer for the energy modules.
  *
  *  Minimal by design (§11): the material behaviour carries most of the
- *  communication; this adds the three cues nothing else draws.
+ *  communication; this adds the cues nothing else draws.
  *
  *   - HEAT: the material ITSELF changes colour and gives off light — see
  *     `renderHeat`.  Nothing else draws heat: no rings, discs or sparks.
  *   - ENERGISED nebula GLITTERS (user call): quick, bright sparks inside the
  *     cloud — the nebula twinkle, faster and hotter — with an occasional
  *     faint crackle line to a neighbouring energised puff.
- *   - THE BEAM: the live beam pulse from the ship to what it touches.
+ *   - THE BEAM: the live beam from the ship to what it touches, and the
+ *     kinetic beam's pulses with their line trail.
+ *   - The electric spread's RING, a shocked hull's CRACKLE, and a player
+ *     seeker's target BRACKET and DOT TRAIL.
  *
- *  Electric arcs reuse the existing lightning-arc particle, magnetism reuses
- *  particle streaks and a ring, explosions reuse the blast ring — none of
- *  those need anything here.  Reads only the view GameEngine hands the
+ *  Electric arcs reuse the existing lightning-arc particle and explosions
+ *  reuse the blast ring — neither needs anything here.  Reads only the view GameEngine hands the
  *  renderer each frame; walks lists that are bounded by construction.
  */
 import { GameEntity, CameraState } from '../../../types';

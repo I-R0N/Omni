@@ -55,7 +55,7 @@ function shoot(page: any, spec: { kind: 'enemy' | 'shard'; mass: number; maxSpee
     const proj = {
       id: 'kb_shell', type: 'PROJECTILE',
       position: { x: at.x + 20, y: at.y },
-      velocity: { x: -16, y: 0 },   // the shipped Blaster muzzle speed
+      velocity: { x: -16, y: 0 },   // the starter Projector's muzzle speed
       rotation: Math.PI, size: { x: 6, y: 6 },
       // Module scope does not cross into `page.evaluate`, so this reads the
       // live constant rather than the suite's own MASS_SCALE literal.
@@ -82,7 +82,7 @@ test.describe('a shot pushes by momentum, not by damage alone', () => {
     const watch = await boot(page);
     await quiet(page);
 
-    // One Plasma Cannon hit (18 damage) across the weight range of the real
+    // One 18-damage hit (the old Plasma Cannon's bite) across the weight range of the real
     // roster: the mass-4 gnat, the mass-10 drone, the mass-140 Warden, the
     // mass-500 dragon.  Before the fix every one of these returned the same
     // number, which is the bug in one line.

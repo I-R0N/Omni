@@ -185,8 +185,8 @@ test.describe('economy', () => {
     await dockAtStation(page);
     await engine(page, e => e.addDebugCredits(500_000));
 
-    // A run starts LEAN: free Base Hull on the ship centre, Blaster on a gun
-    // hex, empty inventory, no shield (CLAUDE.md §5).
+    // A run starts LEAN: free Base Hull on the ship centre, the Projector on a
+    // gun hex, empty inventory, no shield (CLAUDE.md §5).
     const lean = await engine(page, e => e.outfittingSnapshot());
     expect(lean.ship[0]?.id).toBe('hull_base');
     expect(lean.inventory.every((i: any) => i === null)).toBe(true);

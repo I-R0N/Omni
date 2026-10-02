@@ -1324,9 +1324,10 @@ export const INPUT_CONSTANTS = {
      *  the same number reads weaker there.  Clamped to 1 at the top. */
     TRIGGER_FORCE_MULT: 1.6,
     /** Haptic-only tick for a weapon whose recoil deliberately shakes NO
-     *  camera — the plain Blaster.  Screen shake on every shot of the
-     *  fastest gun in the game would be unplayable; a tick in the hand is
-     *  exactly what the shake funnel cannot express. */
+     *  camera — an uncharged, blast-less round from the projectile or homing
+     *  delivery.  Screen shake on every shot of a fast-cadence gun would be
+     *  unplayable; a tick in the hand is exactly what the shake funnel
+     *  cannot express. */
     WEAPON_TICK: 2,
     /** Floor on the gap between effects (ms).  playEffect restarts the motors,
      *  so firing one per frame produces a flat drone instead of hits; a new
@@ -1514,10 +1515,12 @@ export const INPUT_CONSTANTS = {
  *  - PROJECTILES author `mass` directly, because it is the ENERGY BANK the
  *    round flies with (§5's "a round carries two numbers").  Deriving it
  *    from the drawn `size` would make a bolt's damage a function of its
- *    sprite: the Cannon is the proof, drawn at 16 against the Blaster's 6
- *    while massing 3.56 against 1.00, so its density is the LOWEST of any
- *    round (0.0139) and would have to be authored low anyway.  No
- *    information is gained and a hazard is introduced.
+ *    sprite: the retired Plasma Cannon was the proof, drawn at 16 against
+ *    the Blaster's 6 while massing 3.56 against 1.00, so its density was
+ *    the LOWEST of any round (0.0139) — and today's Cannon delivery makes
+ *    the same point the other way: the bare shell, drawn at 12, masses two
+ *    to three times its modified shells drawn at 16–18.  No information is
+ *    gained and a hazard is introduced.
  *  - ENEMIES author `mass` per archetype for the same reason a boss is
  *    bigger than a gnat without being proportionally heavier.  Their
  *    densities are REPORTED by the audit so the scale stays visible; two
@@ -3034,7 +3037,7 @@ export const MERGE_BLOWBACK = {
   DAMAGE: 0,         // non-damaging — pure knockback
   KNOCKBACK: 4,      // shove impulse at centre, falls off to 0 at rim
   LIFETIME: 0.22,    // seconds — snappier than the cannon's 0.35
-  COLOR: '#a855f7',  // purple — match the plasma cannon shock front
+  COLOR: '#a855f7',  // purple — the old Plasma Cannon's shock-front colour
 };
 
 // Hot-spot collapse — cure for the overlapping-shard pile-up that the
@@ -5814,8 +5817,10 @@ export const DAMAGE_TEXT_CONSTANTS = {
 //
 // so a beam built to rake a line gives up little per body and a pellet gives
 // up half.  (Every bank is now MASS_SCALE / BASE_BANK_DIVISOR ≈ 2.9x those,
-// so today's muzzle decay is ~0.65 Blaster, ~0.83 Shotgun, ~0.88 Burst and
-// ~0.93 Laser — the same ordering, gentler.)  That is why
+// so the rounds that inherited these tunings decay ~0.65 a hit (the
+// Projector), ~0.83 (the Shotgun, spread + kinetic) and ~0.88 (the Slug,
+// projectile + kinetic — the old Burst): the same ordering, gentler.  The
+// Laser left no round behind; it became the thermal BEAM.)  That is why
 // `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN` are DELETED here rather
 // than retuned: two knobs describing one phenomenon was the clearest single
 // symptom of the overlap this work exists to remove, and it is also why the
@@ -5825,8 +5830,9 @@ export const DAMAGE_TEXT_CONSTANTS = {
 // AND THE BODY COUNT IS NOT A BUDGET EITHER.  A round stops when it can no
 // longer afford what it is hitting: terrain charges per GRAIN
 // (`grainSize x bondStrength`) and an actor charges only what it could
-// actually absorb, so the same Blaster bolt that is stopped dead by one rock
-// tile punches through ~9 one-HP gnats (four at step 3, before the bank
+// actually absorb, so the starter Projector round, which is stopped dead
+// inside one rock tile, punches through 6 one-HP gnats (the retired
+// Blaster's 4-bite round managed ~9; four at step 3, before the bank
 // re-scale above).  Depth is emergent on both sides of the seam, which is
 // what let the Penetration module be deleted rather than replaced (step 5).
 export const IMPACT_ENERGY_PER_DAMAGE = 32;
@@ -6010,7 +6016,11 @@ export function projectileBite(authored: number, speed: number, spawnSpeed: numb
 // DBG 2x step and then BAKED).  That restores the original statement — the
 // peak measures ~20.8 against the same 18 bite, so the charge is worth about
 // one more hit again — and it is the RIGHT dial for it: the trim is about
-// penetration and moving it back would have undone the weapon pass.  The DBG
+// penetration and moving it back would have undone the weapon pass.  (That
+// was the Plasma Cannon.  Its shell lives on in the cannon combinations,
+// where the same arithmetic gives the Arc / Incendiary Shells ~20.8 against
+// a 14 bite and the Heavy Shell ~24.6 against its 24; the bare Cannon scales
+// its blast by `blastScale` 0.2.)  The DBG
 // ladder keeps 1x meaning WHAT SHIPS, so its 0.5x step is now the A/B against
 // the pre-call blast (§8's rule: a settled value is baked into the constant
 // and the knob returns to 1x, or every derivation written against the base
@@ -6168,7 +6178,8 @@ export const BASE_BANK_DIVISOR = GUNNERY_MK3_TRIPLE_MULT / BASE_BANK_TRIM;   // 
 // retired Blaster's delivered damage per second.  The Blaster landed a 4 bite
 // every 0.14 s = 28.6/s; every entry in DELIVERY_BASE sits at 16-17/s
 // (`nominalDps`, pinned by tests/energy.spec.ts) — except the CANNON, whose
-// direct bite is 12.9/s because its blast carries the rest.  The MODIFIERS are what make
+// direct bite is only ~2.1/s (3 per 1.4 s) because its blast carries the
+// rest.  The MODIFIERS are what make
 // a weapon strong, which is why every combination that an OLD gun maps onto
 // inherits that gun's own tuning — the old roster survives as seven named
 // points in the new space (see LEGACY_WEAPON_MAP in engine/systems/energy.ts).
@@ -6189,8 +6200,9 @@ export const LEGACY_BASE_WEAPON = { damage: 4, cooldown: 0.14, dps: 4 / 0.14 } a
 export const ENERGY_COLORS: Record<EnergyModifier | 'none', string> = {
   none: '#94a3b8', kinetic: '#f97316', electric: '#22d3ee', thermal: '#ef4444',
 };
-/** The Cannon's modified shells keep the old Plasma Cannon purple family;
- *  the BARE cannon is white (user call), like the other bare deliveries are
+/** The old Plasma Cannon purple — UNREAD: the cannon combinations take their
+ *  energy's colour (orange / cyan / red) like every other combination.  The
+ *  BARE cannon is white (user call), like the other bare deliveries are
  *  neutral. */
 export const CANNON_COLOR = '#a855f7';
 export const BARE_CANNON_COLOR = '#f1f5f9';
@@ -6501,20 +6513,26 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
     // `damage` or `speed` off a player gun has to restate the mass with it.
     mass: 1.4222,      // one bite at damage 5, speed 15
   },
-  // Bastion's siege battery — the player Plasma Cannon, AoE and all: the same
-  // purple heavy slug that splashes on impact.  Halved damage and a much
-  // longer beat, because a boss lobbing the player's artillery on the player's
-  // cadence would be unsurvivable.  The splash is what makes hiding behind
-  // cover (or hugging the hull) stop working.
+  // Bastion's siege battery — a boss variant of the player's Cannon, splash
+  // and all.  Halved damage and a much longer beat, because a boss lobbing
+  // the player's artillery on the player's cadence would be unsurvivable.
+  // The splash is what makes hiding behind cover (or hugging the hull) stop
+  // working.
+  // OPEN (energy modules): this spreads the BARE `WEAPONS.cannon`, and
+  // nothing below restates `detonateOn`, `boreCostScale` or `color`, so the
+  // shell inherits the bare Cannon's fuse-only detonation, narrow bore and
+  // white colour — it no longer splashes on contact the way this battery was
+  // written to.  Restating the three (or spreading 'cannon+kinetic', the old
+  // shell's successor) is the fix.
   SIEGE: {
     ...WEAPONS.cannon,
     name: 'Bastion Siege Battery',
     cooldown: 3.2,          // vs the player's 1.40 — a slow, readable lob
-    damage: 9,              // direct hit (player: 18)
+    damage: 9,              // direct hit (the old Plasma Cannon: 18)
     speed: 11,              // slow shells you can see coming and boost out of
     lifetime: 3.2,
     explosionRadius: 130,
-    explosionDamage: 6,     // splash, AUTHORED (player: derived, ~20.8)
+    explosionDamage: 6,     // splash, AUTHORED (the old Plasma Cannon: derived, ~20.8)
     explosionKnockback: 5,
     recoil: 0,
     mass: 4.7603,      // one bite at damage 9, speed 11 — see SCATTER
@@ -6739,7 +6757,7 @@ export const SHIP_WEIGHT = {
   // (0.10 -> 0.05) while BASE_BOOST was raised slightly (1.10 -> 1.15) to
   // compensate.  Net effect at the two ends of the curve:
   //   weaponless bare frame (w 1.0)  -> x1.10  (was x1.10 — the fly-light hook)
-  //   lean start, hull + Blaster (2.0) -> x1.05  (was x1.00 — the slight base bump)
+  //   lean start, hull + Projector (2.0) -> x1.05  (was x1.00 — the slight base bump)
   //   fully outfitted (w ~15.2)      -> x0.65  (x0.68 before the scanner
   //                                      joined "Outfit all"; x0.82 guns only)
   // So a maxed ship is now genuinely heavy and leans on Engine/Thrusters to
@@ -6987,7 +7005,7 @@ export function detectionAlpha(age: number): number {
 export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Ship group ──
   // Every run STARTS with the free Base Hull mounted on the center ship
-  // hex (mirror of the starter Blaster on gun hex W1): it adds no stats
+  // hex (mirror of the starter Projector on gun hex W1): it adds no stats
   // but is the adjacency ROOT the whole ship-module tree chains from, so
   // bought modules work out of the box.  cost 0 keeps it out of the shop.
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
@@ -9005,11 +9023,11 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   },
   // Bastion (BOSS_SIEGE): the second WEAPON-boss and the Reaver's inverse on
   // every axis — slow, huge and plated instead of fast and evasive, lobbing
-  // the PLAYER'S OWN Plasma Cannon (BOSS_WEAPONS.SIEGE, splash and all) in
+  // shells spread from the PLAYER'S OWN Cannon (BOSS_WEAPONS.SIEGE) in
   // 2-shell salvos from a LONG stand-off (`preferredDistance`) instead of
   // brawling.  Its counterplay identity is the pair of B3 traits: a permanent
-  // FRONT-SHIELD plate (face-tanking never becomes viable — flank it, ricochet
-  // into its back, or splash past the plate edge) over REGEN that only a
+  // FRONT-SHIELD plate (face-tanking never becomes viable — flank it, or
+  // splash past the plate edge) over REGEN that only a
   // genuine damage BURST shuts off.  SHOOTING role, and the only archetype
   // that overrides the shared skirmisher stand-off.
   [EnemySubtype.BOSS_SIEGE]: {
@@ -9228,9 +9246,11 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 // weapon a "right answer" somewhere is WEAPONS_AMMO_PLAN §7.
 //   armor.chipThreshold — per-hit damage at/above this lands in full
 //   armor.reduction     — fraction cut from hits BELOW the threshold
-// So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
-// Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
-// through.  AoE/explosion damage isn't chip-resisted (it's an answer).
+// So the Projector (3) and a Shotgun pellet (3) chip the Tank, while the Slug
+// (7), Seeker (8), Arc Bolt (9), the cannon shells (14–24) and charged shots —
+// and a Gunnery-boosted Projector (≈6.2) — punch through.  AoE/explosion
+// damage isn't chip-resisted (it's an answer), and the energy layer's beams,
+// arcs and heat never meet the trait.
 //
 // A trait SET is also what a (h) boss phase carries (BossPhaseDef.traits): a
 // phase REPLACES the set, so a boss can trade one defence for another as it
@@ -9254,9 +9274,9 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 // entity's FACING — the Bulwark's arc geometry generalized, but with NO pool to
 // deplete, so face-tanking never becomes viable no matter how long you hold the
 // trigger.  Its answers fall out of WHERE damage is applied rather than from
-// special cases: lightning chains and shockwave rings damage in GameEngine,
-// OUTSIDE the projectile path, so they bypass the plate for free; a Laser
-// ricochet arrives from behind; and a slow fortress can simply be flanked.
+// special cases: the energy layer's arcs, beams and heat (`damageBody`) and
+// the shockwave rings land OUTSIDE the projectile path, so they bypass the
+// plate for free; and a slow fortress can simply be flanked.
 //   deg       — total covered arc, centred on `rotation`
 //   reduction — fraction cut from a covered hit
 //
@@ -9267,9 +9287,10 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 // the player pauses" — any sustained weapon clears that, chip damage would stop
 // healing through, and the trait would invert.  With fixed buckets the
 // arithmetic lands on the §7 table by construction (per `windowSec` = 0.4s):
-//   Blaster  ≈12  → heals through (chip)      Shotgun cone 18 → opens the burn
-//   Burst Rifle 15 → just under the gate      Cannon 18 (+10 splash) → opens it
-//   Seeker 8 / Lightning 9 → under (their answers are other traits)
+//   Projector ≈9 → heals through (chip)       Shotgun cone 18 → opens the burn
+//   Slug 2×7 = 14 → just under the gate       Heavy Shell 24 → opens it
+//   Seeker 8 / Arc Bolt 9 → under on the bite alone (their answers are other
+//   traits)
 //   perSec      — health per second while not burning
 //   burstDamage — damage inside one bucket that shuts regen off
 //   windowSec   — bucket length (armed by the first hit)
@@ -9286,8 +9307,9 @@ export interface EnemyTraitSet {
 /**
  * Feed one applied-damage event into a REGEN-trait entity's fixed burst bucket.
  * Called from every path that damages an enemy on the player's behalf — the
- * PhysicsSystem projectile hit, the lightning chain, and the shockwave ring —
- * so splash and chain damage count toward a burst like pellets do.
+ * PhysicsSystem projectile hit, the energy layer's `damageBody`, and the
+ * shockwave ring — so splash, arc and beam damage count toward a burst like
+ * pellets do.
  *
  * The bucket is FIXED, not sliding: only the FIRST hit arms the timer (see the
  * EnemyTraitSet comment for why that distinction is the whole trait).  No-op

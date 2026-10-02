@@ -148,8 +148,8 @@ test.describe('armor — chip fire plinks, big hits punch through', () => {
     expect(chip.dealt).toBeCloseTo(4 * (1 - cfg.reduction), 5);
 
     // A BIG hit — at or above the threshold — lands in full.  This is the
-    // whole counterplay: Cannon / Lightning / a charged slug / a
-    // Gunnery-boosted Blaster past the threshold all get through.
+    // whole counterplay: the cannon shells / the Arc Bolt / a charged round /
+    // a Gunnery-boosted Projector past the threshold all get through.
     const big = await shell(page, { targetId: id, damage: 12 });
     expect(big.dealt).toBe(12);
 
@@ -261,10 +261,15 @@ test.describe('front-shield — a permanent plate with no pool', () => {
     // `updateExplosionRings` in a tight loop: that method reads the ring's
     // lifetime but does not advance it, so hand-stepping it leaves the
     // wavefront pinned at radius 0 and measures nothing.
+    // SMALL on purpose: a ring reaches at most the first 64 bodies inside it,
+    // in master-list order (the energy modules' blast cap), and the boss is
+    // appended late — a 400-unit ring over Deep Space terrain could fill the
+    // cap before it got to the boss.  At the centre the boss takes the full
+    // hit whatever the radius.
     const before = await engine(page, (e, tid: string) => {
       const t = e.currentMap.entities.find((x: any) => x.id === tid);
       e.spawnShockwave({ x: t.position.x, y: t.position.y }, {
-        radius: 400, damage: 20, knockback: 0,
+        radius: 60, damage: 20, knockback: 0,
         color: '#fff', lifetime: 0.3,
         ownerType: 'PLAYER', ownerId: 'player',
       });

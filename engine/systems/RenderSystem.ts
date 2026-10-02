@@ -2030,8 +2030,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // colour automata that only terrain uses.  render/tileShapes.ts.
             drawTileShape(this, ctx, entity, nowSec, playerPos, camera);
           } else if (entity.type === EntityType.PROJECTILE) {
-             // Lightning bolt / bouncer head / charged fireball / the
-             // standard weapon-colour glow.  render/projectileShapes.ts.
+             // Electric bolt / charged fireball / the standard
+             // weapon-colour glow.  render/projectileShapes.ts.
              drawProjectileShape(this, ctx, entity, nowSec);
           } else {
             // Drops (salvage / health / glass debris) and the proximity-
