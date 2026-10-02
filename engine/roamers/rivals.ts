@@ -12,6 +12,7 @@
  *  an outfitted player can still out-fly it.  Engine-managed lifecycle;
  *  AISystem skips them via the `isRival` flag.
  */
+import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, WeaponType, WeaponConfig } from '../../types';
 import {
@@ -40,7 +41,7 @@ export interface RivalInstance {
 
 function rollRivalDisposition(): RivalDisposition {
     const w = RIVAL_CONSTANTS.WEIGHTS;
-    const r = Math.random() * (w.hostile + w.ally + w.neutral);
+    const r = sim.roamers() * (w.hostile + w.ally + w.neutral);
     if (r < w.hostile) return 'hostile';
     if (r < w.hostile + w.ally) return 'ally';
     return 'neutral';
@@ -192,14 +193,14 @@ export function spawnRival(g: GameEngine, forced?: RivalDisposition) {
     const R = RIVAL_CONSTANTS;
     const zoom = g.camera.zoom || 1;
     const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-    const angle = Math.random() * Math.PI * 2;
+    const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + R.SPAWN_MARGIN;
     const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };
     wrapPosition(pos);
     g.openPortal(pos, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
 
     const disposition = forced ?? rollRivalDisposition();
-    const sprite = R.SPRITES[Math.floor(Math.random() * R.SPRITES.length)];
+    const sprite = R.SPRITES[Math.floor(fxRng.sprites() * R.SPRITES.length)];
     const ship: GameEntity = {
         id: nextId('rival'),
         type: EntityType.ENEMY,
@@ -217,12 +218,12 @@ export function spawnRival(g: GameEngine, forced?: RivalDisposition) {
         isRival: true,
         sprite,
         trail: [],
-        glowPhase: Math.random() * Math.PI * 2,
+        glowPhase: fxRng.sprites() * Math.PI * 2,
     };
     g.currentMap.entities.push(ship);
     g.rivals.push({
         ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
-        fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
+        fireTimer: sim.roamers() * R.WEAPON.cooldown, stolen: 0,
     });
     g.audio.play('rival.warp.in', { x: ship.position.x, y: ship.position.y });
 }

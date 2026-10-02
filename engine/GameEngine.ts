@@ -1,5 +1,8 @@
 
 
+import { sim, fxRng, seedRng } from './systems/rng';
+import { resetIdCounter } from './systems/IdAllocator';
+import { freshRunSeed } from './replay';
 import { InputSystem } from './systems/InputSystem';
 import { PhysicsSystem } from './systems/PhysicsSystem';
 import { RenderSystem } from './systems/RenderSystem';
@@ -1109,6 +1112,7 @@ export class GameEngine {
       shakeOffset: { x: 0, y: 0 }
     };
 
+    this.seedRun();
     this.loadMap(this.buildMap(this.selectedMapType));
   }
 
@@ -1193,6 +1197,48 @@ export class GameEngine {
   }
 
   // --- STATE MANAGEMENT ---
+  /** Root seed of the current run's random streams (engine-core S1, D-S1-a:
+   *  hidden from the player for now).  Read it, with the input log, to replay
+   *  a run.  Changes only when a new run begins. */
+  public runSeed = 1;
+  /** A seed the NEXT new run must use instead of a fresh one (replay / tests). */
+  private pendingRunSeed: number | null = null;
+  /** True while a replay is driving the sim by hand: the rAF loop then only
+   *  draws, and `stepSim` is the one thing that advances the world. */
+  public replayHold = false;
+
+  /** Seed every random stream and the id sequence for a new run. */
+  private seedRun() {
+    const seed = this.pendingRunSeed ?? freshRunSeed();
+    this.pendingRunSeed = null;
+    this.runSeed = seed >>> 0;
+    seedRng(this.runSeed);
+    resetIdCounter();
+  }
+
+  /** Begin a NEW run on `mapType` from `seed` and hold the loop so `stepSim`
+   *  drives it.  The replay harness's entry point (engine/replay.ts). */
+  public beginSeededRun(seed: number, mapType: MapType) {
+    this.pendingRunSeed = seed;
+    this.selectedMapType = mapType;
+    this.deathPending = false;
+    this.deathDelay = 0;
+    this.deathSummary = null;
+    this.resetAndLoadSelectedMap();
+    this.startGame();
+    this.replayHold = true;
+    this.simAccumulator = 0;
+    this.prepareFrameEntities();
+  }
+
+  /** Advance the world by exactly `n` fixed substeps, now, with no rAF and no
+   *  wall clock.  The unit the rAF loop's accumulator drain is made of. */
+  public stepSim(n: number) {
+    const dt = getSimDt();
+    for (let i = 0; i < n; i++) this.simStep(dt);
+    this.prepareFrameEntities();
+  }
+
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
@@ -1496,6 +1542,7 @@ export class GameEngine {
       this.shards.reset();
       this.energy.reset();
       this.perfController.reset();
+      this.ai.reset();
       this.activeDrops = [];
       this.portalTransit.length = 0;
       this.trailEmitAccumulator = 0;
@@ -1580,7 +1627,18 @@ export class GameEngine {
    *  setMapType() (→ PLAYING).  Leaves gameState untouched; the caller
    *  decides the target state and pushes the frame. */
   private resetAndLoadSelectedMap() {
+      // A new run is a new SEED: every random stream restarts from one root,
+      // so the world this run generates is a function of `runSeed` alone.  A
+      // portal transition (`transitionToMap`) deliberately does NOT come
+      // through here — the streams run on across it.
+      this.seedRun();
       this.loadMapFresh(this.selectedMapType);
+      // The sim clock is run state: detection stamps and energy timers are
+      // read against it, and a run that begins at "whatever the last one
+      // ended on" is not a function of its seed.  Nothing carries a stamp
+      // across this point — `loadMapFresh` rebuilt every entity and cleared
+      // `lastHostileNearAt`.
+      this.simClock = 0;
 
       // ── Run-scoped reset — the half a portal transition SKIPS ──────────
       // Per-run counters that ride with the score/economy rather than with
@@ -1807,7 +1865,7 @@ export class GameEngine {
               this.portalTransit.push({
                   entity: e,
                   delay: transitCfg.DELAY_MIN
-                      + Math.random() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
+                      + sim.engine() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
               });
           }
       }
@@ -2433,6 +2491,49 @@ export class GameEngine {
     return this.simClock - this.lastHostileNearAt < AUDIO_CONSTANTS.MUSIC_LINGER_SEC;
   }
 
+  /** ONE fixed sim substep: refresh the working set, decide which periodic
+   *  tasks run, then physics and game logic.  Extracted from `loop` so the
+   *  replay harness steps the world by the same code the frame does.
+   *  Returns the substep's wall time in ms (perf bookkeeping only). */
+  private simStep(dt: number): number {
+        // Refresh working set for physics/AI before each sim step so
+        // entities spawned during the previous step are visible to this one.
+        this.prepareFrameEntities();
+        // Sample load + precompute every skippable task's run decision
+        // for this substep.  Manual DBG overrides (which still live on
+        // the systems that own their cycle buttons) are synced in first
+        // so `0 = AUTO` delegates to the controller and a manual pin
+        // wins.  Signals: current total entities, previous step's peak
+        // collision-cell density, and the previous substep's sim time.
+        this.perfController.setManual('shardPair', this.physics.shardPairFrameInterval);
+        this.perfController.setManual('shardTilePair', this.physics.shardTilePairFrameInterval);
+        this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
+        this.perfController.beginStep(
+            this.perfCounts.totalEntities,
+            this.physics.lastDynamicCount,
+            this.physics.lastMaxCellDensity,
+            // The load signal's TIME term is wall-clock, so it is the one
+            // input a replay cannot reproduce: a held replay reports 0 and the
+            // controller sees entity count and cell density alone.
+            this.replayHold ? 0 : this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
+        );
+        // Wall-clock the two top-level sim phases so the perf overlay
+        // can show the gap between summed sub-timers and total sim
+        // time.  Untimed work (entity compaction, flow-field nudge,
+        // weapon ticks, drop scan, etc.) shows up as the difference.
+        const tPhys0 = performance.now();
+        try { this.updatePhysics(dt); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
+        this.lastUpdatePhysicsMs = performance.now() - tPhys0;
+        const tLogic0 = performance.now();
+        try { this.updateGameLogic(dt); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.lastUpdateGameLogicMs = performance.now() - tLogic0;
+        // Push per-substep perf samples.  Every timed sub-phase was written
+        // to instance fields on its owning system during the two calls above;
+        // the recorder just reads and ring-buffers them in one shot.
+        this.recordSimPerf();
+        return this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs;
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
@@ -2792,8 +2893,10 @@ export class GameEngine {
       this.audio.setCombat(combat);
     }
 
-    if (this.gameState !== GameState.PLAYING) {
-        // If paused or in menu, still draw (static frame) but skip updates
+    if (this.gameState !== GameState.PLAYING || this.replayHold) {
+        // If paused or in menu, still draw (static frame) but skip updates.
+        // A replay in progress holds the sim the same way: `stepSim` is the
+        // only thing that advances it.
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -2903,39 +3006,7 @@ export class GameEngine {
         // transit warp; the rest of this frame's substeps would otherwise
         // simulate the destination while the player is still in the tunnel.
         if (this.portalWarpTimer > 0) { this.simAccumulator = 0; break; }
-        // Refresh working set for physics/AI before each sim step so
-        // entities spawned during the previous step are visible to this one.
-        this.prepareFrameEntities();
-        // Sample load + precompute every skippable task's run decision
-        // for this substep.  Manual DBG overrides (which still live on
-        // the systems that own their cycle buttons) are synced in first
-        // so `0 = AUTO` delegates to the controller and a manual pin
-        // wins.  Signals: current total entities, previous step's peak
-        // collision-cell density, and the previous substep's sim time.
-        this.perfController.setManual('shardPair', this.physics.shardPairFrameInterval);
-        this.perfController.setManual('shardTilePair', this.physics.shardTilePairFrameInterval);
-        this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
-        this.perfController.beginStep(
-            this.perfCounts.totalEntities,
-            this.physics.lastDynamicCount,
-            this.physics.lastMaxCellDensity,
-            this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
-        );
-        // Wall-clock the two top-level sim phases so the perf overlay
-        // can show the gap between summed sub-timers and total sim
-        // time.  Untimed work (entity compaction, flow-field nudge,
-        // weapon ticks, drop scan, etc.) shows up as the difference.
-        const tPhys0 = performance.now();
-        try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
-        this.lastUpdatePhysicsMs = performance.now() - tPhys0;
-        const tLogic0 = performance.now();
-        try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
-        this.lastUpdateGameLogicMs = performance.now() - tLogic0;
-        frameSimMs += this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs;
-        // Push per-substep perf samples.  Every timed sub-phase was written
-        // to instance fields on its owning system during the two calls above;
-        // the recorder just reads and ring-buffers them in one shot.
-        this.recordSimPerf();
+        frameSimMs += this.simStep(FIXED_DT);
         this.simAccumulator -= FIXED_DT;
         steps++;
     }
@@ -3090,7 +3161,7 @@ export class GameEngine {
       // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
       let fxDir = flow.x, fyDir = flow.y;
       if (laneJitter > 0) {
-          if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+          if (e.flowLane === undefined) e.flowLane = sim.engine() * 2 - 1;
           const off = e.flowLane * laneJitter;
           const px = -flow.y, py = flow.x;
           const nx = flow.x + px * off;
@@ -3304,7 +3375,7 @@ export class GameEngine {
               const flow = this.flowField.sampleShardFlow(d.position.x, d.position.y);
               let fxDir = flow.x, fyDir = flow.y;
               if (laneJitter > 0) {
-                  if (d.flowLane === undefined) d.flowLane = Math.random() * 2 - 1;
+                  if (d.flowLane === undefined) d.flowLane = sim.engine() * 2 - 1;
                   const off = d.flowLane * laneJitter;
                   const px = -flow.y, py = flow.x;
                   let nx = flow.x + px * off;
@@ -3754,8 +3825,8 @@ export class GameEngine {
               for (let nb = 0; nb < 1; nb++) {
                   const jitter = baseSize * 0.2;
                   const puffPos = {
-                      x: entity.position.x + (Math.random() - 0.5) * jitter,
-                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                      x: entity.position.x + (sim.engine() - 0.5) * jitter,
+                      y: entity.position.y + (sim.engine() - 0.5) * jitter,
                   };
                   const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
@@ -3763,7 +3834,7 @@ export class GameEngine {
                       puffPos,
                       baseSize,
                       comp[0].hex,
-                      0.45 + Math.random() * 0.2,
+                      0.45 + sim.engine() * 0.2,
                       entity.lastImpactVelocity ?? entity.velocity,
                       comp,
                       0.5,
@@ -3781,12 +3852,12 @@ export class GameEngine {
               && variant === 'rock-tile'
               && entity.mass === Infinity) {
               const baseSize = this.deformedDiameter(entity);
-              const count = 3 + Math.floor(Math.random() * 3);
+              const count = 3 + Math.floor(sim.engine() * 3);
               for (let nb = 0; nb < count; nb++) {
                   const jitter = baseSize * 0.4;
                   const puffPos = {
-                      x: entity.position.x + (Math.random() - 0.5) * jitter,
-                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                      x: entity.position.x + (sim.engine() - 0.5) * jitter,
+                      y: entity.position.y + (sim.engine() - 0.5) * jitter,
                   };
                   const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
@@ -3794,7 +3865,7 @@ export class GameEngine {
                       puffPos,
                       baseSize,
                       comp[0].hex,
-                      0.4 + Math.random() * 0.3,
+                      0.4 + sim.engine() * 0.3,
                       entity.lastImpactVelocity,
                       comp,
                       0.5,
@@ -3835,13 +3906,13 @@ export class GameEngine {
               const ec = entity.color || '#f87171';
               const baseSize = Math.max(entity.size.x, entity.size.y);
               const span = ENEMY_NEBULA_BURST.MAX_COUNT - ENEMY_NEBULA_BURST.MIN_COUNT + 1;
-              const count = ENEMY_NEBULA_BURST.MIN_COUNT + Math.floor(Math.random() * span);
+              const count = ENEMY_NEBULA_BURST.MIN_COUNT + Math.floor(sim.engine() * span);
               const inheritVel = entity.lastImpactVelocity ?? entity.velocity;
               for (let nb = 0; nb < count; nb++) {
                   const jitter = baseSize * ENEMY_NEBULA_BURST.SPREAD_JITTER;
                   const puffPos = {
-                      x: entity.position.x + (Math.random() - 0.5) * jitter,
-                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                      x: entity.position.x + (sim.engine() - 0.5) * jitter,
+                      y: entity.position.y + (sim.engine() - 0.5) * jitter,
                   };
                   this.drops.spawnColoredNebulaShard(
                       this.currentMap.entities,
@@ -3879,7 +3950,7 @@ export class GameEngine {
                  && !isShardFamily) {
           // Generic fallback for anything outside the classification
           // (misc structures) — unchanged from before.
-          const numParticles = 4 + Math.floor(Math.random() * 3);
+          const numParticles = 4 + Math.floor(fxRng.particles() * 3);
           const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
           this.spawnParticles(entity.position, numParticles, entity.color || '#facc15', {
               speedMin: SPEED_MIN, speedMax: SPEED_MAX,
@@ -3928,8 +3999,8 @@ export class GameEngine {
       // Collect POIs once outside the placement-attempt loop.
       const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
       for (let i=0; i<5; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const dist = 500 + Math.random() * (config.radius - 500);
+          const angle = sim.engine() * Math.PI * 2;
+          const dist = 500 + sim.engine() * (config.radius - 500);
           const x = Math.cos(angle) * dist;
           const y = Math.sin(angle) * dist;
 
@@ -3945,7 +4016,7 @@ export class GameEngine {
 
           if (safe && this.currentMap) {
                const newAst = this.currentMap.createRockShard(x, y,
-                  config.minSize + Math.random() * (config.maxSize - config.minSize),
+                  config.minSize + sim.engine() * (config.maxSize - config.minSize),
                   config.speedMultiplier
                );
                this.currentMap.entities.push(newAst);
@@ -4029,11 +4100,11 @@ export class GameEngine {
             const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
             const along = mag * osc;
             const jitter = mag * S.DIR_JITTER;
-            this.camera.shakeOffset.x = this.shakeDirX * along + (Math.random() - 0.5) * jitter;
-            this.camera.shakeOffset.y = this.shakeDirY * along + (Math.random() - 0.5) * jitter;
+            this.camera.shakeOffset.x = this.shakeDirX * along + (fxRng.render() - 0.5) * jitter;
+            this.camera.shakeOffset.y = this.shakeDirY * along + (fxRng.render() - 0.5) * jitter;
         } else {
-            this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
-            this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;
+            this.camera.shakeOffset.x = (fxRng.render() - 0.5) * mag * 2;
+            this.camera.shakeOffset.y = (fxRng.render() - 0.5) * mag * 2;
         }
     }
 
@@ -4216,7 +4287,7 @@ export class GameEngine {
             this.overworldDragonTimer -= dt;
             if (this.overworldDragonTimer <= 0) {
                 const types: (StructureVariant | 'mixed')[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
-                spawnDragon(this, types[Math.floor(Math.random() * types.length)]);
+                spawnDragon(this, types[Math.floor(sim.engine() * types.length)]);
                 this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
             }
         }
@@ -4922,7 +4993,7 @@ export class GameEngine {
     // intended usage.
     this.audio.loop('status.disable.loop', this.player.systemsDisabled === true);
     // Occasional acid drip on the ship while corroding (throttled).
-    if (acidParticle && Math.random() < 0.4) {
+    if (acidParticle && fxRng.particles() < 0.4) {
       this.spawnParticles(this.player.position, 1, CORROSION.COLOR, {
         speedMin: 0.5, speedMax: 2, sizeMin: 1, sizeMax: 2.2,
         lifetimeMin: 0.3, lifetimeMax: 0.6,
@@ -5619,7 +5690,7 @@ export class GameEngine {
           return;
       }
 
-      const vx = (Math.random() - 0.5) * 10;
+      const vx = (fxRng.render() - 0.5) * 10;
       const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
       const popup = this._damageTextPool.pop() ?? ({
           id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
@@ -5667,7 +5738,7 @@ export class GameEngine {
       // dent tiles.  (rock-tile is already a dent entity; name the shard.)
       const suppressNumber = isDent || target?.shardVariant === 'rock-shard';
       if (target && target.health > 0 && !suppressNumber) {
-          const vx = (Math.random() - 0.5) * 10;
+          const vx = (fxRng.render() - 0.5) * 10;
           const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
           const popup = this._damageTextPool.pop() ?? ({
               id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
@@ -5720,7 +5791,7 @@ export class GameEngine {
                   // selling the brittle fracture as both shrapnel and
                   // dust.  Only rock today; other dent variants want
                   // the cleaner solid-shard-only readout.
-                  if (target.shardVariant === 'rock-tile' && Math.random() < ROCK_HIT_NEBULA_PUFF_CHANCE) {
+                  if (target.shardVariant === 'rock-tile' && sim.engine() < ROCK_HIT_NEBULA_PUFF_CHANCE) {
                       // Occasional puff per hit (probability gated above)
                       // at a varied size + small jitter on spawn position
                       // so it doesn't overlap exactly.  Without the gate
@@ -5730,8 +5801,8 @@ export class GameEngine {
                       const baseSize = this.deformedDiameter(target);
                       const jitter = baseSize * 0.15;
                       const puffPos = {
-                          x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
-                          y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
+                          x: impactWorldPos.x + (sim.engine() - 0.5) * jitter,
+                          y: impactWorldPos.y + (sim.engine() - 0.5) * jitter,
                       };
                       const comp = randomRockNebulaComposition();
                       this.drops.spawnColoredNebulaShard(
@@ -5739,7 +5810,7 @@ export class GameEngine {
                           puffPos,
                           baseSize,
                           comp[0].hex,
-                          0.45 + Math.random() * 0.2,
+                          0.45 + sim.engine() * 0.2,
                           target.lastImpactVelocity,
                           comp,
                           0.5,
@@ -5804,13 +5875,13 @@ export class GameEngine {
       if (!this.currentMap) return;
       // Perf: most non-killing hits just crack (the overlay) — only some shed
       // a chip entity.  Thins the chip stream that drives render/sim cost.
-      if (Math.random() >= ROCK_CHIP.CHIP_CHANCE) return;
+      if (sim.engine() >= ROCK_CHIP.CHIP_CHANCE) return;
       const entities = this.currentMap.entities;
       const diam = this.deformedDiameter(parent);
       // Solid chunks only come off reasonably-sized rock — a tiny shard would
       // shed a useless sliver, so it puffs dust until it breaks.
       const solid = diam >= ROCK_CHIP.SOLID_MIN_PARENT_DIAM
-          && Math.random() < ROCK_CHIP.ROCK_FRACTION;
+          && sim.engine() < ROCK_CHIP.ROCK_FRACTION;
       let chipDiam: number;
       if (solid) {
           // Solid rock-shard chunk flung from the impact point (sized +
@@ -5826,19 +5897,19 @@ export class GameEngine {
           // accumulates (no lifetime), so only actually puff some of the
           // time.  No puff this hit → nothing chips (the crack already
           // telegraphed the damage); skip the conservation shrink too.
-          if (Math.random() >= ROCK_CHIP.DUST_CHANCE) return;
+          if (sim.engine() >= ROCK_CHIP.DUST_CHANCE) return;
           // Pulverised dust — a tinted nebula puff drifting off the impact.
           chipDiam = diam * ROCK_CHIP.NEBULA_SIZE_FRAC;
           const jitter = diam * 0.15;
           const puffPos = {
-              x: impactPos.x + (Math.random() - 0.5) * jitter,
-              y: impactPos.y + (Math.random() - 0.5) * jitter,
+              x: impactPos.x + (sim.engine() - 0.5) * jitter,
+              y: impactPos.y + (sim.engine() - 0.5) * jitter,
           };
           const comp = randomRockNebulaComposition();
           this.drops.spawnColoredNebulaShard(
               entities, puffPos, diam, comp[0].hex,
               ROCK_CHIP.NEBULA_SIZE_FRAC, parent.lastImpactVelocity, comp,
-              0.45 + Math.random() * 0.2, true, // fromRock — condenses back to rock-shard
+              0.45 + sim.engine() * 0.2, true, // fromRock — condenses back to rock-shard
           );
       }
       // Conservation: slim a mobile asteroid by the chip's footprint (dust
@@ -7135,17 +7206,17 @@ export class GameEngine {
           if (item.delay > 0) continue;
           this.portalTransit.splice(i, 1);
           const e = item.entity;
-          const scatterA = Math.random() * Math.PI * 2;
-          const scatterR = Math.random() * cfg.SCATTER;
+          const scatterA = sim.engine() * Math.PI * 2;
+          const scatterR = sim.engine() * cfg.SCATTER;
           e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
           e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
           wrapPosition(e.position);
-          const heading = Math.random() * Math.PI * 2;
-          const speed = cfg.SPEED_MIN + Math.random() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
+          const heading = sim.engine() * Math.PI * 2;
+          const speed = cfg.SPEED_MIN + sim.engine() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
           e.velocity.x = Math.cos(heading) * speed;
           e.velocity.y = Math.sin(heading) * speed;
           if (e.rotationSpeed !== undefined) {
-              e.rotationSpeed += (Math.random() - 0.5) * 1.5;
+              e.rotationSpeed += (sim.engine() - 0.5) * 1.5;
           }
           e.portalGraceTimer = cfg.GRACE_SEC;
           e.active = true;
@@ -7173,8 +7244,8 @@ export class GameEngine {
       if (!ctx) return;
       const subtype = (id in EnemySubtype && BOSS_DEFS[id as EnemySubtype])
           ? (id as EnemySubtype) : BOSS_ROTATION[0];
-      const spread = 420 + Math.random() * 260;
-      const a = Math.random() * Math.PI * 2;
+      const spread = 420 + sim.engine() * 260;
+      const a = sim.engine() * Math.PI * 2;
       const pos = {
           x: this.player.position.x + Math.cos(a) * spread,
           y: this.player.position.y + Math.sin(a) * spread,
@@ -7218,8 +7289,8 @@ export class GameEngine {
     // (it is never despawned at a wave end), so don't touch it here.
     const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
     if ((clearedIndex + 1) % healthInterval === 0) {
-      const hAngle = Math.random() * Math.PI * 2;
-      const hDist  = 20 + Math.random() * 80; // 20–100 units from player
+      const hAngle = sim.engine() * Math.PI * 2;
+      const hDist  = 20 + sim.engine() * 80; // 20–100 units from player
       const hPos   = {
         x: this.player.position.x + Math.cos(hAngle) * hDist,
         y: this.player.position.y + Math.sin(hAngle) * hDist,
@@ -7234,8 +7305,8 @@ export class GameEngine {
     // above stays score-only.  This spray + the grace timer is the
     // between-wave breather now that the card modal no longer pauses the sim.
     for (let i = 0; i < SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = 40 + Math.random() * 80;
+      const a = sim.engine() * Math.PI * 2;
+      const d = 40 + sim.engine() * 80;
       this.spawnSalvageDrop({
         x: this.player.position.x + Math.cos(a) * d,
         y: this.player.position.y + Math.sin(a) * d,

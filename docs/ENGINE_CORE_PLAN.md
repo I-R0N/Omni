@@ -186,6 +186,15 @@ every session landing before it adds new `Math.random()` sites to convert —
 and the replay harness it produces makes every later refactor verifiable
 rather than hoped-at.
 
+**Status (S1, 2026-10-02).**  PR 1 is built: every `Math.random()` site in
+the game code now draws from a named seeded stream (`engine/systems/rng.ts`),
+the replay harness exists (`engine/replay.ts`, `tests/replay.spec.ts`) and
+D-S1-c is decided (§7 D1: AI jitter is SIM).  Still OPEN and not to be
+guessed: D-S1-a, b, d, e, f, g — to be put to the user once PR 1 is green.
+D-S1-b is partly answered by what PR 1 had to do — the seed already covers
+everything, because a half-seeded run is not replayable — so the live
+question is only whether the PLAYER can ever choose it (a).
+
 **Near-term payoff** (the discipline rule): bug reports become a seed plus
 an input log; the existing 430 tests get far stronger; deterministic
 lockstep becomes the cheapest netcode path if multiplayer is ever wanted.
@@ -490,6 +499,7 @@ who made it, and the consequences for other sessions.
 | D0 | PM | 2026-10-02 | **Mobile first, Steam deferred, console accepted as possibly a different game** (user call).  Weighed against a Steam-first release; rejected because the game is already shaped for a 390×844 phone and Steam's real cost is a desktop HUD and input pass, while mobile's cost is store paperwork. | Sets the whole plan's order.  `S5` is not scheduled and nothing in `S1`–`S4` is shaped around it. |
 | D0b | PM | 2026-10-02 | **The portable-core goal is a deterministic, platform-free sim with content as data — not a reusable engine, and not shared code with a console port** (user call, sharpened in planning).  A port is a verified translation checked by replaying inputs against state hashes. | Makes `S1`'s determinism work the keystone.  Imposes the discipline rule in §1. |
 | D0c | PM | 2026-10-02 | **Sessions are organised around gameplay decisions, not around refactors** (user call).  Each session pairs invisible plumbing with the gameplay feature it unlocks, and ships two PRs. | Collapses an earlier seven-package plan into four sessions. |
+| D1 | S1 | 2026-10-02 | **D-S1-c — the sim/cosmetic split of the random streams** (user call).  Options weighed: AI jitter as SIM / as COSMETIC / split by effect.  **Call: AI jitter is SIM; the rest of the proposed split confirmed as written.**  SIM = terrain / map gen, wave composition + spawn placement, drop rolls + scatter, fracture velocities and seeds, nebula condense rolls, chip dust, boss / rival / dragon / snitch / bubble rolls, projectile spread and curl, the energy layer's lanes, and enemy jitter / flock / timers.  COSMETIC = particles, sprite / palette / shade picks, nebula twinkle, camera shake, damage-text jitter, audio variation, the star field and background nebula, render-time wobble.  Rationale for jitter: it moves bodies, so a replay that did not reproduce it would be silently false. | Streams are one per SUBSYSTEM (`engine/systems/rng.ts`), so a draw added to one cannot shift another.  Anything that mixes both kinds in one function was split site by site (e.g. a death's particle COUNT is cosmetic, the debris it throws is sim).  Entity ids are sim state (they seed fracture patterns), so cosmetic prefixes count on their own id sequence.  AI draw order must stay stable per entity — a later session that reorders enemy iteration reshuffles every replay. |
 
 ---
 
@@ -500,4 +510,27 @@ should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
 
-*(empty — nothing flagged yet)*
+- **S1 → S2 (Clock port).**  Four wall-clock reads still sit in or beside the
+  sim and a replay works around, not through, them: (1) `PerfController`'s load
+  signal has a wall-clock sim-time term — a held replay feeds it 0, so skip
+  tiers in a REAL recorded run are not reproduced; a bug-report replay of a
+  heavy scene needs the tier recorded, or the controller pinned; (2) a charged
+  shot's hold time reads `performance.now` in `InputSystem` and is not in the
+  replay input format; (3) the replay's aim is a screen position from the
+  viewport centre, so it only matches at the recorded viewport; (4) the
+  per-run seed is read from `crypto` / `Date.now` in `freshRunSeed` — a daily
+  seed (D-S1-a) would route through the `Clock` port.  *(S1, 2026-10-02)*
+- **S1 → S2 (save scope).**  `GameEngine.runSeed` is the one number a saved
+  run needs to regenerate terrain; the streams' STATES are not saved, so a
+  mid-run save restores the world from entities but cannot resume the random
+  sequence unless `simStates()` is persisted too.  *(S1, 2026-10-02)*
+- **S1 → S3 (content as data).**  Nothing in the content tables may read
+  `Math.random` any more; a content row that wants a random roll names its
+  stream.  `constants.ts` still owns three roll helpers
+  (`randomRockShade` / the plastic shades are cosmetic; the wave-mix roll in
+  `buildWaveSpawnList` is sim) — they stay as functions, not data.
+  *(S1, 2026-10-02)*
+- **Process.**  The plan lived only on `claude/steam-game-publishing-xhnui2`
+  (PR #108) when S1 began, so `git checkout -B claude/engine-core origin/main`
+  would have dropped it.  S1 branched from the plan branch instead.
+  *(S1, 2026-10-02)*

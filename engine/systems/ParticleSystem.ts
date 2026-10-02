@@ -1,3 +1,4 @@
+import { fxRng } from './rng';
 import { GameEntity, EntityType, Vector2 } from '../../types';
 import { GLITTER_TRAIL_CONSTANTS, MAX_PARTICLES } from '../../constants';
 import { nextId } from './IdAllocator';
@@ -92,19 +93,19 @@ export class ParticleSystem {
 
     for (let i = 0; i < count; i++) {
       const angle = spreadAngle !== undefined
-        ? spreadAngle + (Math.random() - 0.5) * 2 * halfCone
-        : Math.random() * Math.PI * 2;
-      const speed = speedMin + Math.random() * (speedMax - speedMin);
-      const size  = sizeMin + Math.random() * (sizeMax - sizeMin);
-      const life  = lifetimeMin + Math.random() * (lifetimeMax - lifetimeMin);
+        ? spreadAngle + (fxRng.particles() - 0.5) * 2 * halfCone
+        : fxRng.particles() * Math.PI * 2;
+      const speed = speedMin + fxRng.particles() * (speedMax - speedMin);
+      const size  = sizeMin + fxRng.particles() * (sizeMax - sizeMin);
+      const life  = lifetimeMin + fxRng.particles() * (lifetimeMax - lifetimeMin);
 
       // Optional position scatter — useful for spawning glittery clouds
       // over an area (e.g. nebula merge glimmer) instead of a single point.
       let px = position.x;
       let py = position.y;
       if (positionJitter > 0) {
-        const jAngle = Math.random() * Math.PI * 2;
-        const jDist  = Math.sqrt(Math.random()) * positionJitter; // uniform area
+        const jAngle = fxRng.particles() * Math.PI * 2;
+        const jDist  = Math.sqrt(fxRng.particles()) * positionJitter; // uniform area
         px += Math.cos(jAngle) * jDist;
         py += Math.sin(jAngle) * jDist;
       }
@@ -187,16 +188,16 @@ export class ParticleSystem {
     for (let i = 0; i < COUNT_PER_FRAME; i++) {
       // Uniform along-axis distribution in [-1, 1] so sparkles are evenly
       // spaced from the upstream end to the downstream end of the segment.
-      const u = Math.random() * 2 - 1;
+      const u = fxRng.particles() * 2 - 1;
       const along = u * axisExtent;
       // Triangular perpendicular spread (peaked at centreline) so sparkles
       // cover the sprite's width without smearing beyond the hull.
-      const pu = Math.random() - Math.random();
+      const pu = fxRng.particles() - fxRng.particles();
       const jitter = pu * perpExtent;
 
-      const life = LIFETIME_MIN + Math.random() * (LIFETIME_MAX - LIFETIME_MIN);
-      const size = SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
-      const color = GCOLORS[Math.floor(Math.random() * GCOLORS.length)];
+      const life = LIFETIME_MIN + fxRng.particles() * (LIFETIME_MAX - LIFETIME_MIN);
+      const size = SIZE_MIN + fxRng.particles() * (SIZE_MAX - SIZE_MIN);
+      const color = GCOLORS[Math.floor(fxRng.particles() * GCOLORS.length)];
 
       const gpx = cx + fx * along + perpX * jitter;
       const gpy = cy + fy * along + perpY * jitter;

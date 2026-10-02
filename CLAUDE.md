@@ -112,7 +112,10 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           death — use `quietScene`),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  507 tests.  All run at
+                          whatever happened next), replay (the REPLAY HARNESS: same seed + same
+                          inputs ⇒ identical sim hashes across maps, the
+                          cosmetic streams cannot reach the sim, and no
+                          `Math.random` survives in the game code).  519 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts (six sizes plus
                           a mid-session resize) and two starfield tests
                           that resize mid-test
@@ -178,6 +181,13 @@ engine/
                           time snapshot of them (never the whole map), and
                           a ring that says so (`heatFrac`, the incendiary
                           shell) also deposits heat (see §8, energy)
+  replay.ts               THE REPLAY HARNESS (engine-core S1): a run is
+                          `(seed, input log)`; `runReplay` steps the real
+                          engine by hand (`GameEngine.stepSim`, no rAF, no
+                          wall clock) and hashes the SIM state every N steps
+                          so a divergence names its first step and section.
+                          Dev-only — no player-facing surface (D-S1-g).
+                          Published as `window.__omniReplay`
   energyEffects.ts        ENERGY MODULES, the side-effect half: the
                           bounded heated set (cooling, burn latch, glass
                           thermal failure, plastic bond release,
@@ -417,7 +427,12 @@ engine/
                           AREA at a target density, so every screen size
                           shows the same sky per unit area.  See §8 and
                           docs/GAUNTLET_STARFIELD_LOG.md
-    IdAllocator.ts        Monotonic nextId() for entity IDs
+    rng.ts                SEEDED RANDOM STREAMS (engine-core S1) — every
+                          draw in the game comes from a named mulberry32
+                          stream, `sim.*` (changes the world, must replay
+                          exactly) or `fxRng.*` (decoration only).  See §8
+    IdAllocator.ts        Monotonic nextId() for entity IDs (cosmetic
+                          prefixes count on their own sequence — §8)
     PerfController.ts     Load-driven frame-skip coordinator for every
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
@@ -2758,6 +2773,33 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 
 ## 8. Conventions and gotchas
 
+- **ALL RANDOMNESS IS A SEEDED STREAM, AND THE STREAMS ARE SPLIT BY WHAT
+  THEY CAN CHANGE** (engine-core plan S1, user call D1).  `Math.random` is
+  banned from the game code — `tests/replay.spec.ts` greps for it — and every
+  draw reads a named stream from `engine/systems/rng.ts`: `sim.terrain` /
+  `waves` / `drops` / `shards` / `nebula` / `ai` / `combat` / `roamers` /
+  `energy` / `engine` for anything that moves the WORLD, and `fxRng.particles`
+  / `sprites` / `render` / `audio` / `sky` for anything that only decorates
+  it.  The rule that matters: **nothing the sim reads may come from an `fxRng`
+  stream** (the render layer, audio, background and particle files may not
+  import `sim` at all — also grepped).  The streams are one per subsystem,
+  not one per kind, so a draw added to the drop code cannot shift what the AI
+  rolls next.  Generator: mulberry32, the repo's precedent
+  (`fracture.ts`), with its 32-bit state exposed so the replay hash folds it
+  in.  `GameEngine.seedRun()` reseeds every stream from `runSeed` at the start
+  of a run (`resetAndLoadSelectedMap`, constructor) and NOT across a portal
+  transition — the streams run on.  The seed is hidden from the player
+  (`freshRunSeed`); `beginSeededRun(seed, map)` pins it.  The call that made
+  AI jitter SIM: enemy wobble moves bodies, so a replay that did not reproduce
+  it would be silently false.  Four non-obvious things hold determinism up:
+  an entity id is SIM STATE (`seedFromEntityId` seeds the fracture pattern),
+  so cosmetic prefixes (`part`/`glit`/`score`/`dmg`/`hud`/`lightning`) count
+  on a separate sequence in `IdAllocator` or a particle count rolled on a
+  cosmetic stream would shift the next shard's break; the id counter restarts
+  with each run, so every id-keyed cache (`AISystem.reset`) must clear on map
+  load or a new run's enemy inherits the last run's memory of its id; the sim
+  clock (`simClock`) restarts with the run; and the PerfController's load
+  signal has a wall-clock term, which a held replay feeds as 0.
 - **Torus math is non-optional.** Any new distance check, nearest-neighbor
   scan, or projectile targeting must go through `wrapDeltaX`/`wrapDeltaY`.
   Naïve `a.x - b.x` will silently break across seams.
@@ -5416,7 +5458,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns twelve, once, in its mount effect — except
+  them.**  `App.tsx` assigns thirteen, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5483,6 +5525,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     suites (`tests/mass.spec.ts` first).  A projectile a twentieth the
     density of the hull that fires it plays perfectly well; only the
     tables side by side show it.
+  - `__omniReplay` — the replay harness (`runReplay`, `endReplay`,
+    `hashSimState`, `firstDivergence`) and the `rng` stream module.  A
+    stream that leaks into the sim still plays perfectly and throws nothing,
+    so `tests/replay.spec.ts` pins it through this handle.
   - `__omniBlend` — the bonded-pair blend geometry (`buildFilletPath`,
     `blendAttachRadius`, `coatMargin`, `roundedPolyPath`), every failure
     mode of which — a degenerate pair, NaN coordinates, a seam, a fillet

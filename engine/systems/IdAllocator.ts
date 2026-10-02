@@ -21,15 +21,35 @@
  */
 
 let counter = 0;
+let fxCounter = 0;
+
+/**
+ * Prefixes of COSMETIC entities (particles, trail glints, popups, arcs).
+ * They count on their OWN sequence, because an id string is sim state: the
+ * fracture pattern of a shard is seeded from its id (`seedFromEntityId`),
+ * and a shared counter would let the number of particles a death threw —
+ * which rides a cosmetic random stream — shift the id, and so the break, of
+ * the next shard.  Engine-core plan S1: cosmetic draws must not reach the sim.
+ */
+const COSMETIC_PREFIXES = new Set(['part', 'glit', 'score', 'dmg', 'hud', 'lightning']);
 
 /**
  * Return a fresh unique ID prefixed with `prefix`.  Prefixes carry no
- * semantic meaning to the allocator; they exist purely for human-readable
- * debugging (e.g. `proj_42`, `part_1337`).
+ * semantic meaning to the allocator beyond the sim/cosmetic split above;
+ * they exist for human-readable debugging (e.g. `proj_42`, `part_1337`).
  */
 export function nextId(prefix: string): string {
+  if (COSMETIC_PREFIXES.has(prefix)) {
+    fxCounter += 1;
+    return `${prefix}_${fxCounter}`;
+  }
   counter += 1;
   return `${prefix}_${counter}`;
+}
+
+/** The sim sequence's position, for the replay hash. */
+export function peekIdCounter(): number {
+  return counter;
 }
 
 /**
@@ -39,4 +59,5 @@ export function nextId(prefix: string): string {
  */
 export function resetIdCounter() {
   counter = 0;
+  fxCounter = 0;
 }

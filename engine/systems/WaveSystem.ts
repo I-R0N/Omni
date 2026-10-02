@@ -1,3 +1,4 @@
+import { sim } from './rng';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WaveAnnouncement } from '../../types';
 import {
   DIFFICULTY_STAT_SCALES,
@@ -311,12 +312,12 @@ export class WaveSystem {
     // viewport, padded by the configured offscreen margin and the enemy's
     // own half-size so even its sprite edge stays off-screen.
     const minSpawnDistance = viewportHalfDiagonal + WAVE_CONSTANTS.OFFSCREEN_MARGIN + enemyHalfSize;
-    const baseAngle = Math.random() * Math.PI * 2;
+    const baseAngle = sim.waves() * Math.PI * 2;
     const pos = this.spawnPos;
     // Try up to 8 candidate positions; pick first one clear of static tiles.
     for (let attempt = 0; attempt < 8; attempt++) {
       const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
-      const dist = minSpawnDistance + Math.random() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
+      const dist = minSpawnDistance + sim.waves() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
       pos.x = player.position.x + Math.cos(a) * dist;
       pos.y = player.position.y + Math.sin(a) * dist;
       wrapPosition(pos);
@@ -364,7 +365,7 @@ export class WaveSystem {
       position: { x, y },
       velocity: { x: 0, y: 0 },
       size: { x: config.size, y: config.size },
-      rotation: Math.random() * Math.PI * 2,
+      rotation: sim.waves() * Math.PI * 2,
       color: config.color,
       active: true,
       health: scaledHealth,
@@ -404,13 +405,13 @@ export class WaveSystem {
       if (config.shieldArc) {
         enemy.shieldArcHalfWidth = (config.shieldArc.deg * Math.PI / 180) / 2;
         enemy.shieldArcSpin = config.shieldArc.slew;
-        enemy.shieldArcAngle = Math.random() * Math.PI * 2;
+        enemy.shieldArcAngle = sim.waves() * Math.PI * 2;
       }
     }
 
     // Nest spawner (Stage 4): seed the brood spawn timer so it staggers.
     if (config.spawner) {
-      enemy.spawnTimer = config.spawner.interval * (0.4 + Math.random() * 0.6);
+      enemy.spawnTimer = config.spawner.interval * (0.4 + sim.waves() * 0.6);
     }
 
     // Boss ((h)): mark it so the HUD bar / render aura / payout paths pick it
@@ -453,11 +454,11 @@ export class WaveSystem {
   public spawnAt(subtype: EnemySubtype, pos: Vector2, ctx: WaveSpawnContext, counts: boolean = false): GameEntity {
     const id = nextId(`brood_${this.waveIndex}`);
     const jitter = ENEMY_VARIANTS[subtype].size;
-    const x = pos.x + (Math.random() - 0.5) * jitter;
-    const y = pos.y + (Math.random() - 0.5) * jitter;
+    const x = pos.x + (sim.waves() - 0.5) * jitter;
+    const y = pos.y + (sim.waves() - 0.5) * jitter;
     const enemy = this.buildEnemy(id, subtype, x, y, ctx, counts);
-    enemy.velocity.x = (Math.random() - 0.5) * 4;
-    enemy.velocity.y = (Math.random() - 0.5) * 4;
+    enemy.velocity.x = (sim.waves() - 0.5) * 4;
+    enemy.velocity.y = (sim.waves() - 0.5) * 4;
     ctx.entities.push(enemy);
     this.waveEnemyIds.add(id);
     return enemy;

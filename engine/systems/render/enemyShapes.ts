@@ -14,6 +14,7 @@
  *  whiten, the boss aura ring, the engine flame, and the damage-crack
  *  overlay.
  */
+import { fxRng } from '../rng';
 import { GameEntity, EntityType } from '../../../types';
 import {
     BOSS_CONSTANTS, BOSS_DEFS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS,
@@ -239,13 +240,13 @@ export function drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity
         if (latched && entity.attachedToId === 'player') {
             ctx.lineWidth = 1.4;
             for (let k = 0; k < 3; k++) {
-                ctx.strokeStyle = `rgba(245,158,11,${0.5 + 0.45 * Math.random()})`;
+                ctx.strokeStyle = `rgba(245,158,11,${0.5 + 0.45 * fxRng.render()})`;
                 ctx.beginPath();
-                let ax = rb * sxx * 0.7, ay = (Math.random() - 0.5) * rb * 0.8;
+                let ax = rb * sxx * 0.7, ay = (fxRng.render() - 0.5) * rb * 0.8;
                 ctx.moveTo(ax, ay);
                 for (let s = 0; s < 3; s++) {
-                    ax += rb * 0.5 * (0.6 + Math.random() * 0.6);
-                    ay += (Math.random() - 0.5) * rb * 0.7;
+                    ax += rb * 0.5 * (0.6 + fxRng.render() * 0.6);
+                    ay += (fxRng.render() - 0.5) * rb * 0.7;
                     ctx.lineTo(ax, ay);
                 }
                 ctx.stroke();

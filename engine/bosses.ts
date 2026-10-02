@@ -19,6 +19,7 @@
  *  enemy can carry, not a boss mechanism, so filing it under bosses would be
  *  a misfile.
  */
+import { sim } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, EnemySubtype, EngineStats, Vector2 } from '../types';
 import {
@@ -175,8 +176,8 @@ g.audio.play('boss.death');
     // The money is PHYSICAL — the same salvage drops every other source pays,
     // sprayed off the corpse so it converges and merges normally.
     for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = 30 + Math.random() * 140;
+        const a = sim.roamers() * Math.PI * 2;
+        const d = 30 + sim.roamers() * 140;
         g.spawnSalvageDrop({
             x: boss.position.x + Math.cos(a) * d,
             y: boss.position.y + Math.sin(a) * d,
@@ -298,7 +299,7 @@ g.audio.play('boss.death');
 function grantBossModule(g: GameEngine): { label?: string; desc?: string; credits?: number } {
     const catalog = MODULE_DEFS.filter(d => d.cost > 0);
     if (catalog.length === 0) return {};
-    const def = catalog[Math.floor(Math.random() * catalog.length)];
+    const def = catalog[Math.floor(sim.roamers() * catalog.length)];
     const slot = g.inventory.indexOf(null);
     if (slot === -1) {
         const paid = g.modulePrice(def.cost);
@@ -329,10 +330,10 @@ function openDescentPortal(g: GameEngine, pos: Vector2) {
     const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled
         && HUB_PORTAL_SITES.some(site => site.targetId === d.id));
     if (arenas.length === 0) return;
-    const dest = arenas[Math.floor(Math.random() * arenas.length)];
+    const dest = arenas[Math.floor(sim.roamers() * arenas.length)];
 
     // Offset from the corpse so the rift doesn't sit under the debris.
-    const a = Math.random() * Math.PI * 2;
+    const a = sim.roamers() * Math.PI * 2;
     const p = {
         x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
         y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
