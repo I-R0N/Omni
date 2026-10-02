@@ -424,18 +424,28 @@ nothing in `S1`–`S4` should be shaped around it.
 
 ## 5. Branch and CI conventions
 
-**One integration branch off `main`** holds all of `S1`–`S4`.  Proposed
-name: `claude/engine-core`.  Work sessions branch from it and PR back into
-it; it merges to `main` when the PM session judges a phase coherent.
+**One integration branch off `main`** holds all of `S1`–`S4`:
+**`claude/engine-core`** (user call, confirmed).  Work sessions branch from
+it and PR back into it; it merges to `main` when the PM session judges a
+phase coherent.  A work session that finds the branch missing creates it
+from `main` (`git fetch origin main && git checkout -B claude/engine-core
+origin/main`) — it is not pre-created here, because an empty long-lived
+branch is just a name.
 
 **This plan doc must reach `main` early**, because fresh work sessions
 clone the default branch and would otherwise not see it.
 
 **CI maps onto the existing two-scope design** (CLAUDE.md §7) with no new
-machinery: PRs into the integration branch get the SMOKE scope per push;
-merges into the integration branch run the FULL suite.  Add
-`claude/engine-core` to the full-suite trigger list in `pr-checks.yml`
-beside `claude/plan-completion`, or reuse that branch.
+machinery, and it is already WIRED: `claude/engine-core` is in
+`pr-checks.yml`'s `push.branches`, which is the whole mechanism — the scope
+step sends every non-`pull_request` event to `test:full`, so a merge into
+the integration branch runs the whole net while PRs INTO it get the cheap
+per-push smoke.  Nothing further to configure.
+
+**A work session's own gate** is therefore CLAUDE.md §7's rule verbatim:
+typecheck + build + `npm test` (smoke) + the suites the change touches, per
+push.  The FULL suite waits for the user's notice that a PR is ready to
+merge — a work session does not decide that moment has arrived.
 
 **Private-repo note.**  The repo is going private (user call).  Three
 consequences, none blocking: keep `i-r0n/omni-standalone` **public** so

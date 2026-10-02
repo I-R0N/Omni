@@ -7,7 +7,8 @@ name: PR checks
 #           A bundle that will not boot, a type error, or a broken core loop
 #           still fails in ~3 minutes; nothing merges without this green.
 #   FULL  — the entire Playwright suite, at the MAJOR SEAMS only:
-#           pushes to `main` and `claude/plan-completion` (i.e. immediately
+#           pushes to `main`, `claude/plan-completion` and
+#           `claude/engine-core` (i.e. immediately
 #           after a merge lands), PRs whose BASE is `main` (the
 #           plan-completion → main promotion), any PR carrying the
 #           `full-tests` label (the opt-in for pre-merge full validation),
@@ -31,9 +32,14 @@ on:
   # Also guard the long-lived branches themselves, so a bad merge is visible
   # immediately rather than at the next PR opened against them.  `main` is the
   # default branch; `claude/plan-completion` is the integration branch the
-  # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md).
+  # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md);
+  # `claude/engine-core` is the integration branch for the engine-core +
+  # mobile phase (docs/ENGINE_CORE_PLAN.md §5).  Listing a branch here is the
+  # WHOLE mechanism: the scope step below sends every non-`pull_request` event
+  # to the full suite, so a merge into one runs the whole net while PRs INTO
+  # it still get the cheap per-push smoke.
   push:
-    branches: [main, claude/plan-completion]
+    branches: [main, claude/plan-completion, claude/engine-core]
   workflow_dispatch:
 
 concurrency:
