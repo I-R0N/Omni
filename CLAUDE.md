@@ -1093,6 +1093,12 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `tests/roll.spec.ts` pins signal + easing + every DBG cycle + the
   hull default.
 - `PLAYER_MOVEMENT_CONFIG` (per-MapType)
+- `FLIGHT_INPUT_CYCLE` / `FLIGHT_VELOCITY_RESPONSE` — DBG Player & Ship ▸
+  Flight ▸ "Flight input" A/B (index 0 ships): `Accel` adds the movement
+  vector to velocity (coasts); `Velocity` treats it as a TARGET velocity
+  (deflection × `lastCruiseSpeed`) eased toward at 25%/tick, with the target
+  pre-scaled to cancel PhysicsSystem's friction so full deflection reaches
+  cruise.  Skipped while a knockback overshoot (`overSpeedAllow`) is live.
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)

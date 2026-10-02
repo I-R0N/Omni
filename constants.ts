@@ -3864,6 +3864,29 @@ export function cycleVelGain(): number {
   return activeVelGainIndex;
 }
 
+// DBG flight-input A/B (Player ▸ Flight ▸ "Flight input"): how the movement
+// vector drives the ship.  'accel' (shipped) adds it to velocity as an
+// ACCELERATION, so speed builds and coasts.  'velocity' treats it as a
+// TARGET velocity (deflection × cruise speed) the ship eases toward, so
+// releasing the input brakes instead of coasting.  Index 0 ships.
+export const FLIGHT_INPUT_CYCLE: ReadonlyArray<{ name: string; velocity: boolean }> = [
+  { name: 'Accel (def)', velocity: false },
+  { name: 'Velocity',    velocity: true },
+];
+/** Per-tick fraction of the gap to the target velocity closed in Velocity mode. */
+export const FLIGHT_VELOCITY_RESPONSE = 0.25;
+let activeFlightInputIndex = 0;
+export function isVelocityFlightInput(): boolean {
+  return FLIGHT_INPUT_CYCLE[activeFlightInputIndex].velocity;
+}
+export function getActiveFlightInputName(): string {
+  return FLIGHT_INPUT_CYCLE[activeFlightInputIndex].name;
+}
+export function cycleFlightInput(): number {
+  activeFlightInputIndex = (activeFlightInputIndex + 1) % FLIGHT_INPUT_CYCLE.length;
+  return activeFlightInputIndex;
+}
+
 // DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
 // A/B-ing how deep the bank reads, cycled live from the pause debug menu.
 // Only the ANGLE varies — the response/return rates are the same feel at

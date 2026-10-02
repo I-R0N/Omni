@@ -33,7 +33,7 @@ import {
     cycleNebulaDamp, cycleNebulaSpinDamp, cycleNebulaBond, cycleNebulaTileShare,
     cycleNebulaDrain,
     togglePlasticAutomataBrighten,
-    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity, cycleBlastEnergy,
+    cyclePlayerThrust, cyclePlayerSpeed, cyclePlayerRoll, cyclePlayerHull, cycleRollDamping, cycleTiltMode, cycleLeanDir, cycleTiltSource, cycleVelGain, cycleFlightInput, cycleSnitchSpeed, cycleEnemyScale, cycleImpactVelocity, cycleCrashEnergy, cycleHullDensity, cycleBlastEnergy,
     cyclePortalWarp, cyclePortalSize, cyclePortalGravity, cyclePortalGravityRange,
     cyclePortalLens, cyclePortalLensSpin, cyclePortalLensRadius,
     cycleSwarmMove, cycleSubstepCap, cycleHudRate, cycleSimRate, getSimDt,
@@ -994,6 +994,12 @@ export class DebugControls {
    *  only; Thrust mode never reads it. */
   cycleVelGain() {
     cycleVelGain();
+  }
+
+  /** Toggle the flight-input A/B (FLIGHT_INPUT_CYCLE): acceleration vs
+   *  target-velocity control of the ship. */
+  cycleFlightInput() {
+    cycleFlightInput();
   }
 
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
