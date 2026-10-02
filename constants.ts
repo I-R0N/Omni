@@ -7864,23 +7864,8 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
   CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
-  // Death penalty (interim, user call): dying forfeits this fraction of the
-  // player's UNSPENT Salvage, charged once when the run-summary screen is
-  // raised so the summary can report exactly what it cost.  0.25 is
-  // PROVISIONAL — big enough that a death stings, small enough that it never
-  // wipes a run — and is placeholder for the dynamic system the economy
-  // tuning pass (roadmap step 6) will design.  Money already SPENT on modules
-  // is untouched: the penalty taxes hoarding, not investment.
-  DEATH_PENALTY_FRACTION: 0.25,
-  // ...and a FLOOR, so death still costs something at a low balance where a
-  // percentage rounds to pocket change.  The charge is
-  //   min(balance, max(fraction × balance, MIN))
-  // — whichever of the two is higher, but never more than the player has, so
-  // it can bring them to zero and never below.  12 500 ≈ 12–13 salvage drops
-  // (CREDITS_PER_DROP 1000), i.e. roughly two waves of combat income, and it
-  // is the binding term below a 50 000 balance.  PROVISIONAL like the
-  // fraction: both are placeholders for the economy tuning pass (step 6).
-  DEATH_PENALTY_MIN: 12500,
+  // No death penalty on salvage (user call D6): dying strips the installed
+  // loadout instead (GameEngine.returnToStation).
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)

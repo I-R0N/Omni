@@ -186,7 +186,10 @@ every session landing before it adds new `Math.random()` sites to convert —
 and the replay harness it produces makes every later refactor verifiable
 rather than hoped-at.
 
-**Status (S1, 2026-10-02).**  PR 1 is built: every `Math.random()` site in
+**Status (S1, 2026-10-02).**  PR 2 is built on top of PR 1 (branch
+`claude/s1-death-reset`): per-map seeding with a persistent hub (D8), the
+death return to the station with installed modules stripped (D4), no credit
+penalty (D6) and the arena seed on the summary (D2).  PR 1 is built: every `Math.random()` site in
 the game code now draws from a named seeded stream (`engine/systems/rng.ts`),
 the replay harness exists (`engine/replay.ts`, `tests/replay.spec.ts`) and
 D-S1-c is decided (§7 D1: AI jitter is SIM).  All of D-S1-a to g are now decided

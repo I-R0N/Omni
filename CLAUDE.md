@@ -115,7 +115,7 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           whatever happened next), replay (the REPLAY HARNESS: same seed + same
                           inputs ⇒ identical sim hashes across maps, the
                           cosmetic streams cannot reach the sim, and no
-                          `Math.random` survives in the game code).  519 tests.  All run at
+                          `Math.random` survives in the game code).  522 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts (six sizes plus
                           a mid-session resize) and two starfield tests
                           that resize mid-test
@@ -632,23 +632,18 @@ state on the way).
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
   per-map run state.
 
-Death: `respawnPlayer()` refills at the current map's spawn and the run
-continues.  There IS now an interim death PENALTY (user call): raising the
-summary charges `min(balance, max(DEATH_PENALTY_FRACTION × balance,
-DEATH_PENALTY_MIN))` of the player's UNSPENT credits — whichever of the
-percentage and the flat floor is HIGHER, clamped to what they hold, so a
-broke pilot is zeroed and never driven negative.  Charged ONCE, on the
-transition into `deathPending`, so neither respawning nor restarting can
-double-charge, and money already spent on modules is untouched (the
-penalty taxes hoarding, not investment).  `lastDeathCreditsLost` /
-`runCreditsLost` carry it to the summary, which reports salvage as a
-LEDGER FOR THIS LIFE: earned since the last death
-(`lifeCreditsEarned`, snapshotted + zeroed at each death), lost to the
-wreck, and held after the loss.  The run gross (`runCreditsEarned`)
-stays on `EngineStats` but is deliberately NOT the headline — it keeps
-climbing and isn't the question being asked at the wreck.  Both numbers are PROVISIONAL
-and the fuller dynamic system still belongs to the economy tuning pass
-(step 6).
+Death (user calls D4/D6, engine-core S1): the RESPAWN button runs
+`returnToStation()` — the player goes back to their STATION in the persistent
+hub (reloading it if they died in an arena, `stageIndex` back to 0), the hull
+and shield refill, and everything INSTALLED on the ship is stripped
+(`resetOutfit(true)`): the hex slots fall back to the free lean start (Base
+Hull + Projector), which keeps the ship flyable.  What SURVIVES is the
+character, not the loadout: salvage (there is NO credit penalty any more —
+the old `DEATH_PENALTY_*` charge, `lastDeathCreditsLost` and the summary's
+"salvage lost" line are gone), CARGO modules, purchased hex slots, score and
+every run counter.  A death in the hub just refills and relocates beside the
+home station.  There is still no run terminator: the run is the persistent
+character.
 The screen itself is PRESENTATION around the respawn behaviour — when
 the wreck's `explosionTimer` runs out the engine no longer respawns; it
 arms `deathDelay` (`UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC`), the boss
@@ -664,8 +659,8 @@ everything after step 4b stops: input / weapons / docking / drop
 collection / wave progress, the snitch / dragon / rival ticks, the
 projectile post-pass and the energy layer — heat neither cools nor burns
 until the respawn), the
-explosion-timer branch is guarded on `explosionTimer > 0` so the PENALTY
-cannot be re-charged every step, and the summary is a SNAPSHOT
+explosion-timer branch is guarded on `explosionTimer > 0` so the summary
+snapshot cannot be re-taken every step, and the summary is a SNAPSHOT
 (`deathSummary`, taken at the moment of death and republished verbatim)
 so nothing behind the screen can move the numbers on it.  `runTimeSec`
 likewise stops explicitly while `deathDelay > 0 || deathPending` — reading
@@ -2786,20 +2781,28 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   not one per kind, so a draw added to the drop code cannot shift what the AI
   rolls next.  Generator: mulberry32, the repo's precedent
   (`fracture.ts`), with its 32-bit state exposed so the replay hash folds it
-  in.  `GameEngine.seedRun()` reseeds every stream from `runSeed` at the start
-  of a run (`resetAndLoadSelectedMap`, constructor) and NOT across a portal
-  transition — the streams run on.  The seed is hidden from the player
-  (`freshRunSeed`); `beginSeededRun(seed, map)` pins it.  The call that made
+  in.  SEEDING IS PER MAP, NOT PER RUN (user call D8): every map load goes
+  through `GameEngine.loadMapSeeded`, which seeds the streams for the map's
+  KIND.  The HUB is a persistent world — its terrain is generated from the
+  one fixed `HUB_WORLD_SEED` (`MapDescriptors.ts`), so it is the same place
+  on every visit and every run, and it carries no seed (`arenaSeed` is null);
+  an ARENA is a fresh mini-game that carries its own — random
+  (`freshRunSeed`) unless `beginSeededRun(seed, map)` pinned one — and that
+  `arenaSeed` is what the death summary shows (D2).  After the hub's terrain
+  is built the streams are reseeded from a fresh (or pinned) seed, so ambient
+  fauna does not repeat every visit.  The call that made
   AI jitter SIM: enemy wobble moves bodies, so a replay that did not reproduce
-  it would be silently false.  Four non-obvious things hold determinism up:
+  it would be silently false.  Five non-obvious things hold determinism up:
   an entity id is SIM STATE (`seedFromEntityId` seeds the fracture pattern),
   so cosmetic prefixes (`part`/`glit`/`score`/`dmg`/`hud`/`lightning`) count
   on a separate sequence in `IdAllocator` or a particle count rolled on a
   cosmetic stream would shift the next shard's break; the id counter restarts
-  with each run, so every id-keyed cache (`AISystem.reset`) must clear on map
-  load or a new run's enemy inherits the last run's memory of its id; the sim
-  clock (`simClock`) restarts with the run; and the PerfController's load
-  signal has a wall-clock term, which a held replay feeds as 0.
+  with each MAP, so every id-keyed cache (`AISystem.reset`) must clear on map
+  load or a new map's enemy inherits the last one's memory of its id, and
+  debris carried through a portal is re-id'd `xfer_<id>` at capture so it can
+  never collide; the sim clock (`simClock`) restarts with the map; the
+  PerfController's load signal has a wall-clock term, which a held replay
+  feeds as 0; and `PhysicsSystem.shardPairCallCount` restarts with the map.
 - **Torus math is non-optional.** Any new distance check, nearest-neighbor
   scan, or projectile targeting must go through `wrapDeltaX`/`wrapDeltaY`.
   Naïve `a.x - b.x` will silently break across seams.

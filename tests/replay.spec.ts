@@ -119,6 +119,45 @@ test.describe('same seed + same inputs ⇒ the same world', () => {
   });
 });
 
+test.describe('the hub is persistent; only arenas carry a seed (D8)', () => {
+  async function terrain(page: any, seed: number, map: string): Promise<{ fp: number; n: number; arenaSeed: number | null }> {
+    return page.evaluate((a: any) => {
+      const g = (window as any).__omniEngine;
+      g.beginSeededRun(a.seed, a.map);
+      let h = 0x811c9dc5, n = 0;
+      for (const e of g.currentMap.entities) {
+        if (!e.active || e.type !== 'STRUCTURE' || e.mass !== Infinity) continue;
+        n++;
+        for (const v of [e.position.x, e.position.y]) {
+          h = Math.imul(h ^ (Math.round(v * 100) | 0), 0x01000193) >>> 0;
+        }
+      }
+      const out = { fp: h, n, arenaSeed: g.arenaSeed };
+      (window as any).__omniReplay.endReplay(g);
+      return out;
+    }, { seed, map });
+  }
+
+  test('the hub generates the same terrain whatever the seed, and carries none', async ({ page }) => {
+    await boot(page);
+    const a = await terrain(page, 1, 'OVERWORLD');
+    const b = await terrain(page, 2, 'OVERWORLD');
+    expect(a.n).toBeGreaterThan(50);
+    expect(b.fp).toBe(a.fp);
+    expect(a.arenaSeed).toBeNull();
+  });
+
+  test('CONTROL: an arena generates different terrain per seed, and reports its seed', async ({ page }) => {
+    await boot(page);
+    const a = await terrain(page, 1, 'POCKET');
+    const b = await terrain(page, 2, 'POCKET');
+    const a2 = await terrain(page, 1, 'POCKET');
+    expect(b.fp).not.toBe(a.fp);
+    expect(a2.fp).toBe(a.fp);
+    expect(a.arenaSeed).toBe(1);
+  });
+});
+
 test.describe('the cosmetic streams cannot reach the sim', () => {
   for (const map of ['POCKET', 'UNIVERSE']) {
     test(`${map}: hammering every fx stream moves no sim hash`, async ({ page }) => {

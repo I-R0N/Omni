@@ -1666,18 +1666,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {row('Salvage earned',
                      `◈${rs.creditsEarnedLife.toLocaleString()}`,
                      'since last death')}
-                {rs.creditsLost > 0 && (
-                  <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
-                    <span className={`text-rose-400/90 ${T_BODY} uppercase tracking-widest`}>Salvage lost</span>
-                    <span className="text-right">
-                      <span className={`text-rose-300 font-bold tabular-nums ${T_ROW}`}>−◈{rs.creditsLost.toLocaleString()}</span>
-                      {rs.creditsLostRun > rs.creditsLost && (
-                        <span className={`text-slate-500 ${T_NOTE} ml-1.5`}>◈{rs.creditsLostRun.toLocaleString()} this run</span>
-                      )}
-                    </span>
-                  </div>
-                )}
-                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'after loss')}
+                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'kept')}
+                {rs.arenaSeed !== null && row('Arena seed', rs.arenaSeed.toString(16).toUpperCase().padStart(8, '0'))}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
               </div>
 
@@ -1690,10 +1680,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   Respawn
                 </button>
                 <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
-                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept
-                  {rs.creditsLost > 0
-                    ? `; the wreck cost you ◈${rs.creditsLost.toLocaleString()} of your unspent Salvage${rs.credits === 0 ? ' — all of it' : ''}.`
-                    : '.'}
+                  You return to your station with the equipment you had installed stripped away. Salvage, cargo and score are kept.
                 </p>
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <button

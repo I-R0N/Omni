@@ -24,7 +24,7 @@ import { PerfRecorder } from './systems/PerfRecorder';
 import { AudioSystem } from './systems/AudioSystem';
 import { registerSfx } from './systems/SfxRegistry';
 import { nextId } from './systems/IdAllocator';
-import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
@@ -368,8 +368,6 @@ export class GameEngine {
   } | null = null;
   // Salvage forfeited to the CURRENT death (shown on the summary) and across
   // the whole run (so repeated deaths read as a running cost).
-  private lastDeathCreditsLost: number = 0;
-  private runCreditsLost: number = 0;
   // ── Progression ─────────────────────────────────────────────────────────
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
@@ -1112,8 +1110,7 @@ export class GameEngine {
       shakeOffset: { x: 0, y: 0 }
     };
 
-    this.seedRun();
-    this.loadMap(this.buildMap(this.selectedMapType));
+    this.loadMapSeeded(this.selectedMapType);
   }
 
   /**
@@ -1160,7 +1157,7 @@ export class GameEngine {
   public setMapType(type: MapType) {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
-      this.loadMap(this.buildMap(type));
+      this.loadMapSeeded(type);
       // Recentre the player on the newly-loaded map's spawn so the
       // menu backdrop renders the new map at frame 0 instead of the
       // previous map's viewport.
@@ -1197,27 +1194,22 @@ export class GameEngine {
   }
 
   // --- STATE MANAGEMENT ---
-  /** Root seed of the current run's random streams (engine-core S1, D-S1-a:
-   *  hidden from the player for now).  Read it, with the input log, to replay
-   *  a run.  Changes only when a new run begins. */
+  /** Root seed the random streams were last started from (engine-core S1).
+   *  Read it, with the input log, to replay.  Changes on every map load. */
   public runSeed = 1;
-  /** A seed the NEXT new run must use instead of a fresh one (replay / tests). */
+  /** The seed of the ARENA the player is in, or null in the hub (D8: the hub
+   *  is persistent and carries no seed).  This is what the run summary shows. */
+  public arenaSeed: number | null = null;
+  /** A seed the NEXT map load must use instead of a fresh one (replay / tests). */
   private pendingRunSeed: number | null = null;
   /** True while a replay is driving the sim by hand: the rAF loop then only
    *  draws, and `stepSim` is the one thing that advances the world. */
   public replayHold = false;
 
-  /** Seed every random stream and the id sequence for a new run. */
-  private seedRun() {
-    const seed = this.pendingRunSeed ?? freshRunSeed();
-    this.pendingRunSeed = null;
-    this.runSeed = seed >>> 0;
-    seedRng(this.runSeed);
-    resetIdCounter();
-  }
-
   /** Begin a NEW run on `mapType` from `seed` and hold the loop so `stepSim`
-   *  drives it.  The replay harness's entry point (engine/replay.ts). */
+   *  drives it.  The replay harness's entry point (engine/replay.ts).  `seed`
+   *  seeds an ARENA; the hub's terrain is fixed and the seed then only pins
+   *  what happens in it. */
   public beginSeededRun(seed: number, mapType: MapType) {
     this.pendingRunSeed = seed;
     this.selectedMapType = mapType;
@@ -1603,7 +1595,47 @@ export class GameEngine {
       // successor waits, paused at 0, for the destination's own first
       // engagement.
       this.audio.cueBattleTrack();
+      this.loadMapSeeded(type);
+  }
+
+  /** Seed for the map's kind and load it.  SEEDING IS PER MAP, NOT PER RUN
+   *  (user call D8) — see the notes inside.  Every map load goes through
+   *  here: a run start, a portal, the death return, the constructor and the
+   *  menu backdrop. */
+  private loadMapSeeded(type: MapType) {
+      // The hub is a
+      // persistent world generated from one fixed seed, so it is the same
+      // place every visit; an ARENA is a fresh mini-game and carries its own
+      // seed — random unless a replay pinned one — which the run summary
+      // shows.  Ids and the sim clock restart with the map: both are state a
+      // seed has to determine, and every cache keyed by either was rebuilt
+      // or cleared above.  (Debris carried through a portal is re-id'd at
+      // capture so it cannot collide with the new map's ids.)
+      const kind = descriptorForMapType(type)?.kind;
+      if (kind === 'hub') {
+        seedRng(HUB_WORLD_SEED);
+        this.arenaSeed = null;
+      } else {
+        const seed = (this.pendingRunSeed ?? freshRunSeed()) >>> 0;
+        this.pendingRunSeed = null;
+        seedRng(seed);
+        this.arenaSeed = seed;
+      }
+      resetIdCounter();
+      this.simClock = 0;
       this.loadMap(this.buildMap(type));
+      if (kind === 'hub') {
+        // The hub's terrain is fixed; what happens IN it afterwards (ambient
+        // fauna, drops, rivals) is not, and must not repeat every visit.
+        // The streams continue from a pinned seed (replay / tests) or a fresh
+        // one.
+        const live = (this.pendingRunSeed ?? freshRunSeed()) >>> 0;
+        this.pendingRunSeed = null;
+        seedRng(live);
+        this.runSeed = live;
+      } else {
+        this.runSeed = this.arenaSeed!;
+      }
   }
 
   /** Park the player (and the camera) at the freshly-loaded map's declared
@@ -1627,18 +1659,7 @@ export class GameEngine {
    *  setMapType() (→ PLAYING).  Leaves gameState untouched; the caller
    *  decides the target state and pushes the frame. */
   private resetAndLoadSelectedMap() {
-      // A new run is a new SEED: every random stream restarts from one root,
-      // so the world this run generates is a function of `runSeed` alone.  A
-      // portal transition (`transitionToMap`) deliberately does NOT come
-      // through here — the streams run on across it.
-      this.seedRun();
       this.loadMapFresh(this.selectedMapType);
-      // The sim clock is run state: detection stamps and energy timers are
-      // read against it, and a run that begins at "whatever the last one
-      // ended on" is not a function of its seed.  Nothing carries a stamp
-      // across this point — `loadMapFresh` rebuilt every entity and cleared
-      // `lastHostileNearAt`.
-      this.simClock = 0;
 
       // ── Run-scoped reset — the half a portal transition SKIPS ──────────
       // Per-run counters that ride with the score/economy rather than with
@@ -1670,8 +1691,6 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
       this.lastStageClear = null;
-      this.lastDeathCreditsLost = 0;
-      this.runCreditsLost = 0;
 
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
@@ -1789,6 +1808,10 @@ export class GameEngine {
           if (captured.length > transitCfg.MAX_ENTITIES) {
               captured.length = transitCfg.MAX_ENTITIES;
           }
+          // Ids restart with the destination map, so carried debris takes a
+          // prefix that no `nextId` ever produces — two bodies must never
+          // share an id.
+          for (const c of captured) c.e.id = 'xfer_' + c.e.id;
       }
 
       if (opts?.descend) this.stageIndex++;
@@ -1930,14 +1953,37 @@ export class GameEngine {
   // economy tuning pass (roadmap step 6), so RESPAWN is byte-for-byte the
   // auto-respawn that used to fire when the wreck finished.
 
-  /** Primary action: continue the run from the current map's spawn. */
+  /** Primary action (user call D4): death sends the player back to their
+   *  STATION in the hub and strips everything INSTALLED on the ship.  Salvage
+   *  is untouched (D6 — no penalty), and so is cargo, purchased hex slots,
+   *  score and the run's counters: the character persists, the loadout does
+   *  not.  The ship is left with the lean start (free Base Hull + Projector),
+   *  which is what keeps it flyable. */
   public respawnFromDeath() {
       if (!this.deathPending) return;
       this.deathPending = false;
       this.deathDelay = 0;
       this.deathSummary = null;
-      this.respawnPlayer();
+      this.returnToStation();
       this.prepareFrameEntities();
+  }
+
+  /** The death reset: hub, home station, installed modules gone. */
+  private returnToStation() {
+      this.resetOutfit(true);
+      this.player.maxShield = 0;
+      if (this.currentMap?.type !== HUB_DESCRIPTOR.mapType) {
+          this.stageIndex = 0;
+          this.stageClearPending = false;
+          this.stageClearDelay = 0;
+          this.portalWarpTimer = 0;
+          this.loadMapFresh(HUB_DESCRIPTOR.mapType);
+          this.initWaveSystem();
+          seedAmbientBubbles(this);
+      }
+      this.respawnPlayer();
+      this.lastTime = performance.now();
+      this.simAccumulator = 0;
   }
 
   /** Wipe the run and drop straight back into play on the same map — the
@@ -4214,24 +4260,8 @@ export class GameEngine {
                 // A1: the wreck finishing no longer respawns on its own — it
                 // arms the beat that raises the run-summary screen.
                 this.player.explosionTimer = 0;
-                // Death penalty (user call): forfeit a fraction of UNSPENT
-                // Salvage, charged HERE — once, on the transition into the
-                // summary — so the screen can report exactly what it cost and
-                // so neither respawning nor restarting can double-charge.
-                // Money already spent on modules is untouched.
-                // Whichever is HIGHER — the percentage or the flat floor —
-                // clamped to what the player actually holds, so a broke pilot
-                // is zeroed rather than driven negative.
-                const lost = Math.min(
-                    this.credits,
-                    Math.max(
-                        Math.floor(this.credits * SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION),
-                        SALVAGE_CONSTANTS.DEATH_PENALTY_MIN,
-                    ),
-                );
-                this.credits -= lost;
-                this.lastDeathCreditsLost = lost;
-                this.runCreditsLost += lost;
+                // No salvage penalty (user call D6): dying costs the equipment
+                // (`returnToStation`), never the money.
                 // Close out this life's income tally for the summary, then
                 // start the next life at zero.
                 this.lastLifeCreditsEarned = this.lifeCreditsEarned;
@@ -4912,12 +4942,14 @@ export class GameEngine {
   /** Run reset + DBG relock: back to the lean start — empty inventory,
    *  the free Base Hull on the center ship hex (adjacency root) and the
    *  starter Projector (`dlv_projectile`) on gun hex W1. */
-  public resetOutfit() {
+  public resetOutfit(keepInventory = false) {
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
-      this.inventory.fill(null);
-      this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
-      this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+      if (!keepInventory) {
+          this.inventory.fill(null);
+          this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+          this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+      }
       this.shipSlots[0] = 'hull_base';
       this.weaponSlots[0] = 'dlv_projectile';
       this.player.currentWeapon = 'projectile';
@@ -5225,8 +5257,7 @@ export class GameEngine {
       credits: this.credits,
       creditsEarned: this.runCreditsEarned,
       creditsEarnedLife: this.lastLifeCreditsEarned,
-      creditsLost: this.lastDeathCreditsLost,
-      creditsLostRun: this.runCreditsLost,
+      arenaSeed: this.arenaSeed,
       timeSec: Math.floor(this.runTimeSec),
       mapName: this.currentMap?.name ?? '',
     };

@@ -154,7 +154,7 @@ test.describe('death screen', () => {
     await engine(page, e => { e.awardScore(5000); e.addDebugCredits(40_000); });
     await engine(page, e => e.startExplosion(e.player));
     await waitForStats(page, s => !!s.runSummary, 'summary 1');
-    const balanceAfterPenalty = await engine(page, e => e.credits as number);
+    const balanceAtDeath = await engine(page, e => e.credits as number);
 
     await engine(page, e => e.respawnFromDeath());
     await waitForStats(page, s => !s.runSummary, 'summary 1 to clear');
@@ -167,9 +167,9 @@ test.describe('death screen', () => {
     }));
     expect(respawned.exploding).toBe(false);
     expect(respawned.health).toBe(respawned.maxHealth);
-    // The RUN survives — score and the post-penalty balance carry.
+    // The RUN survives — score and the balance carry (no death penalty).
     expect(respawned.score).toBeGreaterThanOrEqual(5000);
-    expect(respawned.credits).toBe(balanceAfterPenalty);
+    expect(respawned.credits).toBe(balanceAtDeath);
 
     // ── RESTART RUN: wipe and drop straight back into play ───────────────
     await engine(page, e => e.startExplosion(e.player));
@@ -178,14 +178,14 @@ test.describe('death screen', () => {
     const restarted = await waitForStats(page, s => s.gameState === 'PLAYING' && !s.runSummary, 'a fresh run');
     const zeroed = await engine(page, e => ({
       score: e.score, credits: e.credits, kills: e.runKills,
-      earned: e.runCreditsEarned, lost: e.runCreditsLost,
+      earned: e.runCreditsEarned,
       waves: e.runWavesCleared, bosses: e.bossesKilled,
       exploding: !!e.player.isExploding,
     }));
     // EVERY run counter is back to zero — the thing a stale-state leak in
     // resetAndLoadSelectedMap would break, and did once before.
     expect(zeroed).toEqual({
-      score: 0, credits: 0, kills: 0, earned: 0, lost: 0,
+      score: 0, credits: 0, kills: 0, earned: 0,
       waves: 0, bosses: 0, exploding: false,
     });
     // And it lands in PLAY, not in the menu.
