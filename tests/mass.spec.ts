@@ -9,8 +9,9 @@
  *  MEASURED before the scale existed (`perf/impact-audit.mjs` §7): the four
  *  shard ladders spanned 0.0100..0.0300 in mass per d², a coherent 3× band
  *  reading exactly as material density; enemies sat inside it; and the
- *  PLAYER sat alone at 0.2500 — 25× glass, 8× rock, twice the dragon.  A
- *  20-unit hull massing 100 was as dense as nothing else in the game.
+ *  PLAYER sat alone at 0.2500 — 25× glass, 8× metal (14× rock), twice the
+ *  dragon.  A 20-unit hull massing 100 was as dense as nothing else in the
+ *  game.
  *
  *  The hull is MEANT to be the densest thing here (user call) — a ship is a
  *  machine, not a rock.  What this suite pins is that the figure is now
@@ -70,6 +71,8 @@ test.describe('mass is stated as a density, on one scale', () => {
       // SIZE IS UNSCALED.  The whole factor lands in density, which is what
       // "areas and sizes stay constant" means in one assertion.
       expect(r.playerSize, 'the hull is the same size it always was').toBe(20);
+
+      watch.assertClean();
     });
 
   test('the shard ladders read from the same table, so glass:rock:metal stays 1:1.8:3',
@@ -123,9 +126,9 @@ test.describe('mass is stated as a density, on one scale', () => {
       });
 
       // Not a tolerance — a STATEMENT.  The audit's finding was that the
-      // hull sits 25x glass and 8x rock, and that this was invisible.  It
-      // is deliberate, so it is written down where a change to either side
-      // has to come past it.
+      // hull sits 25x glass and 8x metal (14x rock), and that this was
+      // invisible.  It is deliberate, so it is written down where a change
+      // to either side has to come past it.
       expect(r.hull / r.GLASS).toBeCloseTo(25, 6);
       expect(r.hull / r.METAL).toBeCloseTo(8.333, 2);
       expect(r.hull).toBeGreaterThan(r.METAL);
@@ -302,20 +305,21 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
       // fails if anyone "fixes" the scale by cancelling it again.
       expect(r.C, 'the conversion does not carry the factor').toBe(32);
       // Each worth is its PRE-SCALE value times the scale: a 100-mass hull
-      // against a 32 conversion gave 3.125, a 36px rock shard 0.729, a
-      // Blaster bolt 0.03125.  Every one of them is now ten times that.
+      // against a 32 conversion gave 3.125 and a 36px rock shard 0.729, and
+      // both are now ten times that.
       expect(r.hullWorth, 'a hull carries 10x the energy')
         .toBeCloseTo(3.125 * r.scale, 5);
       expect(r.rockWorth, 'and so does a rock shard')
         .toBeCloseTo(0.729 * r.scale, 5);
       // A BOLT IS THE ONE EXCEPTION, and it is deliberate rather than a leak:
-      // the base shot BANK is additionally divided by what three Gunnery
-      // Mk III grant, so a fully-gunned round is the one carrying the full
-      // 10x.  Read live, because this is a relationship between two
-      // constants rather than a number.
+      // the base shot BANK is additionally divided by BASE_BANK_DIVISOR
+      // (what three Gunnery Mk III grant, over the 0.6 feel trim), so even a
+      // fully-gunned round carries only 0.6 of the 10x.  Read live, because
+      // this is a relationship between two constants rather than a number.
       // (Energy modules: the base bolt is the unmodified PROJECTOR now, whose
-      // authored bank is 0.75 — one bite of its 3 at speed 16 — against the
-      // retired Blaster's 1.0; the relationship pinned here is unchanged.)
+      // authored bank is 0.75 — one bite of its 3 at speed 16, a pre-scale
+      // worth of 0.0234 — against the retired Blaster's 1.0 and 0.03125; the
+      // relationship pinned here is unchanged.)
       expect(r.boltWorth, 'a BASE bolt carries 10x over the base-bank divisor')
         .toBeCloseTo((0.75 / 32) * r.scale / r.divisor, 5);
 
@@ -364,8 +368,9 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
       // The end-to-end statement, driven through the real collision branch.
       // Rock is the material `CRASH_ENERGY_COUPLING` was calibrated on: at
       // the audit's 6 u/step it used to take NINE goes, and at ten times the
-      // energy it takes one.  A compensation anywhere in the chain restores
-      // the nine, which is exactly the failure this exists to catch.
+      // energy it takes two — the first ram spends ~46 of a ~52-59 HP tile
+      // and the ship bounces off.  A compensation anywhere in the chain
+      // restores the nine, which is exactly the failure this exists to catch.
       await startRun(page, 'ROCK_FIELD');
       await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock field');
 
@@ -383,10 +388,11 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
         p.health = p.maxHealth = 1e9;
         let n = 0;
         while (t.active && n < 200) {
-          // Each ram is a clean run at the TILE.  Grains the last ram chipped
-          // off drift back across the lane, and a ram that stops against one
-          // spends nothing on the tile — measured, ~4% of runs took a phantom
-          // extra go or two that way, on main as on this branch.
+          // Each ram meets the tile ALONE.  A ram that holds chips grains off
+          // it, and that debris drifts back across the lane: the next approach
+          // can stop on a loose grain instead of the tile, spending nothing on
+          // it, and a ram that never lands still counts (measured: 2 runs in
+          // 12 took a phantom extra go).
           for (const x of e.currentMap.entities) if (x !== t) x.active = false;
           p.position.x = 0; p.position.y = 0;
           p.velocity.x = 6; p.velocity.y = 0;      // the audit's own ram speed
@@ -402,8 +408,8 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
       });
 
       // Stated as a CEILING well under the old nine rather than as exactly
-      // one: derived HP varies tile to tile by construction, so a tough
-      // outlier may take two.  What must not happen is a return to the
+      // two: derived HP varies tile to tile by construction, so a tough
+      // outlier may take three.  What must not happen is a return to the
       // pre-scale count, which is what a re-compensation looks like.
       expect(rams, 'a ram at ten times the energy is not a nine-goes job')
         .toBeLessThan(4);

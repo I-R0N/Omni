@@ -56,8 +56,9 @@ spreadsheets.
 
 The player primarily **purchases** — ship hulls, weapons, hardware
 upgrades, specialized modules — using currency earned from interacting
-with the world. (The shipped Salvage/Drydock spine from PR #64 is the v1
-of exactly this.)
+with the world. (The shipped spine — salvage drops → station shops →
+hex-module outfitting, PRs #72/#73, which replaced PR #64's Salvage/Drydock
+v1 — is exactly this.)
 
 **Materials remain physical.** They are terrain, obstacles, ecology, and
 resources simultaneously. Players should rarely collect individual
@@ -149,7 +150,7 @@ stations, migration, regional identity.
 
 ## Development Staging
 
-### Current overhaul (= the game-feedback plan, in flight)
+### Current overhaul (= the game-feedback plan — complete; promoted to `main` by PR #93, 2026-09-21)
 
 Focus: **high-fidelity submap gameplay**. Aligned additions: improve
 material interactions, tile formation, emergence of larger structures,
@@ -161,6 +162,12 @@ systems or inventory-heavy economies.
 
 Introduce the continuous overworld: travel, portals, stations, NPC
 traffic, localized submaps, map identity, exploration gameplay.
+
+*(No document called "the Overworld plan" was ever written.  Parts arrived
+early inside the feedback plan — the wave-free Overworld hub, stations,
+portals and map descriptors — and the successor roadmap is
+`docs/CONFIG_CHANGES_PHASED_PLAN.md` Phases B–G, with the world layering in
+`docs/PORTAL_AND_WORLD_LAYER_PLAN.md`.)*
 
 ### Future phase (multiplayer)
 
@@ -191,6 +198,9 @@ lat/lon anchoring), world-scale economy.
 
 ## Implications for the game-feedback plan (orchestration notes)
 
+*Historical — all resolved: (h) shipped in PR #77, (k) in PR #74, and the
+game-feedback plan is closed.*
+
 Resolutions this strategy forces on the plan of record:
 
 - **Decision #34 RESOLVED.** Structure: the current game stays a
@@ -211,7 +221,9 @@ Resolutions this strategy forces on the plan of record:
 - **living-entity task SUPERSEDED** — the Bubble (PR #67) shipped the
   grazer design space (eats shards, grows, splits, ambient fauna).
 - **orbital-fields-moons MOVED to the Overworld plan** — planets and
-  moving celestial landmarks are overworld features.
+  moving celestial landmarks are overworld features.  (That plan doc was
+  never written; the idea's only spec is decision #25 in
+  `docs/GAME_FEEDBACK_PLAN.md`.)
 - **Landmark detection (Meaning Layer) is NOT in this plan** — but new
   work should avoid foreclosing it: keep structure formation events
   observable (tile snap, composite completion, condensation already

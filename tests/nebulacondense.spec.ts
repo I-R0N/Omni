@@ -11,7 +11,7 @@
  *  USER CALL: condensing into another material should be significantly
  *  rarer, and the tile route correspondingly more common.
  *
- *  THREE claims, each wrong in a way nothing else reports:
+ *  FOUR claims, each wrong in a way nothing else reports:
  *
  *   1. THE SPLIT IS THE LADDER'S, read at the roll.  The knob has to reach
  *      the real outcome — a share that is declared and never consulted looks
@@ -29,17 +29,19 @@
  *      The yield side is measured off real shattered tiles rather than read
  *      from a constant — checking the inequality against a second opinion
  *      about the child count would pass while the real count drifted.
- *   4. A FAILED TILE PLACEMENT RETURNS THE MASS.  The tile branch can find
+ *   4. A FAILED TILE PLACEMENT STAYS NEBULA.  The tile branch can find
  *      every candidate hex occupied; both source shards have already faded
  *      by then, so a bare no-op DESTROYS the pair.  That was tolerated at an
  *      even split (measured 9.1% of tile rolls on UNIVERSE); with the tile
  *      share now dominant it would be most of the loss in the game.  This is
  *      the claim with no symptom whatsoever — mass quietly going missing
- *      looks like nothing.
+ *      looks like nothing.  (The recovery re-emits a one-unit shard, so the
+ *      pair's other units are still lost.)
  *
  *  Driven through the REAL `onComposeNebulaShardPair` rather than a
- *  reimplementation of the roll (harness rule 3): the roll, the rock
- *  exemption and the recovery all live inside it.
+ *  reimplementation of the roll (harness rule 6): the roll and the
+ *  failed-placement recovery both live inside it (the rock exemption that
+ *  used to live there is gone — claim 2).
  */
 
 import { test, expect } from '@playwright/test';
@@ -143,7 +145,7 @@ test.describe('what a condensed nebula cloud becomes', () => {
       // shipped step must always condense into other materials markedly less
       // often than the even split it replaced.
       await dialByName(page, 'nebulaTileShareName',
-        v => v.startsWith('half'), e => (e as any).dbg.cycleNebulaTileShare(), 6);
+        v => v.startsWith('half'), e => (e as any).dbg.cycleNebulaTileShare(), 4);
       const old = await crystallise(page, { n: N, material: 'glass-shard' });
       const oldMat = old.materials / N;
 
@@ -179,22 +181,21 @@ test.describe('what a condensed nebula cloud becomes', () => {
        *  this is a COMPARISON rather than an absolute — it survives the share
        *  being re-tuned. */
 
-      /*  DIAL THE LADDER EXPLICITLY (harness rules 12/13).  Two reasons, and
-       *  the second is what made this flake: a sibling test walks this same
-       *  cycle and leaves it wherever it finished, so an undialled run here
-       *  measures whatever step ran last; and the shipped step is the one
-       *  whose sampling noise is smallest, since p far from 0.5 narrows the
-       *  binomial.  Reading the default instead would also compare a step
-       *  against itself the day that default moves. */
+      /*  DIAL THE LADDER EXPLICITLY (harness rules 12/13).  Every test boots
+       *  its own page, so nothing leaks in from a sibling; the dial is here
+       *  because the shipped step is the one whose sampling noise is
+       *  smallest (p far from 0.5 narrows the binomial), and because reading
+       *  the default instead would compare a step against itself the day
+       *  that default moves (rule 13). */
       await dialByName(page, 'nebulaTileShareName',
-        v => v.startsWith('rare'), e => (e as any).dbg.cycleNebulaTileShare(), 6);
+        v => v.startsWith('rare'), e => (e as any).dbg.cycleNebulaTileShare(), 4);
 
       /*  N and the BAND are sized off the binomial rather than guessed.  At
        *  the shipped p ≈ 0.875, one arm's s.d. is sqrt(p(1-p)/N) = 1.2% at
        *  N = 800, so the DIFFERENCE of two arms carries ~1.65%.  A 6-point
        *  band is therefore ~3.6 s.d. — the previous 400/5-point pairing was
-       *  1.4 s.d. at the p = 0.5 a stale dial left behind, which is a test
-       *  that fails roughly one run in six while the product is correct. */
+       *  ~2.1 s.d., a test that fails about one run in thirty while the
+       *  product is correct. */
       const N = 800, BAND = 0.06;
       const rock = await crystallise(page, { n: N, material: 'rock-shard' });
       const virgin = await crystallise(page, { n: N, material: 'glass-shard' });
@@ -224,7 +225,7 @@ test.describe('what a condensed nebula cloud becomes', () => {
       watch.assertClean();
     });
 
-  test('a tile that cannot be placed hands the mass back instead of losing it',
+  test('a tile that cannot be placed stays nebula instead of vanishing',
     async ({ page }) => {
       const watch = await boot(page);
       await startRun(page, 'NEBULA_FIELD');
@@ -236,10 +237,12 @@ test.describe('what a condensed nebula cloud becomes', () => {
       expect(r.tiles, 'no tile can be placed').toBe(0);
       expect(r.lost, 'so every tile roll hits the failure branch')
         .toBeGreaterThan(N * 0.5);
-      // THE CLAIM: the pair's mass comes back as nebula rather than
-      // vanishing.  Both source shards are already fading by this point, so
-      // without the hand-back the cloud is simply destroyed — and one nebula
-      // shard fewer looks like nothing at all.
+      // THE CLAIM: the pair comes back as nebula rather than vanishing.
+      // Both source shards are already fading by this point, so without the
+      // hand-back the cloud is simply destroyed — and one nebula shard fewer
+      // looks like nothing at all.  (What comes back is a ONE-unit shard, so
+      // most of the pair's units are still lost; this pins the shard, not
+      // the units.)
       expect(r.nebulaShards, 'every failed placement returns a nebula shard')
         .toBe(r.lost);
       // And it does NOT fall through to the material branch: that would turn
@@ -354,10 +357,17 @@ test.describe('the nebula material ledger', () => {
       const watch = await boot(page);
       await startRun(page, 'NEBULA_FIELD');
 
-      /*  Driven through the REAL coalescence (ShardSystem.growNebulaShard is
-       *  what the sub-cost branch calls), because the loss has to land on the
-       *  field the gate later reads — applying it anywhere else would leave
-       *  the merge looking lossy while the accumulation stayed free. */
+      /*  Driven through the REAL gate, `ShardSystem.composeNebulaShards`:
+       *  that is where the cut is applied, and the `growNebulaShard` it calls
+       *  only STORES the units it is handed — so a test that computed the
+       *  loss itself and passed it in stays green with the loss deleted from
+       *  the engine (harness rule 6).  The loss has to land on the field the
+       *  gate later reads; applying it anywhere else would leave the merge
+       *  looking lossy while the accumulation stayed free.
+       *
+       *  Two 2-unit shards: 4 units is under every drain step's tile cost
+       *  (the cheapest is 5) and the stall count starts at 1, so the pair
+       *  COALESCES rather than crystallising — asserted below, not assumed. */
       const r = await engine(page, () => {
         const e: any = (window as any).__omniEngine;
         const N: any = (window as any).__omniNebula;
@@ -369,15 +379,23 @@ test.describe('the nebula material ledger', () => {
           size: { x: 20, y: 20 }, mass: 0.01, active: true, rotation: 0,
           color: '#a78bfa', nebulaCondenseUnits: units,
           nebulaColorComposition: [{ hex: '#a78bfa', weight: 1 }],
-        });
+        }) as any;
         const a = mk(2), b = mk(2);
         const combined = 4;
-        sh.growNebulaShard(a, b, a.nebulaColorComposition,
-          combined * (1 - N.nebulaMergeLoss()), 'glass-shard', 1,
-          { x: 1000, y: 1000 }, { x: 0, y: 0 });
-        return { combined, kept: a.nebulaCondenseUnits, loss: N.nebulaMergeLoss() };
+        // `a` is the survivor — the caller passes the larger party first.
+        sh.composeNebulaShards(a, b, e.currentMap.entities, e.physics);
+        return {
+          combined, kept: a.nebulaCondenseUnits, loss: N.nebulaMergeLoss(),
+          // A coalescence retires only the smaller party; a crystallise
+          // fades BOTH and hands the mass to the adapter instead.
+          survivorFading: (a.mergeFadeTimer ?? 0) > 0,
+          consumedFading: (b.mergeFadeTimer ?? 0) > 0,
+        };
       });
 
+      expect(r.survivorFading, 'the pair coalesced rather than crystallised')
+        .toBe(false);
+      expect(r.consumedFading, 'and the smaller party retired into it').toBe(true);
       expect(r.loss, 'the loss is a real cut').toBeGreaterThan(0);
       expect(r.kept, 'the survivor carries LESS than the pair put in')
         .toBeLessThan(r.combined);

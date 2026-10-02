@@ -37,7 +37,7 @@ interface UIOverlayProps {
   onSetMusicVolume?: (v: number) => void;
   onSetVolume?: (v: number) => void;
   onToggleMute?: () => void;
-  onToggleDrafts?: () => void;
+  onToggleDrafts?: () => void;   // unused — the WAV-only button it drove is gone
   onSetControlScheme?: (scheme: ControlScheme) => void;
   onToggleAdaptiveTriggers?: () => void;
   // ── The debug panel (components/DebugMenu.tsx) ─────────────────────────
@@ -706,8 +706,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             onClick={() => onSetControlScheme && onSetControlScheme(scheme.id)}
             className={`px-2 py-2 rounded-lg border text-left transition-all active:scale-95 ${TAP} ${
               // An ODD number of options into a 2-up grid: the last one spans
-              // the row rather than leaving a hole.  (Six today, so this is
-              // inert — kept because the roster has changed twice.)
+              // the row rather than leaving a hole.  (Seven today, so this is
+              // LIVE: 'gamepad-left' spans the bottom row on its own, away
+              // from the two pad schemes above it.)
               i === CONTROL_SCHEMES.length - 1 && CONTROL_SCHEMES.length % 2 === 1 ? 'col-span-2 ' : ''
             }${
               active === scheme.id
@@ -731,7 +732,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    * A native `<select>` rather than a custom menu: on a phone it opens the
    * OS picker, which is a better target than anything drawn here, and it
    * comes with keyboard and screen-reader behaviour for free.  The pause menu
-   * is already a long scroll — five buttons with captions would push the rest
+   * is already a long scroll — seven buttons with captions would push the rest
    * of it further down for a setting most players touch once.
    */
   const renderSchemeDropdown = () => {
@@ -902,7 +903,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
           ['Salvage', 'The silver drops are money. Collecting them is the only way to earn.'],
           ['Stations', 'Dock to repair, buy modules, and outfit the ship. Outfitting needs a drydock.'],
           ['Portals', 'The rifts on the hub lead to wave arenas. The return rift brings you home.'],
-          ['Waves', 'Clear the field to advance. Every sixth wave is a boss; killing it opens a way down.'],
+          ['Waves', 'Clear the field to advance. Wave 6 is a boss and the last wave: kill it, then take the return rift home.'],
           ['Death', 'Costs a slice of the salvage you are still carrying — spent money is safe.'],
         ])}
       </div>
@@ -1609,11 +1610,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       })()}
 
       {/* ── Death / run summary (Phase 3 Pair A) ── */}
-      {/* The sim is frozen while `runSummary` is present (loop short-circuit,
-          same as the docked station), so the wreck field stays drawn behind
-          this overlay.  Presentation only: RESPAWN is the auto-respawn that
-          used to fire on its own, so dying still costs nothing but time —
-          the death PENALTY question belongs to the economy tuning pass. */}
+      {/* The ONE full-screen overlay that does NOT freeze the sim (user call;
+          CLAUDE.md §3): the field keeps fighting behind this translucent
+          summary, and the numbers on it are a snapshot taken at the moment of
+          death.  RESPAWN is the auto-respawn that used to fire on its own;
+          dying now also costs an interim PENALTY on unspent salvage, charged
+          once as the summary is raised (the fuller system belongs to the
+          economy tuning pass). */}
       {stats.runSummary && (() => {
         const rs = stats.runSummary;
         const mm = Math.floor(rs.timeSec / 60);
@@ -1716,18 +1719,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
       })()}
 
       {/* ── Main Menu ── */}
-      {/* Condensed to exactly three controls (user call): DIFFICULTY, START,
-          and a collapsed debug dropdown holding the map / enemy-test buttons.
-          The run always begins on the OVERWORLD hub now — map choice is a
-          debug override, not a front-door decision, so the menu no longer
-          asks for one.
+      {/* Condensed (user call): DIFFICULTY and START, with the control-scheme
+          picker and the collapsed Controls & Basics help beside them.  The
+          map / enemy-test buttons that used to sit in a debug dropdown here
+          moved to the debug panel, whose DBG launcher floats in this
+          screen's corner as it does over every overlay.  The run always
+          begins on the OVERWORLD hub now — map choice is a debug override,
+          not a front-door decision, so the menu no longer asks for one.
 
           LAYOUT: a fixed-width column centred by `my-auto` inside a
           scrollable flex column — NOT `justify-center`, which clips content
-          above the reachable scroll area once the debug dropdown is open (the
-          same trap the station and pause panels document).  So the two
+          above the reachable scroll area once the column outgrows the screen
+          (the same trap the station and pause panels document).  So the
           controls that matter sit dead centre at every screen size, and an
-          expanded debug list scrolls instead of pushing START off-screen. */}
+          opened help panel scrolls instead of pushing START off-screen. */}
       {stats.gameState === GameState.MENU && (
         <div className={`absolute inset-0 ${OVERLAY_SCRIM} flex flex-col items-center pointer-events-auto z-50 overflow-y-auto overscroll-contain p-6 ${OVERLAY_FAB_CLEARANCE}`} data-overlay="menu">
           <div className="w-full max-w-xs flex flex-col items-center gap-8 my-auto">

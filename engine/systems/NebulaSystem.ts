@@ -547,28 +547,18 @@ export class NebulaSystem {
 
 
     /**
-     * If the given nebula shard has grown large enough (disc area ≥
-     * HEX_AREA), transmute it into a brand-new NEBULA tile at the nearest
-     * unoccupied grid cell.  Returns true if the transmutation succeeded.
-     *
-     * The shard's accumulated colour composition carries over to the
-     * new tile, so the palette that multiple shards mixed together
-     * persists into the condensed tile.
-     *
-     * If no candidate cell is clear (the shard's own cell and all 6
-     * neighbours are occupied), the transmutation aborts and the shard
-     * stays as a shard — a later frame may find a clear cell as it drifts.
-     */
-    /**
      * Tile-outcome of the nebula pair-transmute.  Looks for the
      * nearest free hex cell starting from `position` (the pair's
      * midpoint) — origin cell + 6 neighbours, sorted by distance.
+     * The pair's accumulated colour composition carries over to the
+     * new tile, so the palette that multiple shards mixed together
+     * persists into the condensed tile.
      * Returns false if every candidate is occupied.  The CALLER must do
      * something with that: the two source shards have already faded, so a
      * bare no-op destroys the pair's mass.  It used to be treated as an
      * acceptable loss at an even split; with the tile share now dominant it
-     * would be most of the loss in the game, so the caller re-emits the mass
-     * as a nebula-shard.
+     * would be most of the loss in the game, so the caller re-emits a
+     * ONE-unit nebula-shard (the pair's other units are still lost).
      */
     private transmuteToTileAt(
         entities: GameEntity[],
@@ -613,15 +603,14 @@ export class NebulaSystem {
     }
 
     /**
-     * Glass-shard outcome of the nebula pair-transmute.  Spawns a
-     * brand-new mobile glass-shard at the supplied midpoint, sized
-     * to sqrt(HEX_AREA) so the visible mass roughly matches what
-     * the tile outcome would have produced.  The new glass-shard
-     * enters the ShardSystem merge cycle and may itself transmute
-     * to a glass-tile (or downgrade to a rock-shard) once it
-     * reaches GLASS_TIER_DIAMETER.  Both source nebula-shards are
-     * already fading by the time we get here (ShardSystem armed
-     * their mergeFadeTimers in composeNebulaShards).
+     * Material outcome of the nebula pair-transmute.  Spawns a
+     * brand-new mobile shard of the COMMITTED material (rock / glass /
+     * plastic / metal) at the supplied midpoint, sized to sqrt(HEX_AREA)
+     * (rock: 0.6× that) so the visible mass roughly matches what the
+     * tile outcome would have produced.  The new shard enters the
+     * ShardSystem merge cycle like any other of its material.  Both
+     * source nebula-shards are already fading by the time we get here
+     * (ShardSystem armed their mergeFadeTimers in composeNebulaShards).
      */
     private spawnCondensedShardAt(
         entities: GameEntity[],
@@ -825,12 +814,12 @@ export class NebulaSystem {
      * A tile is only on the table when the cloud can AFFORD one
      * (`canAffordTile` — see the ledger in constants.ts: a tile must cost more
      * than a tile's own shatter yields, or nebula grows without bound).  Given
-     * that, rolls `nebulaTileShare()` (DBG ▸ Visual ▸ "Neb solid"; ships at 7/8
-     * toward the tile) between:
+     * that, rolls `nebulaTileShare()` (DBG ▸ Materials ▸ Nebula ▸ "Neb solid";
+     * ships at 7/8 toward the tile) between:
      *   - nebula-tile   at the nearest free hex cell (cloud thickening), at
      *                   the SAME rate for every cloud whatever its dust was
-     *                   made of.  If no candidate hex is free the pair's mass
-     *                   is handed back as a nebula-shard rather than lost.
+     *                   made of.  If no candidate hex is free a ONE-unit
+     *                   nebula-shard is handed back (the rest is lost).
      *   - the COMMITTED material shard at the midpoint, plus — when the
      *     cloud overshot the material's cost — a leftover nebula-shard
      *     carrying the off-target "remainder" colours (excess-split), so
@@ -865,10 +854,12 @@ export class NebulaSystem {
             // the tile branch can suffer (the material branch always
             // succeeds).  Measured at 9.1% of tile rolls on UNIVERSE while
             // the split was even; with the tile share now dominant it would
-            // be most of the loss in the game.  Hand the mass back to the
-            // cloud instead, so it drifts and tries again: conserving, and in
-            // the direction the call asks for (the cloud stays nebula rather
-            // than falling through to a material it did not roll).
+            // be most of the loss in the game.  Hand mass back to the cloud
+            // instead, so it drifts and tries again — in the direction the
+            // call asks for (the cloud stays nebula rather than falling
+            // through to a material it did not roll).  Only ONE unit goes
+            // back, though: the pair held at least `nebulaTileCost()`, so
+            // the rest of its units are still lost here.
             this.spawnLeftoverNebulaShard(entities, position, velocity, composition ?? [{ hex: blendHex, weight: 1 }], 1);
             return;
         }

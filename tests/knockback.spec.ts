@@ -55,7 +55,7 @@ function shoot(page: any, spec: { kind: 'enemy' | 'shard'; mass: number; maxSpee
     const proj = {
       id: 'kb_shell', type: 'PROJECTILE',
       position: { x: at.x + 20, y: at.y },
-      velocity: { x: -16, y: 0 },   // the shipped Blaster/Cannon muzzle speed
+      velocity: { x: -16, y: 0 },   // the starter Projector's muzzle speed
       rotation: Math.PI, size: { x: 6, y: 6 },
       // Module scope does not cross into `page.evaluate`, so this reads the
       // live constant rather than the suite's own MASS_SCALE literal.
@@ -82,7 +82,7 @@ test.describe('a shot pushes by momentum, not by damage alone', () => {
     const watch = await boot(page);
     await quiet(page);
 
-    // One Plasma Cannon hit (18 damage) across the weight range of the real
+    // One 18-damage hit (the old Plasma Cannon's bite) across the weight range of the real
     // roster: the mass-4 gnat, the mass-10 drone, the mass-140 Warden, the
     // mass-500 dragon.  Before the fix every one of these returned the same
     // number, which is the bug in one line.
@@ -118,9 +118,10 @@ test.describe('a shot pushes by momentum, not by damage alone', () => {
      *  feedback kick PLUS the perfectly-inelastic momentum transfer the
      *  projectile itself carries.  That second term was always mass-aware
      *  and is left alone — it is real physics, and at
-     *  PROJECTILE_CONSTANTS.MASS = 1 it is small against any real hull.  So
-     *  the honest invariant is a body's own top speed with headroom for it,
-     *  not the cap in isolation. */
+     *  PROJECTILE_CONSTANTS.MASS = 1 × MASS_SCALE (10) it is small against
+     *  any real hull, which carries the same factor.  So the honest
+     *  invariant is a body's own top speed with headroom for it, not the cap
+     *  in isolation. */
     const absurd = await shoot(page, { kind: 'enemy', mass: 8 * MASS_SCALE, maxSpeed: 8, damage: 60 });
     expect(absurd.speed, 'even an absurd shot cannot launch it')
       .toBeLessThan(8 * 2);

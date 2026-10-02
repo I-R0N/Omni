@@ -6,11 +6,21 @@
  *  asserted here is everything the SIM exposes about it, which turns out to be
  *  all the load-bearing parts (harness rule 3):
  *
+ *   · a portal's off-screen ARROW is bracketed: none without a scanner, none
+ *     from a fitted scanner that has not fired, present once a scan has
+ *     stamped the rift off screen, flagged on-screen when it is in view, and
+ *     gone for a rift past the scanner's reach;
+ *   · the shipped material mode is Dots;
  *   · nebula is gone from BOTH halves of the map (the pre-rendered terrain
  *     layer and the per-frame buffer);
  *   · the material mode decides whether shards reach the buffer at all, so a
  *     mode that draws no dots is not paying to collect them either;
- *   · drops stay excluded, as they always were;
+ *   · TRACKING RIDES THE OBJECT: terrain is tracked tile by tile (flying and
+ *     scanning both meet more of it) and a destroyed tile comes off the
+ *     terrain layer; only BIG shards are tracked, and a tracked shard stays
+ *     on the map wherever it drifts; a merge survivor inherits the flag;
+ *   · drops stay excluded, even with the scan reveal handing the buffer
+ *     everything else;
  *   · the streamline geometry cache rebuilds when the seed lattice moves and
  *     NOT when the camera merely pans — which is the whole reason a per-frame
  *     field trace is affordable.
@@ -20,14 +30,14 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, quietScene, startRun, stats, useScanner, waitForStats } from './helpers';
+import { boot, engine, quietScene, startRun, stats, useScanner, waitForEngine, waitForStats } from './helpers';
 
 /** Fit the widest scanner and complete ONE full ping.
  *
- *  Every readout this suite measures is now gated on a SCAN (scanner rework):
- *  with no scanner the minimap draws neither terrain nor contacts and the HUD
- *  carries no arrows at all, so a test that does not scan is measuring the
- *  blank baseline rather than the thing it names.
+ *  A scan is what reaches past eyesight (scanner rework): without one the
+ *  readouts carry only what the ship has met within SCANNER.ENCOUNTER_RANGE,
+ *  so a test about what the instrument finds has to scan, or it is measuring
+ *  natural encounter rather than the thing it names.
  *
  *  The ping is driven to completion by POLLING the engine's own wavefront
  *  rather than by sleeping a computed duration — this environment renders in
@@ -111,9 +121,9 @@ test.describe('off-screen indicators — portals', () => {
    *  Scoped to THAT portal by target id, not to "any portal in the buffer".
    *  The hub now carries a six-portal TEST RACK beside the home station on top
    *  of the four arena rifts, and at the far-side standoff below one of the
-   *  rack portals sits 1345 units away — inside INDICATOR_RANGE (1500). A
-   *  buffer-wide `find(isPortal)` would return that one and report an arrow
-   *  for a rift the test is not asking about. */
+   *  rack portals sits 1345 units away — well inside a Mk V scan's ~3200
+   *  reach. A buffer-wide `find(isPortal)` would return that one and report
+   *  an arrow for a rift the test is not asking about. */
   async function standOff(page: any, dist: number) {
     const target = await engine(page, (e, d: number) => {
       const p = e.portals[0];
@@ -139,13 +149,22 @@ test.describe('off-screen indicators — portals', () => {
     await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
 
     // THE ARROWS BELONG TO THE SCANNER now (rework).  With nothing fitted the
-    // HUD carries no arrows at any distance — that is the baseline, and it is
+    // HUD carries no arrow past eyesight — that is the baseline, and it is
     // asserted first because everything below is a departure from it.
     // 1400, not 900: inside SCANNER.ENCOUNTER_RANGE the rift is seen with the
     // naked eye (which is the point of encounters), so a claim about the
     // SCANNER has to be made from outside it.
     expect((await standOff(page, 1400)).present,
       'a scannerless ship gets no arrow at instrument range').toBe(false);
+
+    // Fitted but not fired: still nothing.  The scanner is a TOOL — owning it
+    // is not using it, which is the whole reversal from A4.  The widest mark,
+    // so no reach argument can explain the absence; `scanOnce` below finds it
+    // aboard and fits no second one.
+    await engine(page, e => e.debugGrantModule('scanner_mk5'));
+    await waitForEngine(page, e => e.scannerMk === 5, 'the Mk V aboard');
+    expect((await standOff(page, 1400)).present,
+      'a scanner you never fire reveals nothing').toBe(false);
 
     // This asserts the INPUTS the suppression rule reads — presence in the
     // buffer (now the detection stamp) and the `onScreen` flag (the
@@ -181,8 +200,9 @@ test.describe('off-screen indicators — portals', () => {
 
     // Far side of the map, scanned FRESH: still no arrow, and now for a
     // reason the player can act on — it is past what the scanner reaches (a
-    // single Mk V tops out near 3200 units) rather than past a fixed
-    // INDICATOR_RANGE.  Fitting more scanners is what moves this line.
+    // single Mk V tops out near 3200 units) rather than past the fixed
+    // INDICATOR_RANGE the arrow used to have.  Fitting more scanners is what
+    // moves this line.
     await engine(page, e => { for (const p of e.portals) p.detectedAt = undefined; });
     await standOff(page, 6000);
     await scanOnce(page);
@@ -243,8 +263,9 @@ test.describe('minimap — material layer', () => {
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-    // this suite has to switch the subsystem it tests back on.
+    // Idempotent: the scan reveal ships OFF (constants.ts
+    // `activeScanRevealAll`), so on a fresh run this only confirms the
+    // scanner subsystem is live.
     await useScanner(page);
 
     // The scene genuinely has thousands of mobile shards to draw.
@@ -304,8 +325,9 @@ test.describe('minimap — material layer', () => {
       // on a population that does not exist.
       await startRun(page, 'GLASS_FIELD');
       await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-      // this suite has to switch the subsystem it tests back on.
+      // Idempotent: the scan reveal ships OFF (constants.ts
+      // `activeScanRevealAll`), so on a fresh run this only confirms the
+      // scanner subsystem is live.
       await useScanner(page);
       await page.waitForTimeout(500);
 
@@ -349,19 +371,32 @@ test.describe('minimap — material layer', () => {
       // A TRACKED TILE MUST NOT OUTLIVE ITS ROCK.  The terrain layer is an
       // accumulating record of specific tiles now, so a destroyed one has to
       // come off it — driven through the real death path, not by poking the
-      // canvas.
+      // canvas.  The unstamp is a canvas write inside that path, so it is
+      // COUNTED rather than read back off pixels: the renderer's own method
+      // is wrapped for this one death and calls through, so the real write
+      // still runs and a throw in it still reaches the console.
       const killed = await engine(page, e => {
         const t = e.currentMap.entities.find((x: any) =>
           x.active && x.type === 'STRUCTURE' && x.mass === Infinity && x.found === true);
         if (!t) return null;
-        t.health = 0;
-        e.handleEntityDeath(t);
-        return { active: t.active };
+        const r = e.renderer;
+        const unstamp = r.unstampMinimapTile;
+        let unstamps = 0;
+        r.unstampMinimapTile = function (x: any) {
+          if (x === t) unstamps++;
+          return unstamp.call(this, x);
+        };
+        try {
+          t.health = 0;
+          e.handleEntityDeath(t);
+        } finally {
+          delete r.unstampMinimapTile;   // back to the prototype's
+        }
+        return { unstamps };
       });
       expect(killed, 'a tracked tile was available to destroy').not.toBeNull();
-      // The observable is that the death path ran and took the tile with it;
-      // the unstamp is a canvas write inside it, and a clean console is what
-      // says it did not throw on the way.
+      expect(killed.unstamps, 'the death path takes the tile off the terrain layer')
+        .toBe(1);
 
       watch.assertClean();
     });
@@ -372,8 +407,9 @@ test.describe('minimap — material layer', () => {
       await startRun(page, 'ASTEROID_FIELD');
       await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the asteroid field');
       await page.waitForTimeout(500);
-// The scanner ships BYPASSED (DBG "Scan off" defaults to REVEALED), so
-      // this suite has to switch the subsystem it tests back on.
+      // Idempotent: the scan reveal ships OFF (constants.ts
+      // `activeScanRevealAll`), so on a fresh run this only confirms the
+      // scanner subsystem is live.
       await useScanner(page);
 
       const shards = () => engine(page, e => {
@@ -397,16 +433,38 @@ test.describe('minimap — material layer', () => {
 
       // TRACKING RIDES THE OBJECT.  This is the whole difference from the
       // region model it replaced, where a shard drifting out of mapped ground
-      // went quiet even though the player had already met it.
-      const moved = await engine(page, e => {
+      // went quiet even though the player had already met it.  So the
+      // observable is the MAP, not the flag: nothing ever clears `found`, and
+      // the region model did not either — it dropped the shard from the draw
+      // set.  Dots is the layer that collects shards, so it is dialled by
+      // name rather than assumed from the shipped default.
+      await setMaterial(page, 'Dots');
+      const movedId = await engine(page, e => {
         const sh = e.currentMap.entities.find((x: any) =>
           x.active && x.type === 'STRUCTURE' && x.mass !== Infinity && x.found === true);
         if (!sh) return null;
         sh.position.x += 2500;   // somewhere the ship has never been
         sh.position.y += 2500;
-        return sh.found === true;
+        return sh.id as string;
       });
-      expect(moved, 'tracking follows the rock, not the ground').toBe(true);
+      expect(movedId, 'a tracked shard was available to move').not.toBeNull();
+      // FRAMES, not a sleep, and more than one: the buffer is refilled by the
+      // render pass, so a read before a frame has drawn the move would find
+      // the shard left over from where it USED to be.
+      await page.evaluate(() => new Promise(resolve => {
+        let k = 0;
+        const step = () => (++k >= 3 ? resolve(null) : requestAnimationFrame(step));
+        requestAnimationFrame(step);
+      }));
+      const onMap = await engine(page, (e, id: string) => {
+        const sh = e.currentMap.entities.find((x: any) => x.id === id);
+        return {
+          active: !!sh && sh.active === true,
+          buffered: e.renderer._minimapBuffer.some((i: any) => i.entity.id === id),
+        };
+      }, movedId);
+      expect(onMap.active, 'the moved shard is still in the world').toBe(true);
+      expect(onMap.buffered, 'tracking follows the rock, not the ground').toBe(true);
 
       watch.assertClean();
     });
@@ -450,12 +508,26 @@ test.describe('minimap — material layer', () => {
     const watch = await boot(page);
     await startRun(page);
 
+    // THE SCAN REVEAL GOES ON FIRST, or this test cannot fail.  With it off
+    // (as it ships) nothing reaches the buffer that the ship has not met, and
+    // nothing ever meets a drop — so a drop would stay off the map with its
+    // exclusion deleted.  With the reveal up, `mapAlpha` hands the buffer
+    // EVERYTHING, and the drop exclusion in the buffer fill is the only thing
+    // left keeping drops off.
+    if ((await stats(page)).scanRevealAll !== true) {
+      await engine(page, e => { e.dbg.toggleScanReveal(); });
+    }
+    await waitForStats(page, s => s.scanRevealAll === true, 'the scan reveal to switch on');
+
+    // 500 units out, past DROP_CONFIG.MAGNET_RANGE (150): spawned beside the
+    // ship, the drops were reeled in and collected before the first read,
+    // which left nothing on the field to leak.
     await engine(page, e => {
       for (let i = 0; i < 6; i++) {
         e.drops.spawnSalvageDrop(
           e.currentMap.entities,
           e.activeDrops,
-          { x: e.player.position.x + 60 + i * 8, y: e.player.position.y + 60 },
+          { x: e.player.position.x - 500 - i * 40, y: e.player.position.y },
         );
       }
     });
@@ -464,7 +536,16 @@ test.describe('minimap — material layer', () => {
     for (const mode of ['Flow', 'Dots', 'Off'] as const) {
       await setMaterial(page, mode);
       await page.waitForTimeout(200);
-      expect((await bufferByKind(page)).drop ?? 0, `drops leaked in ${mode} mode`).toBe(0);
+      const live = await engine(page, e => e.currentMap.entities
+        .filter((x: any) => x.active && x.dropType).length);
+      const kinds = await bufferByKind(page);
+      // The premise, asserted: there ARE drops out there to leak…
+      expect(live, `live drops on the field in ${mode} mode`).toBeGreaterThan(0);
+      // …and the reveal really is handing the buffer what the ship has not
+      // met: no rift is within eyesight of the hub's spawn point.
+      expect(kinds.portal ?? 0, `the reveal reaches the buffer in ${mode} mode`)
+        .toBeGreaterThan(0);
+      expect(kinds.drop ?? 0, `drops leaked in ${mode} mode`).toBe(0);
     }
 
     await setMaterial(page, 'Flow');
@@ -475,8 +556,9 @@ test.describe('minimap — material layer', () => {
     const watch = await boot(page);
     await startRun(page);
     await setMaterial(page, 'Flow');
-    // The flow layer only runs while a scan's material bubble is fresh, so
-    // the cache this test is about does not exist until something scans.
+    // The flow layer only runs with a scanner aboard (hud.ts `flowAllowed`),
+    // so the cache this test is about does not exist until one is fitted;
+    // `scanOnce` fits a Mk V.
     await scanOnce(page);
     await page.waitForTimeout(400);
 

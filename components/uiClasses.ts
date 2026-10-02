@@ -135,7 +135,7 @@ export const OVERLAY_KEYFRAMES = '@keyframes omniFadeIn{from{opacity:0}to{opacit
  * departures today and each is labelled at its call site.
  */
 
-/** TYPE SCALE.  Five steps, and the names say what each is FOR rather than
+/** TYPE SCALE.  Four steps, and the names say what each is FOR rather than
  *  how big it is, because "10px vs 11px" is the question that produced the
  *  drift.  `MICRO` is the readability floor on glass — the audit found 7px
  *  badges, which is below anything legible on a phone held at arm's length. */
@@ -169,9 +169,10 @@ export const SCREEN_TITLE = 'text-2xl sm:text-3xl font-bold tracking-[0.15em] tr
  *  and get to shout.  Heavier than a screen title on purpose. */
 export const OUTCOME_TITLE = 'text-3xl sm:text-4xl font-black tracking-[0.2em]';
 
-/** The TAP-TARGET FLOOR.  40px is what `screens.spec.ts` already asserts on
- *  the death screen; U1 found it held nowhere else (a 16.5px front-door
- *  toggle, 24.5px shop rows).  Applied as a min-height rather than by
+/** The TAP-TARGET FLOOR.  40px is the floor `tests/viewports.spec.ts`
+ *  asserts (it began as a death-screen check); U1 found it held nowhere
+ *  else (a 16.5px front-door toggle, 24.5px shop rows).  Applied as a
+ *  min-height rather than by
  *  re-padding every control, so a dense row keeps its visual density and
  *  gains only its hit area. */
 export const TAP = 'min-h-[40px]';
@@ -204,8 +205,9 @@ export const CHIP_OFF = 'bg-slate-800 border-slate-700 text-slate-300 hover:text
  *  because a module-scope template reads it at load. */
 export const DEBUG_CHIP = `${CHIP_BASE} shadow-[inset_0_1px_0_rgb(255_255_255/0.07)]`;
 
-/** A HUD CHIP — the top-right readout stack.  One padding for the whole
- *  column; the audit found the status badges at `px-3 py-1` against
+/** A HUD CHIP — the readouts along the top edge (one wrapping row since the
+ *  user call that retired the right-hand stack).  One padding for all of
+ *  them; the audit found the status badges at `px-3 py-1` against
  *  `px-4 py-1.5` everywhere else, which is what made the stack's left edge
  *  ragged. */
 /*  TRANSPARENCY (user call): a HUD chip sits ON the world, so the world reads

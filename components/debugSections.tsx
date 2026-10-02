@@ -11,10 +11,11 @@
  *  Three rules keep it honest:
  *
  *  - **A row's LABEL and ACTION are its identity.**  Docs, suites and muscle
- *    memory name rows by label ("pause ▸ Debug Menu ▸ Neb bond"), so moving a
- *    row between sections is free and renaming one is not.  Every row here
- *    was moved verbatim from the old panel — label, readout and tooltip — and
- *    `tests/debugmenu.spec.ts` pins the full set of labels.
+ *    memory name rows by label ("Materials ▸ Nebula ▸ Neb bond"), so moving
+ *    a row between sections is free and renaming one is not.  Every row that
+ *    came from the old panel was moved verbatim — label, readout and tooltip
+ *    (the tooltip is now the row's `detail`) — and `tests/debugmenu.spec.ts`
+ *    pins the labels; a new row joins its ROW_LABELS.
  *  - **Rows read ONLY the stats payload** (`c.s`), exactly as the old JSX
  *    did; nothing here polls the engine for data.  Actions call the engine
  *    directly (`dbg(e => e.dbg.cycleX())`) — the same method the old App
@@ -126,7 +127,7 @@ export type DebugRow =
   | { kind: 'chips'; label: string; chips: (c: DebugCtx) => readonly DebugChip[] }
   /** Lays itself out; `label` is what the filter matches. */
   | ({ kind: 'custom'; label: string; render: (c: DebugCtx) => React.ReactNode } & DebugHelp)
-  /** Rows only known at render time (the weapon catalog, perf tasks). */
+  /** Rows only known at render time (the weapon-module catalog, perf tasks). */
   | { kind: 'each'; label: string; rows: (c: DebugCtx) => readonly DebugRow[] };
 
 export interface DebugSection {
@@ -334,7 +335,7 @@ const BOSS_SPAWNS: readonly { k: string; label: string; summary: string }[] = [
   { k: 'BOSS_SCATTER', label: 'Reaver',
     summary: 'A fast, evasive brawler with a boss Shotgun; later phases add an arc shield, then armour and Kamikazes.' },
   { k: 'BOSS_SIEGE', label: 'Bastion',
-    summary: 'A huge siege boss lobbing Plasma Cannon salvos from long range; its front plate stops head-on fire, and later it regenerates too.' },
+    summary: 'A huge siege boss lobbing heavy cannon salvos from long range; its front plate stops head-on fire, and later it regenerates too.' },
 ];
 
 const DRAGON_SPAWNS: readonly string[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
@@ -438,15 +439,15 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Crash energy', dbg(e => e.dbg.cycleCrashEnergy()),
         c => c.s.crashEnergyName ?? '1x (def)',
         'How much of a ramming hull\'s energy goes into breaking what it hits — how permeable terrain is.',
-        'How much of a HULL\'s kinetic energy reaches the grain bonds it hits (1 / 0.5 / 0.25 / 2 / 4x over the calibrated coupling). A crash now spends ENERGY like a weapon hit does, so twice the closing speed is four times the bite, and the speed the impactor loses IS what it broke. The coupling is calibrated on ROCK, whose ram count is unchanged at 9; every other material then differs by its own derived toughness rather than by an authored HP (metal used to take 24 to 144 rams across six tiles of identical toughness, because a crash spent one authored HP and metal authors 24 x densityTier). This is the dial for how permeable terrain is; a material\'s own bondStrength is the same question asked of one material.'),
+        'How much of a HULL\'s kinetic energy reaches the grain bonds it hits (1 / 0.5 / 0.25 / 2 / 4x over the calibrated coupling). A crash now spends ENERGY like a weapon hit does, so twice the closing speed is four times the bite, and the speed the impactor loses IS what it broke. The coupling was calibrated on ROCK, at the 9 rams it had always taken; every other material then differs by its own derived toughness rather than by an authored HP (metal used to take 24 to 144 rams across six tiles of identical toughness, because a crash spent one authored HP and metal authors 24 x densityTier). MASS_SCALE has since made every impact ten times harder, so at the audit\'s 6 u/step ram rock now breaks in 1 (glass 1, plastic 7, metal 8). This is the dial for how permeable terrain is; a material\'s own bondStrength is the same question asked of one material.'),
       ctrl('Blast energy', dbg(e => e.dbg.cycleBlastEnergy()),
         c => c.s.blastEnergyName ?? '1x (def)',
         'How much of a cannon shell\'s energy becomes its explosion.',
-        'How much of a SHELL\'s kinetic energy becomes its BLAST (a multiplier over BLAST_ENERGY_COUPLING, which ships at 0.4). The splash was the last damage number in the roster still authored as a flat scalar: the direct bite went kinetic in step 3, the crash in step 4 and the bore in step 5, while explosionDamage sat at 10 as every round\'s bank grew tenfold and terrain started deriving ~50 HP a tile — so the blast shrank into a light show. It is now a fraction of the shell\'s own energy, which means it rides GUNNERY and the charge for free (both buy a heavier round) and the RING grows with the round too, by the square root, so its area is the energy. What it does NOT do is shrink when the shell spent its bank boring: the charge is PAYLOAD, sized at spawn, and travel energy only decides how far the round gets. The coupling is the sibling of "Crash energy" — a hull couples ~11% of a contact into breaking work, a shaped charge this much into the blast — and it is set so the charge is worth about one more hit (measured: peak 20.8 against the Cannon\'s 18 bite). The 0.5x step is the A/B against the pre-doubling blast.'),
+        'How much of a SHELL\'s kinetic energy becomes its BLAST (a multiplier over BLAST_ENERGY_COUPLING, which ships at 0.4). The splash was the last damage number in the roster still authored as a flat scalar: the direct bite went kinetic in step 3, the crash in step 4 and the bore in step 5, while explosionDamage sat at 10 as every round\'s bank grew tenfold and terrain started deriving ~50 HP a tile — so the blast shrank into a light show. It is now a fraction of the shell\'s own energy, which means it rides GUNNERY and the charge for free (both buy a heavier round) and the RING grows with the round too, by the square root, so its area is the energy. What it does NOT do is shrink when the shell spent its bank boring: the charge is PAYLOAD, sized at spawn, and travel energy only decides how far the round gets. The coupling is the sibling of "Crash energy" — a hull couples ~11% of a contact into breaking work, a shaped charge this much into the blast — and it is set so the charge is worth about one more hit (the Heavy Shell, cannon + kinetic: peak ~24.6 against its 24 bite; the bare Cannon scales its blast to 0.2, ~12.5). The 0.5x step is the A/B against the pre-doubling blast.'),
       ctrl('Hull density', dbg(e => e.dbg.cycleHullDensity()),
         c => c.s.hullDensityName ?? '0.250 / m100 (def)',
         'How heavy the ship is — moves crash damage, knockback, impact shake and tilt feel together.',
-        'How heavy the SHIP is, as a density (mass per unit of d\u00b2) and the mass it derives — a multiplier over IMPACT_DENSITY.HULL, index 0 what ships. Mass used to be an impulse term and nothing else; under the energy model it is half of what every impact SPENDS, so one number moves crash damage, knockback, the body-impact shake and the roll spring together. Read it against the MATERIAL band, which is the scale it is stated in: glass 0.010, plastic 0.013, rock 0.018, metal 0.030. The hull ships at 0.250 — 25x glass and 8x rock, deliberately, because a ship is a machine rather than a rock and should plow through gravel instead of being batted about by it. The steps walk DOWN toward that band (and one up), because the question worth judging in play is whether the hull should sit that far above it at all. Lower = you ram for less and get shoved more.'),
+        'How heavy the SHIP is, as a density (mass per unit of d\u00b2) and the mass it derives — a multiplier over IMPACT_DENSITY.HULL, index 0 what ships. Mass used to be an impulse term and nothing else; under the energy model it is half of what every impact SPENDS, so one number moves crash damage, knockback, the body-impact shake and the roll spring together. Read it against the MATERIAL band, which is the scale it is stated in: glass 0.10, plastic 0.13, rock 0.18, metal 0.30. The hull ships at 2.50 (mass 1000) — 25x glass and 8x metal, deliberately, because a ship is a machine rather than a rock and should plow through gravel instead of being batted about by it. The steps walk DOWN toward that band (and one up), because the question worth judging in play is whether the hull should sit that far above it at all. Lower = you ram for less and get shoved more.'),
     ],
   },
   {
@@ -541,8 +542,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         c => c.s.outfitAnywhere ? 'On' : 'Off',
         'Lets the pause menu\'s ship and weapon flowers be edited anywhere on the map.',
         'DBG: drag, install and unmount work in the pause menu without a drydock. Off restores the station-only rule.'),
-      // The catalog is a PANEL-ONLY payload, expanded per render like the
-      // weapon rows above.
+      // The catalog is a PANEL-ONLY payload, expanded into a row per module
+      // on every render.
       each('Weapon module', c => (c.s.weaponModuleCatalog ?? []).map((m): DebugRow => {
         const where = [m.installed > 0 ? `on ${m.installed}` : '', m.stored > 0 ? `cargo ${m.stored}` : '']
           .filter(Boolean).join(' · ');
@@ -593,10 +594,11 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         'Grant the Light module (DBG). Needs to touch a hull module to function; then tap your ship in open space to cycle the light off / medium / high (the beam style at the medium / high lighting tiers).'),
       ctrl('Outfit all', dbg(e => e.debugOutfitAll()),
         c => 'Max',
-        'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).'),
+        'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement (DBG).',
+        'Every Mk III ship and weapon module, a Mk V scanner and a projector + thermal / beam + electric pair, laid out so every adjacency requirement holds; spare deliveries and modifiers go to the inventory.'),
       ctrl('Reset', dbg(e => e.resetOutfit()),
         c => 'Lean',
-        'Reset to the lean run start: bare hexes, empty inventory, Projector on gun hex W1.'),
+        'Reset to the lean run start: the free Base Hull on the centre ship hex, empty inventory, Projector on gun hex W1.'),
     ],
   },
   {
@@ -633,7 +635,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Transit fx', dbg(e => e.dbg.cyclePortalWarp()),
         c => c.s.portalWarpName ?? '0.9s',
         'Length of the tunnel flight played when you travel through a portal (or off).',
-        'Length of the flight-THROUGH beat played on arrival (0.9 / 0.6 / 1.4s / off) — the tunnel that unrolls the lens into radial streaks, streams the sky outward and decelerates onto the destination. The sim is FROZEN for its duration (the stage-clear pattern), so nothing can shoot you inside the tunnel and the beat costs no simulation; "off" transitions instantly, exactly as before it existed. Takes effect on the next transit.'),
+        'Length of the flight-THROUGH beat played on arrival (1.4s ships; 1.4 / 0.9 / 0.6 / 2.2 / 3.5 / 6 / 10s / off) — the tunnel that sweeps the REAL star field outward past the hull and decelerates onto the destination. The sim is FROZEN for its duration (the stage-clear pattern), so nothing can shoot you inside the tunnel and the beat costs no simulation; "off" transitions instantly, exactly as before it existed. Takes effect on the next transit.'),
       ctrl('Size', dbg(e => e.dbg.cyclePortalSize()),
         c => c.s.portalSizeName ?? '1×',
         'Scales every rift — the drawn hole, what it swallows and its star warp — but not how close you must be to enter.',
@@ -641,23 +643,23 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Gravity', dbg(e => e.dbg.cyclePortalGravity()),
         c => c.s.portalGravityName ?? '1×',
         'How hard rifts pull shards, enemies and drops (you feel only a fraction of it).',
-        'Portal gravity STRENGTH (1 / 0.5 / 0.25 / off / 1.5×) — how hard the well pulls shards, enemies and drops (the player always feels only GRAVITY_PLAYER_SCALE of it). "off" leaves the art and the lens untouched, so this isolates the pull from the look.'),
+        'Portal gravity STRENGTH (1 / 0.5 / 0.25 / off / 1.5 / 2 / 3 / 4×) — how hard the well pulls shards, enemies and drops (the player always feels only GRAVITY_PLAYER_SCALE of it). "off" leaves the art and the lens untouched, so this isolates the pull from the look. The shipped well was tuned DOWN and baked: 4× here with 2× range reproduces the old g6000 / 1050 rift.'),
       ctrl('  ↳ range', dbg(e => e.dbg.cyclePortalGravityRange()),
         c => c.s.portalGravityRangeName ?? '1×',
         'How far a rift\'s pull reaches.',
-        'How far the pull REACHES (1 / 0.75 / 0.5 / 1.5× of GRAVITY_RANGE). Separate from strength because a well can be too WIDE without being too strong — a short, firm well reads as a mouth, a long faint one as the whole area sagging.'),
+        'How far the pull REACHES (1 / 0.75 / 0.5 / 1.5 / 2 / 3× of GRAVITY_RANGE). Separate from strength because a well can be too WIDE without being too strong — a short, firm well reads as a mouth, a long faint one as the whole area sagging.'),
       ctrl('Lens', dbg(e => e.dbg.cyclePortalLens()),
         c => c.s.portalLensName ?? '1×',
         'Strength of the star warp around each rift.',
-        'Background star-warp strength (1 / 0.5 / 0.25 / off / 1.5 / 2 / 3×). Scales the radial push off the throat AND the twist, both of which are bounded, so each step visibly flattens the distortion. At "off" the star field takes its original untouched draw path — the cheapest possible A/B against the warp existing at all. The warped region hugs the black disc (4× its radius), so it also shrinks with Size and with a smaller destination.'),
+        'Background star-warp strength (1 / 0.5 / 0.25 / off / 1.5 / 2 / 3 / 5 / 8 / 12×). Scales the radial push off the throat AND the twist, both of which are bounded, so each step visibly flattens the distortion. At "off" the star field takes its original untouched draw path — the cheapest possible A/B against the warp existing at all. The warped region rides the black disc (14× its radius at the shipped "↳ radius"), so it also shrinks with Size and with a smaller destination.'),
       ctrl('  ↳ radius', dbg(e => e.dbg.cyclePortalLensRadius()),
         c => c.s.portalLensRadiusName ?? '4×',
         'How much sky the star warp covers, as a multiple of the rift\'s size.',
-        'How much SKY the warp covers, as a multiple of the rift\'s black-disc radius (4 / 6 / 9 / 14 / 2.5×) — separate from Lens, because how WIDE the bend reaches and how HARD it bends are different questions. It rides the disc, so it also inherits the destination-span scaling and the Size knob: a Pocket rift warps a small patch, Deep Space a wide one.'),
+        'How much SKY the warp covers, as a multiple of the rift\'s black-disc radius (14× ships; 14 / 4 / 6 / 9 / 20 / 30 / 2.5×) — separate from Lens, because how WIDE the bend reaches and how HARD it bends are different questions. It rides the disc, so it also inherits the destination-span scaling and the Size knob: a Pocket rift warps a small patch, Deep Space a wide one.'),
       ctrl('  ↳ spin', dbg(e => e.dbg.cyclePortalLensSpin()),
         c => c.s.portalLensSpinName ?? '1×',
         'How fast the star warp swirls — down to frozen.',
-        'Star-lens SPIN (1 / 0.5 / 0.25 / frozen / 2×) — the rate the bounded twist BREATHES, nothing else. The twist no longer accumulates over time (that is what used to wind the field into bands), so this changes only how fast the bend swells and relaxes; "frozen" holds it at its standing value for a completely static warp.'),
+        'Star-lens SPIN (1 / 0.5 / 0.25 / frozen / 2 / 4×) — the rate the bounded twist BREATHES, nothing else. The twist no longer accumulates over time (that is what used to wind the field into bands), so this changes only how fast the bend swells and relaxes; "frozen" holds it at its standing value for a completely static warp.'),
       stat('  ↳ live', c => c.s.portalTuningInfo ?? '—', 'Rift size, pull strength and reach after the knobs above (size px, g strength / reach).', c => 'text-slate-400'),
     ],
   },
@@ -741,7 +743,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Gnat move', dbg(e => e.dbg.cycleSwarmMove()),
         c => c.s.swarmMoveName ?? 'boids',
         'How Swarm gnats fly: flock, orbit and dart, serpentine, or coast and dash.',
-        'Cycle the Swarm gnat movement: boids (flock) → vortex (orbit + dart) → weave (serpentine) → burst (coast + telegraphed dash). Applies live to all gnats.'),
+        'Cycle the Swarm gnat movement: boids (flock) → vortex (orbit + dart) → weave (serpentine; the default) → burst (coast + telegraphed dash). Applies live to all gnats.'),
     ],
   },
   {
@@ -807,7 +809,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Bnd strength', dbg(e => e.dbg.cycleBoundaryStrength()),
         c => c.s.boundaryStrengthName ?? 'x1',
         'Master toughness for all terrain — a multiplier on every grain boundary\'s strength.',
-        'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which puts a 36px rock tile at 9 Blaster hits and a glass pane at 5. Takes effect on the next hit (cached patterns rebuild).'),
+        'Master multiplier on every material\'s GRAIN-BOUNDARY STRENGTH - the damage it takes to break through one pixel of boundary. Under the grain model a body has no authored HP: its health is DERIVED as the total strength of its own pattern\'s boundaries, so this scales how tough all terrain is at once while the relative hardness of rock against glass stays the variant table\'s job. Ships at x1, which derives a 36px rock tile at ~55 HP and a glass pane at ~50. Takes effect on the next hit (cached patterns rebuild).'),
       ctrl('Dmg spread', dbg(e => e.dbg.cycleDamageSpread()),
         c => c.s.damageSpreadName ?? 'material',
         'How widely one hit\'s damage spreads through the grain (off = one grain at a time).',
@@ -851,7 +853,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('  ↳ bond str', dbg(e => e.dbg.cycleGrainKnob('bondStrength')),
         c => c.s.grainKnobNames?.bondStrength ?? '—',
         'How tough this material\'s grain boundaries are.',
-        'Damage to break through ONE PIXEL of grain boundary, for this material alone. Under the grain model a body has no authored HP: its health is DERIVED as the sum of (edge length × strength) over its own pattern, so raising this makes the material tougher AND makes each grain harder to pop off, and a bigger body is tougher for free because it has more boundary. Deliberately NOT normalised by size, which is what lets one number serve a material\u0027s tiles and its shards. Shipped: rock 0.27, glass 0.16, plastic 0.62, metal 0.85. Bnd strength above multiplies whatever this sets.'),
+        'Damage to break through ONE PIXEL of grain boundary, for this material alone. Under the grain model a body has no authored HP: its health is DERIVED as the sum of (edge length × strength) over its own pattern, so raising this makes the material tougher AND makes each grain harder to pop off, and a bigger body is tougher for free because it has more boundary. Deliberately NOT normalised by size, which is what lets one number serve a material\u0027s tiles and its shards. Shipped: rock 0.4, glass 0.4, plastic 1.8, metal 1.8. Bnd strength above multiplies whatever this sets.'),
       ctrl('  ↳ size spread', dbg(e => e.dbg.cycleGrainKnob('sizeSpread')),
         c => c.s.grainKnobNames?.sizeSpread ?? '—',
         'How much grain sizes vary within one body of this material.',
@@ -863,7 +865,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('  ↳ reset all', dbg(e => e.dbg.resetGrainOverrides()),
         c => `${c.s.grainOverrideCount ?? 0} off table`,
         'Clears every per-material override, back to the shipped table.',
-        'Drop every per-material override at once and go back to the variant table. The readout counts how many of the twenty values (four materials × five knobs) are currently overridden - with a panel this size there is otherwise no way to tell whether what you are looking at is the shipped tuning or something left set three sessions ago.'),
+        'Drop every per-material override at once and go back to the variant table. The readout counts how many of the thirty-five values (five materials × seven knobs) are currently overridden - with a panel this size there is otherwise no way to tell whether what you are looking at is the shipped tuning or something left set three sessions ago.'),
     ],
   },
   {
@@ -884,11 +886,11 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Neb bond', dbg(e => e.dbg.cycleNebulaBond()),
         c => c.s.nebulaBondName ?? 'goo',
         'How long touching nebula puffs stick together before they merge.',
-        'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (off 1x / firm 2x / strong 5x / goo 12x). GOO ships; \u2018off (old)\u2019 is one click away because the cycle wraps, so the A/B against pre-feature nebula is still the first press. Stretching the timer is what makes the grip legible \u2014 at the base ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles. It COSTS entity count, which is frame time: live shard population measured 28 / 75 / 307 / 597 across the four steps.'),
+        'How hard a touching pair of nebula shards grips, and how long it holds before merging: cohesion blend rate, break distance, an inner range inside which the self-gravity stops pulling so cohesion is not fighting it at contact, and a multiplier on the compose threshold (off 1x / firm 2x / strong 5x / goo 12x). GOO ships; \u2018off (old)\u2019 is one click away because the cycle wraps, so the A/B against pre-feature nebula is still the first press. Stretching the timer is what makes the grip legible \u2014 at the base ~5 s a pair merges away before it reads as stuck. Merging is never switched off: compose is also how nebula shards transmute back into tiles. Holding pairs open can cost entity count, which is frame time: live shards measured 28 / 75 / 307 / 597 across the four steps \u2014 but that was before nebula\u2019s grain size went to 20; re-measured since, goo shows no measurable cost against \u2018off (old)\u2019.'),
       ctrl('Neb solid', dbg(e => e.dbg.cycleNebulaTileShare()),
         c => c.s.nebulaTileShareName ?? 'rare 1/8',
         'How often a condensing cloud turns into solid material instead of nebula.',
-        'How often a CRYSTALLISING nebula cloud condenses into a solid material shard (rock / glass / plastic / metal) instead of thickening back into a nebula TILE. It was an even 50/50 and measured that way in play (53.9% tile on NEBULA_FIELD, 61.1% on UNIVERSE over 90 s), so nebula leaked into the terrain about as fast as it rebuilt itself; the shipped step makes leaving the family rare. \u2018half (old)\u2019 is the pre-call behaviour. Rock-derived dust is unaffected \u2014 it always returns to rock, which is conservation rather than conversion \u2014 and this never changes WHICH material a cloud picks, only how often it picks one at all.'),
+        'How often a CRYSTALLISING nebula cloud condenses into a solid material shard (rock / glass / plastic / metal) instead of thickening back into a nebula TILE. It was an even 50/50 and measured that way in play (53.9% tile on NEBULA_FIELD, 61.1% on UNIVERSE over 90 s), so nebula leaked into the terrain about as fast as it rebuilt itself; the shipped step makes leaving the family rare. \u2018half (old)\u2019 is the pre-call behaviour. The roll is ORIGIN-BLIND: rock-derived dust rolls the same share as any other cloud (its origin only decides that its solid branch returns to rock), and this never changes WHICH material a cloud picks, only how often it picks one at all.'),
       ctrl('Neb drain', dbg(e => e.dbg.cycleNebulaDrain()),
         c => c.s.nebulaDrainName ?? 'gentle 5u/-10%',
         'How fast nebula recedes overall (what a new cloud tile costs).',
@@ -1033,12 +1035,12 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
     rows: [
       ctrl('Lighting', dbg(e => e.dbg.cycleLighting()),
         c => c.s.lightingModeName ?? 'legacy',
-        'Lighting model: the shipped glows (legacy), one shadow-casting ship light (unified), or a debug fill.',
-        'Unified tile lighting. LEGACY (default) is not "off" — it is the THREE hand-rolled models Omni ships: the player-distance proximity bloom on rock/plastic/indestructible, the repel-impulse glow on glass and metal, and the glass edge tint on its own 120 range. UNIFIED replaces all three with one shadow-casting point light at the ship: a radial falloff with a shadow wedge withheld behind every solid tile in range. Nebula is passThrough and deliberately casts NOTHING, which is why the effect reads strongly on the material showcase maps and faintly on Universe (two thirds of its static tiles are nebula). DEBUG paints a flat grey layer instead of a light — no lighting maths — so the canvas, the single blit and the smoothing restore can be checked on their own.'),
+        'Lighting model: the old hand-rolled glows (legacy), the shadow-casting light layer (unified, ships), or a debug fill.',
+        'Unified tile lighting. LEGACY (the default until unified shipped) is not "off" — it is the THREE hand-rolled models Omni used to ship: the player-distance proximity bloom on rock/plastic/indestructible, the repel-impulse glow on glass and metal, and the glass edge tint on its own 120 range. UNIFIED (ships) replaces all three with one shadow-casting point light at the ship: a radial falloff with a shadow wedge withheld behind every solid tile in range. Nebula is passThrough and deliberately casts NOTHING, which is why the effect reads strongly on the material showcase maps and faintly on Universe (two thirds of its static tiles are nebula). DEBUG paints a flat grey layer instead of a light — no lighting maths — so the canvas, the single blit and the smoothing restore can be checked on their own.'),
       ctrl('Light tier', dbg(e => e.dbg.cycleLightingTier()),
         c => c.s.lightingTierName ?? 'low',
         'Lighting quality and cost: resolution, number of lights, shadow detail.',
-        'Lighting budget. LOW (default) is the 390x844 phone: the light layer renders at a third of screen resolution, 4 lights, 24 occluders each, radius 300, hard shadows. Medium/High halve the divisor and raise every cap. The occluder cap is load-bearing rather than defensive — a radius-300 light can cover ~225 hexes in solid terrain, and the cap takes the NEAREST, which subtend the largest shadow angle, so truncation degrades gracefully.'),
+        'Lighting budget. LOW (default) is the 390x844 phone: the light layer renders at a third of screen resolution, 4 lights, 24 occluders each, radius 300. Medium/High render at half resolution and raise every cap. Shadow softness is NOT on this ladder: the Shadow soft row sets it at every tier. The occluder cap is load-bearing rather than defensive — a radius-300 light can cover ~225 hexes in solid terrain, and the cap takes the NEAREST, which subtend the largest shadow angle, so truncation degrades gracefully.'),
       ctrl('Light bright', dbg(e => e.dbg.cycleLightBrightness()),
         c => c.s.lightBrightnessName ?? '100%',
         'How bright the ship\'s light is.',
@@ -1050,15 +1052,15 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Flashlight', dbg(e => e.dbg.cycleFlashlight()),
         c => c.s.flashlightName ?? 'radial',
         'Turns the ship\'s light into a directional beam, and sets its width.',
-        'The player\'s light as a directional BEAM instead of a radial glow. Points along the AIM — the same angle shots travel — so the torch goes where the ship is looking and there is no second control to fight over. Widths are the full cone: half 180° (a headlight — everything ahead, nothing behind), wide 120°, beam 80°, narrow 45°, tight 25°, pin 12° (at which point the soft edge is as wide as the beam, so it reads as a spot with no boundary at all). RADIAL (default) is the shipped 360° glow and costs nothing extra. OFF is a zero-width beam rather than a special case: the player\'s light draws nothing, so what is left on the layer is exactly the emitters (to turn the whole layer off, use Lighting: legacy). The beam masks everything the player\'s light does — falloff, shadows and caustics — but NOT the secondary emitters, because a lit metal plate is its own light and radiates in every direction; that is what makes sweeping the beam past one read as the beam finding it. A body outside the cone is also skipped entirely, since a shadow runs radially outward and cannot reach into the beam — which is what makes a narrow beam cheaper than the radial light rather than merely darker.'),
+        'The player\'s light as a directional BEAM instead of a radial glow. Points along the AIM — the same angle shots travel — so the torch goes where the ship is looking and there is no second control to fight over. Widths are the full cone: half 180° (a headlight — everything ahead, nothing behind), wide 120°, beam 80°, narrow 45°, tight 25°, pin 12° (at which point the soft edge is as wide as the beam, so it reads as a spot with no boundary at all). RADIAL is the 360° glow (the old default) and costs nothing extra. OFF SHIPS: the light is equipment now — the Light module\'s ship-tap tool overrides this row while it is on, and without it the ship carries no light. OFF is a zero-width beam rather than a special case: the player\'s light draws nothing, so what is left on the layer is exactly the emitters (to turn the whole layer off, use Lighting: legacy). The beam masks everything the player\'s light does — falloff, shadows and caustics — but NOT the secondary emitters, because a lit metal plate is its own light and radiates in every direction; that is what makes sweeping the beam past one read as the beam finding it. A body outside the cone is also skipped entirely, since a shadow runs radially outward and cannot reach into the beam — which is what makes a narrow beam cheaper than the radial light rather than merely darker.'),
       ctrl('Light color', dbg(e => e.dbg.cycleLightColor()),
         c => c.s.lightColorName ?? 'ship',
         'Colour of the ship\'s light.',
-        'What COLOUR the player\'s light is. SHIP (default) is the engine-glow blue the layer has always used, chosen so the light reads as coming from the ship rather than as a new system announcing itself; white / warm / amber / green / violet / red are there because a flashlight is equipment and equipment has a character — a tungsten beam and a cold blue-white one light the same terrain into two different games. The colour reaches everything the player\'s light does, the REFRACTED cone included, which is right: light that passes through glass keeps the colour it arrived with. The secondary emitters are deliberately unaffected — they radiate the colour of the BODY, not of what lit it.'),
+        'What COLOUR the player\'s light is. SHIP (default) is the engine-glow blue the layer has always used, chosen so the light reads as coming from the ship rather than as a new system announcing itself; white / warm / amber / green / violet / red are there because a flashlight is equipment and equipment has a character — a tungsten beam and a cold blue-white one light the same terrain into two different games. The colour reaches everything the player\'s light does, the REFRACTED cone included, which is right: light that passes through glass keeps the colour it arrived with. The secondary emitters take it too: an emitter radiates a blend of this colour and its BODY\'s set by Tint mix, so at the shipped mix (off) it wears the light\'s colour and only at full the body\'s.'),
       ctrl('Tint mix', dbg(e => e.dbg.cycleTintMix()),
         c => c.s.tintMixName ?? 'off',
         'How much a material\'s own colour tints the light that passes through or off it.',
-        'How much of the MATERIAL\'s colour rides the light it passes on. Light through green glass comes out green, and a body lit by a red torch cannot re-emit blue — the layer got both wrong in opposite directions: transmitted light carried the LIGHT\'s colour with no trace of the material, and an emitter carried the MATERIAL\'s with no trace of what lit it. One knob, two applications. Emission and the refracted caustic take a blend between the two colours (0 = the light\'s, 1 = the body\'s). Straight-through transmission is tinted by MULTIPLYING the umbra by the material colour, because that light is not drawn by the shadow pass — it is what the pass chose not to erase — so it can only be coloured after the fact; 0 changes nothing there. A true product everywhere is the physical answer and it reads too dark (two saturated colours multiply toward black), so a half blend is as far as it goes. SHIPS OFF: the effect is real but subtle, because the materials\' colours sit close to the light\'s (glass indigo, metal steel-blue, both against a sky-blue lamp), and the straight-through path costs a fill per translucent group to buy it.'),
+        'How much of the MATERIAL\'s colour rides the light it passes on. Light through green glass comes out green, and a body lit by a red torch cannot re-emit blue — the layer got both wrong in opposite directions: transmitted light carried the LIGHT\'s colour with no trace of the material, and an emitter carried the MATERIAL\'s with no trace of what lit it. One knob, two applications. Emission and the refracted caustic take a blend between the two colours (0 = the light\'s, 1 = the body\'s). Straight-through transmission is tinted by MULTIPLYING the umbra by the material colour, because that light is not drawn by the shadow pass — it is what the pass chose not to erase — so it can only be coloured after the fact; 0 changes nothing there. A true product everywhere is the physical answer and it reads too dark (two saturated colours multiply toward black), so the ladder (off / 1/4 / 1/2 / 3/4 / full) leaves the call to the eye. SHIPS OFF: the effect is real but subtle, because the materials\' colours sit close to the light\'s (glass indigo, metal steel-blue, both against a sky-blue lamp), and the straight-through path costs a fill per translucent group to buy it.'),
       ctrl('Emissive', dbg(e => e.dbg.toggleEmissive()),
         c => c.s.emissiveEnabled === true ? 'On' : 'Off',
         'Metal and glass re-glow the light that falls on them.',
@@ -1066,11 +1068,11 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('World lights', dbg(e => e.dbg.toggleWorldLights()),
         c => c.s.worldLightsEnabled === true ? 'On' : 'Off',
         'Shots and the snitch light up their surroundings.',
-        'A6: do the self-luminous movers — shots and the snitch — light the unified layer in their own colours? These are not emitters: an emitter\'s brightness is what the player\'s light put ON it, where a shot glows because it is on fire, so a bolt lights the walls it passes whether or not the flashlight is pointed there. They spend what is LEFT of the tier\'s maxLights after the player and the emitters (the tier\'s number stays the whole frame\'s light count), budgeted nearest-to-screen-centre, and a light whose disc misses the screen is culled before it costs anything. They cast no shadows — a shadow thrown by a bolt is unreadable at any speed, and each shadowed light is a fresh occluder collection. Off restores the exact pre-A6 layer.'),
+        'Do the self-luminous movers — shots and the snitch — light the unified layer in their own colours? These are not emitters: an emitter\'s brightness is what the player\'s light put ON it, where a shot glows because it is on fire, so a bolt lights the walls it passes whether or not the flashlight is pointed there. They spend what is LEFT of the tier\'s maxLights after the player and the emitters (the tier\'s number stays the whole frame\'s light count), budgeted nearest-to-screen-centre, and a light whose disc misses the screen is culled before it costs anything. They cast no shadows — a shadow thrown by a bolt is unreadable at any speed, and each shadowed light is a fresh occluder collection. Off restores the exact layer from before they existed.'),
       ctrl('Depth dark', dbg(e => e.dbg.toggleDepthAmbient()),
         c => c.s.depthAmbientEnabled === true ? 'On' : 'Off',
         'The world grows darker with each stage you descend.',
-        'A7: each stage DESCENDED adds the light tier\'s ambientPerStage of fog-darkness (capped at four stages), folded into the fog compositor — so it is cut by the player\'s light, respects shadows, and darkens the minimap\'s memory veil, all through the one mechanism. The hub is depth 0 and never darkens; darkness is a property of going down, not a global mood. When the Fog cycle is also on, whichever of the two wants the world darker wins, so a player already running dark fog only notices depth once it exceeds their setting.'),
+        'Each stage DESCENDED adds the light tier\'s ambientPerStage of fog-darkness (capped at four stages), folded into the fog compositor — so it is cut by the player\'s light, respects shadows, and darkens the minimap\'s memory veil, all through the one mechanism. The hub is depth 0 and never darkens; darkness is a property of going down, not a global mood. (The descent rift is switched off today, so in play every arena is depth 0 and there is nothing for this to darken.) When the Fog cycle is also on, whichever of the two wants the world darker wins, so a player already running dark fog only notices depth once it exceeds their setting.'),
       ctrl('Emit bright', dbg(e => e.dbg.cycleEmitBrightness()),
         c => c.s.emitBrightnessName ?? '1/2',
         'How much of the light they receive glowing bodies give back.',
@@ -1119,7 +1121,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Star size', dbg(e => e.dbg.cycleStarSize()),
         c => c.s.starSizeName ?? 'Device px',
         'Smallest star size: one device pixel, or one CSS pixel.',
-        'Star size floor. Bands are generated at DEVICE resolution and blitted 1:1 at whole device-pixel offsets, so no resampling filter is in the path — which makes this a real choice for the first time. Device px: a star may be a single device pixel, the finest sky the display can show. CSS px: never smaller than one CSS pixel — the apparent-size floor the field had before, but crisp instead of filtered. IDENTICAL at dpr 1; the knob only differs at dpr ≥ 2.'),
+        'Star size floor. Stars are drawn straight onto the canvas in DEVICE pixels — one fillRect each at a whole-device-pixel size, no intermediate band canvas — so no resampling filter is in the path, which makes this a real choice. Device px: a star may be a single device pixel, the finest sky the display can show. CSS px: never smaller than one CSS pixel — the apparent-size floor the field had before, but crisp instead of filtered. IDENTICAL at dpr 1; the knob only differs at dpr ≥ 2.'),
       ctrl('Star depth', dbg(e => e.dbg.cycleStarBands()),
         c => c.s.starBandsName ?? '240',
         'How many parallax depth layers the stars are split into.',
@@ -1143,11 +1145,11 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('HP bars', dbg(e => e.dbg.toggleDamageTriggeredBars()),
         c => c.s.damageTriggeredBars === false ? 'Always' : 'On damage',
         'Enemy health bars: only while a fight is on, or always.',
-        'Enemy world-space health bars. On damage (default): a bar appears when the enemy is hit and fades out after, so the bars on screen are the fights in progress rather than a label on every entity. Always: the pre-5d behaviour, every enemy carrying a bar every frame. The PLAYER has no world-space bar either way - the HUD hull/shield readout is the canonical one.'),
+        'Enemy world-space health bars. On damage (default): a bar appears when the enemy is hit and fades out after, so the bars on screen are the fights in progress rather than a label on every entity. Always: the pre-5d behaviour, every enemy carrying a bar every frame. The PLAYER is the standing exception either way: its own hull bar is always drawn under the ship, never damage-triggered, beside the HUD hull/shield chip.'),
       ctrl('Minimap mat', dbg(e => e.dbg.cycleMinimapMaterial()),
         c => c.s.minimapMaterialName ?? 'Flow',
         'What the minimap shows for loose material: flow lines, dots, or nothing.',
-        'What the minimap says about MATERIAL. Flow (default): streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream. Dots: the old spray of one dot per mobile shard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.'),
+        'What the minimap says about MATERIAL. Dots (default): one dot per mobile shard the ship has FOUND (big enough to track, within the minimap\'s reach). Flow: streamlines traced through the asteroid flow field — where material is GOING, drawn as 49 short lines with a pulse running downstream — and only with a scanner aboard. Off: neither. Static tiles are unaffected either way (they come from the pre-rendered terrain layer); nebula is off the minimap entirely.'),
       ctrl('Scan off', dbg(e => e.dbg.toggleScanReveal()),
         c => c.s.scanRevealAll === true ? 'REVEALED' : 'Off',
         'Performance A/B: switches the scanner off and reveals the whole minimap.',
@@ -1282,8 +1284,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       stat(' ·weapons', c => fmtMs(c.s.perf!.weaponsMs), 'Weapon firing and cooldowns.'),
       stat(' ·drops', c => fmtMs(c.s.perf!.dropsMs), 'Collecting and merging drops.'),
       stat(' ·homing', c => fmtMs(c.s.perf!.homingMs), 'Steering homing shots.'),
-      stat(' ·lightn', c => fmtMs(c.s.perf!.lightningMs), 'Lightning arcs and chains.'),
-      stat(' ·misc', c => fmtMs(c.s.perf!.logicMiscMs), 'The rest of updateGameLogic: input, HUD, the wave check, projectile trails.'),
+      stat(' ·lightn', c => fmtMs(c.s.perf!.lightningMs), 'The Arc Bolt\'s pull toward targets (its arcs are the energy layer\'s, in  ·misc).'),
+      stat(' ·misc', c => fmtMs(c.s.perf!.logicMiscMs), 'The rest of updateGameLogic: input, HUD, the wave check, projectile trails, and the energy layer (heat, arcs, beams).'),
       stat('render', c => fmtMs(c.s.perf!.renderMs), 'Average ms to issue the canvas draw (the JS side — the browser composites after this).'),
       stat(' ·neb', c => fmtMs(c.s.perf!.nebulaMs), 'Drawing nebula tiles and shards.'),
       stat(' ·vis-neb', c => c.s.perf!.nebulaVisible, 'Nebula bodies drawn this frame.'),

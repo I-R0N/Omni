@@ -16,9 +16,9 @@ There are three documents in play and they do not overlap by accident:
 
 | Doc | Owns |
 |---|---|
-| `CONFIG_CHANGES_PHASED_PLAN.md` | **The master plan.** Phase order, element IDs (`A1`…`G3`), gauntlet-vs-session calls, the decisions the guidance session owes. |
+| `CONFIG_CHANGES_PHASED_PLAN.md` | **The master plan.** Phase order, element IDs (`A1`…`G5`), gauntlet-vs-session calls, the decisions the guidance session owes. |
 | **This doc** | **Portals and world layering, in detail.** What a portal *is*, what the layers *are*, how they are found, and which topologies they build. |
-| `GAME_STRUCTURE_STRATEGY.md` | The strategy of record — continuous overworld, high-fidelity submaps, the persistence philosophy table. Unchanged by this doc. |
+| `GAME_STRUCTURE_STRATEGY.md` | The strategy of record — continuous overworld, high-fidelity submaps, the persistence philosophy table. Unchanged by this doc apart from the short "Layered containment" paragraph added alongside it. |
 
 **Precedence, both directions, so a future session does not have to guess:**
 
@@ -61,6 +61,13 @@ The parts that matter to everything below:
   the world was removed, pending this design.
 - There is **no per-map state**: destroyed tiles do not persist, and
   `WaveSystem.init` zeroes the ladder on every entry.
+- **The scanner shipped after this doc was written** (PR #96, reworked
+  from the master plan's A4 brief — CLAUDE.md §5 `SCANNER` /
+  `DETECT_TIER`).  A POI can carry a `GameEntity.poiTier` rung: a Mk IV
+  scanner sees *secret* POIs and a Mk V *hidden* ones, and
+  `SCANNER.ENCOUNTER_MAX_POI_TIER` (2) keeps anything above uncommon out
+  of naked-eye encounter.  So §4's reveal mechanism already exists;
+  nothing stamps a high `poiTier` on a portal yet.
 
 ---
 
@@ -146,8 +153,9 @@ not optional and the gauntlet log explains why:
   be drawn analytically or blitted on whole device pixels.
 - `BackgroundManager` already owns per-map parallax and a seeded generator;
   a gateway body is closer to that machinery than to `dropShapes.ts`.
-- It will want the same A/B knob treatment the lens got (DBG ▸ Portals),
-  because "does this read as depth at 390px" is a feel question.
+- It will want the same A/B knob treatment the lens got (DBG ▸ World &
+  Maps ▸ Portals), because "does this read as depth at 390px" is a feel
+  question.
 
 **Art source is an open decision** — see §8.
 
@@ -176,9 +184,11 @@ free, and §4 is about the gap.
 ## 4. Discovery — and an honest problem with it
 
 Hidden portals interface with the master plan's **A4 scanner module**: the
-scanner is what *reveals* a wormhole (label, chevron, minimap blip), and its
-Mk III tier already reads "portals/POIs map-wide" in that plan.  The natural
-split:
+scanner is what *reveals* a wormhole (label, chevron, minimap blip).  *(When
+this was written its Mk III tier read "portals/POIs map-wide"; the scanner
+shipped reworked instead — see §1: secret POIs are the Mk IV rung, hidden
+ones Mk V, and high-tier POIs are exempt from natural encounter.)*  The
+natural split:
 
 - **Unscanned**: no label, no indicator, no blip.  Only the physical cues.
 - **Scanned** (in range of a sufficient scanner, or previously discovered):
@@ -202,14 +212,14 @@ decision on paper:
    `addPortal`.
 2. **The cues get louder without the well getting stronger.**  More visible
    in-flow (a debris tail), a wider lens radius at the same push, an audible
-   bed at range (`poi.portal.idle` already exists and is distance-driven).
+   bed at range (`portal.idle` already exists and is distance-driven).
 3. **Discovery is scanner-first by design** and the physical cues are a
    bonus for observant players rather than the primary channel.  This is the
    safest and the least interesting.
 
-Recommendation: (1) plus a little of (2), A/B'd on the DBG Portals knobs that
-already exist — the knobs were built for exactly this kind of question and
-the retune above is the worked precedent.
+Recommendation: (1) plus a little of (2), A/B'd on the DBG ▸ World & Maps ▸
+Portals knobs that already exist — the knobs were built for exactly this kind
+of question and the retune above is the worked precedent.
 
 ---
 
@@ -256,6 +266,10 @@ deliberately rather than by whichever session gets there first:
   mining, colony, outfitting, ecology and persistence — and consequently has
   to note that **F2** "interleaves with G".
 
+*RESOLVED 2026-09-04 (`d30836b`): the master plan adopted the
+recommendation below — G1 now runs just before F, and the F2↔G interleave
+note is gone.*
+
 Both are right about different halves, because "the graph" is two pieces:
 
 **(a) Node identity + explicit edges — small, and wanted early.**
@@ -286,11 +300,11 @@ recommendation into it, per §0.*
 |---|---|---|
 | §2 layer model | **G1**, **G3** | **Supersedes** the flat "Level-1/Level-2 arena" framing for *world structure*. The art ladder stays G3's; the containment axis is new and orthogonal. |
 | §3a gateway portals | **G3** | **Supersedes** "portal graphics restyled as planets/stations" with the layer-keyed taxonomy and the star-field rendering constraints. |
-| §3b hidden wormholes | — | **New.** No element covers it; needs one. |
-| §4 discovery / scanning | **A4** | **Extends.** A4 builds the scanner; this doc says what it is scanning *for* and that discovered-state is per node. A4 ships pre-merge and must not assume hidden portals exist yet — absence of a scanner must still degrade to today's behaviour exactly. |
-| §5 maze / labyrinth | — | **New.** No element covers them. |
+| §3b hidden wormholes | **G4** | **New** — the master plan added G4 for it. |
+| §4 discovery / scanning | **A4** | **Extends.** A4 builds the scanner; this doc says what it is scanning *for* and that discovered-state is per node. A4 has LANDED, reworked (PR #96): it reversed the "degrade to today's behaviour exactly" rule — no scanner now means no arrows — and already carries the secret/hidden POI rungs (§1). |
+| §5 maze / labyrinth | **G5** | **New** — the master plan added G5 for them. |
 | §5 roguelike descent | **D4** | **Compatible.** D4 owns the reward loop; this doc says descent is one path shape through the same graph, and that `openDescentPortal` should stay uncalled until node identity lands (see §8). |
-| §6 node identity | **G1**, **F2** | **Recommends** splitting G1 and promoting the identity half ahead of F. |
+| §6 node identity | **G1**, **F2** | **Accepted** (2026-09-04): G1 is the identity half, promoted ahead of F. |
 | §6 worldgen | **G2** | Unchanged. |
 | Surface / walkable arenas | Parked (L3/L4) | Unchanged — still parked behind G. |
 
@@ -311,7 +325,7 @@ recommendation into it, per §0.*
    blitted).  Recommend procedural for the first cut, precisely so G2's
    seeded generation can drive it.
 3. **Discovery cue strength** (§4) — own well, louder cues, or scanner-first.
-   A/B on the DBG Portals knobs; do not decide on paper.
+   A/B on the DBG ▸ World & Maps ▸ Portals knobs; do not decide on paper.
 4. **Maze legibility** (§5) — small mazes, a map screen, or physical
    breadcrumbs.  A map screen is a genuinely new UI surface and should be
    costed before a maze mode is committed to.
@@ -336,4 +350,5 @@ being a door to nowhere until there is a layer behind it.
 
 Portal work that DID ship in this session is in `CLAUDE.md` (wormhole
 gravity, star lensing, debris transit, the flight-through beat, the eject and
-avoidance rules, the DBG Portals menu, and the play-tested well retune).
+avoidance rules, the DBG Portals knobs — now DBG ▸ World & Maps ▸ Portals —
+and the play-tested well retune).

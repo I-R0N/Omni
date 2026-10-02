@@ -3,16 +3,16 @@
  *  The lighting gauntlet shipped the player's beam always-on ('beam' was the
  *  DBG default). This pass reframed it (user call): the flashlight is an
  *  in-game TOOL — tapping your own ship in open space cycles it
- *  off → medium → high — and the tool exists only while the FLASHLIGHT KIT
- *  module is installed and active, the same everything-is-a-module pattern
- *  as the Shield core. A kit-less ship carries no beam at all: the DBG
- *  flashlight global now ships 'off' and stays as the raw dev override
- *  underneath the tool.
+ *  off → medium → high — and the tool exists only while the Light module
+ *  (`flashlight_kit`) is installed and active, the same everything-is-a-module
+ *  pattern as the Shield core. A module-less ship carries no beam at all:
+ *  the DBG flashlight global now ships 'off' and stays as the raw dev
+ *  override underneath the tool.
  *
  *  What is pinned:
- *   1. THE KIT GATES THE TOOL — no kit, no cycle, no beam; installed and
- *      hull-adjacent, the cycle walks off/medium/high and the renderer
- *      override follows.
+ *   1. THE LIGHT MODULE GATES THE TOOL — without it, no cycle, no beam;
+ *      installed and hull-adjacent, the cycle walks off/medium/high and the
+ *      renderer override follows.
  *   2. THE GESTURE IS THE SHIP TAP, and the arbitration holds — a dock in
  *      range still wins the tap; open space cycles the light instead of
  *      firing a stray shot at your own hull.
@@ -38,7 +38,7 @@ async function openSpace(page: any) {
   });
 }
 
-test.describe('the kit gates the tool', () => {
+test.describe('the Light module gates the tool', () => {
   test('no kit: no cycle, no beam — and the DBG global ships off', async ({ page }) => {
     const watch = await boot(page);
     await openSpace(page);

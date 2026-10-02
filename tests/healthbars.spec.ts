@@ -281,10 +281,27 @@ test.describe('the player readouts', () => {
     expect(before.maxShield, 'the Warden has a shield pool').toBeGreaterThan(0);
     expect(before.shield, 'and it starts charged').toBeGreaterThan(0);
 
-    // A hit that the shield eats still arms the bar, which is the point: the
-    // strip has to be on screen for the player to watch it drain.
+    // A shield-drained hit still arms the bar (deflected or absorbed, it
+    // drains the pool), which is the point: the strip has to be on screen for
+    // the player to watch it drain.
     const hit = await shell(page, id, 8);
-    expect(hit.timer, 'a shield-absorbed hit still arms the bar').toBeGreaterThan(0);
+    expect(hit.timer, 'a shield-drained hit still arms the bar').toBeGreaterThan(0);
+
+    // And the ENEMY path really draws the strip — arming the timer proves
+    // nothing about the gate in `renderHealthBar` that used to say
+    // player-only.  Same recording context as the player readouts above.
+    const drawn = await engine(page, (e, tid: string) => {
+      const b = e.currentMap.entities.find((x: any) => x.id === tid);
+      const rects: any[] = [];
+      const rec: any = {
+        globalAlpha: 1,
+        fillRect: (x: number, y: number, w: number, h: number) => rects.push({ x, y, w, h }),
+        set fillStyle(_v: any) {}, get fillStyle() { return ''; },
+      };
+      e.renderer.renderHealthBar(rec, b, 0, 0);
+      return rects.length;
+    }, id);
+    expect(drawn, 'hull pair + shield pair on an enemy').toBe(4);
 
     watch.assertClean();
   });
@@ -306,9 +323,9 @@ test.describe('the opt-out', () => {
     expect(dragon.always, 'the dragon opts out of the damage trigger').toBe(true);
     expect(dragon.timer, 'and has not been hit, which is the point').toBe(0);
 
-    // A capstone boss deliberately does NOT opt out: it has the dedicated HUD
-    // bar, so a second permanent readout under its hull would be exactly the
-    // redundancy this milestone removed from the player.
+    // A capstone boss deliberately does NOT opt out: it already has the
+    // dedicated HUD capstone bar, and a second permanent readout under its
+    // hull would duplicate it.
     await engine(page, e => e.debugSpawnBoss('BOSS_WARDEN'));
     await waitForStats(page, x => !!x.boss, 'the boss');
     const boss = await engine(page, e => {

@@ -505,8 +505,9 @@ export const PLASTIC_SHARD_FLOW_MULT = 5;
  *  itself while hitting far harder.
  *
  *  THE DIAL, if ten turns out to be too much, is `CRASH_ENERGY_COUPLING`
- *  (DBG ▸ Player ▸ "Crash energy") or a material's own `bondStrength` —
- *  never this constant, which is what "how heavy is everything" means.
+ *  (DBG ▸ Player & Ship ▸ Impact Model ▸ "Crash energy") or a material's
+ *  own `bondStrength` — never this constant, which is what "how heavy is
+ *  everything" means.
  */
 export const MASS_SCALE = 10;
 
@@ -959,7 +960,8 @@ export const UI_CONSTANTS = {
     ENEMY_WIDTH: 22, ENEMY_HEIGHT: 3,
     OFFSET_MODIFIER: 0.85, // Multiplier of entity size
     OFFSET_BASE: 10, // Pixel padding
-    /** DAMAGE-TRIGGERED VISIBILITY (gauntlet 5d, U5 — parking-lot item).
+    /** DAMAGE-TRIGGERED VISIBILITY (gauntlet 5d, U5 — once a parking-lot
+     *  item, since shipped; docs/GAUNTLET_5D_LOG.md has the record).
      *
      *  A bar is a HIT REACTION, not a permanent label.  Every enemy used to
      *  carry one every frame, at full health and on one-shot trash alike,
@@ -1041,16 +1043,17 @@ export const UI_CONSTANTS = {
     MIN_BAND: 90,
     TEXT_THRESHOLD_POI: 160000,
     MAX_VISIBLE: 5, // Max arrows for POIs
-    // Enemy chevrons are range-unlimited (maps are big and live wave
-    // enemies are capped at TIMED_WAVE_CONFIG.MAX_CONCURRENT_ENEMIES),
-    // so every live enemy is always findable.  The cap here only guards
-    // pathological counts; alpha fades with distance to a floor so far
-    // chevrons read as "out there" without shouting.  The budget keeps the
-    // NEAREST contacts (renderIndicators selects nearest-first).
+    // Enemy chevrons have no range cap of their own: since the scanner
+    // rework an arrow exists only while its contact's DETECTION mark is
+    // fresh (a scan or an encounter), and it fades with that mark rather
+    // than with distance.  The cap here only guards pathological counts.
+    // The budget keeps the NEAREST contacts (renderIndicators selects
+    // nearest-first).
     MAX_VISIBLE_ENEMY: 12,
     // Ambient bubbles get their own small budget: they are fauna, not wave
     // threats, so a bloom of them must never crowd out the enemy arrows.
     MAX_VISIBLE_BUBBLE: 4,
+    // The old distance fade — UNREAD since detection freshness replaced it.
     ENEMY_FADE_START: 800,   // world units — full opacity inside this
     ENEMY_FADE_END: 4000,    // world units — alpha floor from here out
     ENEMY_MIN_ALPHA: 0.35,
@@ -1168,9 +1171,10 @@ export const MINIMAP_CONSTANTS = {
     PULSE_MIN_ALPHA: 0.55,
     CLAMPED_ALPHA_MULT: 0.75,
   },
-  // Portal blips read as ANOMALIES, not dots.  A portal's chevron is
-  // range-gated (PORTAL_CONSTANTS.INDICATOR_RANGE), so the minimap is now
-  // the primary way to FIND one — which means a portal must (a) never be
+  // Portal blips read as ANOMALIES, not dots.  A portal's chevron shows
+  // only once a scan or an encounter has DETECTED it (and never while the
+  // rift is on screen), so the minimap is the primary way to FIND one —
+  // which means a portal must (a) never be
   // culled for being out of range, and (b) be instantly distinguishable
   // from the station / POI dots it sits among.  So: a rotated-square
   // contact with a radar ping expanding out of it, clamped to the border
@@ -1320,9 +1324,10 @@ export const INPUT_CONSTANTS = {
      *  the same number reads weaker there.  Clamped to 1 at the top. */
     TRIGGER_FORCE_MULT: 1.6,
     /** Haptic-only tick for a weapon whose recoil deliberately shakes NO
-     *  camera — the plain Blaster.  Screen shake on every shot of the
-     *  fastest gun in the game would be unplayable; a tick in the hand is
-     *  exactly what the shake funnel cannot express. */
+     *  camera — an uncharged, blast-less round from the projectile or homing
+     *  delivery.  Screen shake on every shot of a fast-cadence gun would be
+     *  unplayable; a tick in the hand is exactly what the shake funnel
+     *  cannot express. */
     WEAPON_TICK: 2,
     /** Floor on the gap between effects (ms).  playEffect restarts the motors,
      *  so firing one per frame produces a flat drone instead of hits; a new
@@ -1350,9 +1355,9 @@ export const INPUT_CONSTANTS = {
     /** px from the bottom edge to the button's CENTRE.  Clears the loadout
      *  strip (SLOT_H + BOTTOM_MARGIN = 62) with a comfortable gap. */
     MARGIN_Y: 110,
-    /** ...but on the LEFT the minimap is already there (MARGIN 20 + SIZE 75
-     *  up from the bottom), so the mirrored layout sits the button higher
-     *  rather than on top of it. */
+    /** ...but on the LEFT the minimap is already there (SIZE 75, sitting
+     *  8px up from the bottom), so the mirrored layout sits the button
+     *  higher rather than on top of it. */
     MARGIN_Y_MIRRORED: 150,
     IDLE_ALPHA: 0.20,
     PRESSED_ALPHA: 0.42,
@@ -1510,10 +1515,12 @@ export const INPUT_CONSTANTS = {
  *  - PROJECTILES author `mass` directly, because it is the ENERGY BANK the
  *    round flies with (§5's "a round carries two numbers").  Deriving it
  *    from the drawn `size` would make a bolt's damage a function of its
- *    sprite: the Cannon is the proof, drawn at 16 against the Blaster's 6
- *    while massing 3.56 against 1.00, so its density is the LOWEST of any
- *    round (0.0139) and would have to be authored low anyway.  No
- *    information is gained and a hazard is introduced.
+ *    sprite: the retired Plasma Cannon was the proof, drawn at 16 against
+ *    the Blaster's 6 while massing 3.56 against 1.00, so its density was
+ *    the LOWEST of any round (0.0139) — and today's Cannon delivery makes
+ *    the same point the other way: the bare shell, drawn at 12, masses two
+ *    to three times its modified shells drawn at 16–18.  No information is
+ *    gained and a hazard is introduced.
  *  - ENEMIES author `mass` per archetype for the same reason a boss is
  *    bigger than a gnat without being proportionally heavier.  Their
  *    densities are REPORTED by the audit so the scale stays visible; two
@@ -1532,7 +1539,8 @@ export const IMPACT_DENSITY = {
   PLASTIC: MATERIALS.plastic.density!,
   ROCK:    MATERIALS.rock.density!,
   METAL:   MATERIALS.metal.density!,
-  // The player's hull.  25x glass and 8x rock, on purpose — see above.
+  // The player's hull.  25x glass and 8x metal (~14x rock), on purpose —
+  // see above.
   HULL:    2.50,
 } as const;
 
@@ -1545,12 +1553,13 @@ export function massFor(d: number, density: number): number {
   return d * d * density;
 }
 
-/** DBG Player ▸ "Hull density" — the live A/B on how heavy the ship is,
- *  a MULTIPLIER over `IMPACT_DENSITY.HULL` with index 0 what ships, so the
- *  first click is the comparison.  The steps walk DOWN toward the material
- *  band (0.25 → 0.125 → 0.0625 → 0.03, the last being metal's own density)
- *  and one step up, because the question the measurement raises is whether
- *  the hull should be that far above the materials at all.
+/** DBG Player & Ship ▸ Impact Model ▸ "Hull density" — the live A/B on
+ *  how heavy the ship is, a MULTIPLIER over `IMPACT_DENSITY.HULL` with
+ *  index 0 what ships, so the first click is the comparison.  The steps
+ *  walk DOWN toward the material band (2.5 → 1.25 → 0.625 → 0.30, the last
+ *  being metal's own density) and one step up, because the question the
+ *  measurement raises is whether the hull should be that far above the
+ *  materials at all.
  *
  *  Applied at `applyModuleEffects`, which is where `player.mass` is
  *  actually derived — so `GameEngine` re-folds the outfit when this cycles
@@ -1746,8 +1755,8 @@ export function cycleRenderScale(): number {
 // approximations that have drifted apart — the player-distance proximity
 // bloom on rock / plastic / indestructible tiles, the repel-impulse glow on
 // glass and metal, and the glass edge tint on its own hardcoded 120 range.
-// `'legacy'` is those three, unchanged, and it is the default: the unified
-// system has to earn its place against them, not be assumed to replace them.
+// `'legacy'` is those three, unchanged.  It was the default until the
+// unified system earned its place against them; `unified` ships now (below).
 //
 //   legacy  — the three shipped models, untouched.  lightingMs reads 0.
 //   debug   — the light layer is built and blitted, but paints a flat grey.
@@ -1796,7 +1805,9 @@ export function toggleShardShadows(): boolean {
   return shardShadowsEnabled;
 }
 
-/** DBG: REFRACTION through translucent bodies — a prototype, OFF by default.
+/** DBG: REFRACTION through translucent bodies — a prototype, now SHIPPED ON
+ *  (last paragraph).  The switch itself, `refractionEnabled`, is declared
+ *  further down beside its brightness cycle ("Refr bright").
  *
  *  The shipped translucency (`SHARD_VARIANTS[v].transmit`) sends light
  *  STRAIGHT THROUGH glass at reduced brightness.  That is the right
@@ -1948,12 +1959,12 @@ export function cycleEmitShadowTier(): string {
  *
  *  `off` is the DEFAULT now (user call, superseding the earlier
  *  beam-default call): the flashlight became an in-game TOOL gated behind
- *  the Flashlight Kit module, so a ship without the kit carries no player
- *  light and this DBG cycle is the raw dev override underneath the tool.
- *  While the tool is ON it overrides this global entirely
- *  (`RenderSystem.playerLightToolHalfDeg`); while it is off — or the kit is
- *  not installed — the renderer falls back here, so a dev can still force
- *  any width from the debug menu.  `off` is a zero-width beam rather than a
+ *  the Light module (`flashlight_kit`), so a ship without it carries no
+ *  player light and this DBG cycle is the raw dev override underneath the
+ *  tool.  While the tool is ON it overrides this global entirely
+ *  (`RenderSystem.playerLightToolHalfDeg`); while it is off — or the module
+ *  is not installed — the renderer falls back here, so a dev can still force
+ *  any width from the debug panel.  `off` is a zero-width beam rather than a
  *  special case: the player's light draws nothing, so what is left on the
  *  layer is exactly the emitters — which makes it a useful thing to look at
  *  rather than a way to disable the feature (that is `Lighting: legacy`).
@@ -2015,9 +2026,11 @@ export const WORLD_LIGHTS = {
  *  — all for free, and `off` restores the exact pre-A7 picture.
  *
  *  SHIPS OFF (user call, 2026-08-20).  The descent "depth" it keys on is
- *  not yet a real place: today's post-boss rifts bounce between arenas that
- *  all hang off the one Overworld, `stageIndex` is a linear counter rather
- *  than a position in a world, and nothing persists — leave a "deep" arena
+ *  not yet a real place: the post-boss descent rift is switched off today
+ *  (so `stageIndex` stays 0 in a shipped run), when it was on it bounced
+ *  between arenas that all hang off the one Overworld, `stageIndex` is a
+ *  linear counter rather than a position in a world, and nothing
+ *  persists — leave a "deep" arena
  *  through the overworld portal and return, and the darkness is gone.  The
  *  mechanism is built and tested; it switches on when the universe map
  *  structure gives depth an address (see docs/PARKING_LOT.md, "Depth-scoped
@@ -2072,13 +2085,13 @@ export function cycleFog(): string {
   activeFogIndex = (activeFogIndex + 1) % FOG_CYCLE.length;
   return FOG_CYCLE[activeFogIndex].name;
 }
-/** The player light's PEAK ALPHA, mirrored here for the fog.
+/** The player light's PEAK ALPHA — the ONE definition.
  *
- *  It is authored in `render/lighting.ts` beside the rest of the light's
- *  shape; the fog needs it to know how far to boost the light into a mask,
- *  and importing the lighting module for one number would tie a compositing
- *  pass to the geometry half.  `tests/lighting.spec.ts` pins the two
- *  together so the mirror cannot drift. */
+ *  It lives here rather than in `render/lighting.ts` beside the rest of the
+ *  light's shape because the fog needs it too (to know how far to boost the
+ *  light into a mask), and importing the lighting module for one number
+ *  would tie a compositing pass to the geometry half.  `render/lighting.ts`
+ *  imports it as its `PEAK`, so there is no second copy to drift. */
 export const PLAYER_LIGHT_PEAK = 0.34;
 
 export const FOG = {
@@ -2139,8 +2152,8 @@ export const FOG = {
  *  A true product everywhere would be the physical answer and it reads too
  *  dark: two saturated colours multiply toward black, and a light that goes
  *  black on contact with coloured glass looks broken rather than physical.
- *  So the default is a half-blend, which is a look call and lives in a cycle
- *  like every other look call here. */
+ *  So the mix is a look call and lives in a cycle like every other look
+ *  call here — and it ships `off` (see `TINT_MIX_CYCLE`). */
 /** With REFRACTION on, how much of a body's transmitted light goes straight
  *  through rather than into the deviated caustic.
  *
@@ -2185,9 +2198,10 @@ export function cycleTintMix(): string {
  *
  *  The colour reaches everything the player's light does, including the
  *  REFRACTED cone, which is right: light that passes through glass keeps the
- *  colour it arrived with.  The secondary emitters are unaffected — they
- *  radiate the colour of the BODY, not of what lit it, which is the
- *  approximation A5i settled on. */
+ *  colour it arrived with.  The secondary emitters take it too: an emitter
+ *  radiates `lerp(light, body, tint mix)`, so at the shipped tint mix
+ *  (`off`) it wears this colour, and only at `full` does it radiate the
+ *  colour of the BODY — the approximation A5i settled on. */
 export const LIGHT_COLOR_CYCLE: ReadonlyArray<{ name: string; rgb: string }> = [
   { name: 'ship',   rgb: '125, 211, 252' },   // sky-300, the shipped light
   { name: 'white',  rgb: '245, 245, 245' },
@@ -2241,10 +2255,11 @@ let activeFlashlightIndex =
  *  everything-is-a-module pattern as the Shield core.  Both ON levels wear
  *  the BEAM flashlight style (the 80-degree cone); what separates them is
  *  the LIGHTING TIER (user call): `medium` runs the light system at the
- *  'medium' rung and `high` at 'high' — longer reach, more occluders, soft
- *  penumbra, the whole ladder step, applied through the tier override below
- *  so every consumer of `getActiveLightingTier` agrees.  `off` is the
- *  default: a light you switch on. */
+ *  'medium' rung and `high` at 'high' — longer reach, more lights and
+ *  occluders, the whole ladder step (shadow softness is not part of it: the
+ *  "Shadow soft" knob sets it at every tier), applied through the tier
+ *  override below so every consumer of `getActiveLightingTier` agrees.
+ *  `off` is the default: a light you switch on. */
 export const FLASHLIGHT_TOOL_LEVELS: ReadonlyArray<{ name: string; label: string; halfDeg: number; tier?: string }> = [
   // `name` is the internal/debug vocabulary (it names the TIER the level
   // runs); `label` is what the player reads over the ship — headlight
@@ -2274,11 +2289,11 @@ export function cycleFlashlight(): string {
  *  product of the ship's velocity with the ship→shard vector — so a shard
  *  off the starboard bow turns clockwise on screen and a port-side one
  *  counter-clockwise.  `inverted` is the same cross product negated, and
- *  `random` is the shipped parity behaviour; all three are one DBG click
- *  apart (Visual ▸ "Neb spin") so the two candidate handednesses can be
- *  A/B'd in flight.  PROPER rotational mechanics (angular momentum in the
- *  impulse solver, spin from off-centre hits) is parked for its own session
- *  — see docs/PARKING_LOT.md. */
+ *  `random` is the old parity behaviour; all three are one DBG click
+ *  apart (Materials ▸ Nebula ▸ "Neb spin") so the two candidate
+ *  handednesses can be A/B'd in flight.  PROPER rotational mechanics
+ *  (angular momentum in the impulse solver, spin from off-centre hits) is
+ *  parked for its own session — see docs/PARKING_LOT.md. */
 export const NEBULA_WAKE_SPIN_CYCLE = ['physical', 'inverted', 'random'] as const;
 export type NebulaWakeSpinMode = typeof NEBULA_WAKE_SPIN_CYCLE[number];
 let activeNebulaWakeSpinIndex = 0;
@@ -2390,11 +2405,11 @@ export function toggleRefraction(): boolean {
  *  peak — the tuning knob for the prototype above.
  *
  *  Named as fractions rather than decimals because that is the quantity the
- *  rule is stated in: refracted light must be no more than HALF the source.
- *  Every entry therefore sits at or below 1/2, and `REFRACT.MAX_BRIGHTNESS_FRAC`
- *  in render/lighting.ts clamps on top of whatever this returns — so the rule
- *  survives someone adding a row here, which is the point of having it in two
- *  places.
+ *  rule was stated in: refracted light no more than HALF the source.  Device
+ *  feedback moved the entries past that (up to 1/1, see the first row), and
+ *  `REFRACT.MAX_BRIGHTNESS_FRAC` in render/lighting.ts — now 1 — still
+ *  clamps on top of whatever this returns, so a refracted cone can never
+ *  outshine the light it came from.
  *
  *  A cycle rather than a number in a file, for the same reason as the shadow
  *  softness beside it: it is a look call, and the look call belongs on the
@@ -2466,7 +2481,8 @@ export function cycleLightBrightness(): string {
   return LIGHT_BRIGHTNESS_CYCLE[activeLightBrightnessIndex].name;
 }
 
-/** DBG: shadow-edge SOFTNESS, as a multiplier on the tier's penumbra k.
+/** DBG: shadow-edge SOFTNESS — the penumbra k the shadow pass uses at EVERY
+ *  tier (the tier table's own `penumbraK` column is no longer read).
  *
  *  A point light casts a perfectly hard shadow, which is what made the first
  *  version read as a drawn line rather than as lighting.  Softness here is
@@ -2543,7 +2559,9 @@ export interface LightingTier {
   readonly maxShardOccluders: number;
   readonly maxRadius: number;
   /** Penumbra softness. 0 = hard shadows (Low pins this, so the penumbra
-   *  stage is a no-op on the worst target by construction). */
+   *  stage is a no-op on the worst target by construction).  UNREAD today:
+   *  the shadow pass takes `getShadowSoftness()` ("Shadow soft") at every
+   *  tier, so this column no longer reaches the draw. */
   readonly penumbraK: number;
   readonly ambientPerStage: number;
 }
@@ -2782,23 +2800,24 @@ export const SHARD_SLEEP_CONSTANTS = {
 // ─────────────────────────────────────────────────────────────────────
 // Shard render LOD (level-of-detail).
 //
-// A mobile shard whose apparent (zoom-scaled) radius falls below
-// MIN_APPARENT_RADIUS_PX is too small for its polygon irregularity,
-// edge stroke, or power-up bloom to read — at a few pixels a 5-9-gon
-// and a disc are indistinguishable.  At that size RenderSystem skips
-// the per-frame beginPath + per-vertex lineTo + fill (+ stroke + glow)
-// and blits a cached solid-disc bitmap (one drawImage), tinted to the
-// shard's fill colour.  Purely visual: collision/merge/physics are
-// untouched, and the threshold is small enough that the swap is
-// sub-pixel.  Special states (hit-flash, power-up glow) keep the full
-// path so they still read.  DEFAULT_ZOOM (0.65) means radius 9 px ≈ a
-// 28-world-unit shard — i.e. the small chips a dense field is made of.
+// A rock or metal shard whose apparent (zoom-scaled) radius falls below
+// CHIP_LOD_RADIUS_PX is too small for its polygon irregularity, edge stroke,
+// or power-up bloom to read — at a few pixels a 5-9-gon and a disc are
+// indistinguishable.  (MIN_APPARENT_RADIUS_PX, the larger gate, now only
+// skips the damage-crack overlay on small bodies.)  At that size RenderSystem
+// skips the per-frame beginPath + per-vertex lineTo + fill (+ stroke + glow)
+// and blits a cached solid-disc bitmap (one drawImage), tinted to the shard's
+// fill colour.  Purely visual: collision/merge/physics are untouched, and the
+// threshold is small enough that the swap is sub-pixel.  Special states
+// (hit-flash, power-up glow) keep the full path so they still read.
+// DEFAULT_ZOOM (0.65) means radius 9 px ≈ a 28-world-unit shard — i.e. the
+// small chips a dense field is made of.
 export const SHARD_LOD_CONSTANTS = {
   MIN_APPARENT_RADIUS_PX: 9,
-  // Rock chips below THIS apparent radius collapse to a cached solid-disc
-  // blit (full polygon + tint render skipped).  Much smaller than the metal
-  // threshold above so a rock keeps its jagged silhouette until it is only
-  // a few screen pixels.
+  // Rock and metal chips below THIS apparent radius collapse to a cached
+  // solid-disc blit (full polygon + tint render skipped; glass never does).
+  // Much smaller than the crack gate above so a shard keeps its jagged
+  // silhouette until it is only a few screen pixels.
   //
   // 6 -> 3 with the grain model.  The 6 was tuned when small rock-shards
   // were the OCCASIONAL conservation chip; V15 makes every tile break
@@ -2806,11 +2825,14 @@ export const SHARD_LOD_CONSTANTS = {
   // ~12.7 units each — apparent radius 4.1px at the default 0.65 zoom,
   // i.e. UNDER the old gate.  Rock-tile debris could therefore never show
   // its Voronoi silhouette at default zoom, which is the whole feature.
-  // At 3 only genuine dust (under ~9 world units) takes the blit.
+  // 3 -> 2 later: at 3, 12.5% of real rock grains still collapsed to discs
+  // beside siblings drawing polygons; at 2 none do on any grain material
+  // (CLAUDE.md §8), and only genuine dust (under ~6 world units) blits.
   CHIP_LOD_RADIUS_PX: 2,
-  // Offscreen LOD bitmap resolution, shared by the disc (rock) and
-  // triangle (metal) caches.  Blitted downscaled to a handful of pixels,
-  // so 48² is ample and keeps each cached colour tiny.
+  // Offscreen LOD bitmap resolution for the disc cache (the only cached
+  // shard silhouette — the metal triangle cache is deleted).  Blitted
+  // downscaled to a handful of pixels, so 48² is ample and keeps each
+  // cached colour tiny.
   DISC_BITMAP_SIZE: 48,
 };
 
@@ -2956,12 +2978,14 @@ export const PERF_TASKS = {
   // 4-step cadence at peak load drops cost ~75 % while staying
   // visually responsive.
   dropMerge:        { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
-  // Consume-and-grow neighbour scan (GameEngine.updateConsumers, Stage 3b).
+  // Consume-and-grow neighbour scan (`updateConsumers`, engine/roamers/
+  // bubbles.ts; Stage 3b).
   // O(consumers × nearby candidates); only non-empty once a consumer (bubble /
   // dragon) is on the field, so it early-outs cheaply most of the time and a
   // few-step cadence is imperceptible (eating settles over frames).
   consume:          { minInterval: 1, maxInterval: 4,   costWeight: 0.5, autoCurve: 1.0 },
-  // Rival re-acquire + loot-vacuum scan (GameEngine.updateRivals, Stage 7).
+  // Rival re-acquire + loot-vacuum scan (`updateRivals`, engine/roamers/
+  // rivals.ts; Stage 7).
   // Two per-rival full-list walks — targeting is O(rivals × live enemies) and
   // the loot vacuum is O(rivals × active drops).  Steering, firing, and the
   // lifecycle still run EVERY step against the cached target (recomputing only
@@ -3013,7 +3037,7 @@ export const MERGE_BLOWBACK = {
   DAMAGE: 0,         // non-damaging — pure knockback
   KNOCKBACK: 4,      // shove impulse at centre, falls off to 0 at rim
   LIFETIME: 0.22,    // seconds — snappier than the cannon's 0.35
-  COLOR: '#a855f7',  // purple — match the plasma cannon shock front
+  COLOR: '#a855f7',  // purple — the old Plasma Cannon's shock-front colour
 };
 
 // Hot-spot collapse — cure for the overlapping-shard pile-up that the
@@ -3345,7 +3369,8 @@ export function cycleDamageSpread(): number {
 // authored constant (the SHARD_COAT_CYCLE relationship) because a pool
 // is a COUNT: 6 x 1.5 is not a thing a ledger can hold, and the count
 // itself is the readable statement.  So this table IS the default, at
-// CHIP_DUST_DEFAULT_INDEX, and there is no second copy of 6 to drift.
+// CHIP_DUST_DEFAULT_INDEX, and there is no second copy of the shipped
+// count to drift.
 export const CHIP_DUST_POOL_CYCLE: ReadonlyArray<number> = [1, 2, 4, 6, 9, 14] as const;
 // SHIPPED AT 1 — the per-chip behaviour (user call, after play-testing the
 // pooled default).  Pooling stays fully live and is the rest of the ladder;
@@ -3414,11 +3439,11 @@ export function grainMaterialOf(variantId: ShardVariantId): GrainMaterial | null
     ? head as GrainMaterial : null;
 }
 
-/** The five per-material knobs, in the order the DBG rows show them.
- *  Each carries its own ladder; index 0 is always `null` = "use the
- *  variant table", so the shipped values stay the default and the
- *  readout says so rather than showing a number that only coincidentally
- *  matches. */
+/** The seven per-material knobs, in the order the DBG rows show them.
+ *  Each carries its own ladder, with a `null` entry = "use the variant
+ *  table" (spliced in at the default's sorted position — see below), so the
+ *  shipped values stay the default and the readout marks it `(def)` rather
+ *  than showing a bare number that only coincidentally matches. */
 // The STEPS each knob offers, ascending.  These are numbers only — the
 // material's own default is NOT listed here; `grainLadder` splices it in
 // at its sorted position, so cycling walks a true number line rather than
@@ -3690,9 +3715,10 @@ export const PLAYER_TRAIL_CONSTANTS = {
 
 // BANKING ROLL — the player ship rolls into changing acceleration.  TWO
 // terms feed the bank, because one alone almost never fires in real play
-// (user report: "not noticing the roll" — under the touch / joystick /
-// gamepad schemes the ship AIMS WHERE IT FLIES, so thrust is always along
-// the nose and a lateral-thrust-only signal is zero by construction):
+// (user report: "not noticing the roll" — under the touch, joystick and
+// one-stick pad (`gamepad-thrust`, `gamepad-left`) schemes the ship AIMS
+// WHERE IT FLIES, so thrust is always along the nose and a
+// lateral-thrust-only signal is zero by construction):
 //   1. STRAFE — the thrust input's component perpendicular to the facing
 //      axis.  Fires when flying across a held aim (keyboard + mouse).
 //   2. TURN — the rate the nose is SWINGING, scaled by throttle: carving a
@@ -3719,9 +3745,10 @@ export const PLAYER_ROLL_CONSTANTS = {
   // divides by √(player.mass / PLAYER_MASS) — rotational inertia grows
   // with mass, ω ∝ 1/√I — so a full outfit (~3× the lean mass) tilts
   // ~1.7× more ponderously with the same wobble character.
-  // TUMBLE mode (DBG Player ▸ "Tilt mode" — a TEST mode, user call): the
-  // clamped signal vector drives angular RATE instead of angle, so the
-  // hull rolls CONTINUOUSLY about the axis perpendicular to the thrust —
+  // TUMBLE mode (DBG Player & Ship ▸ Ship Tilt ▸ "Tilt mode" — a TEST
+  // mode, user call): the clamped signal vector drives angular RATE
+  // instead of angle, so the hull rolls CONTINUOUSLY about the axis
+  // perpendicular to the thrust —
   // end-over-end under forward throttle, a barrel roll under strafe —
   // and freezes where it stopped when thrust drops, like a rolled
   // object.  The rate reuses the tilt-velocity state and eases at the
@@ -3767,7 +3794,7 @@ export const PLAYER_ROLL_CONSTANTS = {
   REST_VEL_EPSILON: 0.06,
 };
 
-// DBG tilt-mode cycle (Player ▸ "Tilt mode"): 'Lean' (the default — tilt
+// DBG tilt-mode cycle (Ship Tilt ▸ "Tilt mode"): 'Lean' (the default — tilt
 // toward the acceleration and settle back) vs 'Tumble' (the continuous-
 // roll TEST mode described above).  Its own cycle rather than a feel
 // preset because it changes what the tilt angles MEAN.
@@ -3784,8 +3811,8 @@ export function cycleTiltMode(): number {
   return activeTiltModeIndex;
 }
 
-// DBG lean-direction cycle (Player ▸ "Lean dir"): the A/B for which way the
-// hull tips into acceleration in LEAN mode.  'Default' banks INTO the
+// DBG lean-direction cycle (Ship Tilt ▸ "Lean dir"): the A/B for which way
+// the hull tips into acceleration in LEAN mode.  'Default' banks INTO the
 // acceleration (an aircraft carving its turn); 'Reversed' negates BOTH
 // components — the read of a hull kicked back by its own thrust, nose
 // rising under throttle.  One sign over the whole signal vector, so the
@@ -3838,8 +3865,8 @@ export function cycleTiltSource(): number {
   return activeTiltSourceIndex;
 }
 
-// DBG velocity-gain cycle (Player ▸ "Vel gain"): sensitivity steps for the
-// VELOCITY tilt source only — the gain multiplies the cruise-normalised
+// DBG velocity-gain cycle (Ship Tilt ▸ "Vel gain"): sensitivity steps for
+// the VELOCITY tilt source only — the gain multiplies the cruise-normalised
 // velocity vector BEFORE the existing magnitude clamp, so 2× reaches full
 // tilt at half cruise speed and 10× saturates on almost any motion at all
 // (the extreme end, for A/B-ing how twitchy the hull should read).  The
@@ -3864,8 +3891,8 @@ export function cycleVelGain(): number {
   return activeVelGainIndex;
 }
 
-// DBG roll-feel presets (Player ▸ "Roll feel"): named MAX-angle steps for
-// A/B-ing how deep the bank reads, cycled live from the pause debug menu.
+// DBG roll-feel presets (Ship Tilt ▸ "Roll feel"): named MAX-angle steps
+// for A/B-ing how deep the bank reads, cycled live from the debug panel.
 // Only the ANGLE varies — the response/return rates are the same feel at
 // every depth — and Off (angle 0) rides the normal easing path, so toggling
 // it mid-bank settles the hull out instead of snapping it flat.
@@ -3926,7 +3953,8 @@ export function cyclePlayerRoll(): number {
 // so turning the pre-rendered rotation on is ONE step of this row plus one
 // of "Roll feel" — the wireframes are the experimental tail behind them.
 // The shapes live in render/playerCube.ts as vertex/edge tables — adding
-// one is a table entry, never a new draw path.  DBG Player ▸ "Hull".
+// one is a table entry, never a new draw path.  DBG Player & Ship ▸
+// Ship Tilt ▸ "Hull".
 export const PLAYER_HULL_CYCLE: ReadonlyArray<string> =
   ['Ship', 'Sheet', 'Cube', 'Diamond', 'Sphere', 'Dodeca', 'Rhombic', 'Tri'] as const;
 let activePlayerHullIndex = 0; // Ship — the legacy sprite, the shipped default
@@ -3945,7 +3973,7 @@ export function cyclePlayerHull(): number {
   return activePlayerHullIndex;
 }
 
-// DBG rotation-damping cycle (Player ▸ "Roll damp"): one multiplier over
+// DBG rotation-damping cycle (Ship Tilt ▸ "Roll damp"): one multiplier over
 // the tilt spring's natural frequency (SPRING_OMEGA — and the tumble
 // mode's rate ease).  The damping RATIO is untouched, so every step keeps
 // the same overshoot-and-wobble character: lower = floatier, the hull
@@ -4299,8 +4327,9 @@ export const PLAYER_MOVEMENT_CONFIG: Record<MapType, { maxSpeed: number, acceler
 };
 
 // DBG runtime multipliers on the per-map player movement config so the
-// PThr / PSpd buttons can A/B-test feel without a rebuild.  Both read
-// live in GameEngine.updatePlayerMovement(): effective acceleration =
+// "Thrust" / "Speed" rows (Player & Ship ▸ Flight) can A/B-test feel
+// without a rebuild.  Both read live in the player-movement block of
+// GameEngine.updateGameLogic: effective acceleration =
 // config.acceleration × thrust-mult, effective maxSpeed = config.maxSpeed
 // × speed-mult.  Note the coupling: terminal cruise is friction-limited
 // at acceleration/(1−friction), so the THRUST cycle is what actually
@@ -4440,10 +4469,12 @@ export const STRUCTURE_VARIANTS = {
     sprite: ASSETS.HEX_STRUCTURE_INDESTRUCTIBLE,
     color: COLORS.STRUCTURE_INDESTRUCTIBLE,
   },
-  // Stage 7: rock-tile family — clusters of solid rock that shatter
-  // into rock-shards on death (the unified "tile is the parent of
-  // every shard" architecture, see docs/SHARD_SYSTEM.md).  Visual:
-  // slate / gray to read as rock; HP between glass (1) and heavy (5).
+  // Rock-tile family — clusters of solid rock that shatter
+  // into rock-shards on death (the tile→shard lineage; CLAUDE.md §5).
+  // Visual: slate / gray to read as rock.  HP: a rock tile spawns with its
+  // size-scaled hit ceiling (`rockHitCeiling`, in TileGenerator) rather
+  // than the `health` below, and the grain model replaces that with a
+  // DERIVED figure at first damage.
   // Sprite intentionally unset so the renderer falls through to the
   // asteroid polygon path (solid entity.color fill).  This makes
   // rock-tiles read with the same texture as rock-shards rather than
@@ -4452,6 +4483,7 @@ export const STRUCTURE_VARIANTS = {
     // 5 HP (was 3) — modest bump so the seeded damage-crack overlay has
     // room to accrue a couple of fractures (one per ~1.3 hits, see
     // MATERIAL_DAMAGE_CRACKS) before the tile shatters.  Still brittle.
+    // Unread today: TileGenerator spawns rock at `rockHitCeiling` instead.
     health: 5,
     mass: Infinity,
     indestructible: false,
@@ -4463,6 +4495,12 @@ export const STRUCTURE_VARIANTS = {
 export type StructureVariant = keyof typeof STRUCTURE_VARIANTS;
 
 // ── Rock break model (probabilistic, size/density-scaled) ──────────────────
+// LEGACY today.  Under the shipped voronoi fracture rock carries
+// `grain.bondStrength`, so damage lands on grain boundaries and its HP is
+// DERIVED from them at first damage (V15, CLAUDE.md §8): the ceiling below
+// is only the authored spawn HP and the early-break roll stands down.  The
+// model runs as written under the DBG legacy fracture A/B.
+//
 // Rock tiles / asteroids / rock-shards no longer break at a flat HP.  Each
 // entity's maxHealth is repurposed as a HIT CEILING: it always cracks on the
 // first hit (never breaks), and from the second hit on every blaster hit
@@ -4482,6 +4520,9 @@ export const ROCK_BREAK = {
   // pair left only 3-5 reveal steps, and the probabilistic early break
   // (which now stands down for progressive variants — see
   // PhysicsSystem.maybeRockEarlyBreak) usually ended it at hit 2-3.
+  // V15 then moved rock onto grain boundaries, where boundary DAMAGE, not
+  // a hit count, does the revealing; this pacing survives only for a
+  // progressive body with no `bondStrength`, and none ships.
   MIN_HITS: 8,   // smallest rock
   MAX_HITS: 12,  // largest / densest boulder
   SIZE_MIN: 20,  // size mapping to MIN_HITS
@@ -4628,14 +4669,15 @@ export const GLASS_SHARD_HP = 12;
 // Metal-shard durability.  Metal had NO entry in any of the three
 // fracture-spawn HP ladders, so every metal grain spawned on the
 // `newSize > 30 ? 2 : 1` fall-through — i.e. at 1 HP.  That is not a
-// brittle metal, it is a missing branch: the crash and tile-pressure
-// paths in PhysicsSystem decrement `health` DIRECTLY rather than
-// spending on grain boundaries, so a 1-HP shard died to a single
-// physical bump while surviving six blaster bolts.
+// brittle metal, it is a missing branch: the crash and tile-pressure paths in
+// PhysicsSystem then decremented `health` DIRECTLY rather than spending on
+// grain boundaries (they spend on the boundaries now — CLAUDE.md §8), so a
+// 1-HP shard died to a single physical bump while surviving six blaster
+// bolts.
 //
 // For a grain material this is only the AUTHORED value — the boundary
 // model rewrites maxHealth to the derived Σ(edge length × bondStrength)
-// at first weapon damage.  16 is that derived figure, measured on
+// at first damage.  16 is that derived figure, measured on
 // METAL_FIELD (16.2 median over 8 grains of a broken metal tile), so
 // the authored and derived numbers agree instead of the authored one
 // being a placeholder that the first hit contradicts.
@@ -4838,7 +4880,7 @@ export const NEBULA_CONSTANTS = {
   // body's own size is the honest input, it is always set, and it is
   // what merges and fracture already move.
   SPRITE_OVERSIZE: 2.727,
-  // Cluster generation moved to MAP_POPULATION (Stage 7) — see the
+  // Cluster generation lives in MAP_POPULATION — see the
   // 'nebula-tile' tileCluster entries per map for cluster counts +
   // size ranges.  Inner / outer split lives on the per-map record.
   // Base palette — nebula tiles draw from the full 360° hue wheel
@@ -5100,7 +5142,7 @@ interface NebulaBondStep {
    *
    *  A nebula bond's shipped outcome is `compose`: after the contact
    *  threshold the pair is CONSUMED and one new body appears.  At the
-   *  shipped ~5 s (scaled by pair size) that window is short enough that
+   *  base ~5 s (scaled by pair size) that window is short enough that
    *  the cohesion and break multipliers barely get to act — and the louder
    *  they are set, the sooner the pair holds together well enough to
    *  vanish into a merge.  Measured: the live bond population churns
@@ -5132,8 +5174,9 @@ interface NebulaBondStep {
 // near 1.8 s and a large one well past 10 s before any multiplier.  The
 // ladder is geometric because the thing being judged is an ORDER of
 // magnitude ("does a clump hold together long enough to read as one blob"),
-// not a few seconds either way.  `off (old)` is exactly 1 on every term, so
-// the shipped build is untouched and the first click is the A/B.
+// not a few seconds either way.  `off (old)` is exactly 1 on every term —
+// the pre-feature behaviour — and with `goo` shipping at the top of the
+// ladder the wrap makes it the first click, so that is still the A/B.
 //
 // THE TOP OF THE RANGE IS SET BY WHAT A BOND SURVIVES, not by taste.  A
 // pair can also break by DISTANCE, and measured over a live field the
@@ -5155,9 +5198,11 @@ export const NEBULA_BOND_CYCLE: ReadonlyArray<NebulaBondStep> = [
 //
 // KNOW THE COST BEFORE MOVING THIS.  Stretching the compose threshold keeps
 // pairs alive as pairs, and live shard population is frame time: measured
-// 28 / 75 / 307 / 597 across off / firm / strong / goo over one window.  See
-// the nebula-bonding note in CLAUDE.md §8 for the measurement and the scene
-// that produces it.
+// 28 / 75 / 307 / 597 live nebula shards across off / firm / strong / goo
+// over one window — but BEFORE nebula's grainSize went to 20, which halved
+// the population; re-measured since on `nebula-storm`, goo shows no
+// measurable cost against `off (old)`.  See the nebula-bonding note in
+// CLAUDE.md §8 for the table and the scene that produces it.
 const NEBULA_BOND_DEFAULT_INDEX = 3; // goo
 let activeNebulaBondIndex = NEBULA_BOND_DEFAULT_INDEX;
 
@@ -5389,11 +5434,13 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
   HOLD: 1.0,
   FADEOUT: 0.5,
   // Banner type sizes.  These are the DESIGN sizes on a roomy viewport;
-  // RenderSystem.fitFontPx shrinks a line that would overflow (banner text is
-  // authored content — boss names, reward labels — so its width isn't known
-  // at design time, and the game is played on a 390px-wide phone).  The MIN
-  // sizes are the readability floor: below them, clipping is the better
-  // failure, but in practice no shipped string reaches them.
+  // `fitFontPx` (render/hud.ts) shrinks a line that would overflow (banner
+  // text is authored content — boss names, reward labels — so its width isn't
+  // known at design time, and the game is played on a 390px-wide phone).  The
+  // MIN sizes are the readability floor: below them, clipping is the better
+  // failure — and shipped strings DO reach it: at a 320px width the Bastion's
+  // phase banner ('BASTION — REPAIR SYSTEMS ONLINE') drops to the 18px floor
+  // and still clips.
   TEXT_PX: 48,
   TEXT_MIN_PX: 18,
   SUBTEXT_PX: 24,
@@ -5761,7 +5808,7 @@ export const DAMAGE_TEXT_CONSTANTS = {
 // slower, and damage is measured from speed, so the next bite is smaller with
 // no curve authored anywhere.  The decay rate is not a knob and is not global:
 // it is `1 - bite/energy` at the muzzle, a consequence of the two numbers
-// above.  Measured over the shipped roster, successive bites are
+// above.  Measured over the roster as step 3 shipped it, successive bites were
 //
 //   Blaster       4.00                          stops dead (bank = 1 bite)
 //   Shotgun       3.00 1.50                     decay 0.50/hit
@@ -5769,19 +5816,25 @@ export const DAMAGE_TEXT_CONSTANTS = {
 //   Laser         5.00 4.00 3.20 2.56 2.05      decay 0.80/hit
 //
 // so a beam built to rake a line gives up little per body and a pellet gives
-// up half.  That is why `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN` are
-// DELETED here rather than retuned: two knobs describing one phenomenon was
-// the clearest single symptom of the overlap this work exists to remove, and
-// it is also why the shipped falloff rate was 0 — nobody could say what the
-// right number was, because the number should not have existed.
+// up half.  (Every bank is now MASS_SCALE / BASE_BANK_DIVISOR ≈ 2.9x those,
+// so the rounds that inherited these tunings decay ~0.65 a hit (the
+// Projector), ~0.83 (the Shotgun, spread + kinetic) and ~0.88 (the Slug,
+// projectile + kinetic — the old Burst): the same ordering, gentler.  The
+// Laser left no round behind; it became the thermal BEAM.)  That is why
+// `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN` are DELETED here rather
+// than retuned: two knobs describing one phenomenon was the clearest single
+// symptom of the overlap this work exists to remove, and it is also why the
+// shipped falloff rate was 0 — nobody could say what the right number was,
+// because the number should not have existed.
 //
 // AND THE BODY COUNT IS NOT A BUDGET EITHER.  A round stops when it can no
 // longer afford what it is hitting: terrain charges per GRAIN
 // (`grainSize x bondStrength`) and an actor charges only what it could
-// actually absorb, so the same Blaster bolt that is stopped dead by one rock
-// tile punches through four one-HP gnats.  Depth is emergent on both sides of
-// the seam, which is what let the Penetration module be deleted rather than
-// replaced (step 5).
+// actually absorb, so the starter Projector round, which is stopped dead
+// inside one rock tile, punches through 6 one-HP gnats (the retired
+// Blaster's 4-bite round managed ~9; four at step 3, before the bank
+// re-scale above).  Depth is emergent on both sides of the seam, which is
+// what let the Penetration module be deleted rather than replaced (step 5).
 export const IMPACT_ENERGY_PER_DAMAGE = 32;
 
 /** The mass the sim flies for a shot from `cfg`.
@@ -5963,7 +6016,11 @@ export function projectileBite(authored: number, speed: number, spawnSpeed: numb
 // DBG 2x step and then BAKED).  That restores the original statement — the
 // peak measures ~20.8 against the same 18 bite, so the charge is worth about
 // one more hit again — and it is the RIGHT dial for it: the trim is about
-// penetration and moving it back would have undone the weapon pass.  The DBG
+// penetration and moving it back would have undone the weapon pass.  (That
+// was the Plasma Cannon.  Its shell lives on in the cannon combinations,
+// where the same arithmetic gives the Arc / Incendiary Shells ~20.8 against
+// a 14 bite and the Heavy Shell ~24.6 against its 24; the bare Cannon scales
+// its blast by `blastScale` 0.2.)  The DBG
 // ladder keeps 1x meaning WHAT SHIPS, so its 0.5x step is now the A/B against
 // the pre-call blast (§8's rule: a settled value is baked into the constant
 // and the knob returns to 1x, or every derivation written against the base
@@ -6121,7 +6178,8 @@ export const BASE_BANK_DIVISOR = GUNNERY_MK3_TRIPLE_MULT / BASE_BANK_TRIM;   // 
 // retired Blaster's delivered damage per second.  The Blaster landed a 4 bite
 // every 0.14 s = 28.6/s; every entry in DELIVERY_BASE sits at 16-17/s
 // (`nominalDps`, pinned by tests/energy.spec.ts) — except the CANNON, whose
-// direct bite is 12.9/s because its blast carries the rest.  The MODIFIERS are what make
+// direct bite is only ~2.1/s (3 per 1.4 s) because its blast carries the
+// rest.  The MODIFIERS are what make
 // a weapon strong, which is why every combination that an OLD gun maps onto
 // inherits that gun's own tuning — the old roster survives as seven named
 // points in the new space (see LEGACY_WEAPON_MAP in engine/systems/energy.ts).
@@ -6142,8 +6200,9 @@ export const LEGACY_BASE_WEAPON = { damage: 4, cooldown: 0.14, dps: 4 / 0.14 } a
 export const ENERGY_COLORS: Record<EnergyModifier | 'none', string> = {
   none: '#94a3b8', kinetic: '#f97316', electric: '#22d3ee', thermal: '#ef4444',
 };
-/** The Cannon's modified shells keep the old Plasma Cannon purple family;
- *  the BARE cannon is white (user call), like the other bare deliveries are
+/** The old Plasma Cannon purple — UNREAD: the cannon combinations take their
+ *  energy's colour (orange / cyan / red) like every other combination.  The
+ *  BARE cannon is white (user call), like the other bare deliveries are
  *  neutral. */
 export const CANNON_COLOR = '#a855f7';
 export const BARE_CANNON_COLOR = '#f1f5f9';
@@ -6400,8 +6459,8 @@ export function chargeTrigger(t: number): TriggerProfile {
   };
 }
 
-// Burst-fire parameters for shooting enemies.
-// Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
+// (Enemy burst fire is per archetype now — the optional `burst` field on
+// ENEMY_VARIANTS; the old global BURST_SIZE / GAP / RELOAD set is gone.)
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
   delivery: 'projectile',
@@ -6432,7 +6491,7 @@ export const ENEMY_WEAPON: WeaponConfig = {
 // not named here falls back to ENEMY_WEAPON.
 //
 // Damage numbers are PROVISIONAL (first-pass boss tuning; the plan's step-6
-// economy/progression pass owns the real balance).
+// economy/progression pass — not yet run — owns the real balance).
 export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = {
   // Reaver's scattergun — the player Shotgun's cone and pellet look, slowed to
   // a readable boss beat and given per-pellet bite, so a full cone at brawling
@@ -6454,20 +6513,26 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
     // `damage` or `speed` off a player gun has to restate the mass with it.
     mass: 1.4222,      // one bite at damage 5, speed 15
   },
-  // Bastion's siege battery — the player Plasma Cannon, AoE and all: the same
-  // purple heavy slug that splashes on impact.  Halved damage and a much
-  // longer beat, because a boss lobbing the player's artillery on the player's
-  // cadence would be unsurvivable.  The splash is what makes hiding behind
-  // cover (or hugging the hull) stop working.
+  // Bastion's siege battery — a boss variant of the player's Cannon, splash
+  // and all.  Halved damage and a much longer beat, because a boss lobbing
+  // the player's artillery on the player's cadence would be unsurvivable.
+  // The splash is what makes hiding behind cover (or hugging the hull) stop
+  // working.
+  // OPEN (energy modules): this spreads the BARE `WEAPONS.cannon`, and
+  // nothing below restates `detonateOn`, `boreCostScale`, `color` or `size`,
+  // so the shell inherits the bare Cannon's fuse-only detonation, narrow bore
+  // and small white look — it no longer splashes on contact the way this
+  // battery was written to.  Parked, with the fix, in docs/PARKING_LOT.md
+  // ("Bastion siege shell inherits the bare Cannon's fuse").
   SIEGE: {
     ...WEAPONS.cannon,
     name: 'Bastion Siege Battery',
     cooldown: 3.2,          // vs the player's 1.40 — a slow, readable lob
-    damage: 9,              // direct hit (player: 18)
+    damage: 9,              // direct hit (the old Plasma Cannon: 18)
     speed: 11,              // slow shells you can see coming and boost out of
     lifetime: 3.2,
     explosionRadius: 130,
-    explosionDamage: 6,     // splash (player: 10)
+    explosionDamage: 6,     // splash, AUTHORED (the old Plasma Cannon: derived, ~20.8)
     explosionKnockback: 5,
     recoil: 0,
     mass: 4.7603,      // one bite at damage 9, speed 11 — see SCATTER
@@ -6602,7 +6667,7 @@ export interface ModuleEffect {
   scannerMk?: number;
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
-  flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
+  flashlight?: boolean;     // Light module — enables the ship-tap light tool
   energy?: EnergyModifier;  // energy modifier — applies to the gun(s) it touches
 }
 
@@ -6637,7 +6702,8 @@ export const MODULE_SLOT_COUNT = 7;   // hex flower: 1 center + 6 sides
 // the ship catalog (phased plan Phase D) is what will start different hulls
 // at different counts, and lowering the number for the CURRENT hull is a
 // balance call for the economy pass rather than something to slip in here.
-// DBG ▸ Modules ▸ "Lock slots" walks it down so the purchase can be flown.
+// DBG ▸ Economy ▸ Salvage & Stations ▸ "Lock slots" walks it down so the
+// purchase can be flown.
 export const MODULE_SLOT_UNLOCK = {
   START: MODULE_SLOT_COUNT,
   MAX: MODULE_SLOT_COUNT,
@@ -6675,16 +6741,14 @@ export const COOLDOWN_FLOOR = 0.4;
 //   BASE_BOOST / (1 + DRAG_PER_WEIGHT × ship weight)
 // where ship weight = HULL_BASE + Σ (weight of every ACTIVE module).
 //
-// `HULL_BASE` is 0 TODAY — the current hull contributes nothing, so the
-// arithmetic is unchanged (the starter Blaster, weight 1, is EXACTLY the 1.0
-// baseline; flying weaponless gives the +10% BASE_BOOST; heavy arsenals like
-// Cannon + Homing ≈ 4.5 weight drag to ≈0.76×).  It exists as the seam for
-// SHIP CLASSES: a heavier hull sets a higher HULL_BASE and starts the whole
-// curve further along, without any other code moving.  Numbers provisional
-// pending playtest.
+// `HULL_BASE` is 0 TODAY — the current hull contributes nothing beyond its
+// own module's weight (the landmarks on today's curve are listed beside
+// BASE_BOOST below).  It exists as the seam for SHIP CLASSES: a heavier hull
+// sets a higher HULL_BASE and starts the whole curve further along, without
+// any other code moving.  Numbers provisional pending playtest.
 //
-// Only guns carry a `weight` in MODULE_DEFS today, but the fold is
-// module-agnostic — give any module a weight and it joins the ship's total.
+// Every module carries a `weight` in MODULE_DEFS (see BASE_BOOST below), and
+// the fold is module-agnostic — whatever a module weighs joins the total.
 export const SHIP_WEIGHT = {
   HULL_BASE: 0,
   // Base thrust with an unladen ship, and how hard each unit of weight drags.
@@ -6693,8 +6757,9 @@ export const SHIP_WEIGHT = {
   // (0.10 -> 0.05) while BASE_BOOST was raised slightly (1.10 -> 1.15) to
   // compensate.  Net effect at the two ends of the curve:
   //   weaponless bare frame (w 1.0)  -> x1.10  (was x1.10 — the fly-light hook)
-  //   lean start, hull + Blaster (2.0) -> x1.05  (was x1.00 — the slight base bump)
-  //   fully outfitted (w ~13.9)      -> x0.68  (was x0.82 with guns only)
+  //   lean start, hull + Projector (2.0) -> x1.05  (was x1.00 — the slight base bump)
+  //   fully outfitted (w ~15.2)      -> x0.65  (x0.68 before the scanner
+  //                                      joined "Outfit all"; x0.82 guns only)
   // So a maxed ship is now genuinely heavy and leans on Engine/Thrusters to
   // stay nimble, which is the point of weighting every module.
   BASE_BOOST: 1.15,
@@ -6940,7 +7005,7 @@ export function detectionAlpha(age: number): number {
 export const MODULE_DEFS: readonly ModuleDef[] = [
   // ── Ship group ──
   // Every run STARTS with the free Base Hull mounted on the center ship
-  // hex (mirror of the starter Blaster on gun hex W1): it adds no stats
+  // hex (mirror of the starter Projector on gun hex W1): it adds no stats
   // but is the adjacency ROOT the whole ship-module tree chains from, so
   // bought modules work out of the box.  cost 0 keeps it out of the shop.
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
@@ -7114,7 +7179,13 @@ export const AUDIO_CONSTANTS = {
    *
    *  Heavier still is possible — rock merges past 460 over a long run — and
    *  that is what a floor is FOR. The bound is "every population can reach its
-   *  own ends", not "nothing is ever clamped". */
+   *  own ends", not "nothing is ever clamped".
+   *
+   *  THOSE POPULATIONS PRE-DATE `MASS_SCALE`.  Every live mass is now ten
+   *  times the figures above while IMPACT_PITCH_REF_MASS stayed 25, so every
+   *  pitch sits ~0.56x lower: the 0.46 floor binds for anything heavier than
+   *  ~558 (heavy rock, the dragon) and nothing plays above ~1.4.  The clamp
+   *  rates quoted above have not been re-measured since. */
   IMPACT_PITCH_MIN: 0.46,
   IMPACT_PITCH_MAX: 2.50,
   /** Per-row gain floors (docs/SFX_INVENTORY.md §4.4).  A floor is what stops
@@ -7328,10 +7399,11 @@ export const SNITCH_CONSTANTS = {
 };
 
 // DBG snitch-speed multiplier on both AI speed states (coast + dart).
-// Cycled live from the DBG panel (Player ▸ Snitch spd) so the chase feel
-// can be tuned without a rebuild.  Multiplies the cruise-relative target
-// speed in GameEngine.updateSnitch, so it scales coast and dart together
-// and tracks player-cruise changes.  Default 1.0× = the base fractions.
+// Cycled live from the DBG panel (Enemies & Bosses ▸ Snitch ▸ "Snitch spd")
+// so the chase feel can be tuned without a rebuild.  Multiplies the
+// cruise-relative target speed in `updateSnitch` (engine/roamers/snitch.ts),
+// so it scales coast and dart together and tracks player-cruise changes.
+// Default 1.0× = the base fractions.
 export const SNITCH_SPEED_CYCLE: ReadonlyArray<number> = [
   0.5, 0.75, 1.0, 1.5, 2.0,
 ] as const;
@@ -7390,7 +7462,7 @@ export function portalHorizonRadius(e: GameEntity): number {
 }
 
 // ── DBG portal tuning (user call: the rift reads as too POWERFUL) ───────────
-// Five live multipliers over the wormhole's shipped numbers, so how strong a
+// Six live multipliers over the wormhole's shipped numbers, so how strong a
 // portal is can be judged by FLYING past one rather than by rebuilding.  Every
 // one is applied at the READ, never baked into the portal entity: the entity
 // keeps PORTAL_CONSTANTS as its base truth, so a knob takes effect on the
@@ -7400,7 +7472,8 @@ export function portalHorizonRadius(e: GameEntity): number {
 // lensed star field back and forth — so the lens is split into two knobs, one
 // for how far it displaces and one for how fast it turns.  Either can be taken
 // to 0 independently, which is what separates "the warp is too strong" from
-// "the warp must not MOVE" as answers.
+// "the warp must not MOVE" as answers.  (A third lens knob, RADIUS — how much
+// sky the warp covers — came later; see PORTAL_LENS_RADIUS_CYCLE.)
 //
 // SIZE scales the drawn rift, its swallow horizon and its lens radius
 // together (all three are `size.x` reads).  It deliberately does NOT touch
@@ -7428,9 +7501,10 @@ export const PORTAL_GRAVITY_RANGE_CYCLE: ReadonlyArray<number> =
 export const PORTAL_LENS_CYCLE: ReadonlyArray<number> =
   [1.0, 0.5, 0.25, 0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0] as const;
 /** Lens RADIUS as a multiple of the rift's horizon — how much sky the warp
- *  covers, separate from how hard it bends it.  Index 0 is LENS.RADIUS_MULT,
- *  the shipped value; the steps above it are what "hug the hole" looks like
- *  when it is loosened back off. */
+ *  covers, separate from how hard it bends it.  Index 0 (14×) is the shipped
+ *  value; `PORTAL_CONSTANTS.LENS.RADIUS_MULT` (4) is the older "hug the
+ *  hole" figure and nothing reads it now.  4 / 6 / 9 and 2.5 are that
+ *  tighter look, 20 / 30 loosen it further. */
 export const PORTAL_LENS_RADIUS_CYCLE: ReadonlyArray<number> = [14, 4, 6, 9, 20, 30, 2.5] as const;
 let activePortalLensRadiusIndex = 0;
 export function getPortalLensRadiusMult(): number {
@@ -7703,7 +7777,7 @@ export const CONTROL_SCHEME_RULES: Record<ControlScheme, {
 //   'dots'  — one dot per mobile shard.  DEFAULT (user call): in play the
 //             question the map is asked is "what is out there", and a dot
 //             answers it directly where a streamline answers a question about
-//             the field.  Flow stays one step of the cycle away.
+//             the field.  Flow is two clicks away (dots → off → flow).
 //   'off'   — neither.  The control, and the honest answer if the streamlines
 //             fail to read at 75px.
 // Static TILES are unaffected — they come from the pre-rendered static layer,
@@ -8045,7 +8119,8 @@ export const PORTAL_CONSTANTS = {
   // more (user call): a synthetic ring set drew a tunnel that the sky was not
   // part of, and the streaks alone carry the motion.
   WARP: {
-    DURATION: 1.1,
+    DURATION: 1.1,          // UNREAD — the live length is PORTAL_WARP_CYCLE
+                            // (1.4 s ships)
     // How far the sky is swept outward over the beat: every star's distance
     // from the vanishing point is multiplied by 1 -> EXPAND.  At 1 the field
     // is EXACTLY the sky already on screen, which is what makes the opening
@@ -8075,9 +8150,10 @@ export const PORTAL_CONSTANTS = {
   //
   // Sizing the rule against the HORIZON rather than an absolute number is
   // what makes it read as physics instead of as a threshold: the same rock
-  // that shoots through a Pocket rift (horizon 18) is small enough to vanish
-  // into Deep Space's (52).  Destination scaling and the DBG Size knob come
-  // along for free, because both already move the horizon.
+  // that shoots through a Pocket rift (horizon ~6 at the shipped SIZE 70) is
+  // small enough to vanish into Deep Space's (~18).  Destination scaling and
+  // the DBG Size knob come along for free, because both already move the
+  // horizon.
   //
   // SPEED must clear the well outright or the eject is a stutter rather than
   // an exit.  Against the shipped well (g1500 out to 525, clamped at
@@ -8150,7 +8226,8 @@ export const PORTAL_CONSTANTS = {
   //
   // Spans in the game today, and what they draw at (entity half-size 100,
   // DBG Size 1×): Pocket 4k → 18, showcase 6k → 25, hub / Ring / Seven
-  // Rings 12k → 42, Deep Space 16k → 52.  The EXPONENT is what makes that
+  // Rings 12k → 42, Deep Space 16k → 52 — and at the shipped SIZE 70
+  // (half-size 35): 6 / 9 / 15 / 18.  The EXPONENT is what makes that
   // range legible: raw linear scaling would put Pocket at 14 against Deep
   // Space's 56, which reads as two unrelated objects rather than one kind
   // of thing sized by where it goes.
@@ -8194,7 +8271,8 @@ export const PORTAL_CONSTANTS = {
   // BREATHING that bounded shear (a sine at SWIRL_RATE) rather than from
   // accumulating it, so the warp still lives without ever winding up.
   LENS: {
-    RADIUS_MULT: 4.0,      // × the horizon radius
+    RADIUS_MULT: 4.0,      // × the horizon radius — UNREAD: the live radius is
+                           // PORTAL_LENS_RADIUS_CYCLE (14× ships)
     PUSH_FRAC: 0.42,       // radial push at the throat, × the lens radius
     TWIST: 0.825,          // radians of shear at the throat (see the clamp below)
     TWIST_SWING: 0.27,     // how much of that shear breathes
@@ -8204,20 +8282,20 @@ export const PORTAL_CONSTANTS = {
     PUFF_RADIUS_MULT: 24.0,
     PUFF_PUSH_FRAC: 0.22,
   },
-  // Off-screen indicator range.  A portal is a FIXED landmark, so a chevron
-  // for a rift on the far side of the map is noise, not navigation — the
-  // arrow only appears once the player is close enough for that rift to be
-  // a real option.
+  // Off-screen indicator range — UNREAD since the scanner rework: a rift's
+  // arrow is now gated on DETECTION (a scan or a natural encounter stamps
+  // `detectedAt`), the same as every other contact, and this bracket is gone.
+  // What it was: a portal is a FIXED landmark, so a chevron for a rift on the
+  // far side of the map is noise, not navigation — the arrow only appeared
+  // once the player was close enough for that rift to be a real option.
   //
-  // Inside that range the arrow now behaves like every other contact
-  // (decision #46b, gauntlet step 5 G6): it is SUPPRESSED once the rift is
-  // on screen, because the rift itself and its own world-space destination
+  // Inside that range the arrow behaved like every other contact (decision
+  // #46b, gauntlet step 5 G6), and still does: it is SUPPRESSED once the rift
+  // is on screen, because the rift itself and its own world-space destination
   // tag are already there and a third naming of the same place is the arrow
-  // at its least useful.  So the two rules bracket exactly the case the
-  // arrow is good for — close enough to matter, not yet visible.  Finding a
-  // rift from further out is the MINIMAP's job (its anomaly blip clamps to
-  // the border rather than being culled, and G5 cleared the shard-dot wash
-  // that used to hide it).
+  // at its least useful.  Finding a rift from further out is the MINIMAP's
+  // job (its anomaly blip clamps to the border rather than being culled, and
+  // G5 cleared the shard-dot wash that used to hide it).
   INDICATOR_RANGE: 1500,
 };
 
@@ -8225,7 +8303,7 @@ export const PORTAL_CONSTANTS = {
  *  One portal per full-game arena, spread well clear of the four stations
  *  at (0,0) / (-3600,-2400) / (3600,2400) / (3800,-2600) and of each other,
  *  so reaching one is a flight — chevrons + minimap dots point the way.
- *  Showcase maps get NO portal: they stay menu-only. */
+ *  Showcase maps are not in this list: they hang off the TEST RACK below. */
 export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
   { targetId: 'arena_universe',    x: -3600, y:  2400 },
   { targetId: 'arena_ring',        x:     0, y: -4200 },
@@ -8531,7 +8609,8 @@ export const ENEMY_SCALING = {
   DMG_GROWTH_PER_WAVE: 0.04, // +4% enemy damage per wave …
   DMG_MULT_CAP: 2.0,         // … capped at 2.0×
 };
-// DBG global multiplier on the per-wave growth (Player ▸ "Enemy scale"):
+// DBG global multiplier on the per-wave growth
+// (Enemies & Bosses ▸ Enemy Tuning ▸ "Enemy scale"):
 // 0 = no wave scaling, 1 = tuned, 2 = double growth.  Feel the margin live.
 export const ENEMY_SCALE_CYCLE: ReadonlyArray<number> = [1, 0, 0.5, 1.5, 2] as const;
 let activeEnemyScaleIndex = 0; // 1×
@@ -8709,8 +8788,8 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // fire can't lock it up or shove it around.  Absent → full kick, always stun.
   poise?: PoiseConfig;
   // Consume-and-grow (Stage 3b/5): stamped onto the entity at spawn so
-  // GameEngine.updateConsumers feeds the bubble nearby shards.  Absent → not a
-  // consumer.
+  // `updateConsumers` (engine/roamers/bubbles.ts) feeds the bubble nearby
+  // shards.  Absent → not a consumer.
   consume?: ConsumeConfig;
   // Self-replication (Stage 5, bubble): an UNprovoked consumer that has grown
   // to `atSize` splits — it resets to base size and births one offspring (so
@@ -8719,8 +8798,9 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   multiply?: { atSize: number; maxPopulation: number };
   // Ambient fauna (Stage 5, bubble): NOT a wave enemy.  An `ambient` archetype
   // never gates wave completion (countsTowardWave forced false at spawn however
-  // it's built) and is kept present in the world by GameEngine.maintainAmbient-
-  // Bubbles instead of the wave spawner.  Absent → a normal wave enemy.
+  // it's built) and is kept present in the world by `maintainAmbientBubbles`
+  // (engine/roamers/bubbles.ts) instead of the wave spawner.  Absent → a
+  // normal wave enemy.
   ambient?: boolean;
   // Third party / neutral (Stage 5, bubble): stamped onto the entity so enemy
   // fire can damage it (friendly-fire filter bypassed) and it retaliates
@@ -8890,10 +8970,13 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   },
   // ── Stage 6 ──
   // Dragon: a big segmented serpent mini-boss.  Enters via a portal, rides the
-  // flow field weaving across the map and DEVOURS tiles (consume eats:'tile' →
-  // consumeTile) to grow longer + thicker, deals contact damage along its body,
-  // and leaves via portal if not killed.  Engine-managed (GameEngine.update-
-  // Dragon); the 'dragon' AI strategy is a no-op.  Tanky combat HP on the head.
+  // flow field weaving across the map and DEVOURS the tiles in its path to grow
+  // longer (its own pass in engine/roamers/dragons.ts appends each one as a
+  // body segment — the `consume` row below never fires, since
+  // `updateConsumers` walks only MOBILE candidates), deals contact damage along
+  // its body, and leaves via portal if not killed.  Engine-managed
+  // (`updateDragons` / `spawnDragon`, engine/roamers/dragons.ts); the 'dragon'
+  // AI strategy is a no-op.  Tanky combat HP on the head.
   [EnemySubtype.DRAGON]: {
     color: '#34d399', size: 64, health: 500, // big boss HP (> the bubble's max)
     maxSpeed: 6, accel: 4, turnRate: 1.2,
@@ -8940,11 +9023,11 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   },
   // Bastion (BOSS_SIEGE): the second WEAPON-boss and the Reaver's inverse on
   // every axis — slow, huge and plated instead of fast and evasive, lobbing
-  // the PLAYER'S OWN Plasma Cannon (BOSS_WEAPONS.SIEGE, splash and all) in
+  // shells spread from the PLAYER'S OWN Cannon (BOSS_WEAPONS.SIEGE) in
   // 2-shell salvos from a LONG stand-off (`preferredDistance`) instead of
   // brawling.  Its counterplay identity is the pair of B3 traits: a permanent
-  // FRONT-SHIELD plate (face-tanking never becomes viable — flank it, ricochet
-  // into its back, or splash past the plate edge) over REGEN that only a
+  // FRONT-SHIELD plate (face-tanking never becomes viable — flank it, or
+  // splash past the plate edge) over REGEN that only a
   // genuine damage BURST shuts off.  SHOOTING role, and the only archetype
   // that overrides the shared skirmisher stand-off.
   [EnemySubtype.BOSS_SIEGE]: {
@@ -8988,8 +9071,8 @@ export const DISABLE = {
 };
 
 // Reactive bubble (Stage 5): the latch / contact / multiply behaviour run by
-// GameEngine.updateBubbles.  The AI feel (wander vs seek) lives in
-// AI_CONFIG.BUBBLE; this block is the engagement payload.
+// `updateBubbles` (engine/roamers/bubbles.ts).  The AI feel (wander vs seek)
+// lives in AI_CONFIG.BUBBLE; this block is the engagement payload.
 export const BUBBLE_CONSTANTS = {
   /** How much of the light falling on a bubble it RE-EMITS (unified light
    *  layer, DBG "Emissive").  A bubble is a translucent membrane, so a beam
@@ -9050,18 +9133,20 @@ export const BUBBLE_CONSTANTS = {
   DIGEST_DURATION: 5.5,   // BASE seconds to digest a shard (× richness) — slow,
                           // one meal at a time
   // Ambient population: bubbles are always-present fauna, not wave enemies.
-  // GameEngine.maintainAmbientBubbles keeps at least AMBIENT_POPULATION alive,
-  // spawning one offscreen every AMBIENT_RESPAWN_INTERVAL seconds while below
-  // it (breeding can carry the count higher, up to multiply.maxPopulation).
+  // `maintainAmbientBubbles` (engine/roamers/bubbles.ts) keeps at least
+  // AMBIENT_POPULATION alive, spawning one offscreen every
+  // AMBIENT_RESPAWN_INTERVAL seconds while below it (breeding can carry the
+  // count higher, up to multiply.maxPopulation).
   AMBIENT_POPULATION: 5,
   AMBIENT_RESPAWN_INTERVAL: 4,  // seconds between top-up spawns while short
   SPAWN_MARGIN: 220,            // units past the viewport edge to spawn a fresh bubble
 };
 
-// Stage 6: the dragon mini-boss.  Engine-managed lifecycle (GameEngine.spawn-
-// Dragon / updateDragon): enter (portal) → roam (flow-weave + devour tiles) →
-// leave (portal), or die when its head HP runs out.  The body is a chain of
-// segments drawn by RenderSystem along the head's recorded path.
+// Stage 6: the dragon mini-boss.  Engine-managed lifecycle (`spawnDragon` /
+// `updateDragons`, engine/roamers/dragons.ts): enter (portal) → roam
+// (flow-weave + devour tiles) → leave (portal), or die when its head HP runs
+// out.  The body is a chain of segments drawn by RenderSystem along the
+// head's recorded path.
 export const DRAGON_CONSTANTS = {
   SPEED_FRAC: 0.13,        // cruise speed as a fraction of the player's terminal cruise
                           // — deliberately slow + ponderous (a roaming siege beast)
@@ -9107,10 +9192,10 @@ export const DRAGON_CONSTANTS = {
 // Player-like EntityType.ENEMY roamers that warp in via portal, hunt the WAVE
 // enemies (denying the player the kill points + drops they'd otherwise get),
 // and—per disposition—may also fight the player.  Engine-managed lifecycle
-// (GameEngine.updateRivals), rendered from an old enemy PNG with a disposition
-// ring.  Three dispositions: hostile (fights player + enemies), ally (fights
-// enemies only, never the player), neutral (fights enemies for loot, ignores
-// the player UNTIL attacked, then retaliates).
+// (`updateRivals`, engine/roamers/rivals.ts), rendered from an old enemy PNG
+// with a disposition ring.  Three dispositions: hostile (fights player +
+// enemies), ally (fights enemies only, never the player), neutral (fights
+// enemies for loot, ignores the player UNTIL attacked, then retaliates).
 export const RIVAL_CONSTANTS = {
   // Cadence: a fresh random rival warps in every SCORE_INTERVAL points earned,
   // up to MAX_RIVALS alive at once.
@@ -9161,9 +9246,11 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 // weapon a "right answer" somewhere is WEAPONS_AMMO_PLAN §7.
 //   armor.chipThreshold — per-hit damage at/above this lands in full
 //   armor.reduction     — fraction cut from hits BELOW the threshold
-// So Blaster (4) / Shotgun-pellet (3) chip the Tank, while Cannon (18) /
-// Lightning (9) / charged shots — and a Gunnery-boosted Blaster past 6 — punch
-// through.  AoE/explosion damage isn't chip-resisted (it's an answer).
+// So the Projector (3) and a Shotgun pellet (3) chip the Tank, while the Slug
+// (7), Seeker (8), Arc Bolt (9), the cannon shells (14–24) and charged shots —
+// and a Gunnery-boosted Projector (≈6.2) — punch through.  AoE/explosion
+// damage isn't chip-resisted (it's an answer), and the energy layer's beams,
+// arcs and heat never meet the trait.
 //
 // A trait SET is also what a (h) boss phase carries (BossPhaseDef.traits): a
 // phase REPLACES the set, so a boss can trade one defence for another as it
@@ -9187,9 +9274,9 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 // entity's FACING — the Bulwark's arc geometry generalized, but with NO pool to
 // deplete, so face-tanking never becomes viable no matter how long you hold the
 // trigger.  Its answers fall out of WHERE damage is applied rather than from
-// special cases: lightning chains and shockwave rings damage in GameEngine,
-// OUTSIDE the projectile path, so they bypass the plate for free; a Laser
-// ricochet arrives from behind; and a slow fortress can simply be flanked.
+// special cases: the energy layer's arcs, beams and heat (`damageBody`) and
+// the shockwave rings land OUTSIDE the projectile path, so they bypass the
+// plate for free; and a slow fortress can simply be flanked.
 //   deg       — total covered arc, centred on `rotation`
 //   reduction — fraction cut from a covered hit
 //
@@ -9200,9 +9287,10 @@ export const ENEMY_ATTACK_EFFECTS: Partial<Record<EnemySubtype, EffectPayload>> 
 // the player pauses" — any sustained weapon clears that, chip damage would stop
 // healing through, and the trait would invert.  With fixed buckets the
 // arithmetic lands on the §7 table by construction (per `windowSec` = 0.4s):
-//   Blaster  ≈12  → heals through (chip)      Shotgun cone 18 → opens the burn
-//   Burst Rifle 15 → just under the gate      Cannon 18 (+10 splash) → opens it
-//   Seeker 8 / Lightning 9 → under (their answers are other traits)
+//   Projector ≈9 → heals through (chip)       Shotgun cone 18 → opens the burn
+//   Slug 2×7 = 14 → just under the gate       Heavy Shell 24 → opens it
+//   Seeker 8 / Arc Bolt 9 → under on the bite alone (their answers are other
+//   traits)
 //   perSec      — health per second while not burning
 //   burstDamage — damage inside one bucket that shuts regen off
 //   windowSec   — bucket length (armed by the first hit)
@@ -9219,8 +9307,9 @@ export interface EnemyTraitSet {
 /**
  * Feed one applied-damage event into a REGEN-trait entity's fixed burst bucket.
  * Called from every path that damages an enemy on the player's behalf — the
- * PhysicsSystem projectile hit, the lightning chain, and the shockwave ring —
- * so splash and chain damage count toward a burst like pellets do.
+ * PhysicsSystem projectile hit, the energy layer's `damageBody`, and the
+ * shockwave ring — so splash, arc and beam damage count toward a burst like
+ * pellets do.
  *
  * The bucket is FIXED, not sliding: only the FIRST hit arms the timer (see the
  * EnemyTraitSet comment for why that distinction is the whole trait).  No-op
@@ -9313,7 +9402,7 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
   [EnemySubtype.SWARM]:     { move: 'swarm' },
   [EnemySubtype.NEST]:      { move: 'skirmisher' }, // maxSpeed 0 → no-move guard
   [EnemySubtype.BUBBLE]:    { move: 'bubble' },     // wander → (on hit) chase + latch
-  [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (GameEngine.updateDragon drives it)
+  [EnemySubtype.DRAGON]:    { move: 'dragon' },     // no-op (roamers/dragons.ts drives it)
   // (h) bosses ride the EXISTING strategies — the boss-ness lives in the
   // BOSS_DEFS phase table + traits, never in a bespoke movement routine.
   [EnemySubtype.BOSS_WARDEN]: { move: 'skirmisher' },
@@ -9334,15 +9423,15 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
 // entirely through fields the existing systems already read — a
 // `Partial<WeaponConfig>` override, a shield (arc or bubble), a brood spawner,
 // a trait set, a speed multiplier, a colour — so a phase change is a STAMP,
-// never a script (strategy guardrail #36e).  GameEngine.updateBosses applies a
-// phase once, on the health-fraction transition.
+// never a script (strategy guardrail #36e).  `updateBosses` (engine/bosses.ts)
+// applies a phase once, on the health-fraction transition.
 //
 // PAYOUT: a boss pays SALVAGE plus a RANDOM MODULE dropped into the inventory
-// (GameEngine.grantBossModule).  The module replaced a timed SHOP DISCOUNT
-// (user call, playtest): a countdown you must be near a shop to spend is worse
-// than a thing you carry away, and removing it also removed the buy/sell
-// money-pump the discount created.  There is still deliberately NO
-// weapon-unlock plumbing: weapons stay purely purchased.
+// (`grantBossModule`, engine/bosses.ts).  The module replaced a timed SHOP
+// DISCOUNT (user call, playtest): a countdown you must be near a shop to
+// spend is worse than a thing you carry away, and removing it also removed
+// the buy/sell money-pump the discount created.  There is still deliberately
+// NO weapon-unlock plumbing: weapons stay purely purchased.
 export const BOSS_CONSTANTS = {
   /** NORMAL waves per stage, BEFORE the capstone.  The boss then gets its OWN
    *  wave on top (user call) — a stage is `WAVE_INTERVAL` ordinary waves and
@@ -9594,10 +9683,12 @@ export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number
   { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
   { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
   // NOTE: BUBBLE is ambient fauna (always-present, never a wave enemy) — it's
-  // maintained by GameEngine.maintainAmbientBubbles, not spawned by waves.
+  // maintained by `maintainAmbientBubbles` (engine/roamers/bubbles.ts), not
+  // spawned by waves.
 ];
 
-// Tier-weight progression for the weighted-random waves (index 3+).  Row =
+// Tier-weight progression for the weighted-random waves (index
+// WAVE_DEFINITIONS.length and up).  Row =
 // min(floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH), last), so the blend
 // walks L1 → ½L1+½L2 → L2 → ⅓ each → ½L2+½L3 → L3 over the first 18 waves
 // and stays pure tier-3 from then on.  Shape: [w_tier1, w_tier2, w_tier3].
@@ -9778,7 +9869,7 @@ export const CLEANUP_CONSTANTS = {
 };
 
 // ── ShardSystem variant table ───────────────────────────────────────
-// See docs/SHARD_SYSTEM.md for the design rationale.  This table is
+// See CLAUDE.md §5 (SHARD_VARIANTS) for the design rationale.  This table is
 // the source of truth for tile / shard regen, merge, shatter, dent,
 // repel, glow and pass-through behaviour — read at runtime by
 // ShardSystem, PhysicsSystem, RenderSystem, and the variant-aware
@@ -10586,7 +10677,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
     // Mass = ∞ alone makes the tile a solid wall.  passThrough lets
     // strikers fly through and shatter on contact while the tile
-    // keeps its static-grid placement.  See docs/SHARD_SYSTEM.md §6.C.
+    // keeps its static-grid placement.  See CLAUDE.md §8 ('Static vs
+    // dynamic via mass', 'passThrough flag').
     passThrough: true,
     // Slow-path tint compute is expensive enough to merit caching.
     renderCache: 'composition',
@@ -10917,11 +11009,11 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // A3 follow-up (user call): metal shards get the SAME Voronoi
     // fracture as the tiles and as rock/glass — one break model for every
     // breakable material.  Same bondStrength as the tile (a material
-    // property, not a per-entity number) and the same density coupling,
-    // so a dense chip is fine-grained and hard exactly as a dense plate
-    // is.  A shard's grains must be FINE or it has almost no internal
-    // boundary and therefore almost no derived HP, which is what made
-    // metal chips die instantly.
+    // property, not a per-entity number).  The density coupling this used
+    // to share with the tile was REVERSED (user call — nothing in GrainSpec
+    // reads densityTier; CLAUDE.md §8).  A shard's grains must be FINE or
+    // it has almost no internal boundary and therefore almost no derived
+    // HP, which is what made metal chips die instantly.
     grain: {
       // The material's grain — shared by its tile and its shard (MATERIALS,
       // engine/systems/energy.ts).  Only the scatter speed is this row's own.
@@ -10954,8 +11046,10 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // tiles and glass-shards with zero impulse and instantly
     // shatter them on overlap.  The metal-shard's HP and trajectory
     // are unaffected; the glass target falls through its normal
-    // death pipeline (glass-tile → DropSystem.spawnGlassShards,
-    // glass-shard → ShardSystem.shatter tier chain).
+    // death pipeline — under the shipped voronoi fracture both break
+    // into their own grain cells; under the DBG legacy A/B a glass-tile
+    // takes DropSystem.spawnGlassShards and a glass-shard the
+    // ShardSystem.shatter tier chain.
     passthroughShatter: { targets: ['glass-tile', 'glass-shard'] },
     spawnsDropsOnDeath: true,
     density: {
@@ -11005,8 +11099,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // ^bondTimeSizePower per the resolver.  At ref-size shards
       // (≈20 diameter) the effective threshold ≈ 5 s; larger pairs
       // wait proportionally longer.  Self-bonds fire the dedicated
-      // pair-transmute path in ShardSystem.composeNebulaShards
-      // (50/50 nebula-tile vs glass-shard at the pair's midpoint),
+      // pair-transmute path in ShardSystem.composeNebulaShards (the
+      // condense ledger: a nebula-tile on the `nebulaTileShare()` roll,
+      // else a solid shard of the cloud's material — CLAUDE.md §8),
       // variant-routed inside composeEntities.
       bondTimeSeconds: 5,
       bondTimeSizeRef: 20,
@@ -11099,11 +11194,14 @@ export function breakYieldsNothing(variantId: ShardVariantId | undefined): boole
 
 // ── Per-map entity-count table ──────────────────────────────────────
 // Source of truth for "how many of variant X spawn on map Y", see
-// docs/SHARD_SYSTEM.md §6.E.  Source of truth for rock-shard
+// CLAUDE.md §5 (MAP_POPULATION).  Source of truth for rock-shard
 // free-spawn counts (read via getRockShardFreeSpawn) and per-map
-// tile-cluster sizing (read by MapClasses.populate).  Replaces
+// tile-cluster sizing (read by BaseMapLayer.populateTileClusters /
+// populateNebulaClusters — the natural maps only; the showcase maps
+// hardcode their SINGLE_ELEMENT_CLUSTER_* populations, so their
+// tileCluster rows below are unread).  Replaces
 // the legacy ASTEROID_GENERATION_CONFIG + NEBULA_CONSTANTS.CLUSTER_*
-// fields, both deleted in Stage 7.
+// fields, both deleted in the shard-system overhaul.
 
 export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
   // Overworld (wave-free home map, 12k) — standard mixed terrain, read

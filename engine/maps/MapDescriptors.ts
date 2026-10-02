@@ -26,7 +26,7 @@ import { MapType } from '../../types';
  *
  * `kind` and `wavesEnabled` are separate on purpose: "is the home hub"
  * and "runs waves" are the same answer today, but the showcase maps are
- * arenas nobody portals into, and the hub lookup wants `kind` alone.
+ * test arenas outside the run's loop, and the hub lookup wants `kind` alone.
  */
 
 export type MapKind = 'hub' | 'arena';
@@ -58,7 +58,9 @@ export const MAP_DESCRIPTORS: readonly MapDescriptor[] = [
   { id: 'arena_seven_rings',    name: 'Seven Rings',    mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true },
   { id: 'arena_pocket',         name: 'Pocket',         mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true },
 
-  // Single-element showcase maps — menu-only (no portals, unchanged).
+  // Showcase / test maps — reached from the debug panel's map picker, and six
+  // of them (all but Indestructible and Tile Heavy) from the hub's TEST RACK
+  // (HUB_TEST_PORTAL_SITES); every one carries a return rift home.
   // Registered so `wavesEnabled` has ONE source of truth for every map.
   { id: 'field_asteroid',       name: 'Asteroid Field', mapType: MapType.ASTEROID_FIELD,       kind: 'arena', wavesEnabled: true },
   { id: 'field_glass',          name: 'Glass Field',    mapType: MapType.GLASS_FIELD,          kind: 'arena', wavesEnabled: true },
@@ -81,7 +83,8 @@ export function mapDescriptor(id: string | undefined): MapDescriptor | undefined
 }
 
 /** Reverse lookup for the MapType-keyed call sites that still exist
- *  (the engine's `wavesEnabled` getter, the menu's map grid). */
+ *  (the engine's `wavesEnabled` getter, and `transitionToMap` naming the
+ *  map it is leaving). */
 export function descriptorForMapType(type: MapType | undefined): MapDescriptor | undefined {
   return type === undefined ? undefined : BY_MAP_TYPE.get(type);
 }

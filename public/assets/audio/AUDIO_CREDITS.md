@@ -21,9 +21,10 @@
 - License terms: https://creativecommons.org/licenses/by/3.0/
 - File: `fly-battle.mp3`, transcoded from the published `Fly.mp3` to a 192 kbps
   MP3 runtime encode; no musical edits.
-- Runtime looping and gain fades only. No endorsement by the author is implied.
-- Used as the battle layer while hostile enemies are present; attribution and
-  license links are visible in the game's audio settings.
+- Runtime playback and gain fades only. No endorsement by the author is implied.
+- One of the three rotating battle-playlist tracks, heard while hostiles are
+  near the player; attribution and license links are visible in the game's
+  audio settings.
 
 **Tracers** — **Sygil**
 

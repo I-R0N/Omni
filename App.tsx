@@ -77,7 +77,7 @@ const App: React.FC = () => {
 
     // Debug handle.  The game already ships a full in-game debug menu (the DBG
     // button, on every screen), so the engine is deliberately reachable from the console
-    // too: it is what the headless smoke scripts drive, and it costs one
+    // too: it is what the Playwright suites in tests/ drive, and it costs one
     // assignment.  Read/poke at your own risk — nothing in the game reads it.
     (window as any).__omniEngine = engine;
 
@@ -97,12 +97,11 @@ const App: React.FC = () => {
     // handler that catches its expand tap, a loadout strip that leaves the
     // viewport — none of those throw, none of them log, and none of them are
     // visible at the one viewport the suites used to run at.  Exposing the
-    // three functions lets the viewport matrix pin them at every width without
+    // layout functions lets the viewport matrix pin them at every width without
     // sampling pixels off a starfield.  Nothing in the game reads this.
-    // `detectionAlpha` (A4) joins them on identical terms: the Scanner's
-    // extended enemy range is a FADE ramp that exists only as a globalAlpha
-    // inside the draw, so a tier that reveals nothing — or reveals at the
-    // wrong mark — is silent.
+    // `detectionAlpha` joins them on identical terms: a scan mark's freshness
+    // fade exists only as a globalAlpha inside the draw, so marks that never
+    // fade — or vanish the instant they appear — are silent.
     (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect, detectionAlpha };
     // Debug handle #4: the menu driver's geometric step rule, so a suite can
     // pin it against a synthetic layout instead of against whatever the menu
@@ -140,7 +139,7 @@ const App: React.FC = () => {
       breakYieldsNothing, SHARD_VARIANTS,
     };
 
-    // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
+    // Debug handle #10 — the ship tilt-sheet grid.  Same terms as the two
     // above: `enumerateCells` / `resolveTiltCell` / `cellMatrix` are pure,
     // and they are wrong in a way nothing reports — a cell order that
     // disagrees with the authoring guide, or a mirror that folds the wrong
@@ -177,6 +176,15 @@ const App: React.FC = () => {
       nebulaTileCost, nebulaMergeLoss,
     };
 
+    // Debug handle #12 — the PURE half of the energy-module pipeline (material
+    // table, heat arithmetic, chain planner, fracture profiles, the legacy
+    // weapon map) plus the composed weapon table.  Same terms as the handles
+    // around it: every one of these can be wrong with no symptom — a chain
+    // cap that stopped holding still draws arcs, a thermal glass profile
+    // that equals the mechanical one still shatters.  Nothing in the game
+    // reads it.
+    (window as any).__omniEnergy = { ...Energy, WEAPONS, weaponConfig, nominalDps, LEGACY_BASE_WEAPON };
+
     // Debug handle #9 — the MASS SCALE, on the __omniHid terms and with the
     // sharpest motive of the set.  Under the energy model a body's mass is
     // half of what its every impact SPENDS, so the masses authored across
@@ -189,14 +197,6 @@ const App: React.FC = () => {
     // `perf/impact-audit.mjs` §7 does with this.  Exposed as the TABLES
     // rather than as computed numbers so the audit cannot drift from what
     // the sim reads.  Nothing in the game reads this handle.
-    // __omniEnergy: the PURE half of the energy-module pipeline (material
-    // table, heat arithmetic, chain planner, fracture profiles, the legacy
-    // weapon map) plus the composed weapon table.  Same terms as the handles
-    // around it: every one of these can be wrong with no symptom — a chain
-    // cap that stopped holding still draws arcs, a thermal glass profile
-    // that equals the mechanical one still shatters.  Nothing in the game
-    // reads it.
-    (window as any).__omniEnergy = { ...Energy, WEAPONS, weaponConfig, nominalDps, LEGACY_BASE_WEAPON };
     (window as any).__omniMass = {
       ENEMY_VARIANTS, WEAPONS, WEAPON_LIST, SHARD_VARIANTS,
       projectileMassFor, PHYSICS_CONSTANTS,
@@ -207,8 +207,9 @@ const App: React.FC = () => {
       IMPACT_DENSITY, massFor, hullDensity, MASS_SCALE, scaledMass,
       // The three shapes mass takes (see tests/mass.spec.ts): the energy
       // conversion it is measured against, and the absolute thresholds it
-      // is compared to.  Both must carry MASS_SCALE, and both are wrong
-      // with no symptom if they stop.
+      // is compared to.  Neither carries MASS_SCALE — that is what makes
+      // every impact ten times harder, and a compensation in either is
+      // wrong with no symptom.
       IMPACT_ENERGY_PER_DAMAGE, STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
       PROJECTILE_CONSTANTS, HIT_FEEDBACK,
       // The BANK re-base and the DERIVED blast, on the same terms as the rest
@@ -226,7 +227,7 @@ const App: React.FC = () => {
       blastDamageFor, BLAST_ENERGY_COUPLING,
     };
 
-    // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
+    // Debug handle #11 — the bonded-pair blend geometry, on the __omniHid
     // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
     // REPORTS.  Every failure mode of a metaball connector is silent — a
     // degenerate pair traces no path, an out-of-domain acos yields NaN
@@ -362,7 +363,9 @@ const App: React.FC = () => {
       e.audio.toggleMute();
   };
 
-  // Synth drafts on/off — the audition switch for recorded takes.
+  // Synth drafts on/off — the audition switch for recorded takes.  UNUSED
+  // since the pause menu's WAV-only button was removed: UIOverlay accepts
+  // `onToggleDrafts` and nothing in it calls it.
   const handleToggleDrafts = () => {
       const e = engineRef.current;
       if (!e) return;

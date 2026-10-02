@@ -1,22 +1,23 @@
 # Legacy recovery sound assets
 
-The primary soundtrack now lives in `../audio/`: 304 sample-based takes and
-a ten-minute background score. See `../audio/AUDIO_CREDITS.md` and
-`docs/CINEMATIC_AUDIO.md`. These WAVs and synthesis are recovery sources only.
-The remaining notes describe the earlier pass.
+The primary soundtrack now lives in `../audio/`: 304 sample-based takes, a
+ten-minute ambient bed and a three-track battle playlist. See
+`../audio/AUDIO_CREDITS.md` and `docs/CINEMATIC_AUDIO.md`. These WAVs and
+synthesis are recovery sources only. The remaining notes describe the earlier
+pass.
 
 66 mono, 44.1 kHz, 16-bit PCM WAV takes cover 22 event IDs. Files use the
 registered ID with dots replaced by dashes and a variant suffix. Longest-ID
 matching prevents a generic ID from claiming a more specific sound's files.
 
-Existing WAVs take precedence over production recipes. IDs without files use
-three cached renders of `SfxRegistry.ts` + `SfxVoicing.ts`. These are the shipped
-procedural sound design, not placeholder files. Sustained sounds remain live
-synthesis to follow throttle, charging and proximity. Decoding/compilation is
-asynchronous; immediate recipes cover startup or asset failure.
-
-The standalone inliner includes WAV data URIs; the same decoder and mixer
-serve the web build and standalone. No remote audio services are required.
+These WAVs are the SECOND tier, the first fallback under the banks. A WAV is
+fetched only for an ID that no decoded bank covers, which today is none of
+them. Below the WAVs, the `SfxRegistry.ts` + `SfxVoicing.ts` recipes remain
+the last resort, as three cached renders per one-shot or live synthesis.
+Files named after a loop ID are refused: loops take their recorded texture
+from the banks alone. The standalone inliner bakes these files in as
+`window.__omniSfxInline`, so the same decoder and mixer serve the web build
+and standalone. No remote audio services are required.
 
 ## September 2026 mastering pass
 
@@ -29,20 +30,25 @@ serve the web build and standalone. No remote audio services are required.
 
 No third-party sounds were added. New synthesis is authored in repository
 source. Existing assets retain their existing provenance/licensing; this pass
-makes no new licensing claim about those inherited files. See
-`docs/AUDIO_POLISH.md` for scope, event coverage and validation limits.
+makes no new licensing claim about those inherited files. The pass's audit
+notes are in git history; `docs/CINEMATIC_AUDIO.md` describes the current mix,
+lifecycle and validation.
 
 ## Reproduce and validate
 
-Build and serve a preview on `127.0.0.1:4173`, then run:
+Build and serve a preview on `127.0.0.1:4173`, run the repair, then stop the
+preview before testing: the suite rebuilds and serves its own preview on that
+same port, so it tests the repaired files.
 
 ```sh
 node scripts/master-audio.mjs
-# Rebuild the preview to include repaired files before the checks below.
-node scripts/smoke/assets.mjs
-node scripts/smoke/tone.mjs
-npx playwright test tests/audio.spec.ts
+# stop the preview, then:
+npm run test:audio
 ```
+
+`tests/audio.spec.ts` checks that every file here matches a registered ID. It
+does not measure the WAVs themselves: they are fetched only when a bank fails,
+and the asset smoke that did measure them was retired with `scripts/smoke/`.
 
 `master-audio.mjs` regenerates only the six named impact files and shortens
 only the six named heavy tails. Do not run the generic 250 ms prep tool over

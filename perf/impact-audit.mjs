@@ -3,8 +3,11 @@
  *
  *  Establishes what a shipped weapon's authored `damage` is WORTH in energy
  *  and momentum terms against each material's DERIVED HP, and what the crash
- *  gates correspond to in those same units — so any future conversion
- *  constant can be FITTED to the game that exists rather than chosen.
+ *  gates correspond to in those same units.  It was written to ask whether
+ *  one conversion constant could fit the game that existed; step 3 answered
+ *  by freeing projectile mass and fixing `IMPACT_ENERGY_PER_DAMAGE` at 32.
+ *  It stays as the read-out later steps re-run: ram counts (§5 / §5b), the
+ *  mass scale (§7), penetration and the blast (§8).
  *
  *  Everything here is measured through the REAL engine in a REAL browser via
  *  `window.__omniEngine` / `window.__omniGrain` (CLAUDE.md §8), on the
@@ -60,8 +63,9 @@ const materials = [];
 for (const m of MATERIALS) {
   await page.evaluate(mapType => {
     const e = window.__omniEngine;
-    // setMapType is honoured only from the MAIN MENU, so come back to it
-    // between materials rather than switching mid-run.
+    // Back through the MAIN MENU between materials, so each map starts a
+    // fresh run.  (A mid-run setMapType is a switch-and-play that resets the
+    // run too; going via the menu just keeps the order explicit.)
     e.restartGame();
     e.setMapType(mapType);
     e.startGame();
@@ -110,8 +114,7 @@ for (const m of MATERIALS) {
     let killed = 0;
     for (const b of ents.slice()) {
       if (killed >= 24) break;
-      if (b.active && b.shardVariant === tileV && b.mass === Infinity && (b.health ?? 0) > 0
-          && !tiles.some(t => false)) {
+      if (b.active && b.shardVariant === tileV && b.mass === Infinity && (b.health ?? 0) > 0) {
         b.health = 0;
         b.lastImpactVelocity = { x: 4, y: 0 };
         b.lastImpactDamage = 3;
@@ -141,15 +144,20 @@ const weapons = await page.evaluate(() => {
   e.startGame();
   const p = e.player;
   const out = [];
-  const list = e.stats && e.stats.weaponCatalog ? null : null;
-  const TYPES = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
-  for (const t of TYPES) {
-    const cfg = e.weapons.getConfig(t);
+  // The energy-module rounds (CLAUDE.md §5 WEAPONS), labelled by name.  The
+  // first five carry the retired guns' tunings (Blaster → Projector, Burst →
+  // Slug, Shotgun, Lightning → Arc Bolt, Homing → Seeker); the old Laser
+  // became the thermal BEAM, which fires no round and so has no bank to read.
+  const TYPES = [['PROJECTOR', 'projectile'], ['SLUG', 'projectile+kinetic'],
+    ['SHOTGUN', 'spread+kinetic'], ['ARC BOLT', 'projectile+electric'],
+    ['SEEKER', 'homing+kinetic'], ['HEAVY SHELL', 'cannon+kinetic'], ['CANNON', 'cannon']];
+  for (const [t, key] of TYPES) {
+    const cfg = e.weapons.getConfig(key);
     // Spawn a LIVE shot from a stationary player and read the projectile the
     // real spawn path produced — mass and muzzle speed are the numbers the
     // sim actually flies, not the table's intent.
     p.velocity.x = 0; p.velocity.y = 0;
-    p.currentWeapon = t;
+    p.currentWeapon = key;
     p.weaponCooldown = 0;
     const before = new Set(e.currentMap.entities.map(x => x.id));
     e.weapons.firePlayerWeapon(e.currentMap.entities, p,
@@ -233,14 +241,13 @@ const crashes = await page.evaluate(() => {
 });
 
 // ── 5. How many crashes a tile takes — virgin vs already shot ──────────────
-// The crash paths decrement `health` DIRECTLY, while a weapon hit converts
-// the body onto the DERIVED boundary budget.  So the same crash is worth a
-// wildly different fraction of a tile depending on whether that tile has ever
-// been shot.  Driven through the REAL player-crash branch of
-// `PhysicsSystem.resolveCollision`.
+// Since step 2 a crash spends on the same derived boundaries a shot does, and
+// since step 4 it spends kinetic energy (`crashDamageFor`), so VIRGIN and
+// ONCE-SHOT should read the same count, give or take the bolt's own bite.
+// This section is that regression pin.  Driven through the REAL player-crash
+// branch of `PhysicsSystem.resolveCollision`.
 const crashCounts = [];
 for (const m of MATERIALS) {
-  if (m.map === 'ROCK_FIELD') { /* rock tiles exist only here */ }
   await page.evaluate(mapType => {
     const e = window.__omniEngine;
     e.restartGame(); e.setMapType(mapType); e.startGame();
@@ -268,7 +275,8 @@ for (const m of MATERIALS) {
       const p = e.player;
       p.position.x = t.position.x - t.size.x; p.position.y = t.position.y;
       if (preShoot) {
-        // One ordinary Blaster bolt: enough to build the boundary model.
+        // One ordinary bolt (the retired Blaster's 4): enough to build the
+        // boundary model.
         P.resolveCollision({
           id: 'audit_bolt', type: 'PROJECTILE',
           position: { x: t.position.x - t.size.x * 0.5 - 2, y: t.position.y },
@@ -291,11 +299,9 @@ for (const m of MATERIALS) {
     // virgin-vs-once-shot claim (step 2) is pinned against a stable number.
     const a = pick(authoredTiers[0]); const virgin = a ? crashTo(a, false) : null;
     const b = pick(authoredTiers[0]); const shot   = b ? crashTo(b, true)  : null;
-    // Every tier, so the spread the AUTHORED-HP conversion introduces is
-    // visible rather than sampled.  A crash spends one authored HP, so a
-    // material whose authored HP is tiered has a ram count that is tiered
-    // too — while its derived HP, which is what the grain model calls
-    // toughness, does not move at all.
+    // Every tier, so a spread would be visible rather than sampled.  Since
+    // step 4 a crash never reads authored HP, so every tier of one material
+    // should take the same count — 5b is the column that proves it flat.
     const tiers = [];
     for (const au of authoredTiers) {
       const t = pick(au);
@@ -327,8 +333,11 @@ const scale = await page.evaluate(() => {
     // it, which derive or route through the seam already, read right.
     push('enemy', k.toLowerCase(), v.size, C.scaledMass(v.mass));
 
-  for (const w of C.WEAPON_LIST) {
+  // Every weapon key that fires a ROUND: a beam and an instant cone (the
+  // electric spread) carry no projectile mass to report.
+  for (const w of Object.keys(C.WEAPONS)) {
     const cfg = C.WEAPONS[w];
+    if (cfg.delivery === 'beam' || cfg.coneHalfDeg !== undefined) continue;
     push('projectile', String(w).toLowerCase(),
          cfg.size ?? 6, C.projectileMassFor(cfg));
   }
@@ -351,7 +360,13 @@ const pen = await page.evaluate(() => {
   e.restartGame(); e.setMapType('POCKET'); e.startGame();
   const p = e.player;
   const ctx = e.waveContext();
-  const TYPES = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
+  // The energy-module rounds (CLAUDE.md §5 WEAPONS), labelled by name.  The
+  // first five carry the retired guns' tunings (Blaster → Projector, Burst →
+  // Slug, Shotgun, Lightning → Arc Bolt, Homing → Seeker); the old Laser
+  // became the thermal BEAM, which fires no round and so has no bank to read.
+  const TYPES = [['PROJECTOR', 'projectile'], ['SLUG', 'projectile+kinetic'],
+    ['SHOTGUN', 'spread+kinetic'], ['ARC BOLT', 'projectile+electric'],
+    ['SEEKER', 'homing+kinetic'], ['HEAVY SHELL', 'cannon+kinetic'], ['CANNON', 'cannon']];
 
   /** Fire ONE real shot from a stationary player and hand back the live
    *  projectile — mass and muzzle speed are the numbers the sim flies. */
@@ -402,11 +417,12 @@ const pen = await page.evaluate(() => {
   out.mk3Frac = 0.36;
   const g3 = 1 + 3 * out.mk3Frac;
   out.g3 = g3;
+  out.trim = window.__omniMass.BASE_BANK_TRIM;
 
   // ACTOR penetration, at base and at three Gunnery Mk III.
   for (const mult of [1, g3]) {
-    for (const t of TYPES) {
-      const shot = shotOf(t, mult);
+    for (const [t, key] of TYPES) {
+      const shot = shotOf(key, mult);
       out.rows.push({
         type: t, mult,
         mass: shot ? shot.mass : null,
@@ -415,7 +431,11 @@ const pen = await page.evaluate(() => {
     }
   }
 
-  // THE BLAST, ISOLATED — and its THREE TRIGGERS.
+  // THE BLAST, ISOLATED — and its THREE TRIGGERS.  Fired from the HEAVY
+  // SHELL (cannon + kinetic), which carries the old Plasma Cannon shell's
+  // rules: an actor, the fuse or a stop sets it off.  The BARE cannon is
+  // fuse-only (`detonateOn: 'fuse'`), so it would read 0 on contact and
+  // measure its fuse in place of a stop.
   //
   // A DIRECT hit at a known point rather than the fuse: the fuse detonates
   // ~450 units downrange after a flight the shot's own spread randomises.
@@ -446,8 +466,8 @@ const pen = await page.evaluate(() => {
     // (1) ACTOR CONTACT.
     const direct = mk(400, 0);
     const bystander = mk(400, OFF);
-    const shot = shotOf('CANNON', 1);
-    const cfg = e.weapons.getConfig('CANNON');
+    const shot = shotOf('cannon+kinetic', 1);
+    const cfg = e.weapons.getConfig('cannon+kinetic');
     const shotMass = shot ? shot.mass : null;
     const shotBlast = shot ? shot.explosionDamage : null;
     if (shot) {
@@ -477,7 +497,7 @@ const pen = await page.evaluate(() => {
         && x.shardVariant && x.shardVariant !== 'nebula-tile');
       if (tile) {
         const witness = mkAt(tile.position.x, tile.position.y + OFF);
-        const sh = shotOf('CANNON', 1);
+        const sh = shotOf('cannon+kinetic', 1);
         if (sh) {
           // Park it beside the tile with a bank far below one grain, so the
           // contact the real step finds is a STOP rather than a bore — which
@@ -588,8 +608,8 @@ console.log('\n=== 3b. THE LIVE MOBILE-SHARD POPULATION (who actually meets the 
 console.log('\n=== 4. THE IMPLIED CONVERSION ===\n');
 const byMat = Object.fromEntries(materials.map(m => [m.mat, summarise(m.tiles.map(r => r.derived))]));
 console.log('Energy that must be paid per derived HP, if a weapon\'s KE were the currency:');
-console.log('material   derived HP (tile)   Blaster KE/dmg   hits to break   player-crash KE at gate   KE per HP');
-const blaster = weapons.find(w => w.type === 'BLASTER');
+console.log('material   derived HP (tile)   Projector KE/dmg hits to break   player-crash KE at gate   KE per HP');
+const blaster = weapons.find(w => w.type === 'PROJECTOR');
 const bKe = 0.5 * blaster.mass * blaster.speed * blaster.speed;
 const crashGate = crashes.rows.find(r => r.at === 'gate (4)');
 for (const m of materials) {
@@ -602,9 +622,9 @@ for (const m of materials) {
 
 console.log('\nWhat each crash gate BUYS, converted at each weapon\'s own rate:');
 console.log('                                               KE currency                    momentum currency');
-console.log('gate                                          KE  ×Blaster  ×Cannon        p  ×Blaster  ×Cannon');
+console.log('gate                                          KE  ×Project ×HvShell        p  ×Project ×HvShell');
 {
-  const cannon = weapons.find(w => w.type === 'CANNON');
+  const cannon = weapons.find(w => w.type === 'HEAVY SHELL');
   const cKe = 0.5 * cannon.mass * cannon.speed * cannon.speed;
   const bP = blaster.mass * blaster.speed, cP = cannon.mass * cannon.speed;
   for (const r of crashes.rows) {
@@ -613,8 +633,8 @@ console.log('gate                                          KE  ×Blaster  ×Cann
       + `${f(r.ke/(cKe/cannon.damage),1).padStart(8)}   ${f(r.p,0).padStart(6)}  `
       + `${f(r.p/(bP/blaster.damage),1).padStart(8)} ${f(r.p/(cP/cannon.damage),1).padStart(8)}`);
   }
-  console.log('\n(“×Blaster” = the damage this crash would deal if the Blaster\'s own KE-per-damage');
-  console.log(' (or momentum-per-damage) were the conversion constant; “×Cannon” likewise.)');
+  console.log('\n(“×Project” = the damage this crash would deal if the Projector\'s own KE-per-damage');
+  console.log(' (or momentum-per-damage) were the conversion constant; “×HvShell”, the Heavy Shell, likewise.)');
   const kes = weapons.map(w => 0.5 * w.mass * w.speed * w.speed / w.damage);
   const ps  = weapons.map(w => w.mass * w.speed / w.damage);
   console.log(`\nROSTER SPREAD of the implied constant:  KE/damage ${f(Math.min(...kes),1)}..${f(Math.max(...kes),1)} `
@@ -624,7 +644,7 @@ console.log('gate                                          KE  ×Blaster  ×Cann
 
 console.log('\n=== 5. CRASHES TO BREAK A TILE — VIRGIN vs ALREADY SHOT ===\n');
 console.log('(player crash at 6 u/step, 1.5× the CRASH_VELOCITY_THRESHOLD gate)\n');
-console.log('material   virgin: hp/max  crashes      after one Blaster bolt: hp/max  crashes');
+console.log('material   virgin: hp/max  crashes      after one 4-damage bolt: hp/max crashes');
 for (const c of crashCounts) {
   if (!c.virgin || !c.shot) { console.log(`${c.mat.padEnd(10)} (not sampled)`); continue; }
   console.log(
@@ -673,8 +693,8 @@ console.log('\n=== 6. HOW FAR APART THE TWO SIDES ARE ===\n');
   console.log(`\n  WEAPON side, KE per point of damage (= per derived HP, damage is spent 1:1`);
   console.log(`               on boundaries):        ${f(Math.min(...kes),1)} .. ${f(Math.max(...kes),1)}  (${f(Math.max(...kes)/Math.min(...kes),1)}× spread)`);
   console.log(`  CRASH side, virgin tile, KE per derived HP:  ${f(Math.min(...virginK),0)} .. ${f(Math.max(...virginK),0)}  (${f(Math.max(...virginK)/Math.min(...virginK),1)}× spread)`);
-  console.log(`  CRASH side, once shot:  a crash spends exactly 1 HP whatever it brings,`);
-  console.log(`               so the constant is ${f(crashKe,0)} KE per HP for EVERY material.`);
+  console.log(`  CRASH side, once shot:  the same as virgin since step 4 — a crash spends`);
+  console.log(`               kinetic energy (crashDamageFor), so the rows above should agree.`);
 }
 console.log('');
 
@@ -715,8 +735,9 @@ console.log('\n=== 8. PENETRATION AND THE BLAST (fired, not derived) ===\n');
 {
   console.log(`  Gunnery Mk III damageFrac ${f(pen.mk3Frac, 3)} -> three of them = x${f(pen.g3, 3)}`);
   console.log('  A bolt is charged only what a body could ABSORB, so 1-HP gnats measure the');
-  console.log('  BANK directly: each costs one damage however big the bite is.  The base');
-  console.log('  round is sized so three Gunnery Mk III put it back where it was.\n');
+  console.log('  BANK directly: each costs one damage however big the bite is.  Three');
+  console.log(`  Gunnery Mk III multiply the base bank by x${f(pen.g3, 2)}; since BASE_BANK_TRIM`);
+  console.log(`  they land at ${f(pen.trim, 2)} of the pre-rebase round, not back on it.\n`);
   console.log('weapon          base   3x Mk III    ratio     base mass');
   const mults = [...new Set(pen.rows.map(r => r.mult))];
   const at = (t, m) => pen.rows.find(x => x.type === t && x.mult === m);
@@ -727,7 +748,7 @@ console.log('\n=== 8. PENETRATION AND THE BLAST (fired, not derived) ===\n');
   }
   const b = pen.blast;
   if (b) {
-    console.log('\n  THE BLAST — direct hit; what a BYSTANDER in the radius loses:');
+    console.log('\n  THE BLAST (the Heavy Shell, cannon + kinetic) — direct hit; what a BYSTANDER in the radius loses:');
     console.log(`    shell mass ${f(b.shotMass, 2)}   muzzle ${f(b.muzzleSpeed, 1)} u/step   radius ${f(b.radius, 0)}`);
     console.log(`    explosionDamage authored in the config   ${b.authoredInConfig === null ? 'none — DERIVED' : f(b.authoredInConfig, 2)}`);
     console.log(`    explosionDamage the shell actually flew  ${f(b.shotBlast, 2)}`);

@@ -359,7 +359,7 @@ test.describe('joystick — a floating left-thumb stick', () => {
         btnY: btn.y,
         // The minimap owns the bottom-left corner, so the mirrored button
         // must sit clear of it rather than on top of the map toggle.
-        minimapTop: h - 75 - 14,
+        minimapTop: (window as any).__omniHud.computeMinimapRect(h, false).y,
       };
     });
 
@@ -534,8 +534,9 @@ test.describe('left stick and D-pad — thrust', () => {
       return { x: e.player.position.x, y: e.player.position.y };
     });
 
-    // The engine re-polls the real (absent) pad every frame, which would zero
-    // the stick between our injections — so re-inject as we go.
+    // Nothing in a headless run overwrites the injected stick (no pad is
+    // adopted, so `pollGamepad` returns before `applyPadSnapshot`);
+    // re-injecting each step just keeps the claim independent of that.
     for (let i = 0; i < 40; i++) {
       await feed(page, [pad({ lx: 1, ly: 0 })]);
       await engine(page, e => { e.updateGameLogic(1 / 120); });
@@ -694,7 +695,7 @@ test.describe('fire — on the PRESS for a device control', () => {
     watch.assertClean();
   });
 
-  test('a half-pulled trigger holds fire until the profile\'s break point', async ({ page }) => {
+  test('a half-pulled trigger holds fire until the profile\'s fire point', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -725,11 +726,11 @@ test.describe('fire — on the PRESS for a device control', () => {
       full: pad({ analog: { 7: 1 } }),
     });
 
-    // The starting Blaster is a RATTLE, not a click — it has no break, so
+    // The starting Projector is a RATTLE, not a click — it has no break, so
     // the fire point is where its buzz starts (0.30), inside the clamp band.
     expect(r.firePoint).toBeCloseTo(0.30, 5);
-    // And the shape's moment differs by shape, which is the point of the
-    // switch: a slope fires at the TOP of its ramp, not the bottom.
+    // Below the fire point nothing fires, even though `pressed` is already
+    // true at 0.05; past it, exactly one shot.
     expect(r.onCreep).toBe(0);
     expect(r.onPartial).toBe(0);
     expect(r.onFull).toBe(1);
@@ -738,7 +739,7 @@ test.describe('fire — on the PRESS for a device control', () => {
   });
 
   test('the fire point is CLAMPED, so no profile can strand the shot', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
     await startRun(page);
 
     // A deep profile must still be reachable on a pad with NO adaptive
@@ -772,6 +773,8 @@ test.describe('fire — on the PRESS for a device control', () => {
     expect(r.notched).toBeCloseTo(4 / 9, 5);
     // No gun, no profile: the plain threshold.
     expect(r.none).toBeCloseTo(0.35, 5);
+
+    watch.assertClean();
   });
 
   test('the aim moving during a hold does NOT cancel the shot', async ({ page }) => {
@@ -794,8 +797,8 @@ test.describe('fire — on the PRESS for a device control', () => {
     const watch = await boot(page);
     await startRun(page);
     // fireEnabled=false is what the engine passes while docked / paused /
-    // stage-clear / dead.  The press must not queue a shot that lands the
-    // instant the world resumes.
+    // stage-clear / dead, or while the debug panel has the pad.  The press
+    // must not queue a shot that lands the instant the world resumes.
     const r = await feedThen(page, [pad({ down: [BTN.R2] }), pad()], e => ({
       taps: e.input.getDeviceFireEvents().length,
       charged: e.input.getDeviceChargeEvents().length,
@@ -827,7 +830,6 @@ test.describe('fire — on the PRESS for a device control', () => {
 
     await feed(page, [pad()]);
     expect(await engine(page, e => e.input.getMouseHoldDuration())).toBe(0);
-    await engine(page, e => { e.input.getFireEvents(); e.input.getChargeReleaseEvents(); });
 
     watch.assertClean();
   });
@@ -981,6 +983,8 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
     await touch(page, 'touchstart', [{ id: 40, ...spot }]);
     const standardMove = await engine(page, e => e.input.getMovementVector());
     expect(Math.hypot(standardMove.x, standardMove.y)).toBeGreaterThan(0.2);
+    expect(standardMove.x, 'toward the touch: left of centre').toBeLessThan(0);
+    expect(standardMove.y, 'and below it').toBeGreaterThan(0);
     expect(await engine(page, e => e.input.getJoystickState())).toBeNull();
     await touch(page, 'touchend', [{ id: 40, ...spot }]);
 
@@ -1007,6 +1011,16 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
     const spot = await engine(page, () => ({
       x: Math.round(window.innerWidth * 0.8), y: Math.round(window.innerHeight * 0.3),
     }));
+
+    // The CONTROL: under `touch` the same mouse press DOES steer, so the zeros
+    // below are the scheme's doing and not a press that never reached the
+    // input layer.  Dialled explicitly rather than read off the default.
+    await engine(page, e => e.setControlScheme('touch'));
+    await page.mouse.move(spot.x, spot.y);
+    await page.mouse.down();
+    const controlMove = await engine(page, e => e.input.getMovementVector());
+    await page.mouse.up();
+    expect(Math.hypot(controlMove.x, controlMove.y), 'touch: the mouse steers').toBeGreaterThan(0.2);
 
     for (const scheme of ['keyboard', 'gamepad'] as const) {
       await engine(page, (e, sc: string) => e.setControlScheme(sc), scheme);
@@ -1041,7 +1055,8 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
     const watch = await boot(page);
     await startRun(page);
 
-    for (const scheme of ['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad'] as const) {
+    for (const scheme of ['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad',
+      'gamepad-thrust', 'gamepad-left'] as const) {
       await engine(page, (e, sc: string) => e.setControlScheme(sc), scheme);
       await engine(page, e => e.input.keys.add('KeyD'));
       const v = await flyFor(page);
@@ -1119,11 +1134,9 @@ test.describe('control schemes — the touch models are mutually exclusive', () 
 
 test.describe('rumble — force feedback rides the screen shake', () => {
   // Mirrors INPUT_CONSTANTS.RUMBLE (harness rule 7).
-  const MIN_SHAKE = 1;
   const FULL_SHAKE = 20;
   const MIN_MAGNITUDE = 0.14;
   const MIN_INTERVAL_MS = 70;
-  const WEAPON_TICK = 2;
 
   test('every impact ticks, and the curve runs tick → thump', async ({ page }) => {
     const watch = await boot(page);
@@ -1137,7 +1150,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
       return {
         // MICRO (1) — a shard ping, the smallest thing the game emits.
         micro: at(1, 0),
-        // The plain Blaster's haptic-only tick.
+        // The plain Projector's haptic-only tick.
         weapon: at(2, 10_000),
         // A tier-1 kill.
         tierOneKill: at(3.5, 20_000),
@@ -1175,7 +1188,7 @@ test.describe('rumble — force feedback rides the screen shake', () => {
     watch.assertClean();
   });
 
-  test('the plain Blaster ticks the pad and shakes NO camera', async ({ page }) => {
+  test('the plain Projector ticks the pad and shakes NO camera', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
@@ -1248,6 +1261,8 @@ test.describe('rumble — force feedback rides the screen shake', () => {
     expect(r.strongerDuring).not.toBeNull();
     expect(r.immediatelyAfter).toBeNull();
     expect(r.wellAfter).not.toBeNull();
+
+    watch.assertClean();
   });
 
   test('an impact reaches the device, and an unsupported browser is asked once', async ({ page }) => {
@@ -1460,22 +1475,6 @@ test.describe('rumble — force feedback rides the screen shake', () => {
   });
 });
 
-/**
- * ADAPTIVE TRIGGERS — the DualSense output report (WebHID).
- *
- * These tests deliberately stop at the page boundary: no browser in CI has a
- * pad, and `navigator.hid` may not exist at all.  What they DO cover is the
- * half that can be silently wrong on real hardware with no symptom to read —
- * the pad discards a report with a bad CRC or a bad byte layout without
- * complaint, so a malformed report and an absent pad are indistinguishable by
- * feel.  The builders are pure, and CRC-32 has a published vector, so both
- * are pinnable here.
- *
- * The BYTE OFFSETS themselves come from public reverse-engineering and cannot
- * be verified without hardware — see engine/systems/DualSenseHID.ts.  These
- * tests pin the SHAPE (which bytes move, and to what) so a corrected offset
- * changes one table and one expectation rather than being unrecoverable.
- */
 test.describe('left-stick scheme — one thumb flies and aims', () => {
   /*  User call: a scheme where the LEFT stick (and the left D-pad) carries
    *  heading, aim AND throttle together, with the gun on the bottom face
@@ -1516,7 +1515,9 @@ test.describe('left-stick scheme — one thumb flies and aims', () => {
       halfLeft: pad({ lx: 0.5 }),
       fullLeft: pad({ lx: 1 }),
       dpadRight: pad({ down: [15] }),     // D-pad right
-      rightStickOnly: pad({ rx: 1 }),
+      // Pushed LEFT, against the right-pointing aim the D-pad just left: a
+      // right stick that still aimed would swing the pointer across centre.
+      rightStickOnly: pad({ rx: -1 }),
     });
 
     // THROTTLE is the stick's own magnitude, exactly as under `gamepad` —
@@ -1541,6 +1542,7 @@ test.describe('left-stick scheme — one thumb flies and aims', () => {
     // two thumbs cannot fight over the reticle.
     expect(Math.hypot(r.rightOnly.move.x, r.rightOnly.move.y), 'right stick does not fly')
       .toBe(0);
+    expect(r.rightOnly.aimX, 'nor does it aim').toBe(1);
 
     watch.assertClean();
   });
@@ -1729,24 +1731,33 @@ test.describe('trigger thrust — the stick steers, the trigger throttles', () =
     const watch = await boot(page);
     await startRun(page);
 
-    const r = await engine(page, (e: any) => {
+    // Every scheme in CONTROL_SCHEMES except `gamepad-thrust`, written out
+    // (harness rule 7) so a new scheme is a visible edit here.
+    const released = ['touch', 'joystick-left', 'joystick-right', 'keyboard', 'gamepad', 'gamepad-left'];
+    const r = await engine(page, (e: any, schemes: string[]) => {
       const seen: any[] = [];
       e.input.setThrustTriggerProfile = (p: any) => { seen.push(p); };
       const last = () => seen[seen.length - 1];
 
-      e.setControlScheme('gamepad');
-      e.updateGameLogic(1 / 120);
-      const plain = last();
+      const kinds: Record<string, { kind: string; usesThrust: boolean }> = {};
+      for (const sc of schemes) {
+        e.setControlScheme(sc);
+        e.updateGameLogic(1 / 120);
+        kinds[sc] = { kind: last().kind, usesThrust: e.input.usesTriggerThrust() };
+      }
 
       e.setControlScheme('gamepad-thrust');
       e.updateGameLogic(1 / 120);
       const thrust = last();
 
-      return { plainKind: plain.kind, thrustKind: thrust.kind, usesThrust: e.input.usesTriggerThrust() };
-    });
+      return { kinds, thrustKind: thrust.kind, usesThrust: e.input.usesTriggerThrust() };
+    }, released);
 
     // A clutch on a control that does nothing is just a stiff trigger.
-    expect(r.plainKind).toBe('off');
+    for (const sc of released) {
+      expect(r.kinds[sc].usesThrust, `${sc}: the left trigger is not the throttle`).toBe(false);
+      expect(r.kinds[sc].kind, `${sc}: so it is released`).toBe('off');
+    }
     // And where it IS the throttle, it ramps with the ship's speed.
     expect(r.thrustKind).toBe('slope');
     expect(r.usesThrust).toBe(true);
@@ -1755,6 +1766,22 @@ test.describe('trigger thrust — the stick steers, the trigger throttles', () =
   });
 });
 
+/**
+ * ADAPTIVE TRIGGERS — the DualSense output report (WebHID).
+ *
+ * These tests deliberately stop at the page boundary: no browser in CI has a
+ * pad, and `navigator.hid` may not exist at all.  What they DO cover is the
+ * half that can be silently wrong on real hardware with no symptom to read —
+ * the pad discards a report with a bad CRC or a bad byte layout without
+ * complaint, so a malformed report and an absent pad are indistinguishable by
+ * feel.  The builders are pure, and CRC-32 has a published vector, so both
+ * are pinnable here.
+ *
+ * The report FRAME follows the Linux kernel's `dualsense_output_report_common`
+ * and the 'zones' encoding is confirmed on hardware (see
+ * engine/systems/DualSenseHID.ts).  What no headless run can check is the
+ * pad's answer, so these tests pin the SHAPE — which bytes move, and to what.
+ */
 test.describe('adaptive triggers — the DualSense output report', () => {
   test('CRC-32 matches the published check vector', async ({ page }) => {
     const watch = await boot(page);
@@ -1814,7 +1841,7 @@ test.describe('adaptive triggers — the DualSense output report', () => {
   });
 
   test('both wire encodings are reachable and produce different bytes', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
@@ -1844,6 +1871,8 @@ test.describe('adaptive triggers — the DualSense output report', () => {
 
     // The whole point of shipping both: they must actually differ on the wire.
     expect(r.weaponZones).not.toEqual(r.weaponSimple);
+
+    watch.assertClean();
   });
 
   test('the three richer shapes each pack their own zone table', async ({ page }) => {
@@ -1909,7 +1938,7 @@ test.describe('adaptive triggers — the DualSense output report', () => {
   });
 
   test('the simple encoding DEGRADES the rich shapes rather than dropping them', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
 
     // A firmware that only speaks 0x01/0x02 should still feel something per
     // weapon.  Silence would be indistinguishable from the bug this whole
@@ -1935,10 +1964,12 @@ test.describe('adaptive triggers — the DualSense output report', () => {
     expect(r.ramp[2]).toBe(255);
     // A texture starts where its first notch is, not at zone 0.
     expect(r.notches[1]).toBe(Math.round((2 / 9) * 255));
+
+    watch.assertClean();
   });
 
   test('an OFF profile clears all eleven bytes — releasing is an instruction', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
@@ -1956,10 +1987,12 @@ test.describe('adaptive triggers — the DualSense output report', () => {
     expect(r.right).toEqual(new Array(11).fill(0));
     expect(r.left).toEqual(new Array(11).fill(0));
     expect(r.flag0).toBe(0x04 | 0x08);
+
+    watch.assertClean();
   });
 
   test('the rumble self-test drives the motors and leaves the triggers alone', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
@@ -1979,10 +2012,12 @@ test.describe('adaptive triggers — the DualSense output report', () => {
     // The bisection only works if this report says nothing about the
     // triggers: otherwise a buzz would prove nothing about them either way.
     expect(r.triggersClear).toBe(true);
+
+    watch.assertClean();
   });
 
   test('USB sends the block bare; Bluetooth pads to full length and appends a CRC', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
 
     const r = await page.evaluate(() => {
       const hid = (window as any).__omniHid;
@@ -2031,6 +2066,8 @@ test.describe('adaptive triggers — the DualSense output report', () => {
     expect(r.seqByte).toBe(0x30);
     expect(r.tagByte).toBe(0x10);
     expect(r.crcMatches).toBe(true);
+
+    watch.assertClean();
   });
 
   test('the sync follows what the player is HOLDING — gun, charge, or nothing', async ({ page }) => {
@@ -2039,13 +2076,30 @@ test.describe('adaptive triggers — the DualSense output report', () => {
 
     // The profile is pushed unconditionally; whether it reaches a pad is the
     // HID layer's business, so this asserts on what InputSystem was TOLD.
-    const r = await engine(page, (e: any) => {
+    const r = await engine(page, (e: any, arg: any) => {
       const seen: any[] = [];
       e.input.setTriggerProfile = (p: any) => { seen.push(p); };
       const last = () => seen[seen.length - 1];
 
       e.updateGameLogic(1 / 120);
       const armed = last();
+
+      // CHARGING (Overcharge aboard): a pad hold fills the charge ring, and
+      // the trigger follows the ring rather than the gun.  The hold's start
+      // stamp is rewound instead of slept for — the window is wall clock —
+      // and both readings stay short of CHARGE_FULL, so the release owes
+      // nothing.
+      const overcharge = e.player.overchargeUnlocked;
+      e.player.overchargeUnlocked = true;
+      e.input.applyPadSnapshot(arg.press, true);
+      e.input.padFireStart = performance.now() - 200;
+      e.updateGameLogic(1 / 120);
+      const chargeEarly = last();
+      e.input.padFireStart = performance.now() - 800;
+      e.updateGameLogic(1 / 120);
+      const chargeLate = last();
+      e.input.applyPadSnapshot(arg.release, true);
+      e.player.overchargeUnlocked = overcharge;
 
       // EMP: the trigger goes slack, which is the disable made physical.
       // Applied as a real status effect, not by poking the flag —
@@ -2056,7 +2110,7 @@ test.describe('adaptive triggers — the DualSense output report', () => {
       const disabled = last();
       e.player.statusEffects = [];
 
-      // Weaponless flight is legal (the Blaster is removable) — nothing to
+      // Weaponless flight is legal (the Projector is removable) — nothing to
       // fire, nothing to resist.
       const weapon = e.player.currentWeapon;
       e.player.currentWeapon = undefined;
@@ -2066,14 +2120,22 @@ test.describe('adaptive triggers — the DualSense output report', () => {
 
       return {
         armedKind: armed.kind, armedStrength: armed.strength,
+        chargeEarly: { kind: chargeEarly.kind, endStrength: chargeEarly.endStrength },
+        chargeLate: { kind: chargeLate.kind, endStrength: chargeLate.endStrength },
         disabledKind: disabled.kind,
         weaponlessKind: weaponless.kind,
       };
-    });
+    }, { press: pad({ down: [BTN.R2] }), release: pad() });
 
-    // The starting Blaster: a low rattle, because a click 7x/s is fatigue.
+    // The starting Projector: a low rattle, because a click ~5.5x/s is fatigue.
     expect(r.armedKind).toBe('vibration');
     expect(r.armedStrength).toBeCloseTo(0.45, 5);
+    // A charge winding up replaces it with a RAMP that stiffens as the ring
+    // fills, so the charge is felt building rather than appearing as a wall.
+    expect(r.chargeEarly.kind, 'charging overrides the gun').toBe('slope');
+    expect(r.chargeLate.kind).toBe('slope');
+    expect(r.chargeLate.endStrength, 'and stiffens as the ring fills')
+      .toBeGreaterThan(r.chargeEarly.endStrength);
     expect(r.disabledKind).toBe('off');
     expect(r.weaponlessKind).toBe('off');
 
@@ -2081,47 +2143,51 @@ test.describe('adaptive triggers — the DualSense output report', () => {
   });
 
   test('an unsupported browser offers no control and reports why', async ({ page }) => {
+    // Headless Chromium DOES expose `navigator.hid` on the suite's 127.0.0.1
+    // origin, so the shape every mobile browser and Safari present has to be
+    // forced: there, the enhancement is invisible and inert, and nothing else
+    // about the input layer has changed.
+    await page.addInitScript(() => Object.defineProperty(
+      Navigator.prototype, 'hid', { configurable: true, get: () => undefined }));
     const watch = await boot(page);
-    await startRun(page);
 
-    // Headless Chromium exposes no `navigator.hid`, which is exactly the
-    // shape every mobile browser and Safari present — so the DEFAULT state
-    // here is the one that matters most: the enhancement is invisible and
-    // inert, and nothing else about the input layer has changed.
+    // MAIN MENU — the scheme picker is up, so a count of 0 means absent
+    // rather than not rendered yet.
+    await expect(page.getByTestId('scheme-picker')).toBeVisible();
+    await expect(page.getByTestId('adaptive-triggers-toggle')).toHaveCount(0);
+
+    await startRun(page);
     const r = await engine(page, (e: any) => ({
       supported: e.input.adaptiveTriggersSupported(),
       connected: e.input.adaptiveTriggersConnected(),
       info: e.input.adaptiveTriggerDebugInfo(),
     }));
-
+    expect(r.supported).toBe(false);
     expect(r.connected).toBe(false);
-    if (!r.supported) {
-      expect(r.info).toContain('unsupported');
-    } else {
-      // A browser that HAS WebHID still starts disconnected — nothing is
-      // opened without the player asking.
-      expect(r.info).toContain('not connected');
-    }
+    expect(r.info).toContain('unsupported');
 
-    // The control renders only where it can work.
+    // PAUSE MENU — the same: the control renders only where it can work.
     await engine(page, (e: any) => e.pauseGame());
     await expect(page.getByTestId('scheme-select')).toBeVisible();
-    await expect(page.getByTestId('adaptive-triggers-toggle'))
-      .toHaveCount(r.supported ? 1 : 0);
+    await expect(page.getByTestId('adaptive-triggers-toggle')).toHaveCount(0);
 
     watch.assertClean();
   });
 
   test('where WebHID EXISTS the control is in BOTH menus', async ({ page }) => {
-    // Headless Chromium has no `navigator.hid`, so the supported branch was
-    // never exercised — which is how the control could go missing from a menu
-    // without a single test noticing.  A stub is enough: the button only ever
-    // asks `isSupported()` before rendering, and what it calls on click is
-    // covered by the picker's own permission flow, not by this.
-    await page.addInitScript(() => {
-      (navigator as any).hid = { requestDevice: async () => [] };
-    });
+    // Headless Chromium exposes `navigator.hid` here, so the supported branch
+    // is the default.  The button only asks `isSupported()` before rendering;
+    // what it calls on click is the browser's device picker, which no
+    // headless run can drive.
     const watch = await boot(page);
+    const r = await engine(page, (e: any) => ({
+      supported: e.input.adaptiveTriggersSupported(),
+      info: e.input.adaptiveTriggerDebugInfo(),
+    }));
+    expect(r.supported, 'this browser exposes WebHID').toBe(true);
+    // A browser that HAS WebHID still starts disconnected — nothing is
+    // opened without the player asking.
+    expect(r.info).toContain('not connected');
 
     // MAIN MENU — where a player sets their hands up before playing.
     await expect(page.getByTestId('adaptive-triggers-toggle')).toHaveCount(1);
@@ -2185,9 +2251,10 @@ test.describe('menu navigation — the pad reaches every control', () => {
       expect(adopted.inOverlay).toBe(true);
       expect(adopted.tag).toBe('BUTTON');
 
-      // Walk to START and press Cross.  Driving the real buttons rather than
-      // asserting a focus index: the menu's contents are free to change, and
-      // a test that pinned "the fourth control" would break on a rename.
+      // Put focus on START directly (found by its text rather than by a focus
+      // index — the menu's contents are free to change, and a test that
+      // pinned "the fourth control" would break on a rename) and press Cross:
+      // CONFIRM clicks whatever has focus.
       await page.evaluate(() => {
         const start = Array.from(document.querySelectorAll('button'))
           .find(b => /start/i.test(b.textContent || ''));
@@ -2208,8 +2275,9 @@ test.describe('menu navigation — the pad reaches every control', () => {
     const watch = await boot(page);
     await startRun(page);
 
-    // Inert in flight: BACK must not do anything to a running game, or a
-    // stray thumb pauses the fight.
+    // Inert in flight: BACK must not pause a running game, or a stray thumb
+    // pauses the fight.  (Circle is also SCAN in flight — a no-op here only
+    // because the lean start carries no scanner.)
     await engine(page, (e: any) => {
       const pressed: boolean[] = new Array(17).fill(false);
       e.input.applyPadSnapshot({ axes: [0, 0, 0, 0], pressed, values: [] }, false);
@@ -2277,7 +2345,7 @@ test.describe('menu navigation — the pad reaches every control', () => {
   });
 
   test('geometry, not DOM order, decides where a direction goes', async ({ page }) => {
-    await boot(page);
+    const watch = await boot(page);
 
     // The panels are grids of hexes, rows of chips and columns of rows on one
     // screen; DOM order is the right answer for none of them.  Pinned against
@@ -2320,5 +2388,7 @@ test.describe('menu navigation — the pad reaches every control', () => {
     expect(r.leftOfBR).toBe('bl');
     expect(r.upOfBR).toBe('tr');
     expect(r.upOfTL).toBeNull();
+
+    watch.assertClean();
   });
 });

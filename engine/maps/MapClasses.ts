@@ -165,8 +165,8 @@ export abstract class BaseMapLayer {
 
   /**
    * The way home: one ALWAYS-ACTIVE return rift beside this arena's
-   * player spawn.  Called by the four portal-linked arena maps (the
-   * showcase field maps stay menu-only and carry no portals).  The
+   * player spawn.  Called by every map but the hub — the four
+   * portal-linked arenas and every showcase / test map.  The
    * offset lands inside the spawn safe zone those maps already clear,
    * so no extra terrain filtering is needed.
    */
@@ -822,10 +822,10 @@ abstract class SingleVariantTileFieldMap extends BaseMapLayer {
         return d2 > clearSq;
     });
  
-    // A way home.  These maps are reachable from the hub's TEST RACK now, and
-    // a destination you can enter but not leave is a trap rather than a test.
-    // Added AFTER the clearance filter, exactly as the wave arenas do it, or
-    // the rift would be swept up with the terrain.
+    // A way home.  Most of these maps are reachable from the hub's TEST
+    // RACK, and a destination you can enter but not leave is a trap rather
+    // than a test.  Added AFTER the clearance filter, exactly as the wave
+    // arenas do it, or the rift would be swept up with the terrain.
     this.addReturnPortal();
   }
 }
@@ -840,7 +840,8 @@ abstract class SingleVariantTileFieldMap extends BaseMapLayer {
 const SINGLE_ELEMENT_CLUSTER_COUNT = 100;
 const SINGLE_ELEMENT_CLUSTER_SIZE  = 12;
 
-/** Glass-only field — single-hit destructible tiles spread across the map. */
+/** Glass-only field — brittle destructible tiles (HP derived from their grain
+ *  boundaries) spread across the map. */
 export class GlassFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'glass';
   protected readonly clusterCount   = SINGLE_ELEMENT_CLUSTER_COUNT;
@@ -856,10 +857,10 @@ export class GlassFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
- * Plastic-only field — 3-HP plastic tiles spread across the map.  The
- * mid-tier destructible: harder than glass, softer than metal; useful
- * for tuning damage feel and crack visuals against the matte polymer
- * aesthetic in isolation.
+ * Plastic-only field — plastic tiles (HP derived from their grain
+ * boundaries) spread across the map.  The mid-tier destructible: harder
+ * than glass, softer than metal; useful for tuning damage feel and crack
+ * visuals against the matte polymer aesthetic in isolation.
  */
 export class PlasticFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'plastic';
@@ -876,9 +877,10 @@ export class PlasticFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
- * Metal-only field — 5-HP metal tiles spread across the map.  The
- * hardest destructible variant; every cluster requires sustained fire
- * (or a high-momentum asteroid crash) to break.
+ * Metal-only field — metal tiles (HP derived from their grain
+ * boundaries) spread across the map.  The hardest destructible variant;
+ * every cluster requires sustained fire (or a high-momentum asteroid
+ * crash) to break.
  */
 export class MetalFieldMap extends SingleVariantTileFieldMap {
   protected readonly variant: StructureVariant = 'metal';
@@ -916,8 +918,8 @@ export class IndestructibleFieldMap extends SingleVariantTileFieldMap {
 }
 
 /**
- * Rock-tile field (Stage 7 of shard-system overhaul) — clusters of
- * 3-HP rock tiles that, when broken, shatter into mobile rock-shards
+ * Rock-tile field — clusters of rock tiles (HP derived from their grain
+ * boundaries) that, when broken, shatter into mobile rock-shards
  * (the same drift / merge / accrete lifecycle as today's free-floating
  * asteroids).  Exercises the unified tile→shard lineage in isolation;
  * cluster count + size match the other tile-only showcases so DBG
@@ -996,10 +998,10 @@ export class TileHeavyMap extends BaseMapLayer {
         return d2 > clearSq;
     });
  
-    // A way home.  These maps are reachable from the hub's TEST RACK now, and
-    // a destination you can enter but not leave is a trap rather than a test.
-    // Added AFTER the clearance filter, exactly as the wave arenas do it, or
-    // the rift would be swept up with the terrain.
+    // A way home.  Tile Heavy is not on the hub's TEST RACK (its siblings
+    // are), but a destination you can enter but not leave is a trap rather
+    // than a test.  Added AFTER the clearance filter, exactly as the wave
+    // arenas do it, or the rift would be swept up with the terrain.
     this.addReturnPortal();
   }
 }

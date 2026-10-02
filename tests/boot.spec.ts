@@ -16,9 +16,9 @@ test.describe('boot', () => {
     const watch = await boot(page);
 
     // The front door (CLAUDE.md §3): DIFFICULTY and START — the one a player
-    // needs — with the DEBUG launcher floating in the corner, as it does over
-    // every screen (it replaced the menu's own debug dropdown).
-    await expect(page.getByTestId('menu-start')).toBeVisible();
+    // needs, which `boot()` has already waited for — with the DEBUG launcher
+    // floating in the corner, as it does over every screen (it replaced the
+    // menu's own debug dropdown).
     await expect(page.getByTestId('debug-launcher')).toBeVisible();
 
     // Handle 1: the stats payload the HUD renders from.

@@ -6,14 +6,14 @@
  *  shards spin the wrong way" (user report: a shard on the starboard side
  *  should rotate clockwise; roughly half did the opposite).
  *
- *  The sign is now a DBG cycle (Visual ▸ "Neb spin") so the two candidate
- *  handednesses can be A/B'd in flight while PROPER rotational mechanics
- *  stay parked for their own session:
+ *  The sign is now a DBG cycle (Materials ▸ Nebula ▸ "Neb spin") so the two
+ *  candidate handednesses can be A/B'd in flight while PROPER rotational
+ *  mechanics stay parked for their own session:
  *   - `physical` (default): the wake shear — sign of the ship's velocity
  *     crossed with the ship→shard offset.  Starboard → clockwise (positive
  *     rotationSpeed in this y-down world), port → counter-clockwise.
  *   - `inverted`: the same cross product negated — the A/B case.
- *   - `random`: the shipped id-parity behaviour, kept as the control.
+ *   - `random`: the old id-parity behaviour, kept as the control.
  *
  *  Driven through the REAL swirl pass (harness rules 3 and 6).  Screen
  *  coords are y-DOWN: a ship flying +x has its starboard side at +y, and a
@@ -38,11 +38,12 @@ function swirl(page: any, o: { ox: number; oy: number; id?: string; mode: string
       velocity: { x: 0, y: 0 }, rotation: 0, rotationSpeed: 0,
       size: { x: 20, y: 20 }, mass: 0.01, active: true, color: '#a78bfa',
     };
-    /*  Walk the DBG 3-cycle to the wanted mode.  The mode lives in module
-     *  state inside constants.ts with no getter on the debug handle, so the
-     *  test counts cycles from the known shipped default ('physical') — a
-     *  per-page counter, reset with the page like the module state it
-     *  mirrors. */
+    /*  Walk the DBG 3-cycle to the wanted mode.  The mode IS published
+     *  (`EngineStats.nebulaWakeSpinName`), but that readout lags the click
+     *  (harness rule 12) and this helper cycles and swirls in ONE
+     *  evaluation, so it counts cycles from the known shipped default
+     *  ('physical') instead — a per-page counter, reset with the page like
+     *  the module state it mirrors. */
     const w: any = window;
     if (w.__spinModeIdx === undefined) w.__spinModeIdx = 0;
     const MODES = ['physical', 'inverted', 'random'];
@@ -122,18 +123,28 @@ test.describe('wake handedness', () => {
  *  reason and would not have caught this.
  */
 test.describe('nebula drag', () => {
-  /** Break `count` nebula tiles through the REAL death path and hand back
-   *  the shards that exist afterwards. */
+  /** Break `count` nebula tiles through the REAL death path and report how
+   *  many were broken.
+   *
+   *  FRESH tiles only.  A tile handed straight to `handleEntityDeath` stays
+   *  `active` (the engine's own kill paths flip that flag, not the death
+   *  handler), and a second death dispatch on it is a no-op — so without
+   *  the `deathDispatched` filter a second call re-picks the same tiles and
+   *  breaks nothing at all. */
   const breakTiles = (page: any, count: number) => engine(page, (e: any, n: number) => {
     const tiles = e.currentMap.entities
-      .filter((x: any) => x.active && x.shardVariant === 'nebula-tile').slice(0, n);
+      .filter((x: any) => x.active && x.shardVariant === 'nebula-tile'
+        && x.deathDispatched !== true).slice(0, n);
     for (const t of tiles) { t.health = 0; e.handleEntityDeath(t); }
     return tiles.length;
   }, count);
 
+  /** Every live nebula shard, less any tagged `__armOld` (see the spin
+   *  test, which tags the shards alive before its own break). */
   const shardStats = (page: any) => engine(page, (e: any) => {
     const s = e.currentMap.entities
-      .filter((x: any) => x.active && x.shardVariant === 'nebula-shard');
+      .filter((x: any) => x.active && x.shardVariant === 'nebula-shard'
+        && x.__armOld !== true);
     const spin = s.map((x: any) => Math.abs(x.rotationSpeed ?? 0));
     return {
       n: s.length,
@@ -146,6 +157,7 @@ test.describe('nebula drag', () => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+    await quietScene(page);
 
     expect(await breakTiles(page, 30)).toBeGreaterThan(0);
     const got = await shardStats(page);
@@ -158,29 +170,46 @@ test.describe('nebula drag', () => {
     watch.assertClean();
   });
 
-  test('spin damping is its own knob, independent of the linear one', async ({ page }) => {
+  test('the spin-damp ladder really damps spin', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
+    await quietScene(page);
 
     /*  Both runs sit at the SAME linear step, so any difference in spin is
      *  the spin ladder alone.  `match` (index 0) defers to the linear knob,
-     *  which is the shipped behaviour — so this is also the check that the
-     *  default is a no-op and only a deliberate click departs from it. */
+     *  which is the shipped behaviour.
+     *
+     *  EACH ARM MEASURES ONLY ITS OWN BROOD.  Every nebula shard alive
+     *  before an arm's break is tagged and left out of that arm's mean —
+     *  otherwise the second arm averages in the first arm's pieces, which
+     *  have been decaying twice as long and pass the assertion below
+     *  whatever the second step does. */
     const spinAfter = async (steps: number, label: string) => {
       await dialByName(page, 'nebulaSpinDampName', label,
         (e: any) => e.dbg.cycleNebulaSpinDamp(), steps);
+      await engine(page, (e: any) => {
+        for (const x of e.currentMap.entities) {
+          if (x.shardVariant === 'nebula-shard') x.__armOld = true;
+        }
+      });
       await breakTiles(page, 30);
       await advanceSim(page, 2);
-      return (await shardStats(page)).meanSpin;
+      return shardStats(page);
     };
 
     const matched = await spinAfter(7, 'match');
     const hard    = await spinAfter(7, '10x');
 
-    // 10× the per-step spin LOSS has to leave measurably less tumble than
-    // the shipped default does over the same two sim-seconds.
-    expect(hard).toBeLessThan(matched);
+    // Each arm really broke fresh tiles and measured their fragments.
+    expect(matched.n, 'the match arm measured a brood of its own').toBeGreaterThan(20);
+    expect(hard.n, 'and so did the 10x arm').toBeGreaterThan(20);
+    // 10× the per-step spin LOSS: over the same two sim-seconds a launch
+    // spin keeps ~9% (0.98^120) at `match` and effectively none (0.8^120)
+    // at 10x, where every piece snaps to rest in about half a second.  Half
+    // is far from both — a step that did nothing would put the two arms
+    // level and fail here rather than pass on a coin flip.
+    expect(hard.meanSpin).toBeLessThan(matched.meanSpin * 0.5);
 
     watch.assertClean();
   });
@@ -189,7 +218,7 @@ test.describe('nebula drag', () => {
 /** Nebula BONDING — what the "Neb bond" steps actually buy.
  *
  *  A nebula bond's outcome is `compose`: after the contact threshold the
- *  pair is CONSUMED and one new body appears.  At the shipped ~5 s (scaled
+ *  pair is CONSUMED and one new body appears.  At the base ~5 s (scaled
  *  by pair size) that window is short enough that the cohesion and break
  *  multipliers barely get to act — and the harder they grip, the sooner the
  *  pair holds together well enough to vanish into a merge.  So "grip harder"
@@ -209,7 +238,7 @@ test.describe('nebula drag', () => {
  *  build with the feature reverted.  These read `timer / threshold` on live
  *  bonds instead.  `bond.threshold` is the BASE stamped at formation and the
  *  multiplier is applied at the read, so a live bond whose ratio exceeds 1
- *  is precisely one the shipped step would already have merged away — a
+ *  is precisely one the `off (old)` step would already have merged away — a
  *  direct read of the line that changed, with no population dynamics in it.
  */
 test.describe('nebula bonding', () => {
@@ -256,7 +285,7 @@ test.describe('nebula bonding', () => {
     };
   });
 
-  test('a stretched threshold holds pairs the shipped step would have merged', async ({ page }) => {
+  test('a stretched threshold holds pairs the old step would have merged', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
     await waitForStats(page, s => s.currentMapType === 'NEBULA_FIELD', 'the nebula field');
@@ -265,8 +294,8 @@ test.describe('nebula bonding', () => {
     /*  OFF first.  A bond is composed in the same iteration its timer
      *  crosses `threshold` — and the merge-budget deferral clamps to
      *  `threshold - dt` — so no bond that is still ALIVE can ever be past
-     *  its base threshold.  That makes ratio ≤ 1 an invariant of the
-     *  shipped step, and the control for the assertion below. */
+     *  its base threshold.  That makes ratio ≤ 1 an invariant of
+     *  `off (old)`, and the control for the assertion below. */
     await dialByName(page, 'nebulaBondName', 'off (old)',
       (e: any) => e.dbg.cycleNebulaBond(), 4);
     await breakTiles(page);
@@ -327,8 +356,8 @@ test.describe('nebula bonding', () => {
  *  The generic voronoi child recipe copies `parent.sprite`, which is right
  *  for every other material — rock, glass, metal and plastic draw polygons
  *  and carry no sprite worth varying — and wrong for the one family whose
- *  whole look IS the sprite.  A tile decomposing into 6-8 cells handed back
- *  6-8 copies of one cloud image, so a burst read as the same puff stamped
+ *  whole look IS the sprite.  A tile decomposing into 3-4 cells handed back
+ *  3-4 copies of one cloud image, so a burst read as the same puff stamped
  *  out repeatedly rather than as a cloud coming apart.
  *
  *  The assertion is PER PARENT rather than over the whole population,

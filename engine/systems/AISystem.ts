@@ -41,7 +41,7 @@ export class AISystem {
     skirmisher: (dt, enemy, player) => this.updateSkirmisher(dt, enemy, player),
     swarm:      (dt, enemy, player, _flowField, enemies) => this.updateSwarm(dt, enemy, player, enemies),
     bubble:     (dt, enemy, player, flowField, enemies, shards) => this.updateBubble(dt, enemy, player, flowField, shards, enemies),
-    dragon:     () => { /* engine-managed (GameEngine.updateDragon) — no AI here */ },
+    dragon:     () => { /* engine-managed (updateDragons, roamers/dragons.ts) — no AI here */ },
   };
 
   /**
@@ -60,7 +60,7 @@ export class AISystem {
       const enemy = enemies[i];
 
       // Rival ships (Stage 7) are EntityType.ENEMY but engine-managed
-      // (GameEngine.updateRivals) — skip the enemy AI entirely.
+      // (updateRivals, roamers/rivals.ts) — skip the enemy AI entirely.
       if (enemy.isRival) continue;
 
       // Default initialization
@@ -432,8 +432,8 @@ export class AISystem {
    *  - SEEK (provoked): floaty pursuit of its AGGRO TARGET — whoever last
    *    attacked it (the player OR an enemy), resolved from `aggroTargetId`; a
    *    true third party.  If that target is gone it calms back to passive.
-   * While LATCHED (attachedToId set) movement is skipped — GameEngine.update-
-   * Attachments owns the position.  Toroidal.
+   * While LATCHED (attachedToId set) movement is skipped — updateAttachments
+   * (roamers/bubbles.ts) owns the position.  Toroidal.
    */
   private updateBubble(dt: number, enemy: GameEntity, player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[], enemies: GameEntity[]) {
       // Latched onto a target → the attach pass drives position; don't fight it.
@@ -459,7 +459,8 @@ export class AISystem {
       // each contact took ~35% of its speed: a dead stop in ~10 frames, which
       // is the "hits a wall" report.  Sick is the worst case and so the one
       // that got noticed, but the bug was never about being sick, and never
-      // about mass (a bubble's mass is a constant 9 for its whole life).
+      // about mass (a bubble's mass is constant for its whole life —
+      // authored 9, 90 in flight after MASS_SCALE).
       //
       // The floor is the speed the bubble ARRIVED with, so this step can only
       // ever cap the thrust added below it: speed_after <= max(cap, speed_

@@ -13,8 +13,9 @@ import { defineConfig, devices } from '@playwright/test';
  *  is the price of `npm test` meaning "test what is in the working tree".
  *
  *  Viewport is 390×844 — the phone this game is played on, and the size every
- *  layout assertion in the suites is written against.  (Parameterising the
- *  suites over more viewports is roadmap 5d, not this session.)
+ *  layout assertion in the suites is written against — set on the one
+ *  project below.  `viewports.spec.ts` overrides it per describe block
+ *  (`test.use`) to cover six sizes plus a mid-session resize (roadmap 5d).
  */
 export default defineConfig({
   testDir: './tests',
@@ -33,10 +34,10 @@ export default defineConfig({
 
   use: {
     baseURL: 'http://127.0.0.1:4173',
-    viewport: { width: 390, height: 844 },
     ...devices['Desktop Chrome'],
-    // devices spreads its own viewport — re-apply ours after it.
-    // (Object spread order matters; keep this line last.)
+    // Desktop Chrome brings a 1280×720 viewport; the project below sets the
+    // real one.  A project's `use` overrides this block key by key, so the
+    // viewport is stated there and only there.
     trace: 'retain-on-failure',
     video: 'off',
     screenshot: 'only-on-failure',

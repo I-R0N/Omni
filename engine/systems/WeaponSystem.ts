@@ -27,8 +27,8 @@ function chargedMass(config: WeaponConfig, k: number): number | undefined {
 
 /**
  * The CHARGED variant of any weapon (Overcharge).  One rule per DELIVERY,
- * plus one per PAYLOAD — so all thirty combinations have a charge without
- * thirty authored entries, and the charge premium always reads as "more of
+ * plus one per PAYLOAD — so all twenty combinations have a charge without
+ * twenty authored entries, and the charge premium always reads as "more of
  * what this delivery does":
  *   projectile — a much heavier round (the old Blaster fireball)
  *   cannon     — the old Cannon charge (a heavier shell, a much bigger blast)
@@ -173,9 +173,9 @@ export class WeaponSystem {
    * Handles:
    *   - cooldown gating (the only in-combat brake — ammo is deleted, 1b)
    *   - charged shots (Overcharge unlock; cost = the charge-time hold only)
-   *   - burst-fire state setup
-   *   - screen shake
-   *   - projectile spawning via ProjectileSystem
+   *   - screen shake / rumble by delivery
+   *   - dispatch by DELIVERY: rounds spawn via ProjectileSystem, a beam or
+   *     an instant cone goes to the energy layer (`onInstantFire`)
    * Returns `true` if a shot was actually fired.
    */
   public firePlayerWeapon(

@@ -16,14 +16,17 @@
  *  - INPUT.  Nothing done to the panel flies the ship — no mouse click, no
  *    touch tap (including the compatibility mouse events a tap leaves
  *    behind), no key typed into it, no pad button while it has the pad.
- *  - PAYLOAD.  The panel-only data (the weapon catalog) is published only
- *    while the panel is open, on every screen — it used to ride every
- *    paused frame whether or not anyone was looking.
- *  - IDENTITY.  Every row the old menu had survives under its old label.
+ *  - PAYLOAD.  The panel-only data (the weapon catalog, the slot-lock
+ *    readout) is published only while the panel is open — checked over the
+ *    pause menu, where it used to ride every paused frame whether or not
+ *    anyone was looking.
+ *  - IDENTITY.  Every row keeps its label, and every chip its caption:
+ *    labels are identity.
  *  - DESCRIPTIONS.  Every control and chip says what it does in one short
  *    line — shown on a mouse hover, a touch long-press (which must NOT also
  *    press the thing it describes) or a resting keyboard / pad focus — with
- *    its old tooltip kept behind "More".
+ *    the longer DETAIL (the old tooltip, where the row had one) behind
+ *    "More".
  *  - SEE-THROUGH.  The panel ships see-through with a solid toggle, and the
  *    canvas HUD is clipped out from under it rather than ghosting beneath
  *    its rows.
@@ -37,7 +40,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
   boot, engine, stats, startRun, waitForStats, waitForEngine, waitForTransit,
-  waitForStatsKeyChange, dockAtStation, advanceSim, quietScene,
+  waitForStatsKeyChange, dockAtStation, advanceSim, quietScene, samplePeak,
 } from './helpers';
 
 // ── Duplicated on purpose (harness rule 7) ────────────────────────────────
@@ -48,14 +51,16 @@ const DEBUG_KEY = 'Backquote';
 /** W3C standard-gamepad indices, as bound in INPUT_CONSTANTS.GAMEPAD.BUTTONS. */
 const PAD = { CROSS: 0, CIRCLE: 1, R2: 7, SELECT: 8, DPAD_DOWN: 13 };
 
-/** Every labelled row of the OLD panel, read off the `ctrlRow` / `statRow`
- *  calls in the pre-overhaul UIOverlay, in the order it listed them.  A
- *  MULTISET: two rows are called "  ↳ live" and the timing tree has two
- *  "·misc".  Labels are identity — suites, docs and muscle memory name rows
+/** Every labelled row of the debug panel (`components/debugSections.tsx`),
+ *  bar the data-driven ones — a row per weapon module and per perf task,
+ *  labelled from the payload.  A MULTISET: two rows are called "  ↳ live", the timing
+ *  tree has two "·misc", and "Hull" is both the Ship Tilt row and the Hull Mk
+ *  grant row.  Labels are identity — suites, docs and muscle memory name rows
  *  by them — so a rename has to be a deliberate edit to this list.  BYTE for
- *  byte, too: most of the timing tree indents with NO-BREAK spaces and three
- *  of its rows with plain ones, exactly as the old panel had them. */
-const OLD_ROWS = [
+ *  byte, too: the timing tree indents with NO-BREAK spaces, except ·lit,
+ *  ·lit-N and ·fog, which use plain ones.  Seeded from the pre-overhaul panel
+ *  (PR #105). */
+const ROW_LABELS = [
   'Overlays', 'FPS', 'Wave', 'State', 'Wave timer', 'Thrust', 'Speed',
   'Snitch catch', 'Snitch spd', 'Gamepad', '  ↳ axes', '  ↳ rumble',
   '  ↳ triggers', '  ↳ report', '  ↳ trig enc', '  ↳ HID buzz', 'Impact vel',
@@ -93,16 +98,24 @@ const OLD_ROWS = [
   '\u00a0·misc', 'render', '\u00a0·neb', '\u00a0·vis-neb',
   '\u00a0·neb fast/slow', '\u00a0·tLit', '\u00a0·tLit-N', ' ·lit', ' ·lit-N',
   ' ·fog',
-  // Hand-laid rows (no ctrlRow/statRow): the Perf block's three readouts,
+  // Rows the old panel laid out by hand: the Perf block's three readouts,
   // the entity counter with its filter, and the module Mk grant rows (so
   // "Hull" appears twice — the Ship Tilt hull and the Hull Mk grants).
   'load', 'dyn ents', 'merge rate', 'Entities',
   'Hull', 'Plating', 'Capacitor', 'Engine', 'Thrusters', 'Gunnery', 'Autoloader', 'Scanner',
+  // The chip and custom rows, which the registry gave labels of their own.
+  'Maps', 'Material Field Maps', 'Force one type', 'Warp in a boss',
+  'Summon a dragon', 'Warp in a rival', 'Perf REC',
+  // Weapons & Modules ▸ Weapon Modules (energy modules) — its static rows;
+  // the per-module +/− rows are data-driven, like the perf tasks.
+  'Outfit anywhere', 'Equip projectile', 'Equip beam', 'Equip spread',
+  'Equip homing', 'Equip cannon', 'Clear',
 ];
 
-/** The button GROUPS of the old panel, by the label on each button. */
-const OLD_CHIPS = [
-  // Maps (main menu dropdown + pause ▸ Switch Map / Test)
+/** Chips on the panel's button GROUPS, by the label on each button (seeded
+ *  from the pre-overhaul panel). */
+const CHIP_LABELS = [
+  // Maps (World & Maps ▸ Maps / Material Field Maps)
   'Overworld', 'Deep Space', 'Ring World', 'Seven Rings', 'Pocket',
   'Asteroid Field', 'Glass Field', 'Plastic Field', 'Metal Field',
   'Indestructible', 'Nebula Field', 'Rock Field', 'Tile Heavy',
@@ -196,20 +209,10 @@ function worldClock(page: Page) {
 
 /** Largest number of live player shots seen over `ms` of wall time — a shot
  *  lives long enough to be seen, and a peak cannot miss it the way one read
- *  can (harness rule 2). */
+ *  can (harness rule 2; the window is `samplePeak`'s). */
 function peakShots(page: Page, ms = 700) {
-  return page.evaluate(ms => new Promise<number>(resolve => {
-    let peak = 0;
-    const t0 = performance.now();
-    const tick = () => {
-      const e = (window as any).__omniEngine;
-      const n = e.currentMap.entities.filter(
-        (x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length;
-      if (n > peak) peak = n;
-      if (performance.now() - t0 >= ms) resolve(peak); else requestAnimationFrame(tick);
-    };
-    tick();
-  }), ms);
+  return samplePeak(page, e => e.currentMap.entities.filter(
+    (x: any) => x.active && x.type === 'PROJECTILE' && x.ownerType === 'PLAYER').length, ms);
 }
 
 function frames(page: Page, n = 3) {
@@ -766,7 +769,7 @@ function popup(page: Page) {
 }
 
 test.describe('descriptions: what an item does, on every device', () => {
-  test('every control and chip says what it does in one short line, and the old tooltips survive', async ({ page }) => {
+  test('every control and chip says what it does in one short line, and the long descriptions are kept', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
     await openPanel(page);
@@ -1129,7 +1132,7 @@ test.describe('payload', () => {
 // ══════════════════════════════════════════════════════════════════════════
 
 test.describe('the registry', () => {
-  test('every row of the old menu survives, under its old label', async ({ page }) => {
+  test('every row keeps its label — labels are identity', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
     await openPanel(page);
@@ -1141,15 +1144,15 @@ test.describe('the registry', () => {
     const have = new Map<string, number>();
     for (const l of rendered) have.set(l, (have.get(l) ?? 0) + 1);
     const want = new Map<string, number>();
-    for (const l of OLD_ROWS) want.set(l, (want.get(l) ?? 0) + 1);
+    for (const l of ROW_LABELS) want.set(l, (want.get(l) ?? 0) + 1);
     const missing = [...want].filter(([l, n]) => (have.get(l) ?? 0) < n).map(([l, n]) => `${JSON.stringify(l)} ×${n}`);
-    expect(missing, 'rows the old menu had and the panel does not').toEqual([]);
+    expect(missing, 'pinned rows the panel does not render').toEqual([]);
 
     const chips = await page.evaluate(() => Array.from(
       document.querySelectorAll('[data-testid="debug-panel"] [data-debug-row] button'),
     ).map(el => (el.textContent ?? '').trim()));
-    const lostChips = OLD_CHIPS.filter(c => !chips.includes(c));
-    expect(lostChips, 'buttons the old menu had and the panel does not').toEqual([]);
+    const lostChips = CHIP_LABELS.filter(c => !chips.includes(c));
+    expect(lostChips, 'pinned buttons the panel does not render').toEqual([]);
 
     watch.assertClean();
   });
@@ -1161,7 +1164,8 @@ test.describe('the registry', () => {
      *  That is how this suite found `Outfit all` throwing on main: the
      *  deleted Penetration module was still in its canonical layout.  The
      *  chip rows (maps, spawns) are left out: a map switch per chip is a
-     *  test of map loading, which maps.spec.ts owns. */
+     *  test of map loading rather than of the panel; each map is exercised
+     *  by the suites that load it (TILE_HEAVY by none). */
     const watch = await boot(page);
     await startRun(page);
     await openPanel(page);
@@ -1198,7 +1202,7 @@ test.describe('the registry', () => {
     // By a chip's label — the boss is a button, not a row.
     await filter.fill('warden');
     await expect(page.locator('[data-debug-row="Warp in a boss"]')).toHaveCount(1);
-    // By a word only the tooltip carries.
+    // By a word only its description carries.
     await filter.fill('spiral-of-death');
     await expect(page.getByText('Mentioned in descriptions')).toBeVisible();
     await expect(page.locator('[data-debug-row="Substep cap"]')).toHaveCount(1);

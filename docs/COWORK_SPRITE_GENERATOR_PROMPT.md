@@ -2,6 +2,9 @@
 
 > Paste everything below the line into a fresh Cowork session with the
 > `I-R0N/Omni` repo attached.
+>
+> **Status (2026-09-26): not yet run.**  `tools/spritegen/` does not exist,
+> and `public/assets/ships/base/` still holds the 35 `--placeholder` cells.
 
 ---
 
@@ -53,7 +56,7 @@ tilt later, it reuses the same sheet machinery — but that is not this task.
 ships**: the hull changes shape, the colours drift, panel lines move. Snapped
 together at 20 poses/second that is not a banking ship, it is a strobing mess.
 It is also impossible to hit the exact angles the engine indexes — the table
-has cells at ψ = 315°, θ = 60°, and no text prompt lands there.
+has cells at ψ = 315°, θ = 45°, and no text prompt lands there.
 
 So do **not** treat this as "35 text-to-image calls". The pipeline that works:
 
@@ -188,9 +191,10 @@ art at 30px, not at 1024.
 
 - `spritegen ship --backend=stub` produces a complete, valid sheet, and
   `spritegen validate` passes on it — with no GPU present.
-- The sheet loads in the real game: build, run, open **pause ▸ Debug Menu ▸
-  Ship Tilt ▸ "Hull" ▸ Sheet** (and step "Roll feel" off Off — the tilt
-  ships disabled), then confirm the ship banks through the poses.
+- The sheet loads in the real game: build, run, open the **DBG launcher (or
+  the `` ` `` key) ▸ Player & Ship ▸ Ship Tilt ▸ "Hull" ▸ Sheet** (and step
+  "Roll feel" off Off — the tilt ships disabled), then confirm the ship
+  banks through the poses.
   The suites already do exactly this — `tests/shipsprites.spec.ts` and the
   hull walk in `tests/roll.spec.ts` are your working examples of driving the
   engine headlessly and screenshotting it.

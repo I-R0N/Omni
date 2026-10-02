@@ -1,12 +1,18 @@
 /** The background star field.
  *
- *  The one invariant worth a merge gate here is DENSITY PER UNIT AREA. The
+ *  The invariant that started this file is DENSITY PER UNIT AREA. The
  *  star count used to be absolute — 60 bands x 400 stars, over whatever the
  *  viewport happened to be — so a 390x844 phone showed 3.95x the stars per
  *  unit area that a 1440x900 desktop window did (measured; see
  *  `docs/GAUNTLET_STARFIELD_LOG.md` S1). That is a visible difference in
  *  something the player looks at constantly, and it is the kind of regression
  *  that reappears the moment someone "just bumps the star count".
+ *
+ *  The rest pins the star-field gauntlet's later decisions (S3–S13:
+ *  device-pixel generation and its dpr rebuild, the field as data not
+ *  bitmaps, sub-pixel drawing at integral sizes, the seeded sky, spread vs
+ *  layer count, a sky per map and the hub test rack) and the wormhole star
+ *  lens.
  *
  *  These read the derived budget straight off the live `BackgroundManager`
  *  rather than counting lit pixels (harness rule 3: read the sim, not the
@@ -96,7 +102,7 @@ test.describe('the star field', () => {
 
   test('shows the same sky per unit area at two very different viewport sizes', async ({ page }) => {
     // THE REGRESSION THIS FILE EXISTS FOR. Before S2 this ratio was ~3.95;
-    // the two viewports below differ in area by 3.5x.
+    // the two viewports below differ in area by 3.3x.
     const watch = await boot(page);
     await startRun(page);
     await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
@@ -134,14 +140,12 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('renders bands at DEVICE resolution so no filter is in the blit path', async ({ page }) => {
-    // S3. A CSS-px band blitted into a dpr-scaled context at a fractional
-    // offset is resampled by whatever filter the engine picks — measured at
-    // +114% lit device pixels at 45% the luma, and the filter choice is not
-    // specified by the canvas spec, which is how two browsers come to disagree
-    // about the same sky. Bands sized in DEVICE pixels are what removes the
-    // scale from the blit; the integer offsets in `drawBand` remove the
-    // fractional part.
+  test('generates the field in DEVICE pixels at the canvas\'s own capped ratio', async ({ page }) => {
+    // S3 generated the field in DEVICE pixels so the old band blit was 1:1;
+    // S4 then deleted the blit (stars are fillRect'd straight onto the
+    // canvas). What survives is the generation space: star coordinates and
+    // the scroll wrap live in device pixels at effectiveDpr(), the same
+    // capped ratio the canvas was sized with.
     const watch = await boot(page);
     await startRun(page);
     await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'the star field');
@@ -249,11 +253,7 @@ test.describe('the star field', () => {
     // them plus the fact that the field moved at all.
     expect(speeds[NUM_BANDS - 1]).toBeGreaterThan(speeds[0] * 10);
 
-    // SPREAD and LAYER COUNT are independent knobs, and this is the assertion
-    // that says so. The span from farthest to nearest is set by the spread
-    // alone, so it must NOT move when the layer count does — adding layers
-    // subdivides the same range. Conflating the two is the natural reading of
-    // a "depth" control, and it is why more layers looks like LESS separation.
+    // And the field actually moved — a static sky passes every assertion above.
     expect(after.some((v, i) => v !== before[i])).toBe(true);
 
     // Every offset stays inside the wrap window — an offset that escaped it
@@ -353,9 +353,12 @@ test.describe('the star field', () => {
 
     // Cycle DEPTH and come all the way back around to the same setting.
     const steps = 4;   // STAR_BANDS_CYCLE length
+    // Each cycle only INVALIDATES the field (`initialized` goes false) and the
+    // next render rebuilds it, so wait on `initialized` coming back — the star
+    // arrays are non-empty throughout, which would wait for nothing.
     for (let i = 0; i < steps; i++) {
       await engine(page, e => e.dbg.cycleStarBands());
-      await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'regeneration');
+      await waitForEngine(page, e => e.renderer.backgroundManager.initialized === true, 'regeneration');
     }
     const after = await snapshot();
 
@@ -448,25 +451,37 @@ test.describe('the star field', () => {
     const onRack = rack.filter(r => RACK_IDS.includes(r.target));
     expect(onRack.length).toBe(RACK_IDS.length);
 
-    // Densities, read from the engine's own resolver so the test cannot
-    // disagree with what the sky will actually be.
-    const densities = await engine(page, (e, ids: string[]) => {
-      const out: Record<string, number> = {};
-      for (const id of ids) {
-        const d = e.mapDescriptorFor ? e.mapDescriptorFor(id) : null;
-        out[id] = d ? d.mapType : (null as any);
-      }
-      return out;
-    }, RACK_IDS);
-    expect(Object.keys(densities).length).toBe(RACK_IDS.length);
-
     // Sorted top-to-bottom (ascending y = descending altitude), density must
-    // never increase.
+    // step down at every portal.
     const byY = [...onRack].sort((a, b) => a.y - b.y);
     const order = byY.map(r => RACK_IDS.indexOf(r.target));
     // The rack table is declared densest-first, so the y-sorted order must be
     // exactly the declared order.
     expect(order).toEqual([0, 1, 2, 3, 4, 5]);
+
+    // ...and the DENSITIES, read off the live generator rather than a table:
+    // point the sky at each destination's map type, top to bottom — the same
+    // `setMapType` call a map load makes — and let the real `initContent`
+    // derive its budget, so this cannot disagree with what the sky there will
+    // actually be.  The descriptor -> MapType pairs are written out because
+    // MAP_DESCRIPTORS is on no debug handle and the suites never import the
+    // source.
+    const RACK_TYPES: Record<string, string> = {
+      field_asteroid: 'ASTEROID_FIELD', field_glass: 'GLASS_FIELD',
+      field_metal: 'METAL_FIELD',       field_plastic: 'PLASTIC_FIELD',
+      field_rock: 'ROCK_FIELD',         field_nebula: 'NEBULA_FIELD',
+    };
+    const densities: number[] = [];
+    for (const r of byY) {
+      await engine(page, (e, t: string) => e.renderer.setMapType(t), RACK_TYPES[r.target]);
+      await waitForEngine(page, e => e.renderer.backgroundManager.initialized === true,
+        `the sky for ${r.target}`);
+      densities.push(densityOf(await readField(page)));
+    }
+    for (let i = 1; i < densities.length; i++) {
+      expect(densities[i], `rack densities, top to bottom: ${densities.map(Math.round).join(', ')}`)
+        .toBeLessThan(densities[i - 1]);
+    }
 
     watch.assertClean();
   });
@@ -499,12 +514,13 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('rebuilds the bands when the pixel ratio changes, not only the size', async ({ page }) => {
-    // Device-resolution bands make the pixel RATIO a generation input, so the
-    // render-scale cap (DBG ▸ Player ▸ Render scale) has to rebuild them even
-    // though the CSS scene size is unchanged. Without that, the bands keep
-    // their old device size and the blit silently stops being 1:1 — the exact
-    // defect S3 removes, coming back through a different door.
+  test('regenerates the field when the pixel ratio changes, not only the size', async ({ page }) => {
+    // Star coordinates and the scroll wrap are baked in DEVICE pixels, so the
+    // pixel RATIO is a generation input: the render-scale cap (DBG ▸ Perf &
+    // Diagnostics ▸ Sim & Render ▸ Render scale) has to regenerate the field
+    // even though the CSS scene size is unchanged — without that the stars
+    // keep their old device coordinates and the field silently stops matching
+    // the canvas it is drawn into.
     //
     // The cap itself is stepped in App.tsx, not on the engine, so this drives
     // the mechanism the cap relies on: stale the manager's recorded ratio and
@@ -520,7 +536,7 @@ test.describe('the star field', () => {
 
     await engine(page, e => {
       const bg = e.renderer.backgroundManager;
-      // Pretend the bands were generated at a different ratio, and make the
+      // Pretend the field was generated at a different ratio, and make the
       // recorded band size visibly wrong so a rebuild is observable rather
       // than assumed. (-1 can never be a real ratio.)
       bg.sceneDpr = -1;
@@ -642,7 +658,7 @@ test.describe('the star field', () => {
     let after = before;
     for (let i = 0; i < 4 && after.starCount === before.starCount; i++) {
       await engine(page, e => e.dbg.cycleStarDensity());
-      await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, 'regeneration');
+      await waitForEngine(page, e => e.renderer.backgroundManager.initialized === true, 'regeneration');
       after = await readField(page);
     }
 
@@ -665,7 +681,9 @@ test.describe('the star field', () => {
 
     const sample = async (target: string) => {
       await engine(page, (e, t: string) => e.transitionToMap(t), target);
-      await waitForEngine(page, e => e.renderer.backgroundManager.starX.length > 0, `sky for ${target}`);
+      // The map load invalidates the sky; wait for the rebuild, not merely for
+      // a field to exist — the previous map's is still there until it lands.
+      await waitForEngine(page, e => e.renderer.backgroundManager.initialized === true, `sky for ${target}`);
       return engine(page, e => {
         const bg = e.renderer.backgroundManager;
         const sp = bg.bandSpeed;

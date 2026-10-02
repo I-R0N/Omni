@@ -17,7 +17,7 @@ export enum MapType {
   UNIVERSE    = 'UNIVERSE',
   RING        = 'RING',
   SEVEN_RINGS = 'SEVEN_RINGS',
-  // 1 000 × 1 000 sandbox containing every element (asteroids, glass /
+  // 4 000 × 4 000 sandbox containing every element (asteroids, glass /
   // plastic / metal / indestructible tiles, nebula clusters).  Useful
   // for quickly validating interactions between systems without having
   // to fly across a full-size map to find them.
@@ -32,8 +32,8 @@ export enum MapType {
   METAL_FIELD          = 'METAL_FIELD',
   INDESTRUCTIBLE_FIELD = 'INDESTRUCTIBLE_FIELD',
   NEBULA_FIELD         = 'NEBULA_FIELD',
-  // Rock-tile single-element showcase (Stage 7 of shard-system overhaul)
-  // — exercises the new tile→shard lineage where a rock-tile cluster
+  // Rock-tile single-element showcase (from the shard-system overhaul)
+  // — exercises the tile→shard lineage where a rock-tile cluster
   // shatters into rock-shards that drift / merge / accrete.
   ROCK_FIELD           = 'ROCK_FIELD',
   // Tile-heavy stress map — dense clusters of every destructible /
@@ -143,7 +143,7 @@ export enum EnemySubtype {
   BUBBLE   = 'BUBBLE',
   // Stage 6 — DRAGON: a big segmented serpent mini-boss that enters via a
   //           portal, rides the flow field devouring tiles to grow, and leaves
-  //           via portal.  Engine-managed (GameEngine.updateDragon); the AI
+  //           via portal.  Engine-managed (roamers/dragons.ts); the AI
   //           'dragon' strategy is a no-op.
   DRAGON   = 'DRAGON',
   // (h) BOSSES — wave-arena capstones (decision #39e).  A boss is NOT a new
@@ -155,8 +155,8 @@ export enum EnemySubtype {
   //   BOSS_WARDEN  — the chassis boss: a shielded, armored siege platform.
   //   BOSS_SCATTER — "Reaver": an EVASIVE brawler wielding a themed variant of
   //   the player's own Shotgun (WEAPONS_AMMO_PLAN §6 weapon parity).
-  //   BOSS_SIEGE   — "Bastion": a long-range plated fortress wielding the
-  //   player's own Plasma Cannon; front-shield + regen.
+  //   BOSS_SIEGE   — "Bastion": a long-range plated fortress lobbing shells
+  //   spread from the player's own Cannon; front-shield + regen.
   BOSS_WARDEN = 'BOSS_WARDEN',
   BOSS_SCATTER = 'BOSS_SCATTER',
   BOSS_SIEGE = 'BOSS_SIEGE',
@@ -347,8 +347,9 @@ export interface WeaponConfig {
   // Sniper).  Purely cosmetic; copied onto the spawned projectile entity.
   glow?: boolean;
   // Charged-shot render hint — ProjectileSystem.spawn copies this onto
-  // the projectile so RenderSystem can pick a custom visual (today only
-  // the charged Blaster fireball uses it).
+  // the projectile so RenderSystem can pick a custom visual (today the
+  // fireball, set for a charged plain or kinetic round of the projectile
+  // delivery).
   isCharged?: boolean;
   // Status effect this shot applies to the player on hit (e.g. corrosion).
   // ProjectileSystem.spawn copies it onto the projectile.
@@ -464,6 +465,8 @@ export interface GameEntity {
   enemySubtype?: EnemySubtype;
   aiState?: 'idle' | 'chase' | 'flee' | 'hunt' | 'skirmish' | 'orbit' | 'snipe';
   aiTimer?: number;
+  // Written at spawn, never read (WeaponSystem uses
+  // ENEMY_CONSTANTS.VISION_RANGE).
   visionRange?: number;
   maxSpeed?: number;    // Per-entity speed cap (overrides ENEMY_VARIANTS default when set)
   aggroTimer?: number;  // Remaining seconds of post-kill aggro boost (speed + shorter idle)
@@ -561,7 +564,9 @@ export interface GameEntity {
   damage?: number;
   homing?: boolean;
   ownerType?: EntityType; // Who fired the projectile (prevents friendly fire)
-  targetEntityId?: string; // For homing locking
+  // Unread: only ever cleared.  A player seeker's lock lives on
+  // `homingTarget`; enemy homing steers at the player and stores no target.
+  targetEntityId?: string;
   // How many bodies (or GRAINS — see the bore track in PhysicsSystem) this
   // bolt has already struck.  DIAGNOSTIC since step 5: the falloff comes from
   // the bolt's remaining speed, so nothing reads this to decide anything.
@@ -610,10 +615,9 @@ export interface GameEntity {
    *  however the ship was moving when it fired. */
   spawnSpeed?: number;
   /** The factor actually applied to THIS hit relative to the shot's authored
-   *  damage, stashed by PhysicsSystem so the on-hit consumers in GameEngine
-   *  (the Cannon's AoE splash, the Lightning chain) scale by the same number
-   *  the direct damage did.  They cannot re-derive it: the bolt has already
-   *  shed the energy this hit cost by the time their callback runs. */
+   *  damage, stashed by PhysicsSystem.  Written but UNREAD since the energy
+   *  modules: the blast is payload and no longer scales by it, and the
+   *  Lightning chain that read it is gone. */
   hitFalloff?: number;
   hitEntityIds?: string[]; // IDs already struck by this projectile (prevents re-hitting same entity)
 
@@ -681,7 +685,7 @@ export interface GameEntity {
   // RenderSystem to draw the charge ring around the player ship.
   chargeProgress?: number;
 
-  // Powerup pickup
+  // Powerup pickup — unused: nothing reads or writes it.
   powerupWeapon?: WeaponType;
 
   // Salvage-pickup flash — accumulate-within-window: timer counts down from
@@ -700,11 +704,10 @@ export interface GameEntity {
   shieldRechargeRate?: number;
   // Unlock + loadout gating (player only; set by GameEngine
   // .syncUnlocksToPlayer):
-  //  - ownedWeapons: what CAN be equipped (always ≥ Blaster)
+  //  - ownedWeapons: the INSTALLED guns (weaponless flight is legal)
   //  - equippedWeapons: the 2-slot loadout — what cycle/select may pick and
   //    fire.  Exactly 2 entries; null = empty slot.  New run =
-  //    [BLASTER, null].  Loadout swaps happen in the pause-menu Drydock
-  //    (interim home until the station POI lands).
+  //    ['projectile', null].  Loadout changes happen at a station drydock.
   //  - overchargeUnlocked: whether charged shots are allowed
   ownedWeapons?: WeaponType[];
   equippedWeapons?: (WeaponType | null)[];
@@ -836,7 +839,8 @@ export interface GameEntity {
   aimLaser?: boolean;
   aimDist?: number;
 
-  // Player resources (gold kept for drop-system compat until PR 2)
+  // Player resources.  `gold` is initialised and reset on the player but
+  // never earned or spent — Salvage (`GameEngine.credits`) is the money.
   gold?: number;
 
   // Drop item fields
@@ -879,12 +883,12 @@ export interface GameEntity {
   ownerId?: string;
   // Rival ship (Stage 7): a player-like EntityType.ENEMY roamer that fights the
   // WAVE enemies (denying the player their points + drops) and—per disposition—
-  // may also fight the player.  Engine-managed (GameEngine.updateRivals), so
+  // may also fight the player.  Engine-managed (roamers/rivals.ts), so
   // AISystem skips it.  Renders from `sprite` (an old enemy PNG) with a
   // disposition-coloured ring.
   isRival?: boolean;
   // True while this roamer is actively hunting the PLAYER (as opposed to the
-  // wave enemies it normally fights).  Stamped by GameEngine.updateRivals on
+  // wave enemies it normally fights).  Stamped by `updateRivals` on
   // the rivalScan cadence — the rival's DISPOSITION lives on RivalInstance,
   // not the hull, so the renderer needs this mirror to blink the off-screen
   // indicator red.  Unset on every other entity.
@@ -907,7 +911,7 @@ export interface GameEntity {
   // Stamped on an enemy killed by a rival's projectile so handleEntityDeath
   // withholds the kill points + combo from the player (the rival "steals" them).
   killedByRival?: boolean;
-  // Attach + disable (3c): when set, GameEngine.updateAttachments snaps this
+  // Attach + disable (3c): when set, `updateAttachments` snaps this
   // entity's position onto the target every frame (a latch/grapple).  Cleared
   // when the target dies.  `attachOffset` is an optional fixed world offset.
   attachedToId?: string;
@@ -918,8 +922,8 @@ export interface GameEntity {
   // don't rescan statusEffects.
   systemsDisabled?: boolean;
   // Consume-and-grow (3b): a consumer eats nearby consumable shards/tiles and
-  // grows.  Config drives GameEngine.updateConsumers (a PerfController-gated
-  // neighbour pass).  Absent → not a consumer.
+  // grows.  Config drives `updateConsumers` (roamers/bubbles.ts; a
+  // PerfController-gated neighbour pass).  Absent → not a consumer.
   consume?: ConsumeConfig;
   // Nest brood spawn timer (Stage 4): seconds until the next batch; ticked by
   // GameEngine.updateNests for an enemy whose archetype has a `spawner` config.
@@ -936,10 +940,12 @@ export interface GameEntity {
   weaponOverride?: Partial<WeaponConfig>;
   // ── Boss ((h)) ──────────────────────────────────────────────────────────
   // `isBoss` marks a wave capstone: it drives the HUD boss bar, the render
-  // aura and the model-(d) payout in GameEngine.handleEntityDeath.
+  // aura and the capstone payout (`payBossBounty`, engine/bosses.ts — score,
+  // a salvage spray and a random module), dispatched from
+  // GameEngine.handleEntityDeath.
   // `bossPhase` is the index of the currently-applied BOSS_DEFS phase
-  // (GameEngine.updateBosses stamps a phase once, on the health-fraction
-  // transition); -1 means "spawned, no phase applied yet".
+  // (`updateBosses`, engine/bosses.ts, stamps a phase once, on the
+  // health-fraction transition); -1 means "spawned, no phase applied yet".
   isBoss?: boolean;
   bossPhase?: number;
   // Swarm movement scratch (Stage 4): per-gnat timer/phase reused by the
@@ -948,23 +954,24 @@ export interface GameEntity {
   swarmTimer?: number;
   // Reactive bubble (Stage 5).  `bubbleLatchTimer` counts down the seconds a
   // provoked bubble stays latched onto the player (attachedToId='player')
-  // EMPing it, after which it releases and pops — ticked by
-  // GameEngine.updateBubbles.  (Passive movement rides the asteroid flow field
-  // / chases shards directly in AISystem.updateBubble — no stored heading.)
+  // EMPing it, after which it falls off and goes SICK (it no longer pops) —
+  // ticked by `updateBubbles` (roamers/bubbles.ts).  (Passive movement rides
+  // the asteroid flow field / chases shards directly in AISystem.updateBubble
+  // — no stored heading.)
   bubbleLatchTimer?: number;
   // Burst/coast cadence for bubble locomotion (AISystem.updateBubble): counts
   // down through a slow coast then a short fast dart, so a bubble normally
   // creeps but periodically lunges.
   bubbleBurstTimer?: number;
   // Feed pulse: stamped when a bubble swallows a shard; the membrane briefly
-  // bulges (RenderSystem) while it ticks down in GameEngine.updateBubbles.
+  // bulges (RenderSystem) while it ticks down in `updateBubbles`.
   bubbleFeedTimer?: number;
   // Digest (Stage 5): a bubble holding a shard inside it.  On membrane contact
   // the shard is swallowed (deactivated) and its look snapshotted here; the
   // bubble renders a shrinking ghost of it INSIDE the transparent membrane while
   // the timer runs, then grows.  Mirrors the latch (a held target processed over
   // a timer) — the bubble just can't engulf the too-big player/enemy, so that
-  // path clings + EMPs instead.  Ticked in GameEngine.updateBubbles.
+  // path clings + EMPs instead.  Ticked in `updateBubbles`.
   // `bubbleDigestDuration` is the per-shard digest time (= DIGEST_DURATION ×
   // richness) — stored for the render progress ratio AND to recover the richness
   // at finish (heal/grow scale).
@@ -974,7 +981,7 @@ export interface GameEntity {
   bubbleDigestSize0?: number;
   // Sickness (Stage 5): set after breaking a latch or eating a toxic shard —
   // the bubble turns green, moves sluggishly, and can't eat until it ticks out
-  // (GameEngine.updateBubbles).  Loses aggro on entry.
+  // (`updateBubbles`).  Loses aggro on entry.
   bubbleSickTimer?: number;
   // Set on a LATCHED bubble when a projectile hits it (PhysicsSystem) so
   // updateBubbles shakes it loose next tick.  Consumed there.
@@ -985,8 +992,8 @@ export interface GameEntity {
 
   // ── Stage 6: dragon mini-boss ───────────────────────────────────────────
   // Recent head-position history (newest first), recorded by
-  // GameEngine.updateDragon; RenderSystem walks it to draw the trailing body
-  // segments.  Only the dragon head carries this.
+  // `updateDragons` (roamers/dragons.ts); RenderSystem walks it to draw the
+  // trailing body segments.  Only the dragon head carries this.
   dragonPath?: Vector2[];
   // Phase-through (gnat-style): the entity ignores collision with everything
   // except the player + player projectiles (so the dragon glides through terrain
@@ -995,9 +1002,10 @@ export interface GameEntity {
   phasesTerrain?: boolean;
   // Dragon body segment (Stage 6): a real tile-variant STRUCTURE that the dragon
   // has eaten, chain-followed behind the head (position hard-set each frame by
-  // GameEngine.positionDragonBody).  Finite mass so it's shootable + collides;
-  // EntityIndex excludes it from the shard indices so ShardSystem / flow-drift /
-  // consume leave it alone.  Cleared when it's severed off (→ free shard).
+  // `positionDragonBody`, roamers/dragons.ts).  Finite mass so it's
+  // shootable + collides; EntityIndex excludes it from the shard indices so
+  // ShardSystem / flow-drift / consume leave it alone.  Cleared when it's
+  // severed off (→ free shard).
   dragonSegment?: boolean;
 
   // ── SCANNER detection (scanner rework) ────────────────────────────────
@@ -1039,23 +1047,23 @@ export interface GameEntity {
   // ── Snitch (quidditch-style wave bonus target) ───────────────────────────
   // Marks the one-per-wave snitch entity (EntityType.INTERACTABLE, no
   // dropType, so the physics broadphase ignores it entirely).  Steering /
-  // catch logic lives in GameEngine.updateSnitch; RenderSystem keys the
-  // golden-comet draw + trail strip off this flag.
+  // catch logic lives in `updateSnitch` (roamers/snitch.ts); RenderSystem
+  // keys the golden-comet draw + trail strip off this flag.
   isSnitch?: boolean;
   // Stable per-snitch phase offset (radians) for the wander oscillation so
   // two consecutive snitches don't weave identically.
   snitchWanderPhase?: number;
 
   // ── Space-station POI (economy-pivot 1e) ─────────────────────────────────
-  // Marks the one-per-Overworld-map station entity (EntityType.INTERACTABLE,
+  // Marks a station entity — four on the Overworld (EntityType.INTERACTABLE,
   // no dropType, mass ∞): the physics broadphase skips it entirely, the
   // static grid and flow-field obstacle bake exclude INTERACTABLEs, so it's
   // pure scenery + a dock zone.  Docking logic lives in GameEngine; the
   // bespoke draw keys off this flag.
   isStation?: boolean;
-  // Which station variant this POI is ('home' | 'shipwright' | 'armory' —
-  // see STATION_VARIANTS): drives its name/colour and the SERVICES the
-  // docked UI offers (drydock / repair / ship shop / weapon shop).
+  // Which station variant this POI is ('home' | 'shipwright' | 'armory' |
+  // 'tradehub' — see STATION_VARIANTS): drives its name/colour and the
+  // SERVICES the docked UI offers (drydock / repair / ship shop / weapon shop).
   stationKind?: string;
   // Stamped each sim step by the dock proximity check: true while the player
   // is inside STATION_CONSTANTS.DOCK_RANGE.  RenderSystem pulses the dock
@@ -1076,7 +1084,8 @@ export interface GameEntity {
   // Stamped each sim step by the interaction proximity check: true while the
   // player is inside PORTAL_CONSTANTS.USE_RANGE *and* this portal won the
   // nearest-in-range arbitration against every other portal and station.
-  // RenderSystem pulses the entry ring when set (the world-space affordance).
+  // Nothing READS it now: the entry ring it used to pulse went with the
+  // rift's ornament, and the affordance is the ship's `interactPrompt`.
   portalReady?: boolean;
 
   // Stamped by the damage paths when the killing blow came from the player
@@ -1109,7 +1118,7 @@ export interface GameEntity {
   // entity belongs to.  Set at every spawn site; resolves via
   // `shardVariantOf()` (engine/systems/ShardSystem.ts) for callers that
   // also accept legacy entities (none today, kept defensive).
-  // See docs/SHARD_SYSTEM.md.
+  // See CLAUDE.md §4.
   shardVariant?: ShardVariantId;
 
   // Set on nebula-shards that formed from ROCK material (per-hit chip dust
@@ -1261,7 +1270,8 @@ export interface GameEntity {
   // Cannon explosion ring — when true, RenderSystem draws an expanding
   // ring particle whose radius scales from 0 → explosionRadius over its
   // lifetime.  Stroke colour comes from `color`.  Spawned in
-  // GameEngine.applyExplosionAoE alongside the existing spark particles.
+  // `applyExplosionAoE` (engine/explosions.ts) alongside the existing spark
+  // particles.
   isExplosionRing?: boolean;
   // Snapshot of entity ids that were in range AND eligible at the moment
   // the ring spawned.  updateExplosionRings only damages entities whose
@@ -1276,7 +1286,8 @@ export interface GameEntity {
   // bodies it may reach (≤ the blast cap) instead of the whole map.
   validHitEntities?: GameEntity[];
 
-  // Marks a projectile spawned by the lightning weapon (for electric rendering + chain-on-hit)
+  // Marks the Arc Bolt (projectile + electric) round: electric rendering and
+  // lightning gravity.  Its chain is the `energyElectric` payload.
   isLightningProjectile?: boolean;
 
   // When true, handleEntityDeath skips drop spawning (e.g. explosion kills)
@@ -1292,9 +1303,9 @@ export interface GameEntity {
   // brighter bloom so heavy / status shots read at a glance.
   glow?: boolean;
   // Charged-shot render hint — set on the projectile when the charged
-  // variant should render with a custom visual (e.g. fireball gradient
-  // for charged Blaster).  Other charged variants (Burst / Shotgun /
-  // Homing / Cannon) leave this unset and render with the standard
+  // variant should render with a custom visual: the fireball gradient, for
+  // a charged plain or kinetic round of the projectile delivery.  Every
+  // other charged variant leaves this unset and renders with the standard
   // weapon-color gradient.
   isCharged?: boolean;
   // Homing turn-rate multiplier: 1.0 = full tracking, 0.2 = very mild
@@ -2095,11 +2106,12 @@ export interface EngineStats {
   screenShakeEnabled?: boolean;
   // DBG outline overlay for outlineless variants (nebula-tile /
   // nebula-shard cloud sprite).  Default false; DBG-toggleable via
-  // the Visual section's Outline button.
+  // Perf & Diagnostics ▸ Debug Overlays ▸ "Outlines".
   tileOutlinesEnabled?: boolean;
-  // DBG (Visual): off-screen-indicator chevron mode. true = chevrons only for
-  // nearby-but-offscreen entities (on-screen ones are suppressed); false = the
-  // original "chevron everything past the centre ring" behaviour.
+  // DBG (Visual / HUD ▸ Camera & HUD ▸ "Chevrons"): off-screen-indicator
+  // chevron mode. true = chevrons only for nearby-but-offscreen entities
+  // (on-screen ones are suppressed); false = the original "chevron
+  // everything past the centre ring" behaviour.
   chevronsOffscreenOnly?: boolean;
   /** DBG: enemy health bars appear on damage and fade (true, default) vs
    *  always drawn (false, the pre-5d behaviour).  See RenderSystem
@@ -2305,8 +2317,9 @@ export interface EngineStats {
   controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
-  // DBG portal tuning (pause ▸ Debug Menu ▸ Portals) — five live multipliers
-  // over PORTAL_CONSTANTS, plus a readout of what they resolve to.
+  // DBG portal tuning (DBG ▸ World & Maps ▸ Portals) — the transit-warp
+  // length and six live multipliers over PORTAL_CONSTANTS, plus a readout of
+  // what they resolve to.
   portalWarpName?: string;
   portalSizeName?: string;
   portalGravityName?: string;
@@ -2317,8 +2330,8 @@ export interface EngineStats {
   portalTuningInfo?: string;
   // DBG banking-roll feel preset name (PLAYER_ROLL_CYCLE, e.g. "Default").
   rollFeelName?: string;
-  // DBG player-hull name (PLAYER_HULL_CYCLE: "Cube" — the default —
-  // "Diamond", "Sphere", "Dodeca", "Rhombic", "Tri", or "Ship").
+  // DBG player-hull name (PLAYER_HULL_CYCLE: "Ship" — the default —
+  // "Sheet", "Cube", "Diamond", "Sphere", "Dodeca", "Rhombic" or "Tri").
   hullModeName?: string;
   // DBG rotation-damping preset name (PLAYER_ROLL_DAMPING_CYCLE, e.g.
   // "Default").

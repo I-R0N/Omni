@@ -295,15 +295,17 @@ export class DropSystem {
   }
 
   /**
-   * Scatter 7–9 glass shards from a destroyed tile plus an occasional fuel
-   * shard.  Glass shards look like tile fragments (same glass rendering),
-   * drift with the flow field, and persist as permanent debris.  They are
-   * NOT added to activeDrops so they cannot be collected — they are purely
-   * environmental debris.
+   * Scatter 4–12 glass shards (more and smaller the harder the hit) from
+   * a destroyed tile, plus 3–5 glass-palette nebula puffs.  Glass shards
+   * look like tile fragments (same glass rendering), drift with the flow
+   * field, and persist as debris.  They are NOT added to activeDrops so
+   * they cannot be collected — they are purely environmental debris.
+   * This is the LEGACY glass-tile break: under voronoi fracture the tile
+   * breaks into its own cells instead and spawnDrops never calls this.
    */
   public spawnGlassShards(entities: GameEntity[], tile: GameEntity) {
     // Damage biases count and size distribution.
-    // damageNorm 0 → 4–6 shards, mostly large; 1 → 9–11, mostly small.
+    // damageNorm 0 → 4–6 shards, mostly large; 1 → 10–12, mostly small.
     const damage     = tile.lastImpactDamage ?? 1;
     const damageNorm = Math.min(1, (damage - 1) / 4);
     const count      = Math.round(4 + damageNorm * 6) + Math.floor(Math.random() * 3);

@@ -1,7 +1,8 @@
-// ShardSystem schema interfaces.  See docs/SHARD_SYSTEM.md for the
-// full design rationale.  This file defines the data shapes only —
-// the system implementation lives in ShardSystem.ts and the variant
-// table itself in constants.ts as SHARD_VARIANTS.
+// ShardSystem schema interfaces.  Design rationale: CLAUDE.md §4
+// (single STRUCTURE carrier) and §5 (SHARD_VARIANTS).  This file
+// defines the data shapes only — the system implementation lives in
+// ShardSystem.ts and the variant table itself in constants.ts as
+// SHARD_VARIANTS.
 //
 // The schema mirrors STRUCTURE_VARIANTS / ENEMY_VARIANTS — a frozen
 // Record<id, def> consumed by switches inside the shared system.
@@ -32,8 +33,8 @@ export type ShardVariantId =
   | 'nebula-shard';
 
 // ── Carrier EntityType ──────────────────────────────────────────────
-// All shard-family entities live on a single carrier per the §6.C
-// decision in docs/SHARD_SYSTEM.md.  The static-vs-dynamic axis is
+// All shard-family entities live on a single carrier
+// (EntityType.STRUCTURE; CLAUDE.md §4).  The static-vs-dynamic axis is
 // encoded by `mass` (Infinity → static grid, finite → dynamic grid);
 // pass-through is encoded by the variant's `passThrough` flag.
 //
@@ -98,19 +99,20 @@ export interface ShardSpawnShape {
   /** Radial range for jitter, fraction of base radius. */
   radiusMin: number;
   radiusRange: number;
-  /** mass = sizeToMass(diameter).  Default for asteroid / tile-shard
-   *  is `d => d`; nebula-shard overrides to `() => 0.01` (negligible
-   *  striker impulse).  Tiles are mass = Infinity (passed in by the
+  /** mass = sizeToMass(diameter).  Every solid material's shape is
+   *  `d => massFor(d, IMPACT_DENSITY.<material>)`; nebula-shard
+   *  overrides to `() => 0.01 * MASS_SCALE` (negligible striker
+   *  impulse).  Tiles are mass = Infinity (passed in by the
    *  caller, not via this fn). */
   sizeToMass: (diameter: number) => number;
   /** Optional per-entity damping stamped at spawn time.  When set,
    *  spawn sites copy these onto the entity so PhysicsSystem.update
    *  ticks them via the existing per-entity damping path (gated by
-   *  `entity.linearDamping !== undefined`).  Today metal-assembly
-   *  uses this so locked composite cells share the same damping.
-   *  Nebula-shards use NEBULA_CONSTANTS values stamped directly at
-   *  spawn — they predate this field.  Values are per-second decay
-   *  factors — PhysicsSystem applies them via
+   *  `entity.linearDamping !== undefined`).  Today only the nebula
+   *  shape declares them (NEBULA_CONSTANTS values, which the generic
+   *  child recipes copy onto every fragment); a metal composite has
+   *  METAL_ASSEMBLY's damping stamped directly when it forms.  Values
+   *  are per-second decay factors — PhysicsSystem applies them via
    *  `Math.pow(damping, timeScale)`. */
   linearDamping?: number;
   angularDamping?: number;
@@ -288,7 +290,7 @@ export interface ShardShatterPolicy {
    *  variant through its OLD path instead: the powerlaw pipeline for
    *  mobile shards, the dent breakShards spawn for dent tiles. */
   kind: 'none' | 'powerlaw' | 'voronoi';
-  /** Output count — for nebula today: 2..3, for asteroid: 2..5. */
+  /** Output count on the powerlaw paths — nebula and rock today: 2..3. */
   countMin: number;
   countMax: number;
   /** Power-law alpha range.  damageNorm 0 → alphaMin, 1 → alphaMax. */
@@ -328,7 +330,7 @@ export interface ShardShatterPolicy {
   shatterCountBySize?: ReadonlyArray<{ maxSize: number; count: number }>;
   /** Shatter geometry strategy.  Two flavours today:
    *
-   *    'asteroid' — children scattered in a cone around the impact
+   *    'scatter'  — children scattered in a cone around the impact
    *                 direction, count and area driven by impact damage,
    *                 each child sized via power-law over the parent's
    *                 area budget.  Used by rock/glass/tile-family.
@@ -338,8 +340,10 @@ export interface ShardShatterPolicy {
    *                 area = GLASS_TILE_HALF² (constant) so shards are
    *                 visually small regardless of parent tile size.
    *
-   *  Only meaningful when `kind === 'powerlaw'`.  Variants with
-   *  `kind === 'none'` ignore this field. */
+   *  Only meaningful when `kind === 'powerlaw'`, or for a 'voronoi'
+   *  variant under the DBG 'legacy' fracture A/B (which is how nebula
+   *  keeps its rear-cone fan).  Variants with `kind === 'none'` ignore
+   *  this field. */
   style?: 'scatter' | 'nebula';
 }
 
@@ -408,16 +412,20 @@ export interface GrainSpec {
    *  ceiling or min-remainder) breaks the REMAINING cells.  Variants
    *  with progressive fracture skip the dent polygon pull under
    *  voronoi mode — the pattern must stay stable, and the highlight IS
-   *  the damage read.  Today: rock-tile + rock-shard. */
+   *  the damage read.  Today: every solid grain row (rock, glass,
+   *  plastic, metal — tile and shard), and every one of them also sets
+   *  `bondStrength`, so the boundary model below decides when a cell
+   *  breaks and when the body dies; the reveal pacing and the hit-
+   *  ceiling / min-remainder death above only run without it. */
   progressive?: boolean;
   /** GRAIN BOUNDARIES (V15 — the user's model).  When set, damage is
    *  no longer a countdown on a hand-authored HP pool: it ACCUMULATES
    *  ON THE BOUNDARIES of the decomposition, nearest the impact first,
    *  and a cell breaks off exactly when every boundary binding it has
-   *  been broken through.  This number is the damage needed to break a
-   *  boundary AS LONG AS THE BODY IS WIDE, so each edge costs
-   *  `bondStrength × (edgeLength / bodySize)` and a material's
-   *  toughness is ONE number.
+   *  been broken through.  This number is the damage per PIXEL of
+   *  boundary, so each edge costs `bondStrength × edgeLength` (absolute
+   *  length, not normalised by the body's size — see computeEdgeNeed in
+   *  fractureCache.ts) and a material's toughness is ONE number.
    *
    *  The entity's HP is then DERIVED — `Σ edge strengths`, computed
    *  from its own pattern the first time it is damaged — rather than

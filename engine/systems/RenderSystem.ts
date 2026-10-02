@@ -52,9 +52,9 @@ export interface FlowOverlayState {
     sampleN:   number;
 }
 
-// Per-cell flash window for the FF Rebuilds overlay (ms).  Long enough
-// that a single tile destruction is visible at 60 Hz (~36 frames); short
-// enough that rapid destruction events don't smear into one big blob.
+// Per-cell flash window for the Flow Field "Rebuilds" overlay (ms).  Long
+// enough that a single tile destruction is visible at 60 Hz (~36 frames);
+// short enough that rapid destruction events don't smear into one big blob.
 const FF_REBUILD_FLASH_MS = 600;
 
 const SHIELD_COLOR = SHIELD_CONSTANTS.COLOR;
@@ -73,19 +73,21 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // outlineless (plastic-tile / plastic-shard soft-gradient,
   // nebula-tile / nebula-shard cloud).  Lets a dev see where the
   // SAT collision shape ends vs. where the gradient bleeds.
-  // Default OFF.  Wired through GameEngine.toggleTileOutlines and
-  // surfaced in the DBG panel's Visual section.
+  // Default OFF.  Wired through `dbg.toggleTileOutlines` and surfaced at
+  // DBG ▸ Perf & Diagnostics ▸ Debug Overlays ▸ "Outlines".
   public tileOutlinesEnabled: boolean = false;
   // When true, off-screen indicator chevrons are suppressed for entities that
   // are currently ON screen — the player can already see them, so the chevron
   // is redundant clutter; chevrons then only point at nearby-but-offscreen
-  // entities.  Wired through GameEngine.toggleChevronMode, surfaced in the DBG
-  // Visual section ("Chevrons": Offscreen / All).  Default = offscreen-only.
+  // entities.  Wired through `dbg.toggleChevronMode`, surfaced at DBG ▸
+  // Visual / HUD ▸ Camera & HUD ("Chevrons": Offscreen / All).  Default =
+  // offscreen-only.
   public chevronsOffscreenOnly: boolean = true;
-  /** DBG toggle (Visual ▸ "HP bars") — when true (default), an enemy's
-   *  world-space health bar appears only while recently damaged and fades
-   *  out; when false, every enemy carries one every frame, which is the
-   *  pre-5d behaviour and the A/B for judging the change (gauntlet 5d, U5). */
+  /** DBG toggle (Visual / HUD ▸ Camera & HUD ▸ "HP bars") — when true
+   *  (default), an enemy's world-space health bar appears only while
+   *  recently damaged and fades out; when false, every enemy carries one
+   *  every frame, which is the pre-5d behaviour and the A/B for judging the
+   *  change (gauntlet 5d, U5). */
   public damageTriggeredBars: boolean = true;
   /** Is the DOM's boss capstone bar on screen?  Read by the off-screen
    *  indicator rect, which reserves the band the bar occupies so an arrow at
@@ -111,11 +113,14 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   /** SCANNER, pushed once per frame in `GameEngine.draw` — the same channel
    *  the Light's cone override takes.  `scannerMk` says which detection
    *  TIERS the ship can find; `scanRanges` says how far each reaches; the
-   *  three `scan*` fields below carry the live ping and the material bubble.
+   *  fields below carry the live ping and the auto sweep's ring.
    *
-   *  THE BASELINE IS NOTHING (rework, user call).  With no scanner there are
-   *  no off-screen arrows at all and the minimap draws neither terrain nor
-   *  contacts — only the two always-charted landmarks.  Every gate below is
+   *  THE BASELINE IS WHAT YOU HAVE MET (rework, user call).  With no scanner
+   *  the only detection is NATURAL ENCOUNTER within
+   *  `SCANNER.ENCOUNTER_RANGE`: arrows only for contacts met at close range,
+   *  and a minimap of what the ship has flown past — tiles, large shards and
+   *  landmarks for good (`found`), moving contacts while the stamp is fresh
+   *  — plus the two always-charted landmarks.  Every gate below is
    *  therefore "was this detected", not "is the mark high enough". */
   public scannerMk: number = 0;
   public scanRanges: number[] = [];
@@ -127,38 +132,33 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  be exactly the nag the manual button exists to avoid. */
   public autoPingRadius: number = 0;
   public autoPingMax: number = 0;
-  /** Sim clock + the last completed ping's material bubble, for the minimap's
-   *  tier-1 reveal.  See `GameEngine.updateScan` for why materials are a
-   *  radius and contacts are stamps. */
+  /** Sim clock — what every detection stamp is aged against
+   *  (`detectAlpha`).  Contacts are stamps; terrain and materials are
+   *  tracked as `found` OBJECTS (GameEngine.discoverStructures). */
   public simClock: number = 0;
   /** Energy-module feedback (heat glow, energised nebula, the live beam),
    *  pushed by GameEngine each frame; see render/energyFx.ts. */
   public energyFx: EnergyFxView | null = null;
-  /** The last completed ping: WHEN, HOW FAR and WHERE FROM.  These are no
-   *  longer a draw input — materials read the charted memory like the terrain
-   *  does — but they remain the trigger that CHARTS the ping's bubble, which
-   *  is why the centre matters.  Without one, charting followed the ship and
-   *  a scan's whole navigational value (mapping ground you have not flown)
-   *  went with it. */
+  /** The last completed ping: WHEN, HOW FAR and WHERE FROM.  UNREAD: they
+   *  drove the old radius-based material reveal, which
+   *  `GameEngine.discoverStructures` replaced; `GameEngine.draw` still
+   *  copies them here, and nothing in the renderer reads them. */
   public materialRevealAt: number = -1e9;
   public materialRevealRadius: number = 0;
   public materialRevealX: number = 0;
   public materialRevealY: number = 0;
-  /** CHARTED MEMORY (render/charted.ts) — which ground the player has met.
-   *  `_lastChartedScan` is the reveal timestamp already stamped into it, so a
-   *  completed scan is charted exactly once. */
-
 
   /** Does the minimap draw a dot per mobile shard this frame?  TWO callers
    *  have to agree — the per-entity buffer fill here and the draw in
    *  `render/hud.ts` — so the answer has exactly one definition.
    *
-   *  The DBG "Minimap mat" cycle and the SCAN answer different questions and
-   *  BOTH have to say yes: the cycle picks WHICH material layer is drawn
-   *  (dots / flow / off) and the scan decides whether there is anything to
-   *  draw it for.  The cycle cannot be a dev override that forces the layer
-   *  on, because its shipped default is already 'dots' — that would make the
-   *  material reveal free and Mk I worthless. */
+   *  The DBG "Minimap mat" cycle and DISCOVERY answer different questions
+   *  and BOTH have to say yes: the cycle picks WHICH material layer is drawn
+   *  (dots / flow / off) — the only thing this getter reads — and the buffer
+   *  fill then admits a shard only if it is `found` (met, or inside a scan's
+   *  bubble) and within MINIMAP_CONSTANTS.RANGE.  The cycle cannot be a dev
+   *  override that forces the layer on, because its shipped default is
+   *  already 'dots' — that would put every shard on the map, found or not. */
   public get minimapShardDots(): boolean {
     return getActiveMinimapMaterial() === 'dots';
   }
@@ -198,10 +198,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   /** The rift the player arrived through, charted without a scanner. */
   public arrivalPortalId: string | null = null;
 
-  // DBG toggle (PAuto) — when true, plastic-shards render in the
+  // DBG toggle ("Pl shade") — when true, plastic-shards render in the
   // active palette's constant base shade, brightness-scaled by their
   // neighbour-contact count (ShardSystem.plasticNeighborCount).  When
-  // false, they keep their per-instance random shade.  Default ON.
+  // false, they keep their per-instance random shade.  Default OFF.
   public plasticAutomataEnabled: boolean = false;
   // DBG toggle (Tile shade) — master gate for the material-tile
   // neighbour-brightness automata.  When true, glass / metal / rock
@@ -210,10 +210,10 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   // lone tiles stay at the base palette colour.  Default ON so the
   // effect reads immediately for review.  Paired with
   // ShardSystem.materialAutomataEnabled (the count-compute gate) via
-  // GameEngine.toggleMaterialAutomata.
+  // `dbg.toggleMaterialAutomata`.
   public materialAutomataEnabled: boolean = true;
-  // DBG toggle (ShLOD) — when true, mobile shards whose apparent radius
-  // is below SHARD_LOD_CONSTANTS.MIN_APPARENT_RADIUS_PX blit a cached
+  // DBG toggle ("Shard LOD") — when true, rock / metal shards whose apparent
+  // radius is below SHARD_LOD_CONSTANTS.CHIP_LOD_RADIUS_PX blit a cached
   // solid disc instead of their full polygon render.  Default ON.
   public shardLodEnabled: boolean = true;
   // Count of shards drawn via the LOD disc this frame — DBG perf readout.
@@ -354,16 +354,17 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
   stageDepth: number = 0;
 
   /** The flashlight TOOL's cone half-angle while the tool is ON, set per
-   *  frame by GameEngine.draw.  null → the tool is off (or no kit), and the
-   *  player light falls back to the DBG flashlight global — which ships
-   *  'off', so a kit-less ship carries no beam.  See FLASHLIGHT_TOOL_LEVELS. */
+   *  frame by GameEngine.draw.  null → the tool is off (or no Light module),
+   *  and the player light falls back to the DBG flashlight global — which
+   *  ships 'off', so a module-less ship carries no beam.  See
+   *  FLASHLIGHT_TOOL_LEVELS. */
   playerLightToolHalfDeg: number | null = null;
 
   /** DBG passthroughs for the lighting mode.  The state itself is module
    *  scope in constants.ts (the RENDER_SCALE_CYCLE pattern); these exist so
    *  the harness and the tests can reach it off `engine.renderer` without
-   *  the mode having to be plumbed through EngineStats first.  The pause-menu
-   *  DBG row lands with A4, when there is something to look at. */
+   *  the mode having to be plumbed through EngineStats first.  The panel's
+   *  row is DBG ▸ Visual / HUD ▸ Lighting ▸ "Lighting". */
   public cycleLighting(): string { return cycleLightingMode(); }
   public setLighting(m: LightingMode): void { setActiveLightingMode(m); }
   public getLighting(): LightingMode { return getActiveLightingMode(); }
@@ -676,14 +677,11 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
       return c;
   }
 
-  // LOD solid-triangle cache (Step 4).  Keyed by fill colour; a flat
-  // opaque filled equilateral triangle blitted for metal shards too small
-  // for their polygon detail to read.  Metal shards are equilateral
-  // triangles, so the cached silhouette is a triangle (apex-up in local
-  // space, matching their spawn polygon) — the per-entity ctx transform
-  // applies entity.rotation, so the blit lands at the correct orientation.
-  // Bounded like the tinted-sprite cache — the metal palette + density-
-  // tier darkening yields only a handful of distinct colours in practice.
+  // LOD solid-DISC cache (Step 4).  Keyed by fill colour; a flat opaque
+  // filled disc blitted for rock / metal shards too small for their polygon
+  // detail to read — see getSolidDiscBitmap for why it is a disc and
+  // nothing else.  Bounded like the tinted-sprite cache (64 colours,
+  // oldest evicted first).
   private _solidDiscBitmaps: Map<string, HTMLCanvasElement> = new Map();
 
   /** Silhouette-NEUTRAL LOD blob — the ONLY cached shard silhouette, and
@@ -1107,12 +1105,14 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
 
         // Off-screen indicator arrows — for enemies and non-drop POIs.
         //
-        // THE ARROWS ARE THE SCANNER'S (rework, user call).  An arrow now
-        // means "the scan found this", so the gate is the detection stamp:
-        // with no scanner nothing is ever stamped and the HUD carries no
-        // arrows at all, and an always-charted landmark deliberately does NOT
-        // qualify — the home rift is on the MAP without a scanner, never on
-        // the edge of the screen.
+        // THE ARROWS ARE DETECTION'S (rework, user call).  An arrow means
+        // "this was detected", so the gate is the detection stamp, which a
+        // pressed scan OR a natural encounter within SCANNER.ENCOUNTER_RANGE
+        // sets (GameEngine.encounterOne) — a scannerless ship gets arrows
+        // only for contacts it has met at close range, never at instrument
+        // range.  Being always-charted deliberately does NOT qualify: the
+        // home rift is on the MAP without a scanner, and only a fresh
+        // detection puts it on the edge of the screen.
         //
         // Gnats (diesOnContact, Swarm) stay excluded whatever the scan finds:
         // a cloud of them would crowd the screen and they are not threats the
@@ -1141,17 +1141,17 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             }
         }
 
-        // Structures use the pre-rendered static minimap layer — skip them
-        // here to avoid ~22k per-frame object allocations + fillRect calls.
-        // MOBILE shards still reach this buffer, but only while the material
-        // layer is actually being drawn (a fresh scan, or the DBG override):
-        // a few thousand pushes per frame for dots nobody is drawing is the
-        // kind of cost that hides in a profile.
+        // Static tiles use the pre-rendered static minimap layer (they took
+        // the fast path above) — ~22k per-frame object allocations +
+        // fillRect calls avoided.  MOBILE shards still reach this buffer, but
+        // only while the DBG "Minimap mat" cycle is on Dots (the shipped
+        // default): a few thousand pushes per frame for dots nobody is
+        // drawing is the kind of cost that hides in a profile.
         //
-        // CONTACTS ARE GATED ON DETECTION (rework).  The two always-charted
-        // landmarks — the home station and the rift the player arrived
-        // through — are the standing exception, and the only thing a
-        // scannerless ship has on its map.
+        // CONTACTS ARE GATED ON DETECTION (rework) — a scan, an auto sweep or
+        // a natural encounter; `found` landmarks stay for good.  The two
+        // always-charted landmarks — the home station and the rift the player
+        // arrived through — are found from the start.
         if (entity.type !== EntityType.PLAYER && entity.type !== EntityType.PROJECTILE && entity.type !== EntityType.PARTICLE
                 && entity.shardVariant !== 'nebula-tile' && entity.shardVariant !== 'nebula-shard'
                 && !(entity.type === EntityType.STRUCTURE && minimapDots === false)
@@ -1325,7 +1325,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // After the entity pass so it lights what was drawn, before the HUD so
     // it never tints the HUD, and AFTER ctx.restore() because the layer is
     // screen-space and must not inherit the camera translation.  No-op at
-    // LIGHTING_CYCLE 'legacy' (the default).
+    // LIGHTING_CYCLE 'legacy' (the zero-cost restore; 'unified' ships).
     renderLightLayer(this, ctx, width, height, playerPos, camera, player?.rotation,
                      entities);
 
@@ -2030,8 +2030,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
             // colour automata that only terrain uses.  render/tileShapes.ts.
             drawTileShape(this, ctx, entity, nowSec, playerPos, camera);
           } else if (entity.type === EntityType.PROJECTILE) {
-             // Lightning bolt / bouncer head / charged fireball / the
-             // standard weapon-colour glow.  render/projectileShapes.ts.
+             // Electric bolt / charged fireball / the standard
+             // weapon-colour glow.  render/projectileShapes.ts.
              drawProjectileShape(this, ctx, entity, nowSec);
           } else {
             // Drops (salvage / health / glass debris) and the proximity-
@@ -2186,8 +2186,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    * (gauntlet 5d, U5; the parked "damage-triggered health / shield bars"
    * item).
    *
-   * Three rules, and each of them removes something that used to be on screen
-   * all the time:
+   * Three rules:
    *
    *  1. **A bar appears when the entity takes damage and fades out again.**
    *     Every enemy used to carry one every frame, at full health and on
@@ -2211,7 +2210,8 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *
    * `alwaysShowHealthBar` opts a priority target back into a persistent bar.
    * Capstone bosses deliberately do NOT set it: they have the dedicated HUD
-   * bar, and a second readout under the hull is the redundancy rule 2 removes.
+   * bar, and a permanent second readout under the hull would say the same
+   * thing twice (the player's own bar, rule 2, is the one such pair kept).
    *
    * Net effect on cost is a REDUCTION — most entities draw no bar on most
    * frames — against one timer decrement per entity.

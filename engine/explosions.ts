@@ -240,6 +240,11 @@ export function updateExplosionRings(g: GameEngine) {
                 // Player shield soaks the blast first (kamikaze AoE and any
                 // future enemy-owned explosion) so an AoE hit isn't a raw
                 // shield-bypass — mirrors the projectile / ram absorption.
+                // UNREACHABLE today: the ring walks its spawn-time snapshot of
+                // `currentMap.entities`, which never holds the player (enemy
+                // blasts reach it through
+                // `applyBlastToPlayer`), and no other entity's shield is
+                // consulted here — so splash bypasses enemy shields.
                 if (e.id === 'player' && (e.shield ?? 0) > 0 && !e.systemsDisabled) {
                     const absorbed = Math.min(e.shield!, applied);
                     e.shield! -= absorbed;
@@ -314,13 +319,6 @@ export function updateExplosionRings(g: GameEngine) {
     }
 }
 
-/** `falloff` is the PENETRATION damage factor already applied to this hit's
- *  DIRECT damage (PhysicsSystem stashes it on the projectile).  Passing it in
- *  keeps every weapon affected equally by the falloff rate: a pierced shot's
- *  fourth blast is as weakened as its fourth bite.  1 when nothing pierced. */
-/** `directTarget` is undefined for a FUSE detonation — the shell went off in
- *  flight having struck nothing, so there is no direct hit to exclude from
- *  the ring and nothing to compare the owner against. */
 /** Detonate `proj`'s charge at `impactPos`.
  *
  *  THE CHARGE IS PAYLOAD, NOT TRAVEL ENERGY (user call).  This used to scale
@@ -337,7 +335,12 @@ export function updateExplosionRings(g: GameEngine) {
  *  A warhead does not shrink because the shell flew through a wall.  How big
  *  the charge is, is the round's own mass (Gunnery and the charged shot both
  *  buy a heavier one); how far it gets is its travel energy; the two are
- *  separate quantities and only the first sizes this. */
+ *  separate quantities and only the first sizes this.
+ *
+ *  `directTarget` is undefined for a FUSE or a STOP detonation (both fired by
+ *  `updateProjectileFuses`) — the charge went off where the round was, not
+ *  on an actor it struck, so there is no direct hit to exclude from the ring
+ *  and nothing to compare the owner against. */
 export function applyExplosionAoE(g: GameEngine, impactPos: Vector2, proj: GameEntity, directTarget?: GameEntity) {      if (!g.currentMap) return;
 // Compact splash blast — deliberately not the boss-death boom, since
 // a Cannon build fires this several times a fight.
@@ -376,8 +379,8 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         queueElectric(g, impactPos, proj.energyElectric, proj.color || '#22d3ee');
     }
 
-    // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
-    // Plasma Cannon, splash and all) must actually threaten the player —
+    // An ENEMY-owned explosive shell ((h) Bastion lobs a boss variant of the
+    // player's Cannon) must actually threaten the player —
     // otherwise its signature weapon is a light show.  Same direct,
     // shield-respecting blast the kamikaze uses, and for the same reason:
     // the ring sweep never reaches the player.  A player-owned Cannon

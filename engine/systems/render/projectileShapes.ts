@@ -1,7 +1,8 @@
-/** PROJECTILE SHAPES — the four shot silhouettes: the lightning bolt's
- *  crackling tendrils, the bouncer's head dot, the charged Blaster's
- *  red/orange fireball, and the standard radial-gradient glow every other
- *  weapon (player and enemy alike) renders with.
+/** PROJECTILE SHAPES — the three shot silhouettes: the electric bolt's
+ *  crackling tendrils (`isLightningProjectile`, the Arc Bolt), the charged
+ *  round's red/orange fireball (`isCharged`), and the standard
+ *  radial-gradient glow every other weapon (player and enemy alike)
+ *  renders with.  (The bouncer's head dot went with the Laser.)
  *
  *  Extracted verbatim from `RenderSystem.renderEntities`' PROJECTILE arm.
  *  It takes the renderer for exactly one reason: the two GRADIENT CACHES.

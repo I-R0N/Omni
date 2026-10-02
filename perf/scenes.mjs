@@ -100,7 +100,7 @@ export const SCENES = [
     id: 'boss-capstone',
     map: 'UNIVERSE',
     windowSec: DEFAULT_WINDOW_SEC,
-    notes: 'A boss plus its escort mid-wave: aura ring, boss HUD bar, phase transitions, heavy projectile traffic.',
+    notes: 'Two bosses warped in via DBG (which halts the wave ladder): aura rings, boss HUD bar, boss fire. No designed escort, and phases — with the brood a later phase\'s spawner calls — only move if something damages them.',
     setup: (e) => {
       e.startGame();
       e.debugOutfitAll();
@@ -152,7 +152,7 @@ export const SCENES = [
     id: 'stage-descent',
     map: 'UNIVERSE',
     windowSec: DEFAULT_WINDOW_SEC,
-    notes: 'Map-load transition. The ONE permitted long frame — what matters is the residue: substep pile-up and re-warm cost after it.',
+    notes: 'Map-load transition every 3 s by plain portal travel (portals[0], so it ping-pongs UNIVERSE ↔ hub; never a descent — the id is historical). The load runs from the sampler\'s own hook, outside the engine timers, so it lands in the FRAME column only. Each transit then plays the portal-warp beat (1.4 s as shipped; DBG ▸ World & Maps ▸ Portals ▸ "Transit fx"), which HOLDS the sim and zeroes the accumulator, so there is no substep pile-up left to see — and the sim timers are not refreshed during it, so about a third of the window repeats the last pre-transit sim sample. Read frame and render here, not the sim columns.',
     setup: (e) => { e.startGame(); },
     during: (e, frac, api) => {
       // Portal-travel on a cadence so the window holds several transitions
@@ -186,7 +186,7 @@ export const SCENES = [
     id: 'light-shipped',
     map: 'GLASS_FIELD',
     windowSec: DEFAULT_WINDOW_SEC,
-    notes: 'The SHIPPED lighting configuration, stated explicitly so a default change does not silently move this scene: unified, tier low, diffuse shadows, refraction + emission on, beam flashlight, emit shadows / tint mix / fog / depth all off.',
+    notes: 'The A8-era shipped lighting configuration (beam at tier low), stated explicitly so a default change does not silently move this scene: unified, tier low, diffuse shadows, refraction + emission on, beam flashlight, emit shadows / tint mix / fog / depth all off. No longer what ships — the flashlight now ships OFF and the Light tool runs its beam at tier medium or high — so this is a fixed reference, not the default.',
     setup: (e) => {
       e.startGame();
       e.renderer.setLighting('unified');
@@ -205,7 +205,7 @@ export const SCENES = [
     id: 'light-max',
     map: 'GLASS_FIELD',
     windowSec: DEFAULT_WINDOW_SEC,
-    notes: 'Everything the lighting can spend at once: shipped config plus emit shadows, three-layer memory fog, radial light (no beam cull), full tint mix — the ceiling a settings screen could reach, not a shipped state.',
+    notes: 'Everything the lighting can spend at once: the light-shipped config plus emit shadows, three-layer memory fog, radial light (no beam cull), full tint mix — the ceiling a settings screen could reach, not a shipped state.',
     setup: (e) => {
       e.startGame();
       e.renderer.setLighting('unified');

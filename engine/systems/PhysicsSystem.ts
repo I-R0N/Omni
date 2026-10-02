@@ -581,8 +581,8 @@ export class PhysicsSystem {
               entity.nebulaSpawnTimer = undefined;
           }
       }
-      // Nebula shard merge cooldown — skip gravity pull + merge checks
-      // in NebulaSystem.updateDynamics while this is positive.  Only
+      // Nebula shard merge cooldown — skip gravity pull + bond formation
+      // in ShardSystem's merge broadphase while this is positive.  Only
       // NEBULA_SHARDs carry this field in practice, but ticking it
       // unconditionally is a single branch per entity and keeps the
       // timer model consistent.
@@ -648,18 +648,18 @@ export class PhysicsSystem {
           wrapPosition(entity.position);
 
           // Apply Friction.  Stage 5: gate by per-entity damping
-          // override (today: nebula-shards) instead of EntityType so
-          // the shard-family unification doesn't lose nebula's
-          // characteristic cloud drag.
+          // override (today: nebula-shards and metal composites) instead
+          // of EntityType so the shard-family unification doesn't lose
+          // nebula's characteristic cloud drag.
           if (entity.linearDamping !== undefined) {
-            // Custom heavy linear & angular damping (nebula-shards
-            // today, future variants opt in via the same per-entity
-            // field at spawn time).  Falls back to NEBULA_CONSTANTS
-            // values for entities that don't set them.
+            // Custom heavy linear & angular damping (nebula-shards and
+            // metal composites today; future variants opt in via the
+            // same per-entity field at spawn time).  Falls back to
+            // NEBULA_CONSTANTS values for entities that don't set them.
             // DBG "Neb damp" applies HERE, at the read, so a click re-tunes
             // every puff already drifting rather than only the next shatter.
-            // Nebula-only: the damping fields are generic and plastic /
-            // metal shards set them too, so the knob has to name its
+            // Nebula-only: the damping fields are generic and metal
+            // composites set them too, so the knob has to name its
             // material or it becomes a global drag dial.
             const isNebulaBody = entity.shardVariant === 'nebula-shard';
             const linearD = isNebulaBody
@@ -833,8 +833,8 @@ export class PhysicsSystem {
           // Normalised radial (shard → player).
           const rx = dx * invDist;
           const ry = dy * invDist;
-          // Spin HANDEDNESS is a DBG cycle (Visual ▸ "Neb spin") while the
-          // proper rotational mechanics are parked (see PARKING_LOT):
+          // Spin HANDEDNESS is a DBG cycle (Materials ▸ Nebula ▸ "Neb spin")
+          // while the proper rotational mechanics are parked (see PARKING_LOT):
           //  - `physical` (default): the wake shear — the ship's velocity
           //    crossed with the ship→shard vector — so a shard passed on the
           //    STARBOARD side turns CLOCKWISE on screen and a port-side one
@@ -950,10 +950,10 @@ export class PhysicsSystem {
             // Mobile shard-family entities get the close-attractor crush
             // (mobile shards = STRUCTURE with finite mass).  A wormhole
             // portal SWALLOWS instead: the radius is the visual event
-            // horizon (0.62 × r, the dark disc dropShapes draws), so the
-            // shard disappears while covered by it, and there is no damage
-            // popup — matter falling past a horizon is silent, and a crush
-            // number over the rift would be pure noise.
+            // horizon (`portalHorizonRadius`, the dark disc dropShapes
+            // draws), so the shard disappears while covered by it, and there
+            // is no damage popup — matter falling past a horizon is silent,
+            // and a crush number over the rift would be pure noise.
             // Dragon body segments are exempt: they are chain-snapped to the
             // head's path every frame (velocity is moot) and dying any way
             // but a SHOT must go through the sever machinery, not a silent
@@ -1403,7 +1403,7 @@ export class PhysicsSystem {
   // {x,y} per step — the walk runs inside the collision path.
   private readonly _borePoint: Vector2 = { x: 0, y: 0 };
   /** Set by `borePierceTrack`: did the bolt come out the FAR SIDE of the
-   *  body it just bored, or did it run out of charges inside it?  A
+   *  body it just bored, or did it run out of energy inside it?  A
    *  scratch flag rather than a returned object so the walk allocates
    *  nothing. */
   private _boreExited = false;
@@ -1635,10 +1635,11 @@ export class PhysicsSystem {
   /**
    * Reflect a projectile off a surface — the ONE deflection primitive.
    *
-   * Three places in this engine bounce a bolt off something: a shield ring, a
-   * bouncer round off a tile face, and (eventually) a parry or a mirror
-   * hazard.  They differ only in WHERE the normal comes from and what happens
-   * to ownership afterwards, so the mirror itself lives here and the caller
+   * Both shield kinds bounce a bolt off themselves — an arc shield's ring
+   * before the body SAT, a non-arc pool at contact — and the retired Laser's
+   * tile-face bounce was a third caller.  They differ only in WHERE the
+   * normal comes from and what happens to ownership afterwards (a player
+   * PARRY re-owns the bolt), so the mirror itself lives here and the caller
    * decides when it fires.
    *
    * `nx`/`ny` must be a UNIT normal pointing OUT of the surface.  Returns false
@@ -1661,7 +1662,7 @@ export class PhysicsSystem {
       if (vdotn >= 0) return false;
 
       // v' = v − 2(v·n)n.  For an axis-aligned normal this reduces to negating
-      // one component, which is exactly what the bouncer's tile path did by
+      // one component, which is what the retired bouncer's tile path did by
       // hand before it was folded onto this.
       let rx = vx - 2 * vdotn * nx;
       let ry = vy - 2 * vdotn * ny;
@@ -2112,11 +2113,12 @@ export class PhysicsSystem {
       tile._occluderR = undefined;   // the shadow radius is derived from the polygon
       if (tile._staticCached === true) tile._staticCached = false;
 
-      // Damage cracks are no longer appended here.  Rock / metal tiles
-      // and shards now share the seeded, HP-driven crack overlay in
-      // RenderSystem.drawDamageCracks (keyed off health/maxHealth), so
-      // the fracture pattern is deterministic per entity and accrues as
-      // HP drops rather than spawning fresh random segments per hit.
+      // Damage cracks are no longer appended here.  The render-time crack
+      // overlay (render/tileShapes.ts overlayMaterialCracks) draws them: a
+      // grain material's own boundaries under voronoi, the seeded
+      // HP-driven spokes (drawDamageCracks, keyed off health/maxHealth)
+      // otherwise — deterministic per entity either way, accruing as
+      // damage lands rather than spawning fresh random segments per hit.
   }
 
   // ── THE STATIC-GEOMETRY QUERY LAYER ─────────────────────────────────
@@ -2632,7 +2634,7 @@ export class PhysicsSystem {
    * weapon hit and the bubble's bite use, so a crushed tile cracks and sheds
    * grains the way a shot one does.
    *
-   * Returns false HAVING DONE NOTHING for a body that is not running the
+   * Returns null HAVING DONE NOTHING for a body that is not running the
    * grain model (indestructible, nebula, or any variant under the DBG legacy
    * fracture mode).  Unlike `GameEngine.chipStructureAt` — which refuses such
    * a body outright, because it is the chip path — the crash paths MUST still
@@ -2650,8 +2652,10 @@ export class PhysicsSystem {
    * spent `derived / authored`, so metal — whose authored HP is
    * `24 x densityTier` while its derived HP is flat — took 24 to 144 rams
    * across six tiles of IDENTICAL toughness.  Energy never consults an
-   * authored number, so that lottery is gone.  Rock is the calibration
-   * anchor and is unchanged at 9; see CRASH_ENERGY_COUPLING for the rest.
+   * authored number, so that lottery is gone.  Rock was the calibration
+   * anchor (unchanged at 9 rams when this landed; MASS_SCALE has since
+   * made every impact ten times harder — 1 ram at the audit's 6 u/step,
+   * CLAUDE.md §8); see CRASH_ENERGY_COUPLING for the rest.
    *
    * GLASS HAS NO SPECIAL CASE (user call).  V9 gave a glass tile a
    * whole-pane rule — any crash over the threshold spent its ENTIRE
@@ -3397,8 +3401,8 @@ export class PhysicsSystem {
       if (distSq > (rA + rB + 10)**2) return;
 
       // Terrain slam (Stage 5): the player hitting a tile / asteroid fast stamps
-      // a short window GameEngine.updateBubbles reads to shake a latched bubble
-      // free.  STRUCTURE covers static tiles + mobile shards.
+      // a short window updateBubbles (roamers/bubbles.ts) reads to shake a
+      // latched bubble free.  STRUCTURE covers static tiles + mobile shards.
       if (a.type === EntityType.STRUCTURE || b.type === EntityType.STRUCTURE) {
           const ply = a.id === 'player' ? a : (b.id === 'player' ? b : null);
           if (ply && Math.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
@@ -3410,7 +3414,7 @@ export class PhysicsSystem {
       // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
       // a's frame for the duration of this check so vertex math stays
       // local.  After resolution we re-wrap both positions so anything
-      // the bouncer / positional-correction path wrote to a.position or
+      // the deflect / positional-correction path wrote to a.position or
       // b.position in the shifted frame returns to canonical coords.
       const offsetX = (a.position.x + wdx) - b.position.x;
       const offsetY = (a.position.y + wdy) - b.position.y;
@@ -3444,7 +3448,7 @@ export class PhysicsSystem {
 
       if (shifted) {
           // Normalize any positions the resolver may have written in b's
-          // shifted frame (bouncer reflection, SLOP correction, etc.).
+          // shifted frame (shield deflection, SLOP correction, etc.).
           wrapPosition(a.position);
           wrapPosition(b.position);
       }
@@ -3919,7 +3923,9 @@ export class PhysicsSystem {
           // through or resting, not hitting — before this it was damaged a
           // second time on the single-spend path and then STOPPED, so no
           // bored round ever came out of a tile wider than its own step.  A
-          // ricochet that should re-hit clears the list at the bounce.
+          // shield PARRY clears the list when it re-owns a bolt
+          // (`deflectProjectile`), so a parried bolt may strike what it was
+          // refused before.
           if (proj.hitEntityIds !== undefined && proj.hitEntityIds.includes(target.id)) return;
 
           // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
@@ -3929,15 +3935,14 @@ export class PhysicsSystem {
           // nothing bites exactly its authored damage and one that has
           // spent half its energy bites half.
           //
-          // EVERY WEAPON IS AFFECTED EQUALLY (user call).  The falloff is
-          // not direct-damage-only: the Cannon's AoE splash and the
-          // Lightning chain are applied in GameEngine, from a callback that
-          // fires LATER in this function — by which point the grain bore
-          // may already have advanced `pierceHits` past this hit's ordinal.
-          // So the factor actually used here is STASHED on the projectile
-          // and those consumers read it, rather than re-deriving an ordinal
-          // that no longer means the same thing.  One number, one hit, three
-          // damage paths.
+          // EVERY WEAPON WAS AFFECTED EQUALLY (user call): the Cannon's AoE
+          // splash and the Lightning chain, applied in GameEngine from a
+          // callback that fires LATER in this function, read the factor
+          // STASHED here (`hitFalloff`) rather than re-deriving an ordinal
+          // the grain bore may already have advanced.  Neither reads it
+          // now — the blast became PAYLOAD (sized at spawn from the shell's
+          // mass; see `applyExplosionAoE`) and the chain went with the energy
+          // modules — so the stash is written and unread.
           const projMass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
           let projDmg = PhysicsSystem.projectileBiteOn(proj, target);
           // `hitFalloff` keeps its meaning — this hit's size RELATIVE to the
@@ -4093,13 +4098,19 @@ export class PhysicsSystem {
               // and metal share the policy).  A Cannon shot at damage=5
               // costs the target 1 HP and runs one dent step, not five.
               // Hardness scales via the entity's health alone.
+              // ONLY on the fallback below, where applyBoundaryDamage
+              // declines — a body not running the grain model, i.e. the
+              // DBG 'legacy' fracture A/B.  Under voronoi every dent
+              // variant runs the model and spends damage on boundaries.
               const isDentEntity = target.shardVariant !== undefined
                   && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
               // Rock tiles / asteroids / rock-shards also count "hits, not
-              // damage": their maxHealth is a hit ceiling (ROCK_BREAK), so
-              // every shot costs exactly 1 HP regardless of weapon power and
-              // the probabilistic break rolls per hit.  (rock-tile is already
-              // a dent entity; rock-shard has no dent policy, so name it.)
+              // damage" on that same fallback: their authored maxHealth is a
+              // hit ceiling (ROCK_BREAK), so every shot costs exactly 1 HP
+              // regardless of weapon power and the probabilistic break
+              // (maybeRockEarlyBreak, legacy mode only) rolls per hit.
+              // (rock-tile is already a dent entity; rock-shard has no dent
+              // policy, so name it.)
               const isHitCounted = isDentEntity
                   || target.shardVariant === 'rock-shard';
               if (!isIndestructibleTile) {
@@ -4115,8 +4126,10 @@ export class PhysicsSystem {
                   // material's price per GRAIN and slowing by exactly what
                   // it deposited — instead of spending the whole shot on
                   // the entry cell.  It returns 0 for everything else
-                  // (nebula, metal-shard composites, enemies), which is the
-                  // single-spend path this always was.
+                  // (enemies, and every body under the DBG legacy fracture
+                  // A/B), which is the single-spend path this always was.
+                  // A gas never gets here: a round crossing nebula returns in
+                  // the passThrough block above.
                   if (!alreadyHit) boredSteps = this.borePierceTrack(proj, target, projDmg);
                   if (boredSteps === 0) {
                       stampLocalImpact(target, proj.position);
@@ -4206,7 +4219,7 @@ export class PhysicsSystem {
                   // new hit.
                   if (target.thirdParty && proj.ownerId) stampBubbleAggro(target, proj.ownerId);
                   // A shot to a LATCHED bubble shakes it loose (→ sick) — read by
-                  // GameEngine.updateBubbles.
+                  // updateBubbles (roamers/bubbles.ts).
                   if (target.attachedToId !== undefined) target.bubbleKnockFree = true;
               }
           }
@@ -4743,19 +4756,12 @@ export class PhysicsSystem {
       // at drift speed and a small shard at high speed can both crash,
       // while cruising shards stay harmlessly bouncing.
       //
-      // This path deliberately does NOT call onDeath — unlike the player
-      // crash above, asteroids destroy tiles permanently (no shard debris,
-      // no regeneration queue, no flow-field BFS patch).  Omitting
-      // onDeath avoids:
-      //   - spawning 4–11 glass-shard asteroids per crashed tile
-      //     (runaway entity count when a cluster plows a row of tiles),
-      //   - `flowField.onTileDestroyed` and its patch BFS, which on a
-      //     toroidal map propagates through every unblocked cell of the
-      //     pursuit field within range and dominates the frame.
-      // Enemies continue treating the destroyed cell as blocked until
-      // the next natural full field rebuild (when the player changes
-      // grid cells); that's a ~1 s staleness in the worst case, which
-      // is cheaper than patching on every crash.
+      // A tile this crash kills goes through `killStructureByImpact`, i.e.
+      // the full `onDeath` fan-out a shot tile gets (shatter debris,
+      // drops, sound, and the pursuit field's `onTileDestroyed` patch).
+      // This path used to skip onDeath to dodge the debris count and the
+      // patch BFS, which made a crushed tile simply blink out — see
+      // killStructureByImpact.
       // Mobile shards (rock-shard / glass-shard) live on
       // EntityType.STRUCTURE with finite mass; static tiles share
       // the EntityType but are mass=Infinity.  The crash interaction
@@ -4812,11 +4818,11 @@ export class PhysicsSystem {
           // debounces multi-substep re-hits from one bounce event so a
           // single glancing collision counts as one pressure event
           // rather than two or three.  Once the accumulator reaches
-          // TILE_PRESSURE_HITS within the TILE_PRESSURE_WINDOW,
-          // the tile takes a damage tier the same way a single above-
-          // threshold crash would (glass dies in one; tiered tiles step
-          // down one tier per trigger).  Indestructible tiles accumulate
-          // nothing — they're inert under pressure.
+          // TILE_PRESSURE_HITS within the TILE_PRESSURE_WINDOW, the
+          // tile is charged the whole accumulator's crash energy on its
+          // boundaries (below; a body with no grain model loses 1 HP).
+          // Indestructible tiles accumulate nothing — they're inert
+          // under pressure.
           if (!isIndestructible
               && asteroid.mass >= STRUCTURE_CONSTANTS.TILE_PRESSURE_MIN_MASS
               && !(structure.tilePressureCooldown ?? 0)) {
@@ -4828,7 +4834,8 @@ export class PhysicsSystem {
                   // The SLOW kill spends on boundaries too: a tile ground
                   // down by repeated nudges should crack where it is being
                   // nudged, not lose an abstract point of health.  Glass
-                  // still "dies in one" pressure trigger (V9).
+                  // has no special case here either (the V9 whole-pane
+                  // rule is gone — see crashBoundaryDamage).
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
                   // PRESSURE SPENDS WHAT THE WHOLE ACCUMULATOR BROUGHT, not
                   // what its last nudge did.  The trigger IS the sum of
@@ -4866,8 +4873,7 @@ export class PhysicsSystem {
 
       // Mobile-shard vs Player — speed-gated environmental damage
       // (bypasses shield).  Stage 5: mobile shards now live on
-      // STRUCTURE+finite mass; the legacy ROCK_SHARD type is still
-      // accepted for any not-yet-migrated spawn site.
+      // STRUCTURE+finite mass.
       const aIsPlayerLike = a.type === EntityType.PLAYER;
       const bIsPlayerLike = b.type === EntityType.PLAYER;
       if ((aIsPlayerLike && bIsMobileShard) || (bIsPlayerLike && aIsMobileShard)) {

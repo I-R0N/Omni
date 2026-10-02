@@ -34,3 +34,8 @@ playwright/.cache
 
 # Gauntlet 5c capture outputs — regenerable, machine-specific, and noisy.
 perf/out/
+
+# The single-file standalone build (`node scripts/inline-build.mjs` after
+# `npm run build`) — a build output.  pr-preview and publish-standalone both
+# rebuild it from source, so a committed copy only ever went stale.
+omniverse-standalone.html

@@ -100,8 +100,9 @@ export function shardMergeFadeAlpha(entity: GameEntity): number {
 // into lastTileLightingMs / lastTileLightingCount so the dev overlay
 // can A/B tile glow on its own.  Called from the material-tile branch,
 // the glass-family branch's indestructible path, and the asteroid/
-// shard branch's rock-tile path.  ~1μs elapsed threshold filters
-// entities that the helper bailed out of (out of range / no glow).
+// shard branch's rock-tile path.  The count only takes entities the
+// helper actually PAINTED (it reports whether it drew — see below), so
+// ones it bailed out of (out of range / no glow) are not counted.
 export function timedTileBloom(
     rs: RenderSystem,
     ctx: CanvasRenderingContext2D,
@@ -389,13 +390,14 @@ export function overlayMaterialCracks(
     ctx.save();
     buildPath();
     ctx.clip();
-    // Voronoi materials (a SHARD_VARIANTS `fracture` block — rock today)
-    // draw the INTERIOR CELL EDGES of the cached decomposition instead of
-    // seeded spokes: the cracks ARE the seams the entity breaks along
-    // (V3), and since V8 the reveal count comes from the SAME helper the
-    // progressive-detach sim reads (`fractureRevealedEdgeCount`), so a
-    // boundary the player sees fully highlighted is exactly a piece
-    // about to break off.  Everything else (metal, and enemy hulls via
+    // Voronoi materials (a SHARD_VARIANTS `grain` block — rock, glass and
+    // metal call this; plastic draws no cracks) draw the INTERIOR CELL
+    // EDGES of the cached decomposition instead of seeded spokes: the
+    // cracks ARE the seams the entity breaks along (V3), and since V8 the
+    // reveal count comes from the SAME helper the progressive-detach sim
+    // reads (`fractureRevealedEdgeCount`), so a boundary the player sees
+    // fully highlighted is exactly a piece about to break off.  Everything
+    // else (a variant with no grain block, and enemy hulls via
     // enemyShapes) keeps the legacy spoke look.
     if (fractured !== null && fractured.length > 0) {
         // No max(1, …) floor: the helper's count IS the truth the sim
@@ -776,16 +778,18 @@ export function drawTileShape(
                 ctx.stroke();
             }
 
-            // Damage cracks for metal-tile — the seeded HP-driven
-            // fracture overlay (shared drawDamageCracks).  metal-tile
-            // renders here on the slow path every frame (it is NOT in
-            // the static-tile world cache — see isStaticTileCacheable),
-            // so the live crack count is always correct without any
-            // cache invalidation.  maxHealth scales ×densityTier, so a
-            // dense tile cracks proportionally (capped).  Lower
-            // frequency than rock — metal is tough (one crack per ~5
-            // hits, MATERIAL_DAMAGE_CRACKS.metal).  Plastic-tile is
-            // left to its colour-shift damage cue.
+            // Damage cracks for metal-tile — the shared crack overlay.
+            // Metal carries a grain block, so these are its own grain
+            // boundaries, each drawn at the damage it has absorbed (V15);
+            // the seeded HP-paced spokes (drawDamageCracks, one per ~5
+            // hits at MATERIAL_DAMAGE_CRACKS.metal) are only the legacy-
+            // A/B look.  metal-tile renders here on the slow path every
+            // frame (it is NOT in the static-tile world cache — see
+            // isStaticTileCacheable), so the live cracks are always
+            // correct without any cache invalidation.  Plastic-tile draws
+            // no cracks: its cue is the struck grain's dent (its
+            // colour shift toward the shard palette is legacy-A/B only —
+            // applyDentStep returns before it under voronoi).
             if (entity.shardVariant === 'metal-tile') {
                 const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
                 overlayMaterialCracks(
@@ -897,11 +901,11 @@ export function drawTileShape(
             }
 
             // Composite damage cracks — clip to the union of lattice
-            // cells (exact silhouette) and overlay the shared seeded
-            // metal fracture centred on the composite.  maxHealth is
-            // the accumulated lattice HP, so a denser blob crosses
-            // more crack thresholds (capped).  Allocation-free: the
-            // clip path reuses the cell geometry already computed.
+            // cells (exact silhouette) and stroke lattice-cell outlines
+            // (below).  maxHealth is the composite's HP (the grain
+            // model's derived total once it has been hit), paced by
+            // MATERIAL_DAMAGE_CRACKS.metal (capped).  Allocation-free:
+            // the clip path reuses the cell geometry already computed.
             const maxHpC = entity.maxHealth ?? 0;
             const hpC = entity.health ?? maxHpC;
             if (maxHpC > 1 && hpC < maxHpC) {
@@ -936,12 +940,15 @@ export function drawTileShape(
                     ctx.clip();
                     const dmgFracC = Math.min(1, Math.max(0, 1 - hpC / maxHpC));
                     // V5 (metal keeps the lattice): the composite's cracks
-                    // run along its OWN lattice-cell edges — the exact
-                    // seams decomposeMetalComposite breaks it into — not
-                    // the seeded radial spokes.  Reveal a crackSeed-rotated
-                    // prefix of cells (stable per entity, grows with
-                    // damage), stroking each revealed cell's outline; the
-                    // scorch darken is kept from the spoke treatment.
+                    // run along its OWN lattice-cell edges — the seams
+                    // decomposeMetalComposite breaks it into under the
+                    // legacy A/B (under voronoi it breaks into its hull's
+                    // grains instead, so these no longer predict the
+                    // break) — not the seeded radial spokes.  Reveal a
+                    // crackSeed-rotated prefix of cells (stable per
+                    // entity, grows with damage), stroking each revealed
+                    // cell's outline; the scorch darken is kept from the
+                    // spoke treatment.
                     ctx.fillStyle = `rgba(${METAL_CRACK_STYLE.scorchRgb},${
                         METAL_CRACK_STYLE.scorchBase + METAL_CRACK_STYLE.scorchGain * dmgFracC})`;
                     ctx.fillRect(-radC * 1.2, -radC * 1.2, radC * 2.4, radC * 2.4);
@@ -985,8 +992,9 @@ export function drawTileShape(
         // drawImage, skipping the full polygon + density tint + (already
         // LOD-gated) crack render.
         //
-        // A DISC, and the SAME small threshold for every grain material.
-        // This is the silhouette-neutrality rule, learned twice:
+        // A DISC, and the SAME small threshold for both materials that take
+        // it (rock and metal).  This is the silhouette-neutrality rule,
+        // learned twice:
         //   - rock blitted METAL's equilateral triangle for a while, so a
         //     tile shattering into 8 grains read as 8 identical triangles
         //     — precisely the Voronoi shape the fracture model exists to
@@ -1001,7 +1009,8 @@ export function drawTileShape(
         // A disc says "small fragment" and nothing about shape, and
         // CHIP_LOD_RADIUS_PX is deliberately small enough that a tile's
         // own grains draw their real polygons and only genuine dust takes
-        // this path.  Glass (sharp splinter) stays excluded entirely.
+        // this path.  Glass (sharp splinter) stays excluded entirely, and
+        // plastic is not gated in either.
         if (rs.shardLodEnabled
             && (entity.shardVariant === 'rock-shard' || entity.shardVariant === 'metal-shard')
             && !isFlash
@@ -1130,15 +1139,16 @@ export function drawTileShape(
                 ctx.stroke();
             }
 
-            // Damage cracks for rock tiles + shards — a seeded,
-            // HP-driven fracture overlay (slate-900 shadow, the
-            // rock fill shows through) shared with enemies via
-            // drawDamageCracks.  Deterministic per entity so the
-            // pattern holds still and only accrues as HP drops;
-            // far lower frequency than enemies (one crack per
-            // ~1.3 hits, see MATERIAL_DAMAGE_CRACKS.rock).  Drawn
-            // in entity-local space (ctx already translated +
-            // rotated by the setTransform in renderEntities).
+            // Damage cracks for rock tiles + shards — the shared
+            // crack overlay (slate-900 shadow, the rock fill shows
+            // through).  Rock carries a grain block, so the cracks
+            // are its own grain boundaries, each drawn at the damage
+            // it has absorbed (V15); the seeded HP-paced spokes it
+            // shares with enemies (drawDamageCracks, one per ~1.3
+            // hits at MATERIAL_DAMAGE_CRACKS.rock) are only the
+            // legacy-A/B look.  Drawn in entity-local space (ctx
+            // already translated + rotated by the setTransform in
+            // renderEntities).
             if (entity.shardVariant === 'rock-tile'
                 || entity.shardVariant === 'rock-shard') {
                 const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
@@ -1149,11 +1159,11 @@ export function drawTileShape(
                 );
             } else if (entity.shardVariant === 'metal-shard') {
                 // Single (non-composite) metal-shard — the metal
-                // hairline-split style.  Tiny shards rarely cross a
-                // threshold (low HP) and the LOD path skips the
-                // smallest entirely; the chunkier / denser ones show
-                // a split or two.  The grown rigid composite cracks
-                // in its own branch above.
+                // hairline-split style, drawn along its own grain
+                // boundaries (seeded HP-paced splits only under the
+                // legacy A/B).  The LOD path skips the smallest
+                // entirely.  The grown rigid composite cracks in its
+                // own branch above.
                 const rr = Math.max(entity.size.x, entity.size.y) * 0.5;
                 overlayMaterialCracks(
                     ctx, entity, rr, buildPath,

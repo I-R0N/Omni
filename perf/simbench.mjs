@@ -37,7 +37,7 @@ const only = flag('map', null);
 
 /** Scenes: map + a setup that puts the world in the state being measured.
  *  Deliberately the same shapes as the capture matrix so the two agree on
- *  what "the asteroid field" or "a boss fight" means. */
+ *  what "the asteroid field" or "the roamer stack" means. */
 const SCENES = only
   ? [{ id: only.toLowerCase(), map: only, setup: 'e => { e.startGame(); }' }]
   : [

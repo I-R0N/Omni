@@ -1,4 +1,4 @@
-/** Map composition (gauntlet step 5 G7).
+/** Map composition (gauntlet step 5 G7), and the portals between maps.
  *
  *  G7 moved the natural maps' tile-variant mix out of the map classes and
  *  into `MAP_POPULATION`, which CLAUDE.md §5 had already flagged as only
@@ -22,6 +22,15 @@
  *    UNIVERSE     glass 584→566   plastic 142→148  metal  50→47   nebula 1623→1641
  *    POCKET       glass  75→72    plastic  37→36   metal  15→17   nebula  103→102
  *    SEVEN_RINGS  glass 234→234   plastic 528→528  metal 762→762  indestructible 477→477
+ *
+ *  The rest of the file pins PORTALS as physics rather than scenery: arrival
+ *  THROWS the ship clear of the exit rift at a speed solved against the well
+ *  (so a deeper well throws harder); a rift eats only what fits in its mouth
+ *  (a boulder crossing the centre is flung through) and anything that steers
+ *  itself is held off the throat; the TRANSIT WARP holds the sim for its
+ *  beat, never shows the destination before the reveal, and its DBG "off"
+ *  step transitions instantly; and loose DEBRIS near the ship travels through
+ *  with it and flows out of the exit rift.
  */
 
 import { test, expect } from '@playwright/test';
@@ -375,7 +384,6 @@ test.describe('a rift can only eat what fits in its mouth', () => {
     expect(planted, 'a rock big enough to test the rule').not.toBeNull();
 
     // It SURVIVES — the swallow is what this rule replaces — and it leaves.
-    await waitForEngine(page, (e, ) => true, 'a frame', 5_000);
     const out = await page.evaluate(async (p: any) => {
       const e = (window as any).__omniEngine;
       const find = () => e.currentMap.entities.find((x: any) => x.id === p.id);
@@ -436,7 +444,7 @@ test.describe('a rift can only eat what fits in its mouth', () => {
     }, planted);
 
     expect(result, 'the enemy is still alive — a rift must not eat it').not.toBeNull();
-    // Well clear of the horizon (42 at this rift) rather than sitting in it.
+    // Well clear of the horizon (~18 at this rift) rather than sitting in it.
     expect(result!.dist).toBeGreaterThan(120);
 
     watch.assertClean();
@@ -449,11 +457,12 @@ test.describe('a rift can only eat what fits in its mouth', () => {
 const PORTAL_WARP_STEPS = 8;
 
 test.describe('the transit warp — the flight through the wormhole', () => {
-  /** Arrival plays a short screen-space beat (PORTAL_CONSTANTS.WARP): the lens
-   *  unrolls into radial streaks, the sky streams outward, and the tunnel
-   *  decelerates onto the destination.  It reuses the STAGE-CLEAR freeze, and
-   *  that is the part worth pinning — the look is a picture, but "nothing can
-   *  shoot you while you are inside the tunnel" is a rule.
+  /** Arrival plays a short screen-space beat (PORTAL_CONSTANTS.WARP): the
+   *  world washes out, the REAL star field streams outward past the hull, and
+   *  the beat decelerates onto the revealed destination.  It reuses the
+   *  STAGE-CLEAR freeze, and that is the part worth pinning — the look is a
+   *  picture, but "nothing can shoot you while you are inside the tunnel" is
+   *  a rule.
    *
    *  So this asserts the freeze holds, that it releases ON ITS OWN (a beat
    *  that can strand the sim is worse than no beat), and that the DBG "off"
@@ -677,8 +686,8 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
     expect(run!.carried).toBe(run!.ids.length);
     expect(run!.queued).toBeGreaterThanOrEqual(run!.ids.length);
 
-    // 3. The stagger tops out at DELAY_MAX (1.6 sim-seconds); poll the queue
-    //    empty rather than waiting a fixed time (harness rule 1).
+    // The stagger tops out at DELAY_MAX (1.6 sim-seconds); poll the queue
+    // empty rather than waiting a fixed time (harness rule 1).
     await waitForEngine(page, e => e.portalTransit.length === 0,
       'the transit queue to drain');
 

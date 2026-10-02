@@ -1,8 +1,23 @@
 # Material Grain Spec
 
-**Status: A1 IMPLEMENTED; the rest PROPOSED.**  A1 (the GrainSpec types
-and per-material regularity) shipped — see §7 for what that covered and
-what is still ahead.  V15
+**Status (2026-09-26): PART SHIPPED, PART PROPOSED.**
+
+- **SHIPPED:** A1 (`GrainSpec`, per-material `regularity`); A2
+  (`sizeSpread` as a power diagram, and `bondSpread` — both mechanisms
+  are live, but the four solid materials leave them at 0, see PARKING_LOT
+  "Grain `sizeSpread` and `bondSpread` — parked at 0 for the four";
+  nebula uses `sizeSpread` 0.6); A3 and its follow-up (the metal and
+  plastic rows); A4 (`damageSpread`, 2026-09-02 — its sibling A4-B is
+  parked in PARKING_LOT "Grain clusters"); and B1 (per-grain dent,
+  `dentRecoverSeconds`).
+- **REVERSED:** §2.4 density coupling (2026-08-31, user call).
+- **PARTIAL:** B2 — a dying metal composite fractures its own hull, but
+  assembly still builds `metalCells` and PhysicsSystem keeps per-cell
+  colliders.
+- **NOT BUILT:** §3 unified bonding, and §4 / C per-grain materials.
+
+Live values are CLAUDE.md §5's "SHIPPED GRAIN TABLE"; the numbers in §2.5
+and §7 are the design-time and A3 record.  V15
 shipped the grain-boundary model for rock and glass (see
 `docs/GAUNTLET_VORONOI_LOG.md`); this spec generalises it into a material
 system and folds BONDING into the same object, so that adding a material
@@ -95,7 +110,7 @@ question, and every one of them a number rather than a branch.
 
 | field | meaning | range |
 |---|---|---|
-| `grainSize` | px of body diameter per grain.  Small = many grains | 4–40 |
+| `grainSize` | the DIAMETER of one grain (first specified as px of body diameter per grain; see §2.4a).  Small = many grains | 4–40 |
 | `grainCountMin` / `Max` | clamp on the count the size implies | 2–40 |
 | `regularity` | 0 = raw Poisson (ragged, uneven), 1 = near-honeycomb | 0–1 |
 | `sizeSpread` | 0 = every grain the same size, 1 = a wide mix of coarse and fine in one body | 0–1 |
@@ -108,14 +123,16 @@ separation — but they are read from GLOBAL DBG accessors
 `fractureCache.ensureFractureCells`).  Per-material regularity is not
 expressible today at all, and it is exactly what "metal highly regular,
 plastic irregular" needs.  The fix is small: move both into the spec,
-keep the DBG cycles as an override rather than the source.
+keep the DBG cycles as an override rather than the source.  *(Done in
+A1 — see §7.)*
 
 **`sizeSpread` is a new axis** and the one that buys "equal amounts of
 smaller and larger grains".  Implementation: place a `spread`-determined
 fraction of sites with a large minimum separation (the coarse
 population) and the rest with a small one (the fines), then relax.  At 0
 this reduces exactly to today's single-separation placement, so it costs
-nothing when unused.
+nothing when unused.  *(A2 shipped a POWER DIAGRAM instead: separation
+was measured to barely move cell areas — see §7.)*
 
 ### 2.2 Bond strength — how hard it is to break, and to form
 
@@ -130,17 +147,22 @@ nothing when unused.
 WITHIN one material, with no per-grain material and no matrix.  It is
 worth shipping before Tier C for exactly that reason.
 
+*(Of this table only `bondStrength` and `bondSpread` shipped.
+`bondFormSeconds` and `cohesion` belong to §3's unified bonding, which is
+not built — bond timing still lives in the variant's `merge` policy.)*
+
 ### 2.3 Deformation — what a hit does before anything breaks
 
 | field | meaning |
 |---|---|
 | `grainDent` | per-hit inward pull on the STRUCK GRAIN's own outline, as a fraction of its radius |
-| `dentRecovery` | seconds to spring back, 0 = permanent |
+| `dentRecovery` | seconds to spring back, 0 = permanent.  *(Shipped as `dentRecoverSeconds`; ABSENT means permanent — see §2.4a.)* |
 
 This is the "deformation applied at each voronoi shard within a tile"
 ask.  The mechanism it replaces (`applyDentStep`) pulls the WHOLE body's
 outline and stands down entirely under progressive fracture, which is
 why plastic and metal currently cannot be both dentable and grained.
+*(B1 removed that limit — both are now dentable AND grained; see §7.)*
 
 Per-grain denting composes with V15 cleanly because the parent's outline
 is already **derived** from its grains (`unionOfCells`): dent a grain,
@@ -148,6 +170,13 @@ re-derive the union, and the body's silhouette follows for free.  The one
 real cost is §5.2 below.
 
 ### 2.4 Coupling — parameters that track entity state
+
+> **REVERSED (2026-08-31, user call).**  A3 shipped both fields for metal
+> and `a608c35` removed them: density is a RESULT of grain size, count and
+> regularity, not an input to them, so nothing in `GrainSpec` may read
+> `densityTier`, and a material's grain geometry is shared by its tile and
+> its shard (CLAUDE.md §8 "DENSITY IS NOT A GRAIN PARAMETER").  Kept below
+> as the record of what was tried.
 
 | field | meaning |
 |---|---|
@@ -187,6 +216,12 @@ pixel of it.  Everything else is look and feel.
 
 The point of the axes is that materials are positions in the space, not
 code.  Shipped today, requested now, and illustrative:
+
+*(The "shipped" and "new" rows are the DESIGN-TIME numbers, written
+against the old per-body-diameter `grainSize`.  What ships now, in the
+same columns, is glass 15 / 0.5 / 0 / 0.4 / 0, rock 14 / 0.5 / 0 / 0.4 /
+0, plastic 6 / 0.55 / 0 / 1.8 / 0.10 and metal 8 / 0.95 / 0 / 1.8 / 0.05
+— CLAUDE.md §5 "SHIPPED GRAIN TABLE".)*
 
 | material | grainSize | regularity | sizeSpread | bondStrength | grainDent | notes |
 |---|---|---|---|---|---|---|
@@ -243,12 +278,19 @@ What the mechanisms become:
 - **Rock condensation (4)** → density coupling: bonding raises
   `densityTier`, which shrinks grain size and raises strength, which IS
   "denser but smaller and harder".
+
+  *(Both of the bullets above lean on §2.4's density coupling, which was
+  reversed; condensation and the lattice's assembly half remain their own
+  mechanisms today.)*
 - **Tile snap (6)** → an outcome of FORM, not a separate pass: when a
   grained body's area passes the tile threshold at rest, it becomes
   static.  This is the `MergeOutcome` seam finally being used.
 - **Nebula (7)** → stays out.  Nebula is a cloud with `passThrough` and
   no fracture block; it does not want grains and should keep its own
-  transmutation.
+  transmutation.  *(Since 2026-09-07 nebula DOES carry a `grain` block —
+  the Voronoi geometry only, with no `bondStrength` and so no damage
+  model — and it still keeps its own transmutation.  CLAUDE.md §8 "NEBULA
+  TAKES THE VORONOI GEOMETRY AND NOT THE DAMAGE MODEL".)*
 
 ### 3.3 The cost, stated honestly
 
@@ -308,7 +350,8 @@ the numerous small chips stay single-material.
 existing `boundaryStrength` is renamed `bondStrength` — same number, and
 the rename is the point: it is now also the JOIN strength.
 `SHARD_VARIANTS[..].merge` keeps the approach/pull half and hands its
-bond half to the spec.
+bond half to the spec.  *(A1 made the renames; the bond half has not
+moved — that is §3, not built.)*
 
 ### 5.2 Files, in dependency order
 
@@ -403,7 +446,9 @@ dimple reads too weakly.
    its own decision.
 
 4. **`bondSpread` before or with Tier C?**  It delivers most of the
-   visual variety of composites at a fraction of the cost.
+   visual variety of composites at a fraction of the cost.  *(Answered:
+   it shipped in A2, ahead of Tier C, and is parked at 0 for the four
+   solid materials.)*
 
 ## 7. Build order
 
@@ -428,7 +473,8 @@ dimple reads too weakly.
   ratio 2.2 → 4.5 → 8.7 across spread 0 → 0.5 → 1, with the count holding
   at 12 → 12 → 11.3.  `bondSpread` is a pure, exported, unbiased ±60%
   law, exactly 1 at spread 0.  Carried damage was cut — see §6.3.
-- **A3** metal + plastic rows, tuned and measured like V15 was
+- **A3** metal + plastic rows, tuned and measured like V15 was *(done —
+  see the A3 entry below B1)*
 - **B1** per-grain dent, outer-vertices-only (§5.3 option 1) — **DONE.**
   Shipped inert (no material carried `grainDent` until A3) and sequenced
   BEFORE A3 deliberately: opting metal and plastic into the grain model
@@ -456,7 +502,8 @@ dimple reads too weakly.
   and bond strength both track `densityTier`, which is also what drives a
   plate's brightness — so how a plate LOOKS is the readout of how hard it
   will be to break.  Measured t1: 7 grains / 123 hp → t6: 15 grains / 384
-  hp, monotonic throughout.  Metal tiles had no `shatter` policy at all
+  hp, monotonic throughout.  *(Reversed 2026-08-31 — see §2.4; metal no
+  longer varies by tier.)*  Metal tiles had no `shatter` policy at all
   before A3 (they broke via `dent.breakShards`, which the voronoi gates
   stand down); they now break into their cells like every other grain
   material.  metal-SHARD composites are untouched — that is B2.
@@ -475,7 +522,16 @@ dimple reads too weakly.
   breaks off carrying its deformed shape, and plastic — being elastic —
   springs linearly back to the shape its grain was cut at over
   `dentRecoverSeconds`, while metal keeps its dent.
+- **A4** `damageSpread` — **DONE** (2026-09-02; added after this build
+  order was written).  How WIDE a hit's spend is, as a material property:
+  absent or 0 is the sequential needle every material ships with; set, a
+  distance-weighted water-fill pre-charges an annulus so several grains
+  can come away together.  CLAUDE.md §8 "HOW WIDE THE SPEND IS, IS A
+  MATERIAL PROPERTY".  Its sibling A4-B (a group of grains leaving as ONE
+  fragment) is parked in PARKING_LOT "Grain clusters".
 - **B2** retire the metal composite lattice onto the union outline
+  *(PARTIAL — a dying composite now fractures its own hull, but assembly
+  still builds `metalCells` and PhysicsSystem keeps per-cell colliders)*
 - **C** per-grain materials + pair function, behind a render cache
 
 A1–A3 are the material system and the two new materials.  B1–B2 are the
