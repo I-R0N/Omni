@@ -1096,9 +1096,10 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `FLIGHT_INPUT_CYCLE` / `FLIGHT_VELOCITY_RESPONSE` — DBG Player & Ship ▸
   Flight ▸ "Flight input" A/B (index 0 ships): `Accel` adds the movement
   vector to velocity (coasts); `Velocity` treats it as a TARGET velocity
-  (deflection × `lastCruiseSpeed`) eased toward at 25%/tick, with the target
-  pre-scaled to cancel PhysicsSystem's friction so full deflection reaches
-  cruise.  Skipped while a knockback overshoot (`overSpeedAllow`) is live.
+  (deflection × `lastCruiseSpeed` × `FLIGHT_VELOCITY_SPEED_FRAC`, 1/60) eased
+  toward at 25%/tick, with the target pre-scaled to cancel PhysicsSystem's
+  friction.  With no input friction is cancelled too, so the ship drifts at
+  its last velocity.  Skipped while a knockback overshoot (`overSpeedAllow`) is live.
 - `STRUCTURE_CONSTANTS`, `STRUCTURE_VARIANTS` (glass / plastic /
   metal / indestructible — visual/health config; behavioural policy
   lives in `SHARD_VARIANTS` below)

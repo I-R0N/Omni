@@ -3875,6 +3875,9 @@ export const FLIGHT_INPUT_CYCLE: ReadonlyArray<{ name: string; velocity: boolean
 ];
 /** Per-tick fraction of the gap to the target velocity closed in Velocity mode. */
 export const FLIGHT_VELOCITY_RESPONSE = 0.25;
+/** Full-deflection target speed in Velocity mode, as a fraction of cruise
+ *  (1/60: the tick rate — a deliberately slow, precise mode). */
+export const FLIGHT_VELOCITY_SPEED_FRAC = 1 / 60;
 let activeFlightInputIndex = 0;
 export function isVelocityFlightInput(): boolean {
   return FLIGHT_INPUT_CYCLE[activeFlightInputIndex].velocity;

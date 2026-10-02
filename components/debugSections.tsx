@@ -421,7 +421,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Flight input', dbg(e => e.dbg.cycleFlightInput()),
         c => c.s.flightInputName ?? 'Accel (def)',
         'How the controls drive the ship: as an acceleration (ships) or as a target velocity.',
-        'A/B for flight input. Accel (ships): the movement vector is added to velocity each tick, so speed builds up and the ship coasts when you let go. Velocity: the vector is a TARGET velocity (deflection × cruise speed) the ship eases toward, so full deflection reaches cruise, half deflection holds half speed, and releasing brakes the ship instead of coasting. Knockback launches are left alone while they bleed off.'),
+        'A/B for flight input. Accel (ships): the movement vector is added to velocity each tick, so speed builds up and the ship coasts when you let go. Velocity: the vector is a TARGET velocity (deflection × cruise speed ÷ 60) the ship eases toward, so full deflection reaches that slow top speed and half deflection holds half of it. Releasing the input does not brake: the ship drifts on at the velocity it had. Knockback launches are left alone while they bleed off.'),
       ctrl('Thrust', dbg(e => e.dbg.cyclePlayerThrust()),
         c => c.s.playerThrustName ?? '0.75×',
         'How hard the ship accelerates — the knob that actually moves everyday top speed.',
