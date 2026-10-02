@@ -4094,7 +4094,8 @@ the end of its `init()` — showcase maps skip both and stay debug-only.
     dmg/s.  Every pulse leaves a thin fading LINE TRAIL in the beam's colour
     (`PulseTrail`, a fixed ring of the segments each pulse actually traced —
     reflections and passes through glass included — living 1.5 s; drawn in
-    `renderPulseTrail` in one pass, stroked per change of alpha step), which is what joins
+    `renderPulseTrail` in one pass, stroked per change of alpha step — 64 steps
+    with butt caps, since 8 read as visible brightness drops), which is what joins
     the stream into one line.  They fly PARALLEL from RANDOM points
     across a narrow lane (`pulseSpread`, ±1.8 units — not a fan, and not a
     sweep in series; each is rolled clear of the last), each traced through the SAME optics over

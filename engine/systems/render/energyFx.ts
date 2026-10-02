@@ -62,8 +62,10 @@ export interface PulseTrailView {
 const DOT_LIFE = 2.0, DOT_R = 1.8, DOT_PEAK = 0.75;
 const TRAIL_LIFE = 1.5, TRAIL_PEAK = 0.6, TRAIL_WIDTH = 1.5;
 /** Alpha steps the trail fades through; a stroke is issued per change of
- *  step or colour, never per segment. */
-const TRAIL_BUCKETS = 8;
+ *  step or colour, never per segment.  Fine enough that a step (under 1% of
+ *  full alpha) is below what the eye can see — at 8 the fade read as a
+ *  staircase of visible brightness drops along every trail (user report). */
+const TRAIL_BUCKETS = 64;
 
 const CULL = 1400;
 
@@ -363,14 +365,18 @@ function renderPulseTrail(ctx: CanvasRenderingContext2D, t: PulseTrailView, now:
         if (Math.abs(x0 - camX) > CULL || Math.abs(y0 - camY) > CULL) continue;
         if (!any) {
             ctx.save(); any = true;
-            ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = TRAIL_WIDTH;
+            // BUTT caps: where one step's stroke ends and the next begins
+            // they meet edge to edge.  Round caps overlapped there, and two
+            // translucent strokes over one spot add up — a brighter bead
+            // at every step boundary of every trail.
+            ctx.lineCap = 'butt'; ctx.lineJoin = 'round'; ctx.lineWidth = TRAIL_WIDTH;
         }
         const b = Math.min(TRAIL_BUCKETS - 1, Math.floor((age / TRAIL_LIFE) * TRAIL_BUCKETS));
         if (b !== bucket || t.color[i] !== color) {
             if (open) ctx.stroke();
             bucket = b; color = t.color[i];
             ctx.strokeStyle = color;
-            ctx.globalAlpha = TRAIL_PEAK * (1 - (b + 0.5) / TRAIL_BUCKETS);
+            ctx.globalAlpha = TRAIL_PEAK * (1 - b / TRAIL_BUCKETS);
             ctx.beginPath(); open = true; px = NaN;
         }
         const x1 = x0 + (shiftX(t.x0[i], t.x1[i]) - t.x0[i]);
