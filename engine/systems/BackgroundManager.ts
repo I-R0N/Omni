@@ -284,7 +284,8 @@ public setMapType(type: MapType) {
    * When set, `initContent` places one background-nebula puff at each
    * position (with the original random parallax depth 0.2–1.0 so the
    * backdrop still drifts as the camera moves).  Passing null/empty
-   * falls back to the legacy random distribution.
+   * means NO background puffs — a map without nebula tiles gets no BG
+   * nebulae (there is no random fallback any more).
    *
    * Forces an initContent reset so the next render rebuilds puffs from
    * the new centers — safe to call any time post-construction.

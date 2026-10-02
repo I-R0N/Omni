@@ -1,10 +1,11 @@
 /** Targeted in-page probes (gauntlet 5c).
  *
  *  The capture matrix says WHERE allocation happens. Some of those sites have
- *  no visible allocation in their source — `applyFlow` is pure arithmetic over
- *  scratch vectors and still shows ~98 bytes per entity per substep. A probe
- *  answers WHY, by running a minimal loop against the REAL live entity objects
- *  and measuring the heap under it.
+ *  no visible allocation in their source — in 5c `applyFlow` (now
+ *  `GameEngine.applyFlowTo`) was pure arithmetic over scratch vectors and
+ *  still showed ~98 bytes per entity per substep. A probe answers WHY, by
+ *  running a minimal loop against the REAL live entity objects and measuring
+ *  the heap under it.
  *
  *  Usage: node perf/probe.mjs [--map ASTEROID_FIELD]
  */
@@ -42,7 +43,7 @@ await page.waitForTimeout(3000);
 
 const out = await page.evaluate(() => {
   const e = window.__omniEngine;
-  const ents = e.entityIndex.asteroids.slice();
+  const ents = e.entityIndex.shardCandidates.slice();
   const N = ents.length;
   const ITER = 600;
 
@@ -85,23 +86,16 @@ const out = await page.evaluate(() => {
       sink[1] += Math.min(0.8, 0.08 * m);
     }
   }));
-  results.push(run('sampleAsteroidFlow', () => {
+  results.push(run('sampleShardFlow', () => {
     for (let i = 0; i < N; i++) {
       const t = ents[i];
-      const f = e.flowField.sampleAsteroidFlow(t.position.x, t.position.y);
+      const f = e.flowField.sampleShardFlow(t.position.x, t.position.y);
       sink[2] += f.x + f.y;
     }
   }));
-  // The suspected mechanism for the "invisible" allocation in the hot scan
-  // loops: passing doubles across a call the compiler does not inline.
-  results.push(run('wrapDeltaX/Y cross-call', () => {
-    const w = window.__omniWrap;
-    if (!w) return;
-    for (let i = 0; i < N; i++) {
-      const t = ents[i];
-      sink[3] += w.dx(0, t.position.x) + w.dy(0, t.position.y);
-    }
-  }));
+  // (A 'wrapDeltaX/Y cross-call' row used to sit here, reading a
+  // `window.__omniWrap` handle the app has never published — so it always
+  // timed an empty closure.  Publish the helpers before re-adding it.)
 
   const shapes = new Set();
   for (let i = 0; i < N; i++) shapes.add(Object.keys(ents[i]).join(','));
@@ -158,7 +152,7 @@ const out = await page.evaluate(() => {
   };
 });
 
-console.log(`\n### PROBE · ${map} · ${out.N} asteroid-class entities`);
+console.log(`\n### PROBE · ${map} · ${out.N} mobile-shard entities`);
 console.log(`distinct own-key signatures among them: ${out.distinctKeySignatures}\n`);
 console.log('probe'.padEnd(30) + 'bytes/op'.padStart(10) + 'ns/op'.padStart(10));
 console.log('-'.repeat(50));

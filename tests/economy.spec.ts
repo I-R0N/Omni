@@ -2,10 +2,10 @@
  *
  *  Re-derived from the coverage the Pair A log records for `smoke-a1` (the
  *  death penalty charged EXACTLY once, the per-life salvage ledger) and the
- *  boss log's B1 (the buy/sell pricing invariant, the loadout untouched by a
- *  payout).  These are the rules that, if they break, quietly turn the game
- *  into a different game — money appearing from nowhere, or a resale loop
- *  that pays.
+ *  boss log's B1 (the buy/sell pricing invariant — B1's other half, the
+ *  loadout untouched by a boss payout, is loop.spec.ts step 9).  These are
+ *  the rules that, if they break, quietly turn the game into a different
+ *  game — money appearing from nowhere, or a resale loop that pays.
  *
  *  Every assertion here reads a number the SIM owns, not a rendered string.
  *  The rendered-string direction is `attribution.spec.ts`, which is a
@@ -185,8 +185,8 @@ test.describe('economy', () => {
     await dockAtStation(page);
     await engine(page, e => e.addDebugCredits(500_000));
 
-    // A run starts LEAN: free Base Hull on the ship centre, Blaster on a gun
-    // hex, empty inventory, no shield (CLAUDE.md §5).
+    // A run starts LEAN: free Base Hull on the ship centre, the Projector on a
+    // gun hex, empty inventory, no shield (CLAUDE.md §5).
     const lean = await engine(page, e => e.outfittingSnapshot());
     expect(lean.ship[0]?.id).toBe('hull_base');
     expect(lean.inventory.every((i: any) => i === null)).toBe(true);
@@ -357,7 +357,6 @@ test.describe('economy', () => {
     expect(dead.runSummary!.credits).toBe(0);
     const c = await engine(page, e => e.credits as number);
     expect(c).toBe(0);
-    expect(c).toBeGreaterThanOrEqual(0);
 
     watch.assertClean();
   });

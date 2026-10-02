@@ -100,7 +100,7 @@ const _repulScratch: FlowVector = { x: 0, y: 0 };
 // (2R+1)² kernel.  Default 3 — wide enough to bend the flow several
 // cells before an obstacle so streamlines curve around tile clusters
 // instead of pointing straight at them until impact.  GameEngine
-// cycles this at runtime via the DBG "FF KernelR" button.
+// cycles this at runtime via the DBG Flow Field ▸ "Kernel R" row.
 const DEFAULT_KERNEL_R = 3;
 
 // Default tangent-mix factor.  0 = pure radial (push perpendicular
@@ -108,7 +108,7 @@ const DEFAULT_KERNEL_R = 3;
 // wall and traps shards on the boundary).  1 = pure tangent (slide
 // along walls — both sides flow in the same along-wall direction,
 // no saddle).  0.5 = balanced.  GameEngine cycles this via the DBG
-// "FF Tangent" button.
+// Flow Field ▸ "Tangent" row.
 const DEFAULT_TANGENT_MIX = 0.5;
 
 // Breathing field — a slow spatio-temporal undulation added to the
@@ -206,8 +206,9 @@ export class FlowFieldGrid {
   // Per-cell timestamp of the most recent asteroid-field recompute (ms,
   // performance.now() domain).  Written by `_computeShardFlowCell` for
   // every cell it touches: every cell at `buildShardFlowField` (map load)
-  // and 5 cells at each `onTileDestroyed`.  Consumed only by the DBG
-  // "FF Rebuilds" overlay — it flashes any cell whose timestamp is
+  // and the (2R+1)² kernel block (5 cells at legacy R=0) at each
+  // `onTileDestroyed` / `onTileCreated`.  Consumed only by the DBG Flow
+  // Field ▸ "Rebuilds" overlay — it flashes any cell whose timestamp is
   // within FLASH_DURATION_MS of now().  Allocation matches the typed-
   // array group above so it grows the same way in `_ensureCapacity`.
   private astRebuildTs = new Float64Array(TOTAL);
@@ -262,7 +263,9 @@ export class FlowFieldGrid {
    * — old data is intentionally dropped because cell indices change
    * meaning when the cell size changes.
    *
-   * Today this is only called from GameEngine's DBG "FF Density" cycle.
+   * Called at every map load (GameEngine.loadMap applies the configured
+   * `ffCellSize`) and by the DBG World & Maps ▸ Flow Field ▸ "Density"
+   * cycle.
    */
   setCellSize(size: number): void {
     if (size === CELL_SIZE || !(size > 0)) return;
@@ -340,7 +343,7 @@ export class FlowFieldGrid {
    * Change the wall-kernel radius and re-bake every cell.  R = 0
    * reproduces the legacy 4-cardinal-only scan for A/B testing; R ≥ 1
    * enables the extended (2R+1)² kernel with 1/d² falloff.  Cycled at
-   * runtime via the DBG "FF KernelR" button.  No-op when `r` equals
+   * runtime via the DBG Flow Field ▸ "Kernel R" row.  No-op when `r` equals
    * the current radius.
    */
   setKernelR(r: number): void {
@@ -383,7 +386,7 @@ export class FlowFieldGrid {
 
   /** Recompute the asteroid flow vector for a single cell. */
   private _computeShardFlowCell(idx: number): void {
-    // Stamp the recompute time for the DBG "FF Rebuilds" overlay
+    // Stamp the recompute time for the DBG Flow Field ▸ "Rebuilds" overlay
     // regardless of blocked-vs-open outcome — every recompute is a
     // rebuild event worth surfacing.
     this.astRebuildTs[idx] = performance.now();

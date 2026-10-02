@@ -72,7 +72,8 @@ async function quietField(page: any, map = 'GLASS_FIELD') {
   await startRun(page, map);
   // Built as a string, never a closure: `waitForStats` serialises the
   // predicate with toString(), so a captured `map` would be undefined in the
-  // page and the poll would throw rather than wait (helpers.ts, rule 1).
+  // page and the poll would throw rather than wait (tests/README.md harness
+  // rule 9; the note on `waitForStats`).
   await waitForStats(
     page,
     new Function('s', `return s.currentMapType === ${JSON.stringify(map)}`) as any,
@@ -89,8 +90,8 @@ async function quietField(page: any, map = 'GLASS_FIELD') {
  *
  *  WAIT for the readout rather than reading it once: `__omniStats` is
  *  republished by the rAF loop, so a read taken in the same breath as the
- *  click that changes it can still carry the pre-click payload (helpers.ts,
- *  rules 12 and 13). */
+ *  click that changes it can still carry the pre-click payload
+ *  (tests/README.md harness rule 12). */
 async function relativeMode(page: any) {
   await dialByName(page, 'impactVelocityName', 'relative',
     e => e.dbg.cycleImpactVelocity(), 1);
@@ -104,6 +105,11 @@ async function glassField(page: any) {
 /** WEAPONS[CANNON].fuseSeconds, hard-coded (harness rule: a test that
  *  imports the constant it is checking pins nothing). */
 const CANNON_FUSE = 0.42;
+/** The old Plasma Cannon's shell lives on as the HEAVY SHELL (cannon +
+ *  kinetic): tripped by an actor, by its fuse or by stopping in terrain, with
+ *  the full derived blast.  The BARE cannon became a time-fused penetrator
+ *  (user call) and is pinned in energy.spec.ts. */
+// (Written as the literal 'cannon+kinetic' inside each in-page body.)
 const SIM_DT = 1 / 120;
 
 test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
@@ -122,7 +128,7 @@ test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
         if (!t) throw new Error('no fresh glass tile');
 
         p.velocity.x = 0; p.velocity.y = 0;
-        p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+        p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
         const before = e.currentMap.entities.length;
         e.weapons.firePlayerWeapon(e.currentMap.entities, p,
           { x: p.position.x + 500, y: p.position.y }, undefined, false);
@@ -172,7 +178,7 @@ test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
       foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6;
 
       p.velocity.x = 0; p.velocity.y = 0;
-      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
       const before = e.currentMap.entities.length;
       e.weapons.firePlayerWeapon(e.currentMap.entities, p,
         { x: p.position.x + 500, y: p.position.y }, undefined, false);
@@ -206,7 +212,7 @@ test.describe('the Plasma Cannon is a heavy round, not a contact mine', () => {
           .filter((x: any) => x.active && x.isExplosionRing).length;
 
         p.velocity.x = 0; p.velocity.y = 0;
-        p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+        p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
         const before = e.currentMap.entities.length;
         e.weapons.firePlayerWeapon(e.currentMap.entities, p,
           { x: p.position.x + 500, y: p.position.y }, undefined, false);
@@ -354,8 +360,11 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
       // The densest round in the roster against a mid-weight one.  Same
       // damage path, different banks — and the bank is the only thing that
       // can separate their decay.
-      const beam = await walk('BOUNCER');
-      const burst = await walk('BURST');
+      // (Energy modules: the old Laser is a raycast beam now, so the dense
+      //  round here is the kinetic SLUG, three bites, against the SHOTGUN
+      //  pellet's two.)
+      const beam = await walk('projectile+kinetic');
+      const burst = await walk('spread+kinetic');
       // The authored SOLVE (5 bites / 3 bites), times MASS_SCALE, over the
       // base-bank divisor — three factors now, so both are read live rather
       // than written as one product that silently means the wrong thing the
@@ -365,11 +374,11 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
         return { scale: M.MASS_SCALE, divisor: M.BASE_BANK_DIVISOR };
       });
       expect(bankInBites(beam.damage, beam.speed, beam.mass),
-        'the Laser launches with the solve\'s five bites, scaled and re-based')
-        .toBeCloseTo(5 * k.scale / k.divisor, 2);
-      expect(bankInBites(burst.damage, burst.speed, burst.mass),
-        'the Burst Rifle with three, likewise')
+        'the slug launches with its three-bite solve, scaled and re-based')
         .toBeCloseTo(3 * k.scale / k.divisor, 2);
+      expect(bankInBites(burst.damage, burst.speed, burst.mass),
+        'the shotgun pellet with two, likewise')
+        .toBeCloseTo(2 * k.scale / k.divisor, 2);
 
       const beamDecay = beam.bites[1] / beam.bites[0];
       const burstDecay = burst.bites[1] / burst.bites[0];
@@ -381,8 +390,8 @@ test.describe('a hit is measured from the speed the bolt still has', () => {
       // The CLAIM is untouched and is the line below: the rate comes out of
       // the round's OWN mass, so the two weapons differ — which is exactly
       // what the retired global `PIERCE_FALLOFF_RATE` could not say.
-      const beamBites = 5 * k.scale / k.divisor;
-      const burstBites = 3 * k.scale / k.divisor;
+      const beamBites = 3 * k.scale / k.divisor;
+      const burstBites = 2 * k.scale / k.divisor;
       expect(beamDecay, 'the beam gave up one bite out of its own bank')
         .toBeCloseTo((beamBites - 1) / beamBites, 4);
       expect(burstDecay, 'and the burst round one out of its smaller one')
@@ -734,85 +743,10 @@ test.describe('how far a round gets is what it can afford', () => {
       watch.assertClean();
     });
 
-  test('a ricochet may re-hit what it already struck; sustained contact may not',
-    async ({ page }) => {
-      const watch = await boot(page);
-      await quietField(page);
-      const r = await engine(page, (e, a: any) => {
-        const ctx = e.waveContext();
-        const foe = e.waves.spawnAt('RAMMER_1',
-          { x: e.player.position.x + 300, y: e.player.position.y }, ctx, false);
-        foe.maxSpeed = 0; foe.health = foe.maxHealth = 1e6;
-        const tile = e.currentMap.entities.find((x: any) => x.active
-          && x.shardVariant === 'glass-tile' && x.mass === Infinity);
-
-        const beam = () => ({
-          id: 'beam_' + Math.random(), type: 'PROJECTILE',
-          position: { x: foe.position.x, y: foe.position.y },
-          velocity: { x: a.speed, y: 0 }, rotation: 0,
-          size: { x: 6, y: 6 }, mass: a.mass, active: true, color: '#fff',
-          damage: 5, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-          pierceHits: 0, isBouncer: true, bouncesRemaining: 3,
-        } as any);
-        const strike = (p: any) => {
-          const before = foe.health;
-          e.physics.resolveCollision(p, foe, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-          return before - foe.health;
-        };
-
-        // (a) SUSTAINED overlap — the same beam meeting the same body again
-        // with nothing in between.
-        const held = beam();
-        strike(held);
-        const afterFirst = Math.hypot(held.velocity.x, held.velocity.y);
-        strike(held);
-        const sustained = { alive: held.active === true, steps: held.pierceHits,
-                            kept: Math.hypot(held.velocity.x, held.velocity.y) / afterFirst };
-
-        // (b) The same two contacts with a REFLECTION between them.
-        const bounced = beam();
-        strike(bounced);
-        bounced.position.x = tile.position.x - tile.size.x * 0.5 - 2;
-        bounced.position.y = tile.position.y;
-        e.physics.resolveCollision(bounced, tile, { x: 0, y: 0 }, undefined, e.handleEntityDeath);
-        const reflected = { vx: bounced.velocity.x, ids: bounced.hitEntityIds.length,
-                            bounces: bounced.bouncesRemaining };
-        const secondBite = strike(bounced);
-
-        // Snapshot BEFORE tidying the scene up — reading `active` after
-        // clearing it is how a passing test lies.
-        const after = { alive: bounced.active === true, steps: bounced.pierceHits };
-        foe.active = false; bounced.active = false;
-        return { sustained, reflected, secondBite, after };
-      }, { speed: 900, mass: massForBank(5, 900, 5) });
-
-      // The reflection happened, and it emptied the struck-ID list — which is
-      // where the re-hit is bought, NOT by weakening the `alreadyHit` guard
-      // (that guard is what stops a beam in sustained overlap grinding a body
-      // at 120Hz, and it is still doing that job below).
-      expect(r.reflected.vx, 'the beam turned around').toBeLessThan(0);
-      expect(r.reflected.bounces).toBe(2);
-      expect(r.reflected.ids, 'a bounce clears what it has struck').toBe(0);
-
-      // (a) Held against the body, the beam does NOT carry on: it stops on
-      // the re-contact and is charged nothing for it.
-      expect(r.sustained.alive, 'sustained contact ends the beam').toBe(false);
-      expect(r.sustained.steps, 'and buys it no further step of the curve').toBe(1);
-      expect(r.sustained.kept, 'nor does the re-contact cost it energy')
-        .toBeCloseTo(1, 9);
-
-      // (b) After a bounce the same beam strikes the same body again and
-      // survives to keep going.
-      expect(r.after.alive, 'a returning beam carries on').toBe(true);
-      expect(r.after.steps, 'and its second damage event is its second step').toBe(2);
-      expect(r.secondBite, 'at the derived curve\'s next entry')
-        .toBeCloseTo(biteAt(5, 5, 1), 6);
-      // ENERGY IS A LIFETIME BANK: bounces buy COVERAGE, not extra damage.
-      // A beam that turns around still lands only what it can afford.
-      expect(r.secondBite, 'the bounce did not refill the bank').toBeLessThan(5);
-
-      watch.assertClean();
-    });
+  // (The ricochet test lived here.  The ricochet was the retired Laser's
+  //  tile-bounce primitive; the Laser became the thermal BEAM (a raycast
+  //  pulse, energy modules) and nothing in the roster bounces any more, so
+  //  the primitive and its test were removed together.)
 });
 
 /** THE BASE BANK, AND THE BLAST THAT IS NOW DERIVED FROM IT.
@@ -822,7 +756,9 @@ test.describe('how far a round gets is what it can afford', () => {
  *  Blaster bolt punched thirty-one one-HP gnats where the pre-scale round
  *  managed four (audit §8).  The call was that TODAY'S reach is what a
  *  fully-gunned ship should have, so the base round is today's divided by
- *  what three Gunnery Mk III multiply it by.
+ *  what three Gunnery Mk III multiply it by — and a later call
+ *  (`BASE_BANK_TRIM`) took a further 40% off, so three marks now land at
+ *  0.6 of it.
  *
  *  And the blast was the last damage number in the roster still authored as
  *  a flat scalar while everything around it went kinetic, so it shrank into
@@ -888,7 +824,7 @@ test.describe('the base bank, and the blast derived from it', () => {
       watch.assertClean();
     });
 
-  test('three marks scale the bank by the anchor, and move only the bank', async ({ page }) => {
+  test('three marks scale the bank by the anchor, and the re-base moved only the bank', async ({ page }) => {
     const watch = await boot(page);
     await quietField(page);
 
@@ -914,16 +850,28 @@ test.describe('the base bank, and the blast derived from it', () => {
         return out;
       };
       const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
-      const types = ['BLASTER', 'BURST', 'SHOTGUN', 'BOUNCER', 'LIGHTNING', 'HOMING', 'CANNON'];
-      return types.map(t => ({ type: t, base: fire(t, 1), gunned: fire(t, g3), g3 }));
+      // Every combination that fires ROUNDS (a beam has no bank to scale).
+      // The legacy-tuned ones are the old roster.
+      const types = ['projectile', 'projectile+kinetic', 'spread+kinetic', 'projectile+electric',
+                     'homing+kinetic', 'cannon', 'spread', 'homing'];
+      return types.map(t => ({
+        type: t, authored: M.WEAPONS[t].damage,
+        base: fire(t, 1), gunned: fire(t, g3), g3,
+      }));
     });
 
     for (const w of r) {
       // (2) three marks multiply the bank by exactly the anchor.
       expect(w.gunned.mass! / w.base.mass!, `${w.type}: three marks scale the bank by the anchor`)
         .toBeCloseTo(w.g3, 6);
-      // (3) and the BITE is the mark's ordinary effect, untouched by any of
-      // this — the re-base must not have quietly nerfed damage.
+      // (3) ONLY THE BANK MOVED: the round flies its authored bite at mark
+      // 0 — the re-base must not have quietly nerfed damage.  Read against
+      // the table, because a ratio cannot see it: a uniform cut to the bite
+      // cancels out of gunned / base.
+      expect(w.base.damage!, `${w.type}: the re-base left the bite alone`)
+        .toBeCloseTo(w.authored, 9);
+      // And a mark's bite is its ordinary effect, the same factor the bank
+      // took.
       expect(w.gunned.damage! / w.base.damage!, `${w.type}: the bite is the mark's own`)
         .toBeCloseTo(w.g3, 6);
     }
@@ -942,7 +890,7 @@ test.describe('the base bank, and the blast derived from it', () => {
         const p = e.player;
         const fire = (mult: number) => {
           p.velocity.x = 0; p.velocity.y = 0;
-          p.currentWeapon = 'CANNON'; p.weaponCooldown = 0; p.damageMult = mult;
+          p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0; p.damageMult = mult;
           const before = new Set(e.currentMap.entities.map((x: any) => x.id));
           e.weapons.firePlayerWeapon(e.currentMap.entities, p,
             { x: p.position.x + 500, y: p.position.y });
@@ -960,9 +908,9 @@ test.describe('the base bank, and the blast derived from it', () => {
         };
         const g3 = 1 + 3 * M.GUNNERY_MK3_DAMAGE_FRAC;
         return {
-          authored: M.WEAPONS.CANNON.explosionDamage ?? null,
-          authoredRadius: M.WEAPONS.CANNON.explosionRadius ?? null,
-          bite: M.WEAPONS.CANNON.damage,
+          authored: M.WEAPONS['cannon+kinetic'].explosionDamage ?? null,
+          authoredRadius: M.WEAPONS['cannon+kinetic'].explosionRadius ?? null,
+          bite: M.WEAPONS['cannon+kinetic'].damage,
           base: fire(1), gunned: fire(g3), g3,
           coupling: M.BLAST_ENERGY_COUPLING,
           perDamage: M.IMPACT_ENERGY_PER_DAMAGE,
@@ -970,7 +918,7 @@ test.describe('the base bank, and the blast derived from it', () => {
       });
 
       // (4a) the config authors NO splash — absent is what "derive it" means.
-      expect(r.authored, 'the player Cannon authors no explosionDamage').toBeNull();
+      expect(r.authored, 'the Heavy Shell authors no explosionDamage').toBeNull();
 
       // (4b) the shell flies a blast derived from its OWN energy.
       const expected = 0.5 * r.base.mass! * r.base.speed! * r.base.speed!
@@ -1047,15 +995,16 @@ test.describe('the base bank, and the blast derived from it', () => {
           return mass;
         };
         return {
-          blasterBase: fire('BLASTER', false), blasterCharged: fire('BLASTER', true),
-          homingBase: fire('HOMING', false), homingCharged: fire('HOMING', true),
+          blasterBase: fire('projectile', false), blasterCharged: fire('projectile', true),
+          homingBase: fire('homing+kinetic', false), homingCharged: fire('homing+kinetic', true),
         };
       });
 
-      // The authored multipliers are 20 (Blaster) and 2 (Seeker).  Scaled
-      // twice they would read 200 and 20 — which is what shipped.
-      expect(r.blasterCharged! / r.blasterBase!, 'a charged Blaster is 20x, not 200x')
-        .toBeCloseTo(20, 6);
+      // The authored multipliers are 6 (a charged round, energy modules'
+      // generic projectile charge) and 2 (a charged seeker).  Scaled twice
+      // they would read 60 and 20.
+      expect(r.blasterCharged! / r.blasterBase!, 'a charged round is 6x, not 60x')
+        .toBeCloseTo(6, 6);
       expect(r.homingCharged! / r.homingBase!, 'a charged Seeker is 2x, not 20x')
         .toBeCloseTo(2, 6);
 
@@ -1104,7 +1053,7 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
       witness.shield = 0; witness.maxShield = 0;
 
       p.velocity.x = 0; p.velocity.y = 0;
-      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
       const before = new Set(e.currentMap.entities.map((x: any) => x.id));
       e.weapons.firePlayerWeapon(e.currentMap.entities, p,
         { x: p.position.x + 500, y: p.position.y });
@@ -1174,7 +1123,7 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
       const direct = mk(400, 0);
       const bystander = mk(400, 55);
       p.velocity.x = 0; p.velocity.y = 0;
-      p.currentWeapon = 'CANNON'; p.weaponCooldown = 0;
+      p.currentWeapon = 'cannon+kinetic'; p.weaponCooldown = 0;
       const before = new Set(e.currentMap.entities.map((x: any) => x.id));
       e.weapons.firePlayerWeapon(e.currentMap.entities, p,
         { x: p.position.x + 500, y: p.position.y });
@@ -1201,10 +1150,11 @@ test.describe('a shell that runs out of travel energy blasts where it stops', ()
     });
 
     expect(r.rings, 'exactly one damaging ring, not two').toBe(1);
-    // And the bystander took at most ONE blast's worth — the ring's own
-    // distance falloff halves it at half the radius, so two would exceed it.
+    // And the bystander took ONE blast's worth: it sits at half the radius,
+    // where the ring's own distance falloff lands half the charge — so one
+    // blast is ~0.5 of it, and two would land the whole.
     expect(r.lost, 'so the bystander cannot have taken two blasts')
-      .toBeLessThanOrEqual(r.blast);
+      .toBeLessThan(r.blast * 0.75);
 
     watch.assertClean();
   });
@@ -1335,8 +1285,8 @@ test.describe('a blast breaks cloud up; it does not delete it', () => {
          *  of 2.13, so a 1.4 bar sat barely over one standard deviation
          *  under the median and the claim failed roughly one run in ten —
          *  once in CI, on 1.39984.  The physics was never in question
-         *  (CLAUDE.md test rule 11: a derived quantity has a spread; clear
-         *  it, don't sit in it), so the fix is to measure the population
+         *  (tests/README.md harness rule 11: a derived quantity has a spread;
+         *  clear it, don't sit in it), so the fix is to measure the population
          *  property with enough samples to see it.  Interleaved because
          *  each arm consumes the cluster it tested, so running one arm's
          *  samples back to back would hand the other a thinner field. */

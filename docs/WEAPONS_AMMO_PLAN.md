@@ -1,5 +1,13 @@
 # Weapons + Ammo System Plan (completion-roadmap step 0)
 
+> **HISTORICAL design record (2026-07-11)** for the economy pivot,
+> implemented in PRs #72–#77 and since extended.  `CLAUDE.md` is the source
+> of truth.  §6 (weapon parity) remains a live reference.  §7 (the weapon ×
+> trait map) is still the reasoning behind every trait, but its rows name the
+> seven-gun roster the energy modules (PR #104) retired — a weapon is now a
+> delivery module plus an optional energy modifier (CLAUDE.md §5 WEAPONS) —
+> and the table has not been redrawn.
+
 Design doc of record for the weapons-ammo design session (completion
 roadmap step 0, added 2026-07-08; session held 2026-07-11). Consumed by
 the (h) bosses brief and the (k) portals task. Docs-only — no game code
@@ -44,7 +52,9 @@ changes in this PR.
   map and in nodes).
 - **Boss-weapon reconciliation: model (d)** — bosses grant salvage
   and/or shop discounts. Weapons stay purely purchased. This is the
-  gate answer the (h) brief consumes.
+  gate answer the (h) brief consumes.  *(Since changed: the discount was
+  removed — a boss now pays score, a salvage spray and one random
+  module, which can be a gun; see §6.)*
 - **Scope flags** the orchestration session must accept/defer are in
   §8.
 
@@ -275,6 +285,16 @@ skipping the shop. The (h) brief consumes this as: bosses are
 high-payout node capstones with **no unlock plumbing** (no changes to
 `UNLOCK_DEFS`, no grant path, no per-boss weapon flags).
 
+> **SUPERSEDED IN PART (game-feedback plan decision #44e).**  The shop
+> discount was removed.  A boss now pays score, a salvage spray and ONE
+> RANDOM MODULE into the inventory (`grantBossModule`, `engine/bosses.ts`),
+> drawn uniformly from every `MODULE_DEFS` entry that costs anything — which
+> includes the four purchasable deliveries (Scatter, Seeker, Beam, Cannon)
+> and the three energy modifiers, so a capstone can drop a weapon.  With
+> the cargo full it pays that module's catalog value in salvage instead.
+> There is still no per-boss unlock plumbing (`UNLOCK_DEFS` no longer exists
+> at all).  The parity recommendation below is unaffected and live.
+
 **Enemy-side weapon parity (recommendation, uncontested):** a
 weapon-boss should *wield* a themed variant of the literal player
 archetype — same projectile look/behavior family from the player's
@@ -288,7 +308,8 @@ without a parallel weapon table.
 ## 7. Trait-counterplay map (weapon × trait)
 
 Traits: `armor` shipped (Tank; hits below chipThreshold reduced 70%);
-evasive / front-shield / regen arrive with (h). Field conditions
+evasive / front-shield / regen arrived with (h) in PR #77 (the Reaver is
+`evasive`, the Bastion `frontShield` + `regen`). Field conditions
 (swarm crowds, shielded Bulwark) included so every weapon appears as a
 "right answer" at least once — the property that makes owning the
 roster matter under 2-slot provisioning.
@@ -298,16 +319,23 @@ roster matter under 2-slot provisioning.
 | Blaster | ✦ charged slug only | — | — | — | — | ok (free chip) |
 | Burst Rifle | — (5 < 6) | — | — | — | — | **✓ best sustained DPS** |
 | Shotgun | — (3/pellet) | **✓ cone forgives juking** | — | **✓ front-loaded burst** | ✓ close packs | — |
-| Pierce Beam | — (4–5/beam) | — | **✓ ricochets hit the back side** | — | **✓ line rake** | ✓ pierce lines |
+| Laser | — (5/beam) | — | **✓ ricochets hit the back side** | — | **✓ line rake** | ✓ lines through a row |
 | Lightning | ✓ direct 9 ≥ 6 | ✓ chains don't miss | ✓ chains ignore facing | — | **✓ cluster deleter** | — |
 | Seeker | ✓ 8 ≥ 6 (post-buff) | **✓ the designated answer** | — | — | — | ✓ fire-and-forget |
-| Cannon | **✓ the designated answer** | — | ✓ AoE splashes past | **✓ 28 burst** | ✓ pack-opener | ✓ |
+| Cannon | **✓ the designated answer** | — | ✓ AoE splashes past | **✓ 18 burst** | ✓ pack-opener | ✓ |
 
 (h) should assign the new traits so the table stays honest: give the
 evasive enemy real dodge behavior vs straight projectiles, make the
 front-shield entity punish face-tanking (the Bulwark arc-shield already
 prototypes this), and tune regen thresholds against Shotgun/Cannon
-burst windows.
+burst windows.  *(Done in PR #77 — game-feedback plan decision #42b.)*
+
+The Laser row was "Pierce Beam" (the player-facing name was unified to
+Laser, and its per-beam damage stayed 5 — the cooldown took the rebalance).
+The Cannon's regen cell used to read "28 burst": the 18-point bite plus the
+10-point splash.  But the splash ring excludes the target the shell struck,
+so one shell's burst on that target is its 18-point bite, which still
+clears regen's 16-point gate.
 
 **RE-CHECKED AGAINST UNIFIED IMPACT PHYSICS (steps 3–5, 2026-09-12).**  Five
 of the six columns are UNCHANGED, and that is by construction rather than by
@@ -324,9 +352,14 @@ row: overkill carries through on actors, so a round is charged only what the
 body could absorb and flies on with the rest.  A plain Blaster bolt now
 punches FOUR 1-HP gnats (measured) where it used to stop on the first — so
 "—" in that column no longer means "cannot", it means "not its speciality".
+*(FOUR was measured before `MASS_SCALE` and the base-bank re-base and trim,
+all of which moved it; CLAUDE.md §5 carries the current count, measured by
+`perf/impact-audit.mjs` §8.)*
 Whether the cone and chain weapons still need to be the designated crowd
-answers is a live balance question for the step-6 economy pass, not something
-this table can settle on its own.
+answers is a live balance question for the economy tuning pass — the
+game-feedback plan's step 6 never ran; it is parked as PARKING_LOT "Economy &
+progression tuning pass", and phased-plan D1 will reopen the roster — not
+something this table can settle on its own.
 
 ---
 

@@ -12,10 +12,13 @@ const SHARD_RANGE = {
   far:  AUDIO_CONSTANTS.SHARD_FAR_RADIUS,
 } as const;
 
-/** Authored event recipes and mix definitions. SfxVoicing adds production
- * detail; AudioSystem caches three finished takes for every unsampled ID.
- * Existing WAV takes are discovered by dashed ID prefix and take precedence.
- * Sustained sounds stay live so throttle, charge and proximity remain responsive.
+/** Authored event recipes and mix definitions: the ID contract, and the
+ * procedural FALLBACK under the recorded takes.  The cinematic bank takes play
+ * first; a WAV discovered by dashed ID prefix covers an ID no bank does; only
+ * then does a recipe sound, as one of three finished takes AudioSystem caches
+ * (SfxVoicing adds production detail).  Loops normally play a recorded bank
+ * texture; their recipes here run live so throttle, charge and proximity stay
+ * responsive when they do play.
  */
 export function registerSfx(a: AudioSystem) {
   a.register('ability.scan', {

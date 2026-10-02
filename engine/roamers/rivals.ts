@@ -30,7 +30,7 @@ export interface RivalInstance {
   state: 'enter' | 'roam' | 'leave';
   stateTimer: number;        // seconds left in the current state
   fireTimer: number;         // weapon cooldown
-  stolen: number;            // points denied to the player so far (HUD/popup)
+  stolen: number;            // denied points — UNUSED: never incremented/read
   portal?: { x: number; y: number };  // exit-portal centre (leave only)
   // Cached hunt target (Stage 7 perf).  Re-acquired on the PerfController
   // `rivalScan` cadence; steering/firing recompute only the O(1) distance to it
@@ -233,7 +233,7 @@ function fireRivalShot(g: GameEngine, inst: RivalInstance, target: GameEntity) {
     if (!g.currentMap) return;
     const W = RIVAL_CONSTANTS.WEAPON;
     const cfg = {
-        type: WeaponType.BLASTER, name: 'Rival Blaster', cooldown: W.cooldown,
+        delivery: 'projectile', name: 'Rival Blaster', cooldown: W.cooldown,
         speed: W.speed, damage: W.damage, lifetime: W.lifetime,
         color: inst.ship.color || W.color, size: W.size,
         count: 1, spread: 0, recoil: 0,

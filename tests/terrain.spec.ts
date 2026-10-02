@@ -34,9 +34,8 @@ import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, waitForStats, quietScene } from './helpers';
 
 /** The GLASS showcase field is glass and nothing else, so "a static tile" is
- *  unambiguous and its break is the well-understood
- *  `DropSystem.spawnGlassShards` fan rather than whatever variant a mixed map
- *  happened to put under the probe. */
+ *  unambiguous and its break is the pane's own Voronoi cells rather than
+ *  whatever variant a mixed map happened to put under the probe. */
 async function glassField(page: any) {
   await startRun(page, 'GLASS_FIELD');
   await waitForStats(page, s => s.currentMapType === 'GLASS_FIELD', 'the glass field');
@@ -216,8 +215,9 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
       const watch = await boot(page);
       // Metal: the derived HP is high enough that several crushes are nowhere
       // near lethal, so what is measured is unambiguously the spend and not
-      // the break.  (Glass would work too now that its whole-pane rule is
-      // gone, but it dies in nine crashes, which leaves little room.)
+      // the break.  (Glass has no whole-pane rule any more, but it is too
+      // soft for this: the crusher spends ~31 a crush at 8 u/step against a
+      // ~49-HP pane, so a pane would not survive the three crushes measured.)
       await tileField(page, 'METAL_FIELD');
 
       const r = await engine(page, (e, sp: any) => {
@@ -383,9 +383,7 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
     async ({ page }) => {
       const watch = await boot(page);
       // Plastic: every tile on the field spawns at the SAME authored HP (8,
-      // measured over 60 tiles), so two tiles are comparable subjects.  Metal
-      // is not — its HP rides `densityTier`, so tile-to-tile counts differ for
-      // a reason that has nothing to do with this claim.
+      // measured over 60 tiles), so two tiles are comparable subjects.
       await tileField(page, 'PLASTIC_FIELD');
 
       const r = await engine(page, e => {
@@ -395,7 +393,7 @@ test.describe('a crush spends on grain boundaries, like every other damage path'
           && !x.fractureEdgeFill);
         const ramToDeath = (t: any, preShoot: boolean) => {
           if (preShoot) {
-            // One ordinary Blaster bolt — enough to build the boundary model
+            // One ordinary bolt (the retired Blaster's 4) — enough to build the boundary model
             // and rewrite `maxHealth` onto the derived budget.  That rewrite
             // is what the old crash path then counted against, one point at a
             // time.
@@ -560,18 +558,30 @@ test.describe('a fast ship cannot fly through terrain', () => {
       const hp0: any = {};
       for (const t of wall) hp0[t.id] = t.health;
       const wallEnd = wall[wall.length - 1].position.x + w;
+      // Where the ship is is read UNWRAPPED.  A hull that bounces off the wall
+      // flies back the way it came and, on a torus, comes round the seam at a
+      // large positive x — which read as "beyond every tile" and counted the
+      // whole standing wall as flown through (measured: ~1 run in 40, on main
+      // as well).  Summing each step's wrapped displacement keeps a bounce a
+      // bounce.
+      const W = e.currentMap.width;
+      let ux = p.position.x, lastX = p.position.x;
       for (let i = 0; i < 2000; i++) {
         e.prepareFrameEntities();
         e.updatePhysics(DT);
         p.velocity.y = 0;               // hold the heading; friction is not the subject
+        let d = p.position.x - lastX;
+        if (d > W / 2) d -= W; else if (d < -W / 2) d += W;
+        ux += d; lastX = p.position.x;
         if (Math.abs(p.velocity.x) < 0.05) break;
-        if (p.position.x > wallEnd + 100) break;
+        if (ux > wallEnd + 100) break;
+        if (ux < -200) break;           // bounced clear back out of the wall
       }
       P.sweepRewind = realSweep;
-      const past = (t: any) => p.position.x > t.position.x + w * 0.5;
+      const past = (t: any) => ux > t.position.x + w * 0.5;
       return {
         endSpeed: Math.abs(p.velocity.x),
-        escaped: p.position.x > wallEnd,
+        escaped: ux > wallEnd,
         destroyed: wall.filter((t: any) => !t.active).length,
         // A tile the ship is BEYOND that is still whole and never lost a
         // point of health: it was flown through.
@@ -630,10 +640,11 @@ test.describe('a fast ship cannot fly through terrain', () => {
       // A/B still has two different outcomes to compare.
       await freshField(page, 'METAL_FIELD');
 
-      // THE DEFECT, reproduced.  Measured at 120: the ship came out the far
-      // side still doing ~114 with most of the ten tiles whole and unmarked
-      // behind it.  Asserted as a band rather than that figure, since the
-      // point is "kept nearly all of it", not the exact number.
+      // THE DEFECT, reproduced.  At 120 with the sweep stubbed, the ship
+      // comes out the far side having kept nearly all its speed, with most
+      // of the ten tiles whole and unmarked behind it (the ~114 first
+      // measured was on rock, before `MASS_SCALE`).  Asserted as a band,
+      // since the point is "kept nearly all of it", not the exact number.
       const before = await chargeWall(page, 'metal-tile', 120, false);
       expect(before.escaped, 'it flies out the far side').toBe(true);
       expect(before.endSpeed, 'having kept nearly all its speed').toBeGreaterThan(100);
@@ -650,18 +661,21 @@ test.describe('a fast ship cannot fly through terrain', () => {
       watch.assertClean();
     });
 
-  test('an ordinary approach speed is untouched — the sweep is an early-out',
+  test('an ordinary approach speed needs no sweep — the wall holds with it or without it',
     async ({ page }) => {
       const watch = await boot(page);
-      // Metal for the same reason as the control above: the two arms must
-      // still differ, and a rock wall no longer stops a swept hull.
+      // Metal, like the control above: this comparison needs a wall that
+      // stops BOTH arms, and at 10x impact energy a rock wall does not stop
+      // even a swept hull at full speed.
       await freshField(page, 'METAL_FIELD');
 
-      // THE COST OF THE FIX, stated as a claim.  A step shorter than the
-      // pair's own contact window cannot have skipped it, so the sweep
-      // returns on one compare and the run is bit-for-bit the old one.  At 60
-      // (30 units a substep against a +/-28 window) that is already true, so
-      // ordinary flight never reaches the quadratic.
+      // WHY THIS IS THE ORDINARY CASE.  A step shorter than the pair's own
+      // contact window cannot have SKIPPED it — at 60 (30 units a substep
+      // against a +/-28 window) the ship cannot outrun a tile, so the
+      // sweep's outrun test says no.  (Its deep-arrival test can still fire,
+      // and a rewind there only moves where the pair touches.)  What is
+      // asserted is the OUTCOME: with the sweep stubbed out the wall still
+      // stops the ship, and neither arm leaves a tile untouched behind it.
       const swept = await chargeWall(page, 'metal-tile', 60, true);
       await freshField(page, 'METAL_FIELD');
       const stubbed = await chargeWall(page, 'metal-tile', 60, false);
@@ -745,9 +759,9 @@ test.describe('a ram that cannot break through BOUNCES', () => {
 
       expect(r.alive, 'the tile holds at this speed').toBe(true);
       // IT IS DAMAGED, and by an amount worth a weapon's attention: a base
-      // Blaster bolt lands 4, so one ram at this speed is worth about five
-      // of them.  Stated as a floor rather than the measured 21.3 so a
-      // re-tune of the coupling does not read as this defect returning.
+      // Projector bolt lands 3, so one ram at this speed is worth several of
+      // them.  Stated as a floor rather than a measured figure so a re-tune
+      // of the coupling does not read as this defect returning.
       expect(r.dealt, 'and it is really damaged').toBeGreaterThan(10);
       expect(r.dealt, 'but not destroyed').toBeLessThan(r.max);
       // AND THE SHIP BOUNCES.  This is the half that was missing: the crash
@@ -816,9 +830,10 @@ test.describe('a ram that cannot break through BOUNCES', () => {
  *
  *  Glass now cracks under a crush and shatters when enough energy has
  *  arrived, like every other material.  Measured through the real collision
- *  branch (`perf/impact-audit.mjs` §5): 1 ram -> 9, landing beside rock's 9
- *  — which is the tell that the model is doing the talking, since the two
- *  materials share `bondStrength` 0.4 and derive 50.0 and 54.7 HP.
+ *  branch (`perf/impact-audit.mjs` §5) when this landed: 1 ram -> 9, beside
+ *  rock's 9 (both near 1-3 since `MASS_SCALE`) — which is the tell that the
+ *  model is doing the talking, since the two materials share `bondStrength`
+ *  0.4 and derive 50.0 and 54.7 HP.
  *
  *  The sharp form of the claim is that the outcome now depends on the
  *  ENERGY: a slow qualifying crash must leave the pane standing, and it used
@@ -889,9 +904,10 @@ test.describe('glass cracks under a crash like every other material', () => {
       // The two materials share `bondStrength` 0.4 and derive 50.0 and 54.7
       // HP, so their ram counts must be near-identical.  That similarity is
       // the claim: it can only hold if BOTH are priced by the same energy
-      // model, which is what the special case prevented.  Measured 9 and 9;
-      // asserted as a RATIO with room either side, since derived HP varies
-      // tile to tile by construction (a fixed count would flake).
+      // model, which is what the special case prevented.  Measured 9 and 9
+      // when this landed (both near 1-3 since `MASS_SCALE`); asserted as a
+      // RATIO with room either side, since derived HP varies tile to tile by
+      // construction (a fixed count would flake).
       /*  FIVE TILES A MATERIAL, and the MEAN of their ram counts.  One tile
        *  is far too coarse a sample for a ratio: at 10x impact energy a tile
        *  goes in one to three rams, so the ratio can only land on 1/3, 1/2,
@@ -899,10 +915,10 @@ test.describe('glass cracks under a crash like every other material', () => {
        *  claim failed about one run in ten on a perfectly healthy build, on
        *  1/3.  Lowering the ram speed to buy resolution is not available:
        *  measured, at 4 u/step and below neither material breaks at all.
-       *  Averaging is (CLAUDE.md test rule 11: a derived quantity has a
-       *  spread; clear it, don't sit in it) — measured over 8 runs the mean
-       *  ratio then holds 0.75..1.18, which is the SAME claim with the
-       *  quantisation noise taken out of it.
+       *  Averaging is tests/README.md harness rule 11 applied (a derived
+       *  quantity has a spread; clear it, don't sit in it) — measured over
+       *  8 runs the mean ratio then holds 0.75..1.18, which is the SAME
+       *  claim with the quantisation noise taken out of it.
        *
        *  Every pick stays ALIVE and is spaced along y rather than being
        *  activated in turn: a tile that dies is compacted out of
@@ -942,7 +958,13 @@ test.describe('glass cracks under a crash like every other material', () => {
             }
             rams.push(n);
           });
-          return rams.reduce((x: number, y: number) => x + y, 0) / rams.length;
+          // The MAX as well as the mean: a pick that never breaks scores the
+          // 200 cap, and two unbreakable materials would read 200/200 = 1 and
+          // pass the ratio below on nothing.
+          return {
+            mean: rams.reduce((x: number, y: number) => x + y, 0) / rams.length,
+            max: Math.max(...rams),
+          };
         }, { variant });
       };
 
@@ -952,12 +974,13 @@ test.describe('glass cracks under a crash like every other material', () => {
       // At 10x impact energy both materials go in one or two rams at this
       // speed, so "more than three" is no longer the shape of the claim —
       // what survives, and what the whole-pane rule broke, is that glass and
-      // rock cost the SAME, which the ratio below states directly.
-      expect(glass, 'glass takes a real contact, not a threshold')
-        .toBeGreaterThan(0);
-      expect(glass / rock, 'and lands beside rock, which shares its bond strength')
+      // rock cost the SAME, which the ratio below states directly.  Every
+      // pick has to have actually BROKEN first, or the ratio compares caps.
+      expect(glass.max, 'every glass pick broke').toBeLessThan(200);
+      expect(rock.max, 'every rock pick broke').toBeLessThan(200);
+      expect(glass.mean / rock.mean, 'and lands beside rock, which shares its bond strength')
         .toBeGreaterThan(0.5);
-      expect(glass / rock, 'neither tougher nor softer by much').toBeLessThan(2);
+      expect(glass.mean / rock.mean, 'neither tougher nor softer by much').toBeLessThan(2);
 
       watch.assertClean();
     });

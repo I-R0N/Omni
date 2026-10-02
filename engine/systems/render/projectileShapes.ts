@@ -1,7 +1,8 @@
-/** PROJECTILE SHAPES — the four shot silhouettes: the lightning bolt's
- *  crackling tendrils, the bouncer's head dot, the charged Blaster's
- *  red/orange fireball, and the standard radial-gradient glow every other
- *  weapon (player and enemy alike) renders with.
+/** PROJECTILE SHAPES — the three shot silhouettes: the electric bolt's
+ *  crackling tendrils (`isLightningProjectile`, the Arc Bolt), the charged
+ *  round's red/orange fireball (`isCharged`), and the standard
+ *  radial-gradient glow every other weapon (player and enemy alike)
+ *  renders with.  (The bouncer's head dot went with the Laser.)
  *
  *  Extracted verbatim from `RenderSystem.renderEntities`' PROJECTILE arm.
  *  It takes the renderer for exactly one reason: the two GRADIENT CACHES.
@@ -80,19 +81,6 @@ export function drawProjectileShape(
            ctx.fill();
 
            ctx.globalCompositeOperation = 'source-over';
-           ctx.restore();
-       } else if (entity.isBouncer) {
-           // ── Bouncer projectile: the beam body is drawn entirely by
-           // the fast-fading trail in renderTrails. All we draw here
-           // is a small green head dot so the beam has a visible tip
-           // even before the trail accumulates its first couple of
-           // points (first 1–2 frames after spawn).
-           ctx.save();
-           ctx.globalAlpha = Math.min(1, lifetimeFrac);
-           ctx.fillStyle = '#22c55e';
-           ctx.beginPath();
-           ctx.arc(0, 0, r * 0.35, 0, Math.PI * 2);
-           ctx.fill();
            ctx.restore();
        } else if (entity.isCharged) {
            // ── Charged Blaster: red+orange fireball ──

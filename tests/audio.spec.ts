@@ -1,5 +1,40 @@
+/** The sound system as shipped: the recorded banks decode with full id
+ *  coverage, the mix controls and voice budget hold, and the streamed battle
+ *  layer follows combat.  Plus two contracts that used to live in an ungated
+ *  smoke script, here so the merge gate runs them: docs/SFX_INVENTORY.md and
+ *  the registry name the SAME ids, and audio survives what iOS does to a web
+ *  page (the ring switch, interruptions, backgrounding).
+ *
+ *  Everything drives the real AudioSystem through `window.__omniEngine`.  The
+ *  only things stood in for are the ones a headless Chromium cannot produce:
+ *  an 'interrupted' context, a hidden tab, and `navigator.audioSession`. */
+
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { test, expect } from '@playwright/test';
 import { advanceSim, boot, engine, startRun, waitForStats, waitForTransit } from './helpers';
+
+/* THE INVENTORY IS THE CONTRACT (CLAUDE.md §8: adding a sound means adding its
+ * row first), so it and the registry must agree in BOTH directions: a
+ * registered id with no row is a sound nobody specified, and a row nothing
+ * registers is a spec for a sound that never plays.  A documented id is a
+ * table row whose first cell is a backticked id, wherever in the document the
+ * table sits. */
+test('every registered sound has an inventory row, and every row is registered', async ({ page }, testInfo) => {
+  const doc = readFileSync(resolve(dirname(testInfo.file), '../docs/SFX_INVENTORY.md'), 'utf8');
+  const documented = [...new Set(
+    Array.from(doc.matchAll(/^\|\s*`([a-z]+(?:\.[a-z0-9]+)+)`\s*\|/gm), m => m[1]),
+  )];
+  expect(documented.length, 'the inventory tables parsed').toBeGreaterThan(70);
+
+  const watch = await boot(page);
+  const registered: string[] = await engine(page, e => e.audio.allIds);
+  expect(registered.filter(id => !documented.includes(id)), 'registered ids with no inventory row')
+    .toEqual([]);
+  expect(documented.filter(id => !registered.includes(id)), 'inventory rows naming no registered id')
+    .toEqual([]);
+  watch.assertClean();
+});
 
 test('all cinematic cues decode with full coverage and bounded memory', async ({ page }) => {
   const watch = await boot(page);
@@ -58,6 +93,13 @@ test('mix controls, variation inspection, torus pan and pause cleanup', async ({
     a.stopScene(true);
     a.play('impact.tile.rock', { x: 0, y: 100 });
     const left = [...a.live][0].tail.pan.value;
+    // ACROSS THE SEAM: 200 units to the listener's left through the wrap,
+    // where a naive `x - lx` puts the source a whole map to the right and
+    // out of earshot.
+    a.stopScene(true);
+    a.play('impact.tile.rock', { x: e.currentMap.width - 100, y: 100 });
+    const seamVoice = [...a.live][0];
+    const seam = seamVoice ? seamVoice.tail.pan.value : null;
     a.loop('move.thrust', true, { param: 0.7 });
     a.setActive(false);
     const stopped = a.liveVoices === 0 && a.liveLoops === 0;
@@ -67,13 +109,15 @@ test('mix controls, variation inspection, torus pan and pause cleanup', async ({
     a.play('ui.confirm');
     const ui = a.counts.played === count + 1;
     a.setMuted(true);
-    return { before, after, repeats, right, left, stopped, suppressed, ui,
+    return { before, after, repeats, right, left, seam, stopped, suppressed, ui,
       mutedVoices: a.liveVoices, volume: a.volume, sfx: a.sfxVolume, music: a.musicVolume };
   });
   expect(result.before).toBe(result.after);
   expect(result.repeats).toBe(0);
   expect(result.right).toBeGreaterThan(0);
   expect(result.left).toBeLessThan(0);
+  expect(result.seam, 'a source just across the seam is heard').not.toBeNull();
+  expect(result.seam!, 'and pans to the side it is really on').toBeLessThan(0);
   expect(result.stopped && result.suppressed && result.ui).toBeTruthy();
   expect(result.mutedVoices).toBe(0);
   expect([result.volume, result.sfx, result.music]).toEqual([0.6, 0.35, 0.2]);
@@ -121,6 +165,90 @@ test('burst load stays bounded and critical player feedback displaces background
   expect(result.critical).toBeTruthy();
   expect(result.ceiling).toBeLessThanOrEqual(24);
   expect(result.cleanup).toBe(0);
+  watch.assertClean();
+});
+
+/* The inventory's TRIGGER column, spot-checked wherever a trigger is one
+ * synchronous call: every gun fires its OWN voice, an outfit move refused
+ * away from a drydock is audible, and each status effect sounds as it lands.
+ * Then the NEAR-FIELD rule for shard breaks (CLAUDE.md §8): an ambient break
+ * carries only a short way, the same id carries normally when the caller
+ * widens it, and in real play the widening is `killedByPlayer` — a shard the
+ * player broke is theirs to hear from across the screen. */
+test('triggers fire their own ids, and ambient shard breaks stay near-field', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.audible);
+  const r = await engine(page, (e, guns: [string, string][]) => {
+    const a = e.audio;
+    a.stopScene(true); a.setActive(true); a.resetCounters();
+    const px = e.player.position.x, py = e.player.position.y;
+    a.setListener(px, py);
+
+    const fired: Record<string, number> = {};
+    const held = e.player.currentWeapon;
+    for (const [type, id] of guns) {
+      e.player.currentWeapon = type;
+      e.player.weaponCooldown = 0;
+      e.handleShooting({ x: window.innerWidth / 2 + 200, y: window.innerHeight / 2 });
+      fired[id] = a.playsOf(id);
+    }
+    e.player.currentWeapon = held;
+    const moved = e.moveModule({ area: 'inventory', idx: 0 }, { area: 'ship', idx: 1 });
+    const reject = a.playsOf('poi.reject');
+    e.debugApplyCorrosion();
+    e.debugApplyDisable();
+
+    // Manager layer: the def's own near-field range, then a caller override.
+    // Two ids, because two real plays of one id in the same instant would
+    // collapse into one voice — and a clean slate first, so the tier-3
+    // ceiling cannot be what silences them.
+    a.stopScene(true);
+    a.play('destroy.shard.glass', { x: px + 1400, y: py });
+    const far = a.playsOf('destroy.shard.glass');
+    a.play('destroy.shard.glass', { x: px + 120, y: py });
+    const near = a.playsOf('destroy.shard.glass');
+    a.play('destroy.shard.metal', { x: px + 1400, y: py, near: 420, far: 2600 });
+    const widened = a.playsOf('destroy.shard.metal');
+
+    // Engine layer: the same distance, through the real death path.
+    const shards = e.currentMap.entities.filter((x: any) =>
+      x.active && x.shardVariant === 'rock-shard' && !x.deathDispatched).slice(0, 2);
+    const kill = (sh: any, mine: boolean) => {
+      sh.position.x = px + 1400; sh.position.y = py;
+      sh.killedByPlayer = mine || undefined;
+      sh.health = 0;
+      e.handleEntityDeath(sh);
+      return a.playsOf('destroy.shard.rock');
+    };
+    const ambient = shards.length === 2 ? kill(shards[0], false) : -1;
+    const mine = shards.length === 2 ? kill(shards[1], true) : -1;
+    return {
+      fired, moved, reject,
+      corrosion: a.playsOf('status.corrosion.apply'), disable: a.playsOf('status.disable.apply'),
+      far, near, widened, shards: shards.length, ambient, mine,
+    };
+  }, [
+    ['BLASTER', 'weapon.blaster.fire'], ['BURST', 'weapon.burst.fire'],
+    ['SHOTGUN', 'weapon.shotgun.fire'], ['BOUNCER', 'weapon.bouncer.fire'],
+    ['LIGHTNING', 'weapon.lightning.fire'], ['HOMING', 'weapon.homing.fire'],
+    ['CANNON', 'weapon.cannon.fire'],
+  ] as [string, string][]);
+
+  for (const [id, n] of Object.entries(r.fired)) expect(n, `${id} from its own gun`).toBe(1);
+  expect(Object.keys(r.fired)).toHaveLength(7);
+  expect(r.moved, 'outfitting is refused away from a drydock').toBe(false);
+  expect(r.reject, 'and the refusal is audible').toBe(1);
+  expect(r.corrosion, 'corrosion sounds as it lands').toBe(1);
+  expect(r.disable, 'and so does the EMP').toBe(1);
+
+  expect(r.far, 'an ambient shard break is out of earshot at 1400').toBe(0);
+  expect(r.near, 'the same break close by is heard').toBe(1);
+  expect(r.widened, 'and a caller can widen the range back to normal').toBe(1);
+  expect(r.shards, 'two mobile rock shards to break').toBe(2);
+  expect(r.ambient, 'a distant shard nobody hit dies silently').toBe(0);
+  expect(r.mine, 'the same death caused by the player carries').toBe(1);
   watch.assertClean();
 });
 
@@ -207,9 +335,10 @@ test('a lull ducks the battle layer without changing or rewinding the song', asy
 });
 
 
-// The capstone is the ONE override of the continuous playlist (user call): a
-// boss warping in is a designed beat, so the score starts with it rather than
-// carrying on with whatever the wave ladder was playing.
+// A capstone warping in is one of the two moments the playlist cuts to a new
+// song (the other is a map change — see 'a new arena starts a new song'):
+// it is a designed beat, so the score starts with it rather than carrying on
+// with whatever the wave ladder was playing.
 test('a boss warping in cuts the battle layer to a new song', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
@@ -376,7 +505,7 @@ test('a lull inside one arena still holds the battle layer up', async ({ page })
 });
 
 test('long player tails do not suppress the next attack', async ({ page }) => {
-  await boot(page);
+  const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.prepared);
   await startRun(page);
@@ -396,4 +525,114 @@ test('long player tails do not suppress the next attack', async ({ page }) => {
   expect(result.duration).toBeGreaterThan(2);
   expect(result.played).toBe(4);
   expect(result.voices).toBeLessThanOrEqual(2);
+  watch.assertClean();
+});
+
+/* iOS RECOVERY.  Chromium cannot reproduce an iPhone, but every half of the
+ * recovery that is not the device itself can be pinned.  Nothing exists
+ * before the first gesture, and that gesture claims the "playback" audio
+ * session (Safari puts WebAudio in "ambient", which the ring switch silences;
+ * 16.4+ has `navigator.audioSession` for this, stood in for here).  A context
+ * that stops running comes back on the NEXT gesture — the listeners are
+ * deliberately not `once`, because iOS suspends or interrupts a context for
+ * reasons the page never sees — and iOS's non-standard 'interrupted' state is
+ * resumed like 'suspended'.  Hiding the tab suspends; returning re-unlocks. */
+test('iOS recovery: silent until a gesture, then any later gesture or tab return revives it', async ({ page }) => {
+  await page.addInitScript(() => {
+    const session = { type: 'auto' };
+    Object.defineProperty(Navigator.prototype, 'audioSession', { configurable: true, get: () => session });
+  });
+  const watch = await boot(page);
+  expect(await engine(page, e => e.audio.contextState), 'no context before a gesture').toBeNull();
+  expect(await engine(page, e => e.audio.audible)).toBe(false);
+
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.audible);
+  const session = await page.evaluate(() => ({
+    type: (navigator as any).audioSession.type,
+    shims: Array.from(document.querySelectorAll('audio'))
+      .filter(el => el.src.startsWith('data:audio/wav')).length,
+  }));
+  expect(session.type, 'the first gesture claims the playback session').toBe('playback');
+  expect(session.shims, 'so the silent-element fallback is not needed').toBe(0);
+
+  // Stopped from outside, as a phone call or Siri does.  Nothing brings it
+  // back on its own — wall time passing IS the assertion here (rule 1).
+  await engine(page, async e => { await e.audio.ctx.suspend(); });
+  await page.waitForTimeout(300);
+  expect(await engine(page, e => e.audio.contextState)).toBe('suspended');
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.audible);
+
+  // Chromium never enters 'interrupted', so the state is stood in for and
+  // the resume counted.
+  const resumes = await engine(page, e => {
+    const ctx = e.audio.ctx;
+    const real = ctx.resume;
+    let n = 0;
+    Object.defineProperty(ctx, 'state', { configurable: true, get: () => 'interrupted' });
+    ctx.resume = () => { n++; return real.call(ctx); };
+    e.audio.unlock();
+    delete ctx.state;
+    delete ctx.resume;
+    return n;
+  });
+  expect(resumes, "an 'interrupted' context is resumed, not only a 'suspended' one").toBe(1);
+
+  // Backgrounding: a hidden tab suspends the context, and coming back
+  // re-unlocks it with no gesture at all.
+  await engine(page, () => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => engine(page, e => e.audio.contextState)).toBe('suspended');
+  await engine(page, () => {
+    delete (document as any).hidden;
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(() => window.__omniEngine.audio.audible);
+  watch.assertClean();
+});
+
+/* The OTHER half of the ring switch: pre-16.4 iOS has no
+ * `navigator.audioSession`, and the only lever there is a side effect — a
+ * playing <audio> element promotes the page's session.  It must be IN the
+ * document, or iOS ignores it, and it must be a real, decodable file, because
+ * a malformed one is worse than none.  Forced absent, so Chromium takes this
+ * branch whatever it ships. */
+test('iOS ring switch: without navigator.audioSession, a silent <audio> in the document claims playback', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(
+    Navigator.prototype, 'audioSession', { configurable: true, get: () => undefined }));
+  const watch = await boot(page);
+  const shims = () => page.evaluate(() => Array.from(document.querySelectorAll('audio'))
+    .filter(el => el.src.startsWith('data:audio/wav')).length);
+  expect(await shims(), 'nothing before a gesture').toBe(0);
+
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.audible);
+  const shim = await page.evaluate(async () => {
+    const el = Array.from(document.querySelectorAll('audio'))
+      .find(a => a.src.startsWith('data:audio/wav'));
+    if (!el) return null;
+    return {
+      inDocument: el.isConnected,
+      playsinline: el.hasAttribute('playsinline'),
+      loop: el.loop,
+      volume: el.volume,
+      decodes: await new Promise<boolean>(done => {
+        const probe = new Audio(el.src);
+        probe.addEventListener('loadedmetadata', () => done(true), { once: true });
+        probe.addEventListener('error', () => done(false), { once: true });
+        setTimeout(() => done(false), 5000);
+      }),
+    };
+  });
+  expect(shim, 'the gesture put a session element on the page').not.toBeNull();
+  expect(shim!.inDocument, 'IN the document, not detached').toBe(true);
+  expect(shim!.playsinline && shim!.loop, 'inline and looping').toBe(true);
+  expect(shim!.volume, 'inaudible').toBeLessThanOrEqual(0.01);
+  expect(shim!.volume, 'but not zero, which can be optimised away').toBeGreaterThan(0);
+  expect(shim!.decodes, 'a real, decodable WAV').toBe(true);
+  expect(await shims(), 'and only one').toBe(1);
+  watch.assertClean();
 });

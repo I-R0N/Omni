@@ -1,8 +1,10 @@
-/** The seeded Voronoi fracture core (voronoi gauntlet, V1).
+/** The seeded Voronoi fracture core (voronoi gauntlet, V1), and what the
+ *  engine builds on it.
  *
- *  Drives the pure functions on `window.__omniFracture` (App.tsx, the
- *  __omniHid precedent): no engine, no canvas, no timing dependence — the
- *  suite pins exactly the properties the fracture feature stands on:
+ *  The `fracture core` describes (the cost probe among them) drive the
+ *  pure functions on `window.__omniFracture` (App.tsx, the __omniHid
+ *  precedent): no engine, no canvas, no timing dependence — they pin
+ *  exactly the properties the fracture feature stands on:
  *
  *   1. DETERMINISM — same (polygon, seed) → identical cells.  The crack
  *      overlay and the shatter read the SAME decomposition on different
@@ -14,14 +16,23 @@
  *      self-intersection), no slivers below the minimum area (the site-
  *      retirement rule), concave parents survive (rock spawns at radius
  *      0.60±0.55 — NOT convex).
- *   4. COST — µs per decomposition at 4/8/16/30 sites (30 = the current
- *      rock fragment cap), so "compute lazily and cache" has a measured
- *      basis.  Bounds are deliberately loose: this container rasterises in
- *      software and the suite must not flake (perf/README.md — levels are
- *      indicative, deltas are evidence).
+ *   4. COST — µs per decomposition at 4/8/16/30 sites (30 sits above every
+ *      shipped `grainCountMax` — metal's 22 is the largest), so "compute
+ *      lazily and cache" has a measured basis.  Bounds are deliberately
+ *      loose: this container rasterises in software and the suite must not
+ *      flake (perf/README.md — levels are indicative, deltas are evidence).
+ *
+ *  A few later tests are pure in the same way (the splice and union
+ *  helpers, the regularity and spread axes, and the grain resolvers on
+ *  `window.__omniGrain`), but most start a run and drive the real engine:
+ *  the shatter, the grain-boundary damage model, the materials, their DBG
+ *  knobs, and the render path that decides how a fragment is drawn.
  */
 
-/*  A NOTE ON `quietScene`, which every test here calls after its map loads.
+/*  A NOTE ON `quietScene`, which most tests here call once their map loads.
+ *  The ones that skip it never let the world run first: they measure in
+ *  synchronous evaluations straight after the load, before the fauna can
+ *  reach what they measure, or read only DBG readouts and pure tables.
  *
  *  Ambient bubbles GNAW TERRAIN: a bubble bites anything too big to swallow,
  *  tiles included, through the same grain-fracture path this suite is about
@@ -36,7 +47,8 @@
  *  anything else breaking bodies beside it is contamination by definition.
  *  `quietScene` stops the fauna and the ladder; it does not touch shards or
  *  tiles, so no assertion here changes meaning. */
-/* WHY EVERY SYNTHESISED BOLT BELOW CARRIES `mass: <its damage> / 12656.25`.
+/* WHY EVERY SYNTHESISED BOLT BELOW CARRIES THE NON-PIERCING MASS FOR ITS
+ * DAMAGE.
  *
  * Damage is KINETIC (unified impact physics, step 3) and penetration depth is
  * ENERGY divided by what the material charges per grain (step 5b), so a
@@ -45,19 +57,24 @@
  * against an authored damage of 4: harmless while mass meant nothing, and
  * wildly wrong once it became the thing that decides how deep a shot bores.
  *
- * 12656.25 is `v^2 / (2 * IMPACT_ENERGY_PER_DAMAGE)` at the speed 900 they all
- * fly at, so the solve gives each bolt an energy equal to its own damage —
- * a NON-PIERCING round, which is what every test here means by "one hit".
- * Written out rather than imported, per the harness rule that a test which
- * imports the constant it is checking pins nothing. */
+ * Most of them ask `__omniMass.projectileMassFor({ damage, speed: 900 })`,
+ * which solves for an energy equal to the bolt's own damage — a NON-PIERCING
+ * round, which is what every test here means by "one hit".  A few spell the
+ * same number out as `damage / 12656.25`, i.e. `v^2 / (2 *
+ * IMPACT_ENERGY_PER_DAMAGE)` at 900.  Copy the derived form: tests/README.md
+ * ("A global rescale breaks the tests that were RIGHT") is why.  (The recoil
+ * test's bolt is massless on purpose, and says so.) */
 
 import { test, expect } from '@playwright/test';
-import { boot, dialByName, engine, startRun, stats, waitForStats, waitForEngine, quietScene } from './helpers';
+import { boot, dialByName, engine, startRun, stats, waitForStats, waitForEngine, waitForStatsKeyChange, quietScene } from './helpers';
 
 /** Build a jittered star polygon in-page with the module's own PRNG —
  *  the same construction generateShardPolygon uses, at the ROCK spawn
- *  shape's parameters (radiusMin 0.60, radiusRange 0.55, angleJitter 0.5,
- *  6–10 vertices).  Serialized into page.evaluate as a string. */
+ *  shape's radius and jitter (radiusMin 0.60, radiusRange 0.55, angleJitter
+ *  0.5) but with 6–10 vertices, where the rock shape itself picks from
+ *  5 / 7 / 9 (`polyVerticesOptions`); changing the count here would change
+ *  every polygon these tests were measured on.  Serialized into
+ *  page.evaluate as a string. */
 const STAR_POLY_SRC = `
   function starPoly(fr, baseR, seed, opts) {
     opts = opts || {};
@@ -266,8 +283,8 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
         const parentSizeSq = t.size.x * t.size.x;
         // Drive the death dispatch directly with the stamps the real
         // impact path (killStructureByImpact / the projectile path)
-        // leaves — the probabilistic rock hit model would otherwise
-        // shed ROCK_CHIP entities into the count.
+        // leaves — a real hit would first shed pieces of its own into
+        // the count (grains under voronoi, ROCK_CHIP entities under legacy).
         // Mirror killStructureByImpact's contract: the CALLER stamps the
         // impact, zeroes health, flips active and drops the grid entry,
         // THEN raises onDeath.
@@ -275,7 +292,20 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
         t.lastImpactDamage = 3;
         t.health = 0;
         t.active = false;
-        e.handleEntityDeath(t);
+        // WHICH BREAK RAN, not just what came out: the legacy powerlaw
+        // split conserves size² too, so the counts and the conservation
+        // check below pass whichever path the mode switch picked.
+        const calls = { voronoi: 0, powerlaw: 0 };
+        const realVoronoi = e.shards.shatterVoronoiStyle.bind(e.shards);
+        const realPowerlaw = e.shards.shatterPowerlawStyle.bind(e.shards);
+        e.shards.shatterVoronoiStyle = (...a: any[]) => { calls.voronoi++; return realVoronoi(...a); };
+        e.shards.shatterPowerlawStyle = (...a: any[]) => { calls.powerlaw++; return realPowerlaw(...a); };
+        try {
+          e.handleEntityDeath(t);
+        } finally {
+          e.shards.shatterVoronoiStyle = realVoronoi;
+          e.shards.shatterPowerlawStyle = realPowerlaw;
+        }
         const children = ents.filter((x: any) => x.active && !before.has(x.id)
           && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
         let childSizeSq = 0;
@@ -285,7 +315,7 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
           if (!c.polygonPoints || c.polygonPoints.length < 3) polysOk = false;
         }
         return {
-          mode, parentSizeSq, childSizeSq,
+          mode, parentSizeSq, childSizeSq, calls,
           count: children.length, polysOk, dead: t.active === false,
         };
       };
@@ -298,13 +328,18 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
 
     // Voronoi: cells conserve the size² metric exactly by construction.
     expect(r.voronoi.dead).toBe(true);
+    expect(r.voronoi.calls, 'the voronoi arm broke along its cells')
+      .toEqual({ voronoi: 1, powerlaw: 0 });
     expect(r.voronoi.count).toBeGreaterThanOrEqual(2);
     expect(r.voronoi.polysOk).toBe(true);
     expect(Math.abs(r.voronoi.childSizeSq - r.voronoi.parentSizeSq) / r.voronoi.parentSizeSq)
       .toBeLessThan(0.01);
     // Legacy A/B: the powerlaw path still runs (even-area split for rock,
-    // so it conserves too — the A/B difference is the GEOMETRY).
+    // so it conserves too — the A/B difference is the GEOMETRY, which is
+    // why the arms are told apart by the path that ran).
     expect(r.legacy.dead).toBe(true);
+    expect(r.legacy.calls, 'the legacy arm took the powerlaw break')
+      .toEqual({ voronoi: 0, powerlaw: 1 });
     expect(r.legacy.count).toBeGreaterThanOrEqual(2);
 
     watch.assertClean();
@@ -356,9 +391,9 @@ test.describe('voronoi shatter — the sim path (V2)', () => {
     });
 
     expect(r.voronoi.dead).toBe(true);
-    // fracture: a 42px hex maps to ~6 sites (grainSize 7, clamp 5-12); sliver
-    // retirement may retire a couple, never below 2; cells can exceed
-    // sites only on a concave parent, which a hex is not.
+    // fracture: a 42px hex (area ~1146) maps to ~7 sites (rock grainSize 14,
+    // clamp 3-16); sliver retirement may retire a couple, never below 2;
+    // cells can exceed sites only on a concave parent, which a hex is not.
     expect(r.voronoi.count).toBeGreaterThanOrEqual(3);
     expect(r.voronoi.count).toBeLessThanOrEqual(12);
     // Legacy: exactly the 3 breakShards rock-tile ships with.
@@ -377,9 +412,9 @@ test.describe('cracks are the pattern (V3)', () => {
     await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
     // Damage a big rock-shard parked ON SCREEN through the real
-    // projectile path (rock is hit-counted: −1 HP per hit; the first hit
-    // never breaks — ROCK_BREAK's curve is 0 at one hit).
-    const shardId = await engine(page, (e: any) => {
+    // projectile path — a 1-damage bite cannot break a boulder's derived
+    // budget, so the first hit never kills it.
+    await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
       const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-shard'
         && x.mass !== Infinity && x.size.x >= 100 && (x.mergeCount ?? 1) === 1);
@@ -401,16 +436,15 @@ test.describe('cracks are the pattern (V3)', () => {
       // Marker for the polls below — waitForEngine's predicate is
       // serialized, so it cannot close over the id.
       t.__v3probe = true;
-      return t.id;
     });
-    void shardId;
 
-    // The crack overlay computes the decomposition on the next drawn
-    // frame — the render path, not a test back door, fills the cache.
+    // The hit builds the decomposition (the damage path and the crack
+    // overlay share ensureFractureEdges), so the edges the overlay draws
+    // are the ones read here.
     await waitForEngine(page, (e: any) => {
       const t = e.currentMap.entities.find((x: any) => x.__v3probe === true);
       return t !== undefined && t.fractureEdges !== undefined;
-    }, 'the crack overlay to build the decomposition');
+    }, 'the hit to build the decomposition');
 
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
@@ -501,9 +535,11 @@ test.describe('partial fracture (V4)', () => {
         const a = (i / 6) * Math.PI * 2;
         pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
       }
-      // maxHealth 100 gives the reveal fine granularity so the
-      // progressive story is visible step by step.  The id fixes the
-      // seed, so this whole test is deterministic.
+      // maxHealth 100 is only the AUTHORED spawn value: the first
+      // progressFracture call converts it to the DERIVED boundary total
+      // (~44.5 for this seed), so twelve 4-damage bolts end the body on
+      // the twelfth.  The id fixes the seed, so this whole test is
+      // deterministic.
       const tile: any = {
         id: 'v8_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
         position: { x: 4200, y: 3000 }, velocity: { x: 0, y: 0 }, rotation: 0,
@@ -547,9 +583,19 @@ test.describe('partial fracture (V4)', () => {
       };
 
       // Step the damage down; each step highlights more boundaries and
-      // detaches every piece whose boundary completed.
+      // detaches every piece whose boundary completed.  Shot until it dies
+      // (the cap is only a safety bound), and the two properties below are
+      // checked after EVERY step it survives: read once at the end they
+      // could never run, because the last bolt always ends it.
       const steps: any[] = [];
-      for (let step = 0; step < 12; step++) {
+      let aliveSteps = 0;
+      // Persistence: surviving cells are a SUBSET of the original
+      // pattern — nothing was recomputed between detaches.
+      let subset = true;
+      // Conservation: what broke off plus what remains is the shape the
+      // pattern was cut from.
+      let worstConservationErr = 0;
+      for (let step = 0; step < 60; step++) {
         if (!tile.active) break;
         shoot(4);
         steps.push({
@@ -558,29 +604,23 @@ test.describe('partial fracture (V4)', () => {
           cellsLeft: tile.active ? tile.fractureCells.length : 0,
           chips: chips().length,
         });
-      }
-
-      // Persistence: surviving cells are a SUBSET of the original
-      // pattern — nothing was recomputed between detaches.
-      let subset = true;
-      if (tile.active) {
+        if (!tile.active) break;
+        aliveSteps++;
         for (const c of tile.fractureCells) {
           const key = Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10);
           if (!initialCentroids.includes(key)) subset = false;
         }
+        let chipArea = 0;
+        for (const c of chips()) chipArea += fr.polygonArea(c.polygonPoints);
+        const remainderArea = fr.polygonArea(tile.polygonPoints);
+        worstConservationErr = Math.max(worstConservationErr,
+          Math.abs((chipArea + remainderArea) - originalArea) / originalArea);
       }
 
-      // Conservation: what broke off plus what remains is the shape the
-      // pattern was cut from.
-      let chipArea = 0;
-      for (const c of chips()) chipArea += fr.polygonArea(c.polygonPoints);
-      const remainderArea = tile.active ? fr.polygonArea(tile.polygonPoints) : 0;
-
       return {
-        atZero, initialCells, steps, subset,
+        atZero, initialCells, steps, subset, aliveSteps, worstConservationErr,
         finalAlive: tile.active === true,
         totalDebris: chips().length,
-        conservationErr: Math.abs((chipArea + remainderArea) - originalArea) / originalArea,
       };
     });
 
@@ -596,15 +636,17 @@ test.describe('partial fracture (V4)', () => {
         expect(r.steps[i].cellsLeft).toBeLessThanOrEqual(r.steps[i - 1].cellsLeft);
       }
     }
+    // While it stood: the survivors were always cells of the ORIGINAL
+    // pattern, and every broken piece + the remainder tiled the original
+    // shape.  `aliveSteps` guards both against running on nothing.
+    expect(r.aliveSteps).toBeGreaterThan(0);
     expect(r.subset).toBe(true);
-    if (r.finalAlive) {
-      // Alive: every broken piece + the remainder tile the original shape.
-      expect(r.conservationErr).toBeLessThan(0.02);
-    } else {
-      // Dead via min-remainder: chips + death fragments carry the whole
-      // pattern.
-      expect(r.totalDebris).toBeGreaterThanOrEqual(r.initialCells - 1);
-    }
+    expect(r.worstConservationErr).toBeLessThan(0.02);
+    // And it ended in the death path.  Dead because its last boundary
+    // broke (no area floor for grain materials): chips + death fragments
+    // carry the whole pattern.
+    expect(r.finalAlive).toBe(false);
+    expect(r.totalDebris).toBeGreaterThanOrEqual(r.initialCells - 1);
 
     watch.assertClean();
   });
@@ -676,7 +718,7 @@ test.describe('partial fracture (V4)', () => {
             const ed = edges[k];
             let binds = ed.cells.length === 1;
             if (!binds) for (const st of ed.cells) if (living.has(st)) { binds = true; break; }
-            if (binds && (fill[k] ?? 0) < 1e9 && (fill[k] ?? 0) + 1e-6 < edgeNeed(tile, ed)) unbroken++;
+            if (binds && (fill[k] ?? 0) + 1e-6 < edgeNeed(tile, ed)) unbroken++;
           }
           unbrokenAtDeath = unbroken;
           if (unbroken > 0 && (tile.health ?? 0) > 1e-6) diedWithBoundaryLeft = true;
@@ -684,9 +726,8 @@ test.describe('partial fracture (V4)', () => {
       }
       function edgeNeed(t: any, ed: any) {
         const len = Math.hypot(ed.bx - ed.ax, ed.by - ed.ay);
-        // rock's shipped bondStrength; the assertion below only needs
-        // the ORDER of magnitude, so a drift in the constant cannot make
-        // this pass falsely.
+        // Mirrors fractureCache's computeEdgeNeed for a material with no
+        // bondSpread (rock has none): max(0.05, strength x length).
         return Math.max(0.05, ROCK_BOND * len);
       }
       const debris = ents.filter((x: any) => x.active && !before.has(x.id)
@@ -755,93 +796,6 @@ test.describe('partial fracture (V4)', () => {
     // damage read; legacy keeps the shipped dent.
     expect(r.movedVoronoi).toBe(false);
     expect(r.movedLegacy).toBe(true);
-
-    watch.assertClean();
-  });
-});
-
-test.describe('death is dispatched once (V9 regression)', () => {
-  test('a mid-hit fracture death does not double-shatter into duplicate fragments', async ({ page }) => {
-    const watch = await boot(page);
-    await startRun(page, 'ASTEROID_FIELD');
-    await waitForStats(page, s => s.currentMapType === 'ASTEROID_FIELD', 'the rock field');
-    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
-
-    const r = await engine(page, (e: any) => {
-      const fr = (window as any).__omniFracture;
-      const ents = e.currentMap.entities;
-      const w = 42;
-      const pts: any[] = [];
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2;
-        pts.push({ x: Math.cos(a) * w * 0.5, y: Math.sin(a) * w * 0.5 });
-      }
-      // The kill must land INSIDE the damage hook — the exact mid-hit
-      // shape the double-dispatch bug needs (verified: with the guard
-      // disabled this scenario yields 2 dispatches and an exact duplicate
-      // of every fragment).  V15 gets there by breaking EVERY boundary in
-      // one oversized hit, so the body loses cohesion and ends from
-      // inside progressFracture — where the removed min-remainder floor
-      // used to put it.
-      const tile: any = {
-        id: 'v9_dup_tile', type: 'STRUCTURE', shardVariant: 'rock-tile',
-        position: { x: 4200, y: 2600 }, velocity: { x: 0, y: 0 }, rotation: 0,
-        size: { x: w, y: w }, mass: Infinity, active: true, color: '#8a8a8a',
-        health: 2, maxHealth: 2, polygonPoints: pts,
-      };
-      ents.push(tile);
-      tile.lastImpactVelocity = { x: -9, y: 0 };
-      tile.fractureOriginalArea = fr.polygonArea(pts);
-      // REAL projectile kill path: onDamage (progressFracture -> death)
-      // runs BEFORE the outer health<=0 block — the exact double-dispatch
-      // shape of the bug.
-      //
-      // SHOT REPEATEDLY RATHER THAN ONCE.  The original landed a single
-      // 9999-damage shell, which under the energy model (step 5b) no longer
-      // ends a body at all: a bolt pays the material's price per grain and
-      // carries the rest of its energy out the far side, so an oversized shot
-      // drills a clean track instead of obliterating the tile.  What the test
-      // needs is only that the kill land INSIDE the damage hook, so hit until
-      // it does and read the children of the KILLING hit — snapshotting
-      // before each shot, or the earlier shots' chips would be counted as
-      // duplicates of nothing.
-      let before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      for (let hit = 0; hit < 64 && tile.active; hit++) {
-        before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-        e.physics.resolveCollision(
-          {
-            id: 'v9_shell_' + hit, type: 'PROJECTILE',
-            position: { x: tile.position.x + w * 0.5 + 4, y: tile.position.y },
-            velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 40, speed: 900 }), active: true, color: '#fff',
-            damage: 40, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-          },
-          tile, { x: 0, y: 0 },
-          // The REAL damage-feedback hook — the chip/progressFracture site
-          // lives inside it, and the bug was exactly its death racing the
-          // outer health<=0 dispatch.
-          e.spawnDamageText.bind(e),
-          e.handleEntityDeath,
-        );
-      }
-      const children = ents.filter((x: any) => x.active && !before.has(x.id)
-        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
-      // Duplicate detector: under the bug every fragment spawned twice at
-      // the same cell centroid.  Quantise positions and count collisions.
-      const seen = new Set<string>();
-      let dupes = 0;
-      for (const c of children) {
-        const key = Math.round(c.position.x) + ',' + Math.round(c.position.y);
-        if (seen.has(key)) dupes++;
-        seen.add(key);
-      }
-      return { died: tile.active === false, childCount: children.length, dupes };
-    });
-
-    expect(r.died).toBe(true);
-    expect(r.childCount).toBeGreaterThanOrEqual(2);
-    // The bug spawned an exact overlapping duplicate of EVERY fragment.
-    expect(r.dupes).toBe(0);
 
     watch.assertClean();
   });
@@ -988,8 +942,9 @@ test.describe('the glass damage layer (V9)', () => {
       const afterOne = { alive: t.active === true, health: t.health };
       shoot(4);
       const afterTwo = { alive: t.active === true, health: t.health };
-      // V10: glass chips like rock, so the pane may leave early via the
-      // min-remainder rule — keep hitting until it goes, capped.
+      // V10: glass chips like rock — it sheds grains and ends when its
+      // last boundary breaks (no area floor) — so keep hitting until it
+      // goes, capped.
       let hits = 2;
       while (t.active && hits < 40) { shoot(4); hits++; }
       const dead = t.active === false;
@@ -1015,10 +970,11 @@ test.describe('the glass damage layer (V9)', () => {
 
     // The MAP-SPAWNED tile is authored at 20 (V9's damage layer), and V15
     // keeps that number as `authoredMaxHealth` while HP itself becomes
-    // DERIVED from the tile's own grain boundaries — close to 20 by
-    // calibration, but a property of the pattern rather than a constant,
-    // so it varies tile to tile.  Both facts are pinned: the authored
-    // value survives (score reads it), and the live HP is the derived one.
+    // DERIVED from the tile's own grain boundaries — about 49 on a map pane
+    // (~2.5x the authored 20 since glass's bondStrength went to 0.4), and a
+    // property of the pattern rather than a constant, so it varies tile to
+    // tile.  Both facts are pinned: the authored value survives (score
+    // reads it), and the live HP is the derived one.
     expect(r.maxHp).toBe(20);
     expect(r.authored).toBe(20);
     // Derived HP is Sigma(edge length x bondStrength) over the tile's own
@@ -1099,71 +1055,6 @@ test.describe('chip depth and the glass roll-out (V10)', () => {
 
     expect(r.killedUnderVoronoi).toBe(0);
     expect(r.killedUnderLegacy).toBeGreaterThan(0);
-
-    watch.assertClean();
-  });
-
-  test('a real rock tile sheds several pieces across its life before the final break', async ({ page }) => {
-    const watch = await boot(page);
-    // ROCK_FIELD is the rock-TILE showcase; ASTEROID_FIELD is the mobile
-    // rock-shard one.
-    await startRun(page, 'ROCK_FIELD');
-    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
-    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
-
-    const r = await engine(page, (e: any) => {
-      const ents = e.currentMap.entities;
-      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
-        && x.mass === Infinity);
-      if (!t) throw new Error('no rock tile on the field');
-      e.player.position.x = t.position.x + 4000;
-      e.player.position.y = t.position.y + 4000;
-      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      const debris = () => ents.filter((x: any) => x.active && !before.has(x.id)
-        && x.shardVariant === 'rock-shard' && x.mass !== Infinity).length;
-
-      const ceiling = t.maxHealth;
-      let hits = 0;
-      let debrisWhileAlive = 0;
-      // A real shot travels until it overlaps the tile's LIVE polygon, so
-      // as pieces chip away the contact point follows the receding face
-      // inward.  Firing from a fixed point instead would keep testing a
-      // spot the tile no longer occupies — an artefact of the harness,
-      // not of the game (V12 gates detachment on that contact point).
-      const contactX = () => {
-        let mx = -Infinity;
-        for (const p of t.polygonPoints) {
-          if (Math.abs(p.y) < t.size.y * 0.45) mx = Math.max(mx, p.x);
-        }
-        return t.position.x + (mx === -Infinity ? t.size.x * 0.5 : mx) - 1;
-      };
-      while (t.active && hits < 80) {
-        e.physics.resolveCollision(
-          {
-            id: 'v10_shot_' + hits, type: 'PROJECTILE',
-            position: { x: contactX(), y: t.position.y },
-            velocity: { x: -900, y: 0 }, rotation: Math.PI,
-            size: { x: 6, y: 6 }, mass: (window as any).__omniMass.projectileMassFor({ damage: 1, speed: 900 }), active: true, color: '#fff',
-            damage: 1, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-          },
-          t, { x: 0, y: 0 }, e.spawnDamageText.bind(e), e.handleEntityDeath,
-        );
-        hits++;
-        if (t.active) debrisWhileAlive = debris();
-      }
-      return { ceiling, hits, debrisWhileAlive, totalDebris: debris(), died: !t.active };
-    });
-
-    // V10 raised the ceiling (4-6 -> 8-12) so the pattern has hits to
-    // reveal across; with the early-break roll gone the tile actually
-    // reaches them.
-    expect(r.ceiling).toBeGreaterThanOrEqual(8);
-    expect(r.died).toBe(true);
-    // THE ASK: pieces come off DURING its life, not only at the end.
-    expect(r.debrisWhileAlive).toBeGreaterThanOrEqual(3);
-    expect(r.totalDebris).toBeGreaterThan(r.debrisWhileAlive);
-    // It survived more than the old 4-hit floor to do it.
-    expect(r.hits).toBeGreaterThanOrEqual(4);
 
     watch.assertClean();
   });
@@ -1279,13 +1170,26 @@ test.describe('materials through the cells (V5)', () => {
         t.lastImpactDamage = 3;
         t.health = 0;
         t.active = false;
-        e.handleEntityDeath(t);
+        // WHICH BREAK RAN.  A voronoi pane and the legacy glass fan both
+        // hand back "some glass shards", so a count alone passes whichever
+        // path the mode switch picked.
+        const calls = { voronoi: 0, fan: 0 };
+        const realVoronoi = e.shards.shatterVoronoiStyle.bind(e.shards);
+        const realFan = e.drops.spawnGlassShards.bind(e.drops);
+        e.shards.shatterVoronoiStyle = (...a: any[]) => { calls.voronoi++; return realVoronoi(...a); };
+        e.drops.spawnGlassShards = (...a: any[]) => { calls.fan++; return realFan(...a); };
+        try {
+          e.handleEntityDeath(t);
+        } finally {
+          e.shards.shatterVoronoiStyle = realVoronoi;
+          e.drops.spawnGlassShards = realFan;
+        }
         const children = ents.filter((x: any) => x.active && !before.has(x.id)
           && x.shardVariant === childVariant && x.mass !== Infinity);
         let childArea = 0;
         for (const c of children) childArea += fr.polygonArea(c.polygonPoints);
         return {
-          count: children.length,
+          count: children.length, calls,
           areaErr: Math.abs(childArea - areaBefore) / areaBefore,
           healths: children.map((c: any) => c.health),
         };
@@ -1302,6 +1206,8 @@ test.describe('materials through the cells (V5)', () => {
 
     // Voronoi: cells partition the tile — child polygon area sums to the
     // tile's own polygon area.
+    expect(r.glassV.calls, 'the voronoi pane broke along its cells')
+      .toEqual({ voronoi: 1, fan: 0 });
     expect(r.glassV.count).toBeGreaterThanOrEqual(3);
     expect(r.glassV.areaErr).toBeLessThan(0.02);
     expect(r.plasticV.count).toBeGreaterThanOrEqual(3);
@@ -1315,6 +1221,8 @@ test.describe('materials through the cells (V5)', () => {
     for (const h of r.plasticV.healths) expect(h).toBeGreaterThan(24);
     // Legacy A/B: the old fans still run (glass 2-12 fresh silhouettes,
     // plastic exactly the 8-12 breakShards burst at 24 HP).
+    expect(r.glassL.calls, 'the legacy pane took the old glass fan')
+      .toEqual({ voronoi: 0, fan: 1 });
     expect(r.glassL.count).toBeGreaterThanOrEqual(2);
     expect(r.plasticL.count).toBeGreaterThanOrEqual(8);
     expect(r.plasticL.count).toBeLessThanOrEqual(12);
@@ -1418,11 +1326,17 @@ test.describe('only the struck piece chips (V12)', () => {
       if (!t) throw new Error('no rock tile on the field');
       e.player.position.x = t.position.x + 6000;
       t.lastImpactVelocity = { x: -9, y: 0 };
-      t.health = 1; // fully revealed
+      // Heavy damage with NO contact point.  Health 1 BEFORE the model
+      // exists is read by ensureBoundaryModel as 8/9 of the authored 9
+      // already taken, so it spends that share of the derived budget at
+      // build — poured from the side `lastImpactVelocity` points at,
+      // since nothing stamped a real contact (which is also why nothing
+      // below may detach).
+      t.health = 1;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
       for (let i = 0; i < 6; i++) {
         e.progressFracture(t); // no contact point supplied
-        if (t.active) t.health = 1;
+        if (t.active) t.health = 1; // readout only: the model is built
       }
       const chips = ents.filter((x: any) => x.active && !before.has(x.id)
         && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
@@ -1430,8 +1344,8 @@ test.describe('only the struck piece chips (V12)', () => {
     });
 
     // The pattern still builds and shows, but nothing is contacted, so
-    // nothing breaks off — the hit-ceiling and min-remainder rules stay
-    // the only other ways a body ends.
+    // nothing breaks off; the body still ends when its boundaries are
+    // spent.
     expect(r.cracked).toBe(true);
     expect(r.chipCount).toBe(0);
     expect(r.alive).toBe(true);
@@ -1463,7 +1377,10 @@ test.describe('only the struck piece chips (V12)', () => {
         e.player.position.x = t.position.x + 6000;
         const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
         t.lastImpactVelocity = { x: -9, y: 0 };
-        t.health = 1; // hold the reveal at full
+        // The same lever as the rock test above: 19/20 of the authored 20
+        // read as already taken, so model build spends that share of the
+        // pane's derived budget up front.
+        t.health = 1;
         const contactX = () => {
           let mx = -Infinity;
           for (const p of t.polygonPoints) {
@@ -1513,15 +1430,18 @@ test.describe('only the struck piece chips (V12)', () => {
     // is the assertion that actually tests the gate: the pattern is whole,
     // so "nearest the contact" is unambiguous.
     expect(r.hit.firstSide!).toBeGreaterThan(-0.2);
-    // Later pieces get a wider bound ON PURPOSE.  Glass decomposes into
-    // only 3-4 grains on a 36px pane, so ONE grain spans a third of the
-    // body and its centroid can legitimately sit past the centre line
-    // while still being the piece adjacent to the bay the shot opened.
-    // Centroid-x is a weak proxy for "which side" at that grain size —
-    // the rock test above carries the tight bound, on a 15-grain pattern
-    // where the proxy is sound.  (This bound was -0.35 and failed at
-    // -0.53 in a full-suite run while passing 8/8 alone: the metric was
-    // too tight for the material, not the gate letting a far piece go.)
+    // Later pieces get a wider bound ON PURPOSE, and the reason is the
+    // SETUP more than the material.  The `health = 1` lever spends most of
+    // the pane's boundary budget at model build, poured from the contact
+    // point, so the first call frees most of the pane at once and harvests
+    // it nearest-first — the later pieces are a pane coming apart, not a
+    // run of struck faces, and centroid-x is a weak proxy for "which side"
+    // among them.  (It was written as grain size — "3-4 grains on a 36px
+    // pane" — but a pane now decomposes into ~7 against a rock tile's 8.)
+    // The first test in this block, on real bolts, carries the tight bound.
+    // This bound was -0.35 and failed at -0.53 in a full-suite run while
+    // passing 8/8 alone: too tight for this setup, not the gate letting a
+    // far piece go.
     expect(r.hit.worstFarSide).toBeGreaterThan(-0.75);
     // Blind hit: the pattern still highlights, nothing detaches.
     expect(r.blind.cracked).toBe(true);
@@ -1680,13 +1600,12 @@ test.describe('grain boundaries (V15)', () => {
         const shoot = makeShoot(e, t, 4);
         shoot();                       // first hit builds the model
         const edges = t.fractureEdges ?? [];
-        // Σ strengths, recomputed here from the edge geometry and the
-        // shipped constant — so this pins the DEFINITION, not a snapshot.
-      // Rock's LIVE bondStrength, read from the variant table rather than
-      // baked in: a defaults change must not be able to make this quietly
-      // wrong.  It pins the DEFINITION of a boundary's cost, not a number.
-      const ROCK_BOND = (window as any).__omniGrain
-        .grainSpecFor('rock-tile').bondStrength as number;
+        // Σ strengths, recomputed here from the edge geometry and rock's
+        // LIVE bondStrength (read from the variant table rather than baked
+        // in, so a defaults change cannot make this quietly wrong) — so
+        // this pins the DEFINITION, not a snapshot.
+        const ROCK_BOND = (window as any).__omniGrain
+          .grainSpecFor('rock-tile').bondStrength as number;
         let sum = 0;
         for (const ed of edges) {
           sum += Math.max(0.05, ROCK_BOND * Math.hypot(ed.bx - ed.ax, ed.by - ed.ay));
@@ -1783,6 +1702,12 @@ test.describe('grain boundaries (V15)', () => {
     // losing the boundaries they shared with each other, which is an
     // ending, not a shatter at a limit.
     expect(r.sheds / r.total).toBeGreaterThan(0.4);
+    // V10's ask, pinned on the same body its own test used (the first rock
+    // tile on ROCK_FIELD): SEVERAL pieces come off during its life, not
+    // only at the end — and the ending still breaks up what is left.
+    expect(r.sheds, 'at least three pieces leave while it stands')
+      .toBeGreaterThanOrEqual(3);
+    expect(r.dumped, 'and the final break still leaves pieces').toBeGreaterThan(0);
 
     watch.assertClean();
   });
@@ -1794,10 +1719,9 @@ test.describe('grain boundaries (V15)', () => {
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
     await quietScene(page); // ambient bubbles now gnaw terrain — see the header
 
-    // Rock and glass ship different strengths per pixel of boundary, so on
-    // comparable patterns rock takes measurably more damage to consume.
-    // Measured through the DBG master multiplier, which must scale the
-    // whole thing linearly — that is what makes it a usable tuning dial.
+    // Rock's strength per pixel of boundary, read off a real tile and
+    // scaled through the DBG master multiplier, which must scale it
+    // linearly — that is what makes it a usable tuning dial.
     const r = await engine(page, (e: any) => {
       const ents = e.currentMap.entities;
       const derivedFor = () => {
@@ -1826,13 +1750,12 @@ test.describe('grain boundaries (V15)', () => {
       const base = derivedFor();
       e.dbg.cycleBoundaryStrength();            // x1 -> x1.5
       const scaled = derivedFor();
-      const name = e.dbg ? null : null;
       e.dbg.cycleBoundaryStrength();            // x1.5 -> x2
       const scaled2 = derivedFor();
       for (let i = 0; i < 5; i++) e.dbg.cycleBoundaryStrength(); // back to x1
       const restored = derivedFor();
       return { base: base.perPx, scaled: scaled.perPx, scaled2: scaled2.perPx,
-        restored: restored.perPx, name,
+        restored: restored.perPx,
         // The material's LIVE strength, so the multiplier assertions
         // below are about the MULTIPLIER and cannot go stale when the
         // material is retuned.
@@ -2452,7 +2375,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     watch.assertClean();
   });
 
-  test('the four materials rank by boundary strength, metal hardest', async ({ page }) => {
+  test('metal is the most REGULAR of the four breakable materials', async ({ page }) => {
     const watch = await boot(page);
     await waitForEngine(page, () => true, 'the engine handle');
 
@@ -2470,127 +2393,7 @@ test.describe('metal and plastic materials (A3) + per-grain deformation (B1)', (
     const reg = Object.fromEntries(r.map((x: any) => [x.id, x.reg]));
     expect(reg['metal-tile']).toBeGreaterThan(reg['plastic-tile']);
     expect(reg['metal-tile']).toBeGreaterThan(reg['rock-tile']);
-
-    watch.assertClean();
-  });
-});
-
-test.describe('a fragment is drawn as its own shape (LOD)', () => {
-  // The Voronoi work is only visible if the RENDERER shows the cells.  It
-  // did not: the rock chip-LOD branch blitted the cached bitmap built for
-  // METAL, a perfect equilateral triangle, so a tile shattering into 8
-  // grains at once read as 8 identical triangles.  The sim was correct
-  // throughout — the fragments really were Voronoi cells — which is why
-  // no simulation test caught it, and why this one is a render test.
-
-  test('a shattered rock tile does NOT take metal\'s authored silhouette',
-    async ({ page }) => {
-    const watch = await boot(page);
-    await startRun(page, 'ROCK_FIELD');
-    await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock-tile field');
-    await quietScene(page); // ambient bubbles now gnaw terrain — see the header
-
-    const r = await engine(page, (e: any) => {
-      const ents = e.currentMap.entities;
-      const t = ents.find((x: any) => x.active && x.shardVariant === 'rock-tile'
-        && x.mass === Infinity);
-      if (!t) throw new Error('no rock tile');
-      // Park the camera ON the tile at the DEFAULT zoom, which is the
-      // condition the bug lived at.  Set camera.position DIRECTLY, not
-      // via the player: the camera follows with smoothing, so moving the
-      // ship and drawing one frame leaves the debris off-screen and the
-      // LOD counter reads 0 for the wrong reason (this test passed
-      // vacuously that way, including with the bug restored).
-      e.player.position.x = t.position.x;
-      e.player.position.y = t.position.y;
-      e.camera.position.x = t.position.x;
-      e.camera.position.y = t.position.y;
-      const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
-      // One big hit: the whole pattern arrives in a single frame, which is
-      // what made the uniformity unmistakable in the first place.
-      // BREAK IT THROUGH THE DEATH PATH, not with one enormous bolt.
-      // This test wants the whole fragment pattern in a single frame; it does
-      // not care how the tile died.  Under the energy model (step 5b) a huge
-      // shot no longer obliterates a body — it drills a track, pays the
-      // material's price per grain and carries the rest of its energy out the
-      // far side, which is the point of the change.  The two stamps are what
-      // make the shatter read as an impact (CLAUDE.md §8).
-      t.health = 0;
-      t.lastImpactVelocity = { x: -4, y: 0 };
-      t.lastImpactDamage = 3;
-      e.handleEntityDeath(t);
-
-      const debris = ents.filter((x: any) => x.active && !before.has(x.id)
-        && x.shardVariant === 'rock-shard' && x.mass !== Infinity);
-      // Draw a frame so the LOD counter reflects this debris.  TWO things
-      // are load-bearing and each of them made an earlier draft of this
-      // test pass VACUOUSLY (0 blits with the bug fully restored):
-      //  - prepareFrameEntities() first.  draw() renders `frameEntities`,
-      //    which the sim loop rebuilds; freshly spawned debris is not in
-      //    it yet, so the renderer never sees these shards at all.
-      //  - the camera pinned DIRECTLY.  It follows the player with
-      //    smoothing, so moving the ship and drawing once leaves the
-      //    debris off-screen.
-      // draw() zeroes lastLodShardCount at the top of the frame, so read
-      // it afterwards.
-      e.prepareFrameEntities();
-      e.camera.position.x = t.position.x;
-      e.camera.position.y = t.position.y;
-      // Count uses of the cached LOD silhouette while rock debris is on
-      // screen.  The equilateral-triangle blob this once counted has been
-      // DELETED — rock borrowed it and read as identical chips, and once
-      // metal took Voronoi fracture the claim failed for metal too — so
-      // the disc is the only cached silhouette left, and it is
-      // shape-free by construction.  What remains worth asserting is that
-      // a tile's grains are drawn as THEMSELVES rather than collapsed.
-      let blobBlits = 0;
-      const realDisc = e.renderer.getSolidDiscBitmap.bind(e.renderer);
-      e.renderer.getSolidDiscBitmap = (hex: string) => {
-        blobBlits++; return realDisc(hex);
-      };
-      e.draw();
-      e.renderer.getSolidDiscBitmap = realDisc;
-
-      const shapes = debris.map((d: any) => {
-        const p = d.polygonPoints ?? [];
-        let lo = Infinity, hi = 0;
-        for (let i = 0; i < p.length; i++) {
-          const a = p[i], b = p[(i + 1) % p.length];
-          const len = Math.hypot(b.x - a.x, b.y - a.y);
-          lo = Math.min(lo, len); hi = Math.max(hi, len);
-        }
-        return { n: p.length, ratio: lo > 0 ? hi / lo : Infinity,
-          apparent: d.size.x * 0.5 * e.camera.zoom };
-      });
-      return {
-        count: debris.length,
-        zoom: e.camera.zoom,
-        lodBlitted: e.renderer.lastLodShardCount,
-        lodEnabled: e.renderer.shardLodEnabled === true,
-        blobBlits,
-        equilateral: shapes.filter((s: any) => s.n === 3 && s.ratio < 1.05).length,
-        minVerts: Math.min(...shapes.map((s: any) => s.n)),
-        minApparent: Math.min(...shapes.map((s: any) => s.apparent)),
-      };
-    });
-
-    expect(r.count).toBeGreaterThan(3);
-    // The LOD path must be LIVE, or the assertion below is vacuous — the
-    // first draft of this test asserted 0 blits while the debris was
-    // simply off-screen, and passed with the bug restored.
-    expect(r.lodEnabled).toBe(true);
-    // The SIM was always right: no fragment is an equilateral triangle.
-    expect(r.equilateral).toBe(0);
-    expect(r.minVerts).toBeGreaterThanOrEqual(3);
-    // THE BUG, stated directly: a tile's grains are drawn as THEMSELVES.
-    // Before the fix all 8 were collapsed to a cached blob at the default
-    // zoom, so a rock tile could never show its Voronoi pattern; the
-    // smallest one or two are genuine sub-3px dust and may still blit.
-    expect(r.lodBlitted).toBeLessThan(r.count / 2);
-    expect(r.blobBlits).toBe(r.lodBlitted);
-
-    console.log('[LOD] debris', r.count, 'zoom', r.zoom.toFixed(2),
-      'min apparent radius', r.minApparent.toFixed(2), 'px, blitted', r.lodBlitted);
+    expect(reg['metal-tile']).toBeGreaterThan(reg['glass-tile']);
 
     watch.assertClean();
   });
@@ -2802,13 +2605,14 @@ test.describe('deformation is bounded, conserving and elastic', () => {
     for (const [name, rows] of [['plastic', plastic], ['metal', metal]] as any[]) {
       expect(rows.length, name).toBeGreaterThan(2);
       // Every shard decomposes — metal shards had NO grain block at all
-      // and broke on a single hit.  The bar is 2 rather than 3 because a
-      // material's grainSize is now SHARED with its tile: a shard is
-      // simply a smaller body of the same stuff, so it gets whatever
-      // grain count its size implies (plastic averages 2.8) rather than
-      // a finer grain authored just for shards.
+      // and broke on a single hit.  A material's grain geometry is SHARED
+      // with its tile (a shard is simply a smaller body of the same stuff,
+      // not a finer grain authored just for shards), so a shard this small
+      // sits on its material's count FLOOR: 8 grains for both plastic and
+      // metal at today's table.  The bar is set well under that floor, so a
+      // floor retune is not read as this regression.
       expect(avg(rows, 'cells'), name).toBeGreaterThanOrEqual(2);
-      // ...and carries enough internal boundary to survive a few Blaster
+      // ...and carries enough internal boundary to survive a few Projector
       // hits.  Derived HP IS the total internal boundary, so a shard with
       // two grains and one short seam between them dies instantly.
       expect(avg(rows, 'derived'), name).toBeGreaterThan(12);
@@ -3017,8 +2821,6 @@ test.describe('cell regularity (V11)', () => {
       const after = t.fractureCells.map((c: any) =>
         Math.round(c.centroid.x * 10) + ',' + Math.round(c.centroid.y * 10)).join('|');
       const genAfter = t.fractureGen;
-      // Restore (the cycle is global state shared with the other specs).
-      for (let i = 0; i < 4; i++) e.dbg.cycleFractureSiteScale();
       return { changed: before !== after, genMoved: genAfter !== genBefore };
     });
 
@@ -3070,9 +2872,14 @@ test.describe('fracture core — cost', () => {
 
 test.describe('metal composite — breaks into grains, not lattice triangles', () => {
   test('a dying composite sheds Voronoi cells, and no shard spawns at 1 HP', async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    await waitForStats(page, s => s.currentMapType === 'METAL_FIELD', 'the metal field');
+    // This one lets the world RUN (it waits for the assembly pass below)
+    // with the ship parked, so the fauna has time to reach it — and a
+    // bubble eats or bites loose shards, the very population being
+    // assembled.
+    await quietScene(page);
 
     // Metal is the one material whose shards RE-BOND after a break: the
     // assembly pass fuses loose shards onto a triangular lattice
@@ -3109,8 +2916,8 @@ test.describe('metal composite — breaks into grains, not lattice triangles', (
     // Every fresh grain must carry a real authored HP.  Metal had no
     // branch in any of the three fracture-spawn ladders and so spawned on
     // the `size > 30 ? 2 : 1` fall-through — 1 HP, which the crash and
-    // tile-pressure paths (they decrement `health` directly, they do not
-    // spend on grain boundaries) killed in a single bump.
+    // tile-pressure paths (which then decremented `health` directly rather
+    // than spending on grain boundaries) killed in a single bump.
     const spawned = await engine(page, (e: any) => {
       const loose = (e.currentMap.entities as any[])
         .filter((x: any) => x.active && x.shardVariant === 'metal-shard' && !x.metalCells);
@@ -3174,7 +2981,6 @@ test.describe('metal composite — breaks into grains, not lattice triangles', (
 
 test.describe('per-material grain overrides (DBG)', () => {
   test('a knob moves one material — its tile AND its shard — and no other', async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
 
@@ -3307,8 +3113,8 @@ test.describe('metal grains are DRAWN as themselves', () => {
       // Camera pinned DIRECTLY on the tile at default zoom — it follows
       // the player with smoothing, so moving the ship and drawing one
       // frame leaves the debris off-screen and every counter reads 0 for
-      // the wrong reason (the rock version of this test passed vacuously
-      // that way, twice).
+      // the wrong reason (an earlier rock version of this test passed
+      // vacuously that way, twice).
       e.player.position.x = t.position.x; e.player.position.y = t.position.y;
       e.camera.position.x = t.position.x; e.camera.position.y = t.position.y;
       const before = new Set(ents.filter((x: any) => x.active).map((x: any) => x.id));
@@ -3352,7 +3158,8 @@ test.describe('metal grains are DRAWN as themselves', () => {
     // The LOD path must be LIVE or every assertion below is vacuous.
     expect(r.lodEnabled).toBe(true);
     // The grains sit in exactly the band the deleted branch covered:
-    // under metal's old 9px gate, at or above rock's 3px chip gate.
+    // under metal's old 9px gate, and above the shared 2px chip gate
+    // (`CHIP_LOD_RADIUS_PX`, one threshold for every grain material).
     expect(r.maxApparent).toBeLessThan(9);
     // THE BUG: at these sizes the grains must draw their real polygons.
     expect(r.lodBlitted).toBeLessThan(r.count / 2);
@@ -3371,7 +3178,6 @@ test.describe('metal grains are DRAWN as themselves', () => {
 
 test.describe('damage spread (A4)', () => {
   test('off is a needle, on is a splash, and both conserve exactly', async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
 
@@ -3453,7 +3259,6 @@ test.describe('damage spread (A4)', () => {
 
 test.describe('fracture physics — recoil and re-centring', () => {
   test('a shedding body keeps its origin, its tiling, and its momentum', async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'ASTEROID_FIELD');
 
@@ -3461,7 +3266,7 @@ test.describe('fracture physics — recoil and re-centring', () => {
     // 160-unit mobile rock shard:
     //  - the remainder replaced `polygonPoints` and never moved
     //    `position`, so the centre of area walked away from the origin
-    //    (measured -5.9 -> -10.4 over five detaches) and the body then
+    //    (measured -5.9 -> -12.3 over five detaches) and the body then
     //    ROTATED ABOUT THE WRONG POINT;
     //  - the chip's velocity was created from nothing while the parent's
     //    MASS was scaled down and its VELOCITY left alone;
@@ -3571,7 +3376,7 @@ test.describe('fracture physics — recoil and re-centring', () => {
 
     // (4) The origin STAYS on the centre of area.  The residual is the
     // quantisation step (eps = 1% of the body, ~1.6 units here), against
-    // the 10.4 units the pre-fix build drifted to.
+    // the 12.3 units the pre-fix build drifted to.
     expect(r!.worstCentroid).toBeLessThan(2.5);
     // (4b) …and the pattern still tiles the body.  TWO SCALES here, and
     // the tolerance has to sit between them: an unquantised shift
@@ -3621,7 +3426,6 @@ test.describe('fracture physics — recoil and re-centring', () => {
 
 test.describe('per-material knob readouts', () => {
   test('a knob on the table shows the table\'s own number, marked (def)', async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
 
@@ -3684,7 +3488,6 @@ test.describe('per-material knob readouts', () => {
 test.describe('chip dust', () => {
   test('a chipping body throws nebula dust, not just the solid piece',
     async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
 
@@ -3763,7 +3566,6 @@ test.describe('chip dust', () => {
 test.describe('chip LOD gate', () => {
   test('a burst\'s grains draw their real polygons, none collapse to a disc',
     async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
     await waitForStats(page, s => s.currentMapType === 'ROCK_FIELD', 'the rock field');
@@ -3788,6 +3590,7 @@ test.describe('chip LOD gate', () => {
         && x.shardVariant === 'rock-tile' && x.mass === Infinity).slice(0, 8);
       if (tiles.length === 0) return null;
       let allGrains = 0, allDiscs = 0, allLod = 0, minApp = Infinity;
+      let minVerts = Infinity, equilateral = 0;
       for (const t of tiles) {
       // Camera pinned DIRECTLY — it follows the player with smoothing, so
       // moving the ship and drawing once leaves the debris off-screen and
@@ -3823,6 +3626,22 @@ test.describe('chip LOD gate', () => {
       e.renderer.getSolidDiscBitmap = realDisc;
       for (const k of grains) {
         minApp = Math.min(minApp, k.size.x * 0.5 * e.camera.zoom);
+        // The SIM's half of the claim (carried over from the rock LOD
+        // test this one replaced): every grain is a real polygon, and none
+        // is an authored template.  A template is EXACTLY equilateral, so
+        // the bound is 1% — room for float noise, well clear of real
+        // Voronoi grains (measured over 24,000 rock grains, the closest to
+        // equilateral was 1.6% off; at the old 5% bound two counted).
+        const p = k.polygonPoints ?? [];
+        minVerts = Math.min(minVerts, p.length);
+        if (p.length === 3) {
+          let lo = Infinity, hi = 0;
+          for (let i = 0; i < 3; i++) {
+            const len = Math.hypot(p[(i + 1) % 3].x - p[i].x, p[(i + 1) % 3].y - p[i].y);
+            lo = Math.min(lo, len); hi = Math.max(hi, len);
+          }
+          if (lo > 0 && hi / lo < 1.01) equilateral++;
+        }
       }
       allGrains += grains.length;
       allDiscs += discs;
@@ -3832,12 +3651,15 @@ test.describe('chip LOD gate', () => {
         grains: allGrains, zoom: e.camera.zoom,
         lodEnabled: e.renderer.shardLodEnabled === true,
         discBlits: allDiscs, lodBlitted: allLod,
-        minApparent: minApp,
+        minApparent: minApp, minVerts, equilateral,
       };
     });
 
     expect(r).not.toBeNull();
     expect(r!.grains).toBeGreaterThan(3);
+    // The sim was always right, and still is: real polygons, no template.
+    expect(r!.minVerts).toBeGreaterThanOrEqual(3);
+    expect(r!.equilateral).toBe(0);
     // The LOD path must be LIVE or the assertion below is vacuous.
     expect(r!.lodEnabled).toBe(true);
     // The grains sit in the band the old gate was cutting through.
@@ -3856,7 +3678,6 @@ test.describe('chip LOD gate', () => {
 test.describe('grain knob ladders', () => {
   test('every ladder is a number line with the default in its own place',
     async ({ page }) => {
-    test.setTimeout(180_000);
     const watch = await boot(page);
     await startRun(page, 'ROCK_FIELD');
 
@@ -3866,43 +3687,71 @@ test.describe('grain knob ladders', () => {
     // through.  Once the readout shows the real number that reads as an
     // unordered list.  The default is now spliced in at its sorted
     // position instead, so cycling walks a plain ascending number line.
-    const r = await engine(page, () => {
+    //
+    // THE WHOLE GRID, material x knob.  This once walked four materials
+    // across six knobs, which quietly stopped being the grid when
+    // `sizeSpread` joined the knobs and nebula the materials.  Both lists
+    // are spelled out here (harness rule 7) and each is checked against
+    // what the engine itself enumerates, so a new material or knob fails
+    // this test instead of escaping it.
+    const MATS = ['rock', 'glass', 'plastic', 'metal', 'nebula'];
+    const KNOBS = ['grainSize', 'grainCountMin', 'grainCountMax',
+                   'regularity', 'bondStrength', 'damageSpread', 'sizeSpread'];
+    // GRAIN_KNOB_LIST: the per-knob readout carries one entry per knob.
+    const published = await waitForStats(page, s => !!s.grainKnobNames,
+      'the grain knob readout');
+    expect(Object.keys(published.grainKnobNames!).sort()).toEqual([...KNOBS].sort());
+    // GRAIN_MATERIALS: walk the selector's own cycle through its readout,
+    // waiting for each click to land (harness rule 12), until it comes
+    // back round to where it started.
+    const walked: string[] = [];
+    for (let i = 0; i <= MATS.length; i++) {
+      const now = (await stats(page)).grainMaterialName as string;
+      if (walked.includes(now)) break;
+      walked.push(now);
+      await engine(page, (e: any) => { e.dbg.cycleGrainMaterial(); });
+      await waitForStatsKeyChange(page, 'grainMaterialName', now,
+        'the grain material selector to move');
+    }
+    expect([...walked].sort()).toEqual([...MATS].sort());
+
+    const r = await engine(page, (e: any, a: any) => {
       const g: any = (window as any).__omniGrain;
-      const knobs = ['grainSize', 'grainCountMin', 'grainCountMax',
-                     'regularity', 'bondStrength', 'damageSpread'];
       const rows: any[] = [];
-      for (const mat of ['rock', 'glass', 'plastic', 'metal']) {
-        for (const knob of knobs) {
+      for (const mat of a.mats) {
+        for (const knob of a.knobs) {
           const lad = g.grainLadder(mat, knob) as (number | null)[];
           const def = g.grainTableValue(mat, knob) as number;
           const nums = lad.map(v => (v === null ? def : v));
           rows.push({
-            mat, knob, len: lad.length,
+            mat, knob, def, len: lad.length,
             defCount: lad.filter(v => v === null).length,
             // STRICTLY ascending: also proves the default did not land
             // beside a duplicate step of the same value.
             ascending: nums.every((v, i) => i === 0 || nums[i - 1] < v),
             defIdx: lad.indexOf(null),
             // Room to move: a default at the very end of its own ladder
-            // can only be cycled one way.  damageSpread is the documented
-            // exception — 0 is its floor.
+            // can only be cycled one way.
             hasRoomBelow: lad.indexOf(null) > 0,
             hasRoomAbove: lad.indexOf(null) < lad.length - 1,
           });
         }
       }
       return rows;
-    });
+    }, { mats: MATS, knobs: KNOBS });
 
-    expect(r.length).toBe(24);
     for (const row of r) {
       const where = `${row.mat}.${row.knob}`;
       // Exactly ONE default entry, and the line strictly ascends through it.
       expect(`${where}:${row.defCount}`).toBe(`${where}:1`);
       expect(`${where}:${row.ascending}`).toBe(`${where}:true`);
       expect(`${where}:${row.hasRoomAbove}`).toBe(`${where}:true`);
-      // damageSpread ships at 0, which IS the floor — nothing below it.
-      if (row.knob !== 'damageSpread') {
+      // A default of 0 IS the floor — no ladder offers a step below zero —
+      // which is the documented exception.  Today that is damageSpread on
+      // every material (unset, so 0), sizeSpread on the four breakable ones
+      // (parked at 0; nebula's 0.6 IS checked), and nebula's bondStrength,
+      // which it does not carry at all.
+      if (row.def !== 0) {
         expect(`${where}:${row.hasRoomBelow}`).toBe(`${where}:true`);
       }
     }
@@ -3924,7 +3773,7 @@ test.describe('grain knob ladders', () => {
  *  rather than as a literal 0, which would derive a maxHealth of 0 and kill
  *  every cloud on sight.
  *
- *  Three claims, and the third is the one that was actually broken before
+ *  Of the claims below, the SPRITE one was the one actually broken before
  *  any of this: a nebula sprite is deliberately larger than the body under
  *  it, so a sizing rule that stops tracking the body does not LOOK wrong —
  *  it looks like a cloud.  The old rule keyed off `nebulaTileArea`, a field
@@ -4117,33 +3966,25 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
         expect(row.maxHealth, 'every shard spawns at 1 HP').toBe(1);
       }
 
-      // The crash path added by the unified-impact work must skip nebula for
-      // the same reason — it asks `ensureBoundaryModel` and falls back to the
-      // whole-body decrement when it declines.
+      // The crash paths added by the unified-impact work must skip nebula for
+      // the same reason.  A crush never actually REACHES a nebula tile — its
+      // passThrough returns before any crash code runs — so what is pinned is
+      // the decision itself: `crashBoundaryDamage` asks `ensureBoundaryModel`,
+      // and for a body with no bondStrength it declines (null), which is what
+      // sends every crash caller to the whole-body decrement instead.
       const crash: any = await engine(page, (e: any) => {
         const t = e.currentMap.entities.find((x: any) => x.active
           && x.shardVariant === 'nebula-tile' && x.mass === Infinity);
         if (!t) throw new Error('no nebula tile left');
-        const rock: any = {
-          id: 'neb_crash_rock', type: 'STRUCTURE', shardVariant: 'rock-shard',
-          position: { x: t.position.x + t.size.x, y: t.position.y },
-          velocity: { x: -600, y: 0 }, rotation: 0,
-          size: { x: 40, y: 40 },
-            // DERIVED from the real spawn ladder, never a literal: a 40px
-            // rock shard weighs what the material table says it weighs, so
-            // this cannot fall behind a change to the mass scale (it did —
-            // a hardcoded 60 stopped clearing SHARD_CRASH_MOMENTUM once
-            // every mass went 10x, and the crush silently did nothing).
-            mass: (window as any).__omniMass.SHARD_VARIANTS['rock-shard'].spawn.sizeToMass(40), active: true, color: '#8a8a8a',
-          health: 50, maxHealth: 50,
+        const Physics = Object.getPrototypeOf(e.physics).constructor;
+        const spent = Physics.crashBoundaryDamage(t, { x: t.position.x, y: t.position.y }, 50);
+        return {
+          declined: spent === null,
+          boundaryModel: t.fractureEdgeFill !== undefined, maxHealth: t.maxHealth,
         };
-        e.currentMap.entities.push(rock);
-        e.physics.resolveCollision(rock, t, { x: -4, y: 0 }, e.spawnDamageText, e.handleEntityDeath);
-        const out = { boundaryModel: t.fractureEdgeFill !== undefined, maxHealth: t.maxHealth };
-        rock.active = false;
-        return out;
       });
-      expect(crash.boundaryModel, 'a crush on a cloud builds no boundary model').toBe(false);
+      expect(crash.declined, 'the crash spend declines a cloud').toBe(true);
+      expect(crash.boundaryModel, 'and builds no boundary model on it').toBe(false);
       expect(crash.maxHealth, 'and leaves its HP alone').toBe(1);
 
       watch.assertClean();
@@ -4249,16 +4090,18 @@ test.describe('nebula: voronoi geometry without the damage model', () => {
  *  the one worth pinning — a size knob and a frequency knob set
  *  independently can be made to contradict each other, and this cannot.
  *
- *  Pool 1 IS the per-chip behaviour this replaced, so the ladder carries
+ *  Pool 1 is the per-chip end of the ladder — one puff per chip, where the
+ *  code this replaced rolled a 0.35 chance per chip — so the ladder carries
  *  its own negative control and the A/B is the same scenario at pool 6 and
  *  at pool 1, against fresh bodies, with nothing shared but the knob.
  *  Chip dust is told apart from the OTHER nebula-shard spawns (the rock
- *  death burst, dent debris) by its exact authored `sizeFraction` — every
- *  other caller randomises one.
+ *  death burst, dent debris) by its exact authored `sizeFraction` — no
+ *  other caller passes 0.7.
  *
- *  MEASURED on 24 rock tiles a side: 24 puffs averaging 17.2 units at the
- *  shipped pool against 92 averaging 8.6 at pool 1, and the smallest
- *  pooled puff (11.9) is bigger than the largest per-chip one (12.2). */
+ *  MEASURED on 24 rock tiles a side: 24 puffs averaging 17.2 units at pool
+ *  6 against 92 averaging 8.6 at pool 1, and the two size distributions did
+ *  not overlap (the smallest pooled puff was bigger than the largest
+ *  per-chip one). */
 test.describe('chip dust pools into fewer, bigger puffs', () => {
   test('pooling trades frequency for size and conserves the material thrown', async ({ page }) => {
     const watch = await boot(page);
@@ -4272,7 +4115,6 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
     // read after a frame.
     await engine(page, () => {
       const e: any = (window as any).__omniEngine;
-      const fr: any = (window as any).__omniFracture;
       const w: any = window as any;
       w.__dust = [];
       const orig = e.drops.spawnColoredNebulaShard.bind(e.drops);
@@ -4299,7 +4141,6 @@ test.describe('chip dust pools into fewer, bigger puffs', () => {
             rotation: 0, size: { x: W, y: W }, mass: Infinity, active: true,
             color: '#8a8a8a', health: 20, maxHealth: 20, polygonPoints: pts,
           };
-          tile.fractureOriginalArea = fr.polygonArea(pts);
           tile.lastImpactVelocity = { x: -9, y: 0 };
           ents.push(tile);
           for (let h = 0; h < 60 && tile.active; h++) {

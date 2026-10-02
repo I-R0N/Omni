@@ -18,6 +18,9 @@ import { test, expect } from '@playwright/test';
 import { boot, engine, stats, startRun, waitForStats, waitForEngine, dockAtStation, advanceSim, waitForTransit } from './helpers';
 
 const STAGE_WAVE_COUNT = 6;
+// SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS, mirrored rather than imported (harness
+// rule 7): a retune of the wave-clear spray should have to touch this file.
+const WAVE_CLEAR_DROPS = 3;
 
 /** Bank real salvage through the engine's own collection path. */
 async function earn(page: any, units: number) {
@@ -57,10 +60,10 @@ test.describe('the run', () => {
     expect(start.wavesEnabled).toBeFalsy();
 
     const leanWeapons = await engine(page, e => ({
-      guns: e.weaponSlots.filter((s: string | null) => s && s.startsWith('wpn_')),
+      guns: e.weaponSlots.filter((s: string | null) => s && s.startsWith('dlv_')),
       equipped: e.equippedWeapons.filter((w: unknown) => w !== null).length,
     }));
-    expect(leanWeapons.guns).toEqual(['wpn_blaster']);
+    expect(leanWeapons.guns).toEqual(['dlv_projectile']);
     expect(leanWeapons.equipped).toBe(1);
 
     // ── 2. EARN ──────────────────────────────────────────────────────────
@@ -85,18 +88,18 @@ test.describe('the run', () => {
     // ── 4. BUY ───────────────────────────────────────────────────────────
     const buy = await engine(page, e => {
       const before = e.credits;
-      const ok = e.purchaseModule('hull_mk2') && e.purchaseModule('wpn_shotgun');
+      const ok = e.purchaseModule('hull_mk2') && e.purchaseModule('dlv_spread');
       return { ok, spent: before - e.credits, inv: e.inventory.filter((i: string | null) => i !== null) };
     });
     expect(buy.ok).toBe(true);
     expect(buy.spent).toBeGreaterThan(0);
-    expect(buy.inv).toEqual(['hull_mk2', 'wpn_shotgun']);
+    expect(buy.inv).toEqual(['hull_mk2', 'dlv_spread']);
 
     // ── 5. OUTFIT ────────────────────────────────────────────────────────
     const outfit = await engine(page, e => {
       const hp0 = e.player.maxHealth;
       e.moveModule({ area: 'inventory', idx: e.inventory.indexOf('hull_mk2') }, { area: 'ship', idx: 1 });
-      e.moveModule({ area: 'inventory', idx: e.inventory.indexOf('wpn_shotgun') }, { area: 'weapon', idx: 2 });
+      e.moveModule({ area: 'inventory', idx: e.inventory.indexOf('dlv_spread') }, { area: 'weapon', idx: 2 });
       const snap = e.outfittingSnapshot();
       return {
         hp0, hp1: e.player.maxHealth,
@@ -370,8 +373,8 @@ test.describe('the run', () => {
     await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
     await waitForStats(page, s => (s.waveNumber ?? 0) >= 1, 'wave 1');
 
-    // Wait for the wave's budget to have fully spawned and for real enemies
-    // to be on the field.
+    // Wait for real (counted) enemies on the field; the part of the budget
+    // not yet spawned is drained by hand below.
     await waitForEngine(
       page,
       e => e.entityIndex.enemies.some((x: any) => x.active && x.countsTowardWave !== false),
@@ -393,6 +396,18 @@ test.describe('the run', () => {
     expect(mid.waveNumber).toBe(1);
     expect(mid.enemiesRemaining).toBeGreaterThan(0);
 
+    // NOT ON THE CLOCK: run the wave's clock far past its spawn window with
+    // counted enemies still standing — the wave must still be on.  The window
+    // only paces the stream; a wave that ended when it ran out would be the
+    // old timed model back.  (The rest of the budget comes due at once, but
+    // the stream releases it one spawn per 0.4 s backlog gap, so some is
+    // still queued when the half second ends: the wave cannot have completed
+    // by clearing here, only by the clock.)
+    await engine(page, e => { e.waves.elapsedSec = e.waves.durationSec + 60; });
+    await advanceSim(page, 0.5);
+    expect(await engine(page, e => e.waves.waveState), 'the clock ran out and the wave did not')
+      .toBe('active');
+
     // Kill EVERY counted enemy and drain the unspawned remainder.  The wave
     // must then end — completion is the field being clear, and the clock only
     // grades the speed bonus.
@@ -406,6 +421,21 @@ test.describe('the run', () => {
           e.handleEntityDeath(x);
         }
       }
+      // Record what the CLEAR sprays.  The enemies just killed roll salvage
+      // of their own and an ambient shard death can drop more, so "salvage
+      // anywhere" passes with the spray deleted.  Neither of those goes
+      // through the engine's own `spawnSalvageDrop` (DropSystem spawns them
+      // directly) and the wave-clear spray does, so the drops made through
+      // it are exactly the spray.  The wrapper only counts; it delegates.
+      e.__clearSpray = [];
+      const spawn = e.spawnSalvageDrop;
+      e.spawnSalvageDrop = function (this: any, ...args: unknown[]) {
+        const n = this.currentMap.entities.length;
+        const out = spawn.apply(this, args);
+        const d = this.currentMap.entities[n];
+        if (d && d.dropType === 'salvage') this.__clearSpray.push(d.id);
+        return out;
+      };
     });
 
     await waitForEngine(
@@ -416,21 +446,16 @@ test.describe('the run', () => {
     );
 
     // The clear paid a physical salvage spray beside the player — the
-    // between-wave reward beat now that the cards are gone.  Counted as
-    // "drops that EXISTED", not "drops still lying there": the spray lands
+    // between-wave reward beat now that the cards are gone.  Counted as the
+    // drops the clear MADE, not "drops still lying there": the spray lands
     // within magnet range by design, so a test that reads the field a moment
     // later finds an empty floor and calls it a regression.
     const paid = await engine(page, e => ({
       cleared: e.runWavesCleared,
-      // Every salvage drop the run has ever spawned carries an id prefix, so
-      // collected ones are still countable on the master list until the next
-      // sweep — and the credits they became are unambiguous either way.
-      credits: e.credits,
-      salvageOnField: e.activeDrops.filter((d: any) => d.dropType === 'salvage').length,
+      spray: (e.__clearSpray as string[]).length,
     }));
     expect(paid.cleared).toBeGreaterThanOrEqual(1);
-    // Either the spray is still airborne or it has already become money.
-    expect(paid.salvageOnField + (paid.credits > 0 ? 1 : 0)).toBeGreaterThan(0);
+    expect(paid.spray, 'the clear sprays its salvage beside the player').toBe(WAVE_CLEAR_DROPS);
 
     watch.assertClean();
   });

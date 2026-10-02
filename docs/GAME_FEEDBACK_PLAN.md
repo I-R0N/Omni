@@ -1,13 +1,20 @@
 # Game Feedback Plan
 
-Source of truth for the multi-task overhaul kicked off from a long-form
-playtest feedback list. This file is **maintained**: the orchestration
-session re-reads it on cold start and updates it as PRs land.
-
-> Sibling docs `docs/POLISH_ARCHITECTURE.md` and `docs/PARKING_LOT.md`
-> are flagged in CLAUDE.md as historical / out-of-sync. **This file is
-> different — keep it accurate.** When a task lands, update its Status
-> line and any decisions it forced.
+> **CLOSED — read-only history.**  This plan ran from the original
+> playtest list to the promotion of `claude/plan-completion` into `main`
+> (PR #93, 2026-09-21); per decision #36f that closes it.  It was last
+> reconciled on 2026-08-28 (decision #54 and item 26), so PRs #90–#105 are
+> not logged here.  Every original feedback item (a–k) shipped.  Step 6,
+> the economy and progression tuning pass, never ran as its own session:
+> its metrics table below still lists live provisional numbers, and the
+> sim-rate verdict it owned is still open.  For what exists, read
+> `CLAUDE.md`; for what is next, read `docs/CONFIG_CHANGES_PHASED_PLAN.md`.
+> "How this works", the branch strategy and the PR conventions are
+> retired: plan-completion is merged, and new work opens PRs against
+> `main`.  Several docs this plan links to or relied on were removed later
+> (`POLISH_ARCHITECTURE.md`, `SHARD_SYSTEM.md`, `FLOW_FIELD_AUDIT.md`,
+> `EXOTIC_ENEMIES_OPTIMIZATION.md`, `AUDIO_PLAN.md`, `HANDOFF_PR79.md`);
+> they are in git history, last present at commit `ca0ad8e`.
 
 ---
 
@@ -1969,7 +1976,7 @@ Run when convenient; can run in parallel with Phase 2.
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
 | g2-housekeeping | Resolve g2 deviations | shipped (PR #54, merged into plan branch) | `claude/g2-housekeeping-T1LR6` | Glass + metal glow → `repelImpulse`; metal-tile heat-bloom replaced with layer-2b style (blue `#60a5fa`); `metal-shard.repelImmune = false` + new per-emitter `repelImmuneFrom: ['glass-tile']` pattern; indestructible dropped from UNIVERSE/POCKET random spawn; CLAUDE.md refresh. Massive over-delivery (see decision #13): DBG rebuild, glass/nebula tier chains, nebula self-coalesce rewrite, continuous color equilibration, fade-timer unification, dust-puff palette split, visual cleanups, FlowField obstacle fix, player-tile shield-first crash damage. |
-| g3 + plastic-softbody | Metal-passthrough + plastic-softbody retrofit | shipped (PR #55, merged into plan branch) | `claude/plastic-softbody-retrofit-sTxYR` | Metal piece landed per spec (`passthroughShatter: { targets: ['glass-tile', 'glass-shard'] }` on existing metal-shard). Plastic piece **drifted heavily** from the brief (see decision #17): elasticBond schema added then scrapped mid-session in favor of bondsWith + nebula-level damping; ~30 follow-up tuning commits; ended with hex-tile render, radial-gradient shards, palette/opacity/composite-op DBG cycles, polymer-chain bond, sleep gate, color-blend hook into nebula equilibration. Visual asymmetry between polygon-rendered plastic-tile and gradient-rendered plastic-shard. Known perf cost. **To be reverted** by `plastic-revert` task below. |
+| g3 + plastic-softbody | Metal-passthrough + plastic-softbody retrofit | shipped (PR #55, merged into plan branch) | `claude/plastic-softbody-retrofit-sTxYR` | Metal piece landed per spec (`passthroughShatter: { targets: ['glass-tile', 'glass-shard'] }` on existing metal-shard). Plastic piece **drifted heavily** from the brief (see decision #17): elasticBond schema added then scrapped mid-session in favor of bondsWith + nebula-level damping; ~30 follow-up tuning commits; ended with hex-tile render, radial-gradient shards, palette/opacity/composite-op DBG cycles, polymer-chain bond, sleep gate, color-blend hook into nebula equilibration. Visual asymmetry between polygon-rendered plastic-tile and gradient-rendered plastic-shard. Known perf cost. **Reverted** by the `plastic-revert` task below (PR #60). |
 | ff-review | Asteroid/shard flow field audit + debug tooling | shipped (PR #56, merged into plan branch) | `claude/flow-field-debug-audit-IcwCq` | Audit doc at `docs/FLOW_FIELD_AUDIT.md` — 10 findings (4 L1 / 3 L2 / 3 L3). Consolidation answer: **don't consolidate** — analytical `FlowField.ts` is load-bearing for map-load streamline integration + per-respawn velocity bias before the grid exists; baked grid adds wall-repulsion the analytical formula can't provide. DBG overlays added: `AstFF` toggle, `FF Vec` arrows with sample-N cycle, `FF Cells` outlines, `FF Obs` obstacle tint, `FF Reb` rebuild flash. Three follow-ups deferred (#FF-1 obstacle-aware fallback, #FF-2 obstacle filter re-examination, #FF-3 asteroid-bake perf timer). One trivial doc fix in passing. |
 | perf-controller | Unified frame-skipping `PerfController` | shipped unplanned (PR #57, merged into plan branch) | `claude/omni-perf-controller-6ScG1` | **Not in original plan — user-initiated infra add (see decision #18).** New `engine/systems/PerfController.ts` replaces scattered AUTO interval tables with one coordinator. Each substep samples a load signal (entity count + collision-cell density + EWMA sim time), quantises to tiers with hysteresis, schedules tasks with phase offsets. Migrated gates: shard-pair, shard-tile-pair, color-blend, plastic-cosmetic. Newly skippable: AI state machine, flow-field pursuit flush, nebula neighbour recompute, drop-collection scan, plastic self-break. Dynamic merge-rate ladder by entity count (0.6× sparse → 3.5× crowded). New DBG "Perf" section. New constants: `PERF_CONTROLLER_CONSTANTS`, `PERF_TASKS`, `MERGE_RATE_CONSTANTS`. Pre-existing bug flagged but not fixed: `ShardSystem.completeRegen` references nonexistent `this.regenAdapter`. |
 | perf-hotpath | Hot-path allocation + math reductions | shipped (PR #58, merged into plan branch) | `claude/gallant-gauss-btopZ` | **Zero behaviour changes** — pure scalar / allocation rewrites. AISystem reuses `liveIds` Set scratch + mutates `laggedTargets` / `lastPositions` in place; GameEngine mutates `camera.shakeOffset.x/y` in place; PhysicsSystem `fillAxes` folds divisions, `applyGravity` / `applyLocalGravity` hoist `clampedForce/dist`; ProjectileSystem `updateHoming` / `updateLightningGravity` cache winning dx/dy; RenderSystem trail strip pre-computes edge normals into Float32Array scratch, off-screen indicator caches sqrt, glass proximity tints get squared-range early-out, weapon HUD uses pre-computed slot labels. New `engine/systems/enforceCap.ts` consolidates the FIFO hard-cap routine from ParticleSystem + ProjectileSystem. Flagged but not in scope: EntityIndex conditional rebuild, broadphase dense-cell cap, per-entity cached SAT axes, ShardSystem merge-broadphase Map/Set reuse. See decision #28. |
@@ -1977,9 +1984,9 @@ Run when convenient; can run in parallel with Phase 2.
 | material-balance-pass | ~~Reduced shard counts + per-material mass retune + momentum audit~~ → see `momentum-collisions` | replaced earlier | — | Scope narrowed: shard-count reduction and per-material mass retune dropped from this batch (parked under decision #27); only the momentum / velocity-in-collisions piece carries forward as `momentum-collisions` below. PR #60 incidentally addressed adjacent items (rock fragment count now scales with size, inverse-mass flow variability) but did NOT touch impulse resolution. |
 | momentum-collisions | Velocity-aware collision impulse | shipped — model tight-line discipline (PR #63, merged into plan branch) | `claude/momentum-collisions-audit-nnr28e` | Audit outcome **(i) coefficient tune** — all three impulse sites (`resolveCollision` full SAT, `resolveAsteroidPair` circle fast path, `resolveCompositeShardPair` PR #57 per-cell composite) already used the standard normal-impulse formula with both velocities + both masses. No gate leaks. Feel issue was the natural inverse-mass split. Fixed by introducing `COLLISION_CONFIG.MASS_BIAS_EXPONENT = 0.5` — compresses mass ratio in the velocity split at all three sites identically (16× heavier target now picks up ~30% of closing speed, 3.4× prior). Equal-mass pairs unchanged. Static entities unchanged (`0^k = 0`). Positional correction keeps true mass split. Plus `STRUCTURE_CONSTANTS.CRASH_VELOCITY_RETENTION = 0.65` (was hardcoded 0.5) so player crash-through retains more velocity per broken tile. AskUserQuestion chose "Moderate ~30% / Keep 65%". 2 commits, +78/-16 across 2 files. Three deferred follow-ups in PR body. See decision #31. |
 | material-palette-pass | Material palette adjustments + automata coloring extension | **automata shipped (PR #61); palette work split out below** | `claude/material-tile-automata-BXXKt` | Automata-coloring extension shipped, but with **per-material directions** instead of warm/cool sub-arcs (see decision #30): glass = opacity bipolar around neutral, rock = darkens toward shared floor (tile neighbour-count + shard density tier aligned), metal = brightens via density-tier ladder (6 shards = 1 layer). Rock shatter colour-pop fixed (dent shards inherit parent tile's density tier). Metal got a full density-tier system: cells track in `densityTier`, render per-cell mixed shades, snap on rest speed, density drives brightness + HP + break count. One master `Tile shade` DBG toggle. **Palette-adjustment piece NOT shipped** — metal still includes white shades; rock palette unchanged. Carved out as `material-palette-residual` below. |
-| material-palette-residual | Metal de-white + rock red/blue palette | pending | `claude/material-palette-residual-<suffix>` | Carved out of `material-palette-pass` (decision #21) after PR #61 shipped the automata piece. Small palette-only task: remove white from metal palette and add a shiny-ready blue range; add red+blue to rock palette so the existing rock-aggregation darkening reads warmer/cooler depending on cluster context. No automata changes (already done), and the original hue-lerp / warm-cool sub-arc extension is **dropped per user direction** — this palette work closes decision #21 entirely. See decision #30. |
-| map-composition | Mixed clusters + MAP_POPULATION authority | pending | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
-| minimap-faithfulness | Minimap colors match screen + nebula transparency | pending | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
+| material-palette-residual | Metal de-white + rock red/blue palette | **shipped (PR #84, Pair C polish G7-a/b)** | `claude/material-palette-residual-<suffix>` | Carved out of `material-palette-pass` (decision #21) after PR #61 shipped the automata piece. Small palette-only task: remove white from metal palette and add a shiny-ready blue range; add red+blue to rock palette so the existing rock-aggregation darkening reads warmer/cooler depending on cluster context. No automata changes (already done), and the original hue-lerp / warm-cool sub-arc extension is **dropped per user direction** — this palette work closes decision #21 entirely. See decision #30. |
+| map-composition | Mixed clusters + MAP_POPULATION authority | **part (1) shipped (PR #84, Pair C polish G7-d/e); part (2), the cluster-mix rules, was never built** | `claude/map-composition-<suffix>` | **Promoted from side-cleanup.** Two pieces: (1) flip natural maps (UniverseMap / PocketMap / SevenRingsMap) to read tile-variant ratios from `MAP_POPULATION` instead of hardcoded subclass literals. (2) New cluster-composition rules — rock mixed around metal-tile clusters; plastic mixed with glass-tile clusters. Touches MapClasses subclasses + MAP_POPULATION schema. See decision #23. |
+| minimap-faithfulness | Minimap colors match screen + nebula transparency | **superseded by the decision #43 directives and shipped as Pair C polish G5 (PR #84)** | `claude/minimap-faithfulness-<suffix>` | Small UI task. Minimap tile colors should closely match the on-screen tile colors (not the simplified swatches today). Nebula tiles and shards drawn with reduced alpha on the minimap to read as "thin / fog" rather than solid. Touches `MINIMAP_CONSTANTS` + UIOverlay minimap render. See decision #24. |
 | living-entity | New non-threatening grazer entity | **closed — superseded by the Bubble (PR #67)** | — | Decision #20's design surface (wanders, eats glass/rock/metal shards, grows, splits, non-threatening) shipped in spirit as the Stage-5 Bubble: ambient fauna, consume-and-grow (mass-conserved), split at size, passive-until-provoked. Differences (bubble also eats plastic/nebula variants, and retaliates) accepted. Reopen only if a distinctly different creature is wanted. |
 
 ---
@@ -2000,8 +2007,8 @@ Run when convenient; can run in parallel with Phase 2.
 | exotic-enemies | Exotic-enemy roster (Stages 0–7) | **shipped (PR #67, into plan branch)** | `claude/exotic-enemies-core-z0rfwn` | Precursor to (h). Kamikaze / Bulwark / Turret / Swarm+Nest / reactive Bubble / Dragon mini-boss / Rivals + the AI-dispatch-table + reusable-primitives groundwork. Over-delivered a full neutral/third-party ecosystem beyond the (h) spec (see decision #32). |
 | exotic-enemies-optimization | Perf pass over the exotic roster + roamers | **shipped (into plan branch)** | `claude/exotic-enemies-optimization-nty6i8` | Zero-behaviour/zero-visual pass (decision #33). Cadenced the per-rival O(rivals×enemies) targeting + O(rivals×drops) loot vacuum through a new `rivalScan` PerfController task with a cached `RivalInstance.target` (min interval 1 → identical at low load); killed the O(all-entities) `entityById` latch-resolve in `updateAttachments`; cached the geometric dragon-head skull + maw gradients and the bubble-membrane fill gradient on the entity (per-frame pulse → `globalAlpha`), so on-screen dragon/bubble render cost stops scaling with the per-frame `createRadialGradient` churn (the win grows with FOV). Verified via headless Chromium (10 dragons + 6 rivals + ambient bubbles, 0 errors, tablet + desktop FOV). `updateConsumers` spatial-query + particle-burst counts deferred to the parking lot (zero-behaviour posture). Report: `docs/EXOTIC_ENEMIES_OPTIMIZATION.md`. |
 | physics-broadphase-opt | Physics/shard broadphase optimization + render-GC pooling | **shipped (PR #70, merged into plan branch 2026-07-06)** | `claude/physics-shard-broadphase-k7m2p` | Measure-first follow-on to #69, driven by iPhone Perf REC captures. Zero-behaviour: per-pair invMass/effInvMass cache + numeric `_pairSeq` dedup in `resolveAsteroidPair`; shatter-path scratch reuse; Perf REC sim sub-timer breakdown + spike attribution. **Big win:** render-bucket pooling (steady-state bucket allocation zero; peak render 17→9 ms). **User-approved behaviour changes:** player↔nebula-shard now pass-through + soft swirl (hard collision = DBG toggle, default off); swarm gnats take standard terrain collisions; player trail default → VELOCITY; tile repel push off by default (glow retained); DBG accessible while paused. Conclusion: steady state vsync-bound; residual hitches are external browser/GC stalls; the one genuine in-code spike (O(k²) shard-pair at 8k+ entities) parked in `docs/PARKING_LOT.md` with an implementation sketch. See decision #35d. |
-| h | New enemies + bosses (bosses proper) | pending — un-gated, next up | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), weapon-type bosses. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. **Re-scope per strategy (decision #36):** bosses are submap "special encounters" as wave capstones. Design-phase knob: reconcile the Mega-Man-X defeat-unlocks-weapon idea with the Drydock purchase model (grant Module free vs unlock purchasability vs unique boss weapon). No new progression system — everything routes through the shipped Augments/Modules/Salvage spine. |
-| k | Portal to next map after N waves | pending — un-gated, re-scoped | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring (PR #67 already shipped the reusable `GameEngine.openPortal(pos, opts)` rift VFX; (k) builds the traversable-portal entity on top). **Two portal flavors:** cross-map AND intra-map. **Re-scope per strategy (decision #36):** destinations reference a new lightweight **map-descriptor layer** (stable map IDs + metadata), NOT bare MapType enum switching — this is the plan's one deliberate extension point for the future overworld (which will reference the same descriptors). Keep the descriptor layer thin: id, display name, MapType, spawn-point, optional traits. No overworld features in this plan. |
+| h | New enemies + bosses (bosses proper) | **shipped (PR #77, decision #42)** — the notes are the pre-build brief | `claude/bosses-<suffix>` | **Still UNbuilt** — the exotic roster above is the enemy-content precursor, NOT the bosses. Remaining: shielded boss (open/closed states; smaller "shoot-only" variant), weapon-type bosses. Debug menu bypass kept. Likely new aiState `'open'`/`'closed'`. Reuse the Stage-2/3 AI-dispatch table + reusable primitives from PR #67. **Re-scope per strategy (decision #36):** bosses are submap "special encounters" as wave capstones. Design-phase knob: reconcile the Mega-Man-X defeat-unlocks-weapon idea with the Drydock purchase model (grant Module free vs unlock purchasability vs unique boss weapon). No new progression system — everything routes through the shipped Augments/Modules/Salvage spine. |
+| k | Portal to next map after N waves | **shipped (PR #74, decision #41)** — the notes are the pre-build brief | `claude/map-portal-<suffix>` | New spawnable portal entity + GameEngine.loadMap lifecycle wiring (PR #67 already shipped the reusable `GameEngine.openPortal(pos, opts)` rift VFX; (k) builds the traversable-portal entity on top). **Two portal flavors:** cross-map AND intra-map. **Re-scope per strategy (decision #36):** destinations reference a new lightweight **map-descriptor layer** (stable map IDs + metadata), NOT bare MapType enum switching — this is the plan's one deliberate extension point for the future overworld (which will reference the same descriptors). Keep the descriptor layer thin: id, display name, MapType, spawn-point, optional traits. No overworld features in this plan. |
 
 ---
 
@@ -2014,9 +2021,9 @@ of the items in Phase 1 follow-ups.
 
 | ID | Task | Notes |
 |----|------|-------|
-| waves-to-nodes | Wave gameplay relocates into portal-node sub-maps; base map goes combat-light | **DEFERRED to the Overworld plan** (decision #37f) — the design lives in `docs/WEAPONS_AMMO_PLAN.md` §2.4/§8.6. Rejected for this plan because it restructures where the core loop happens and would double (k)'s scope; in this plan a combat-light base map is mostly empty space. The overworld plan (whose thesis IS layered maps) is the right home; WaveSystem activation re-plumbing happens there. |
+| waves-to-nodes | Wave gameplay relocates into portal-node sub-maps; base map goes combat-light | **MOOTED in substance (decision #39e)** — the hub is wave-free and the existing wave maps ARE the nodes. Was: **DEFERRED to the Overworld plan** (decision #37f) — the design lives in `docs/WEAPONS_AMMO_PLAN.md` §2.4/§8.6. Rejected for this plan because it restructures where the core loop happens and would double (k)'s scope; in this plan a combat-light base map is mostly empty space. The overworld plan (whose thesis IS layered maps) is the right home; WaveSystem activation re-plumbing happens there. |
 | orbital-fields-moons | Orbital flow fields + moving moons with gravity | **MOVED to the Overworld plan** (decision #36) — planets and moving celestial landmarks are overworld features per `docs/GAME_STRUCTURE_STRATEGY.md`. Original sketch preserved in decision #25; it becomes an early task of the next plan, not this one. |
-| voronoi-rock-fracture (CLOSED — see decision #26 / docs/GAUNTLET_VORONOI_LOG.md) | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). Still QUEUED for the true Voronoi cell decomposition (geometric sector chips from the tile polygon); user wants to keep it for consideration. See decision #26. |
+| voronoi-rock-fracture (CLOSED — shipped by the voronoi gauntlet, PR #91; see decision #26 / docs/GAUNTLET_VORONOI_LOG.md) | Voronoi-style rock shatter, mostly-intact tile | New rock shatter algorithm. Rock shards explode off the tile in larger numbers and at higher velocities, but the tile remains mostly intact through several hits before fully breaking. Voronoi cell-based fracture if feasible; fallback to a chunkier polygon-decomposition if not. 1–2 sessions. **Partially covered by PR #65** — the `ROCK_BREAK`/`ROCK_CHIP` model already delivers the *feel* (per-hit chip-off, several hits to break, multi-piece final break). The true Voronoi cell decomposition (geometric sector chips from the tile polygon) was later built by the voronoi gauntlet (PR #91). See decision #26. |
 
 ---
 
@@ -2066,7 +2073,8 @@ observes the three strategy guardrails (decision #36e).
      (death penalty, ship weight, ship-select interaction, stage
      descent, boss-wave rework). Ledger:
      `docs/GAUNTLET_PAIR_A_LOG.md`.
-   - **Pair B** — running in parallel per #43, which makes
+   - ~~**Pair B**~~ — **DONE** (PR #79, decision #53).  Was: running
+     in parallel per #43, which makes
      `docs/SFX_INVENTORY.md` its deliverable. Prior design input now
      also exists: `docs/AUDIO_PLAN.md`, written independently in the
      Pair A session (#44g) before #43 was recorded, so the two overlap
@@ -2078,11 +2086,14 @@ observes the three strategy guardrails (decision #36e).
      any audio asset is authored, since that decides the asset budget,
      and its §2b torus note is a correctness requirement, not a
      preference.
-   - **Pair C** — unchanged, and note that the ship-select interaction
+   - ~~**Pair C**~~ — **DONE** (PR #84, decision #52).  Was:
+     unchanged, and note that the ship-select interaction
      (#44) left a deliberate hole for it: the controller BUTTON is the
      third intended path into `updateInteractables`' `selected` flag.
-5. **Polish batch** — material-palette-residual + map-composition +
-   minimap-faithfulness bundled into 1–2 small sessions (map-composition
+5. ~~**Polish batch**~~ — **DONE** (PR #84, decision #52; the optional
+   NPC shuttles were CUT, G8).  Was: material-palette-residual +
+   map-composition + minimap-faithfulness bundled into 1–2 small
+   sessions (map-composition
    doubles as regional-identity groundwork per the strategy's
    "maps become known for characteristics"). **Minimap directives
    (user, decision #43): remove nebula from the minimap entirely, and
@@ -2109,7 +2120,8 @@ observes the three strategy guardrails (decision #36e).
    entry ONLY; tiers 3–6 stay parked. This ends the "no test runner"
    stance at that tier — CLAUDE.md §7 must be updated by that session.
 
-5c. **Performance gauntlet** (decision #47a) — runs AFTER 5b (the
+5c. ~~**Performance gauntlet**~~ — **DONE, goal NOT met** (PR #81,
+   decision #49).  Was: (decision #47a) — runs AFTER 5b (the
    regression net makes zero-behaviour claims checkable) and IN
    PARALLEL with the collaborator's SFX session. Measure-first per the
    PR #69/#70 methodology: headless same-harness A/B for every change;
@@ -2127,7 +2139,8 @@ observes the three strategy guardrails (decision #36e).
    External browser/OS stalls (the PR #70 caveat) are attributed and
    documented, never used to excuse an in-code spike.
 
-5d. **UI gauntlet** (decision #47b) — runs AFTER the step-5 Pair C +
+5d. ~~**UI gauntlet**~~ — **DONE** (PR #89, decision #54a).  Was:
+   (decision #47b) — runs AFTER the step-5 Pair C +
    polish gauntlet and BEFORE the step-6 tuning pass: one coherence /
    legibility sweep over the COMPLETE UI surface (menus, HUD, station,
    death/stage screens, indicators, settings). Absorbs the parked
@@ -2180,13 +2193,17 @@ observes the three strategy guardrails (decision #36e).
    SFX (PR #79, collaborator — rebasing onto the 5f structure) →
    5 (Pair C + polish) → 5d (UI) → 6 (tuning, incl. the sim-rate
    verdict and the 60 fps on-device judgment) → 7 (final playtest +
-   second deploy).
+   second deploy).  *(How it ended: SFX, 5 and 5d all shipped; 7's
+   deploy happened — PR #93 promoted `plan-completion` into `main` on
+   2026-09-21 — and 6 never ran as its own session.)*
    5c's **sim-rate toggle** (120 Hz / 60 Hz, DBG "Sim rate") is a FEEL
    decision with the cost side already measured (−62% sim p99, +26%
    frames): fold the verdict into 6, where it can be judged alongside
    the rest of the playtest tuning.
-6. **Economy & progression tuning pass** (parking-lot promotion,
-   decision #40) — one playtest-driven session tuning together:
+6. **Economy & progression tuning pass** — **NEVER RAN** as its own
+   session; the plan closed without it (see the banner).  Was:
+   (parking-lot promotion, decision #40) — one playtest-driven session
+   tuning together:
    Overworld income pacing, per-wave enemy growth vs discrete module
    power, Mk trade-in, weapon-weight numbers, resale fractions, AND
    the **salvage death penalty decision** (severity is a user call;
@@ -2221,7 +2238,9 @@ observes the three strategy guardrails (decision #36e).
    | `PORTAL_CONSTANTS.ARRIVAL_OFFSET` | 165 | Arrival distance from the rift mouth — must stay inside `USE_RANGE` so turning around is one tap. Geometry, not balance, but it is a tuned number. |
    | `INPUT_CONSTANTS.SHIP_SELECT_RADIUS` | 46 | Too small and docking feels unresponsive; too large and it eats shots aimed near the hull. |
    | `UI_CONSTANTS.INDICATORS` ramp | 11→5 px over 350→3500 | Whether size alone reads as distance now that the numeric readout is gone from ordinary enemies. |
-7. **Final playtest + ship-it PR** — now the SECOND deploy
+7. **Final playtest + ship-it PR** — the ship-it PR **HAPPENED**
+   (PR #93, 2026-09-21), after `docs/CONFIG_CHANGES_PHASED_PLAN.md`'s
+   Phase A and WITHOUT step 6.  Was: now the SECOND deploy
    (decision #45): `claude/plan-completion` → `main` after steps 4–6
    complete. The first deploy was the 2026-08-08 going-public merge of
    `claude/game-feedback-plan-UN3MV`.
@@ -2232,8 +2251,8 @@ overworld, multi-station networks / NPC traffic / civilizations
 detection (Meaning Layer), mining operations, orbital-fields-moons,
 **waves-to-nodes** (portal nodes hosting wave gameplay; decision #37f),
 durable persistence. Still parked (decision #27 + parking lot):
-unchanged. voronoi-rock-fracture stays deferred-optional — pull in only
-if a material session has spare room; PR #65 already delivers the feel.
+unchanged. voronoi-rock-fracture was held here as deferred-optional
+and then SHIPPED anyway (the voronoi gauntlet, PR #91).
 
 ---
 
@@ -2261,15 +2280,15 @@ provisional numbers are routed to step 6.
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| a | SFX system | pending | `claude/gauntlet-pair-b-<suffix>` | New cross-cutting system. **User directive (decision #43):** deliverable includes `docs/SFX_INVENTORY.md` — a comprehensive list of every action needing a sound effect WITH per-effect generation parameters (trigger, character, duration, pitch/envelope, variation, concurrency/throttle, mix level, positional), serving BOTH as the user's brief for generating higher-quality effects externally AND as the session's map for draft synthesized effects. Draft effects are procedural (WebAudio) — no asset files, keyed by inventory ID so real assets can drop in later. |
-| b | Enemy-explosion variety | pending | `claude/explosion-variety-<suffix>` | Per-material shard composition on enemy death. Pairs with (a). Depends on (g2). |
+| a | SFX system | **DONE** (PR #79, decision #53) | `claude/gauntlet-pair-b-<suffix>` | New cross-cutting system. **User directive (decision #43):** deliverable includes `docs/SFX_INVENTORY.md` — a comprehensive list of every action needing a sound effect WITH per-effect generation parameters (trigger, character, duration, pitch/envelope, variation, concurrency/throttle, mix level, positional), serving BOTH as the user's brief for generating higher-quality effects externally AND as the session's map for draft synthesized effects. Draft effects are procedural (WebAudio) — no asset files, keyed by inventory ID so real assets can drop in later. |
+| b | Enemy-explosion variety | **DONE** (PR #79 — Pair B milestone B4) | `claude/explosion-variety-<suffix>` | Per-material shard composition on enemy death. Pairs with (a). Depends on (g2). |
 
 ### Pair C — Input
 
 | ID | Task | Status | Branch | Notes |
 |----|------|--------|--------|-------|
-| c2 | Onscreen joystick + PS5 controller | pending | `claude/controller-input-<suffix>` | InputSystem extension. Independent. |
-| c1 | Controls/gameplay help in menus | pending | `claude/menu-help-<suffix>` | UIOverlay menu copy. Depends on (c2) so layouts are accurate. |
+| c2 | Onscreen joystick + PS5 controller | **DONE** (PR #84, decision #52) | `claude/controller-input-<suffix>` | InputSystem extension. Independent. |
+| c1 | Controls/gameplay help in menus | **DONE** (PR #84, decision #52) | `claude/menu-help-<suffix>` | UIOverlay menu copy. Depends on (c2) so layouts are accurate. |
 
 ---
 

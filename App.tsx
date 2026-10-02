@@ -1,6 +1,7 @@
 
 import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
+import * as Energy from './engine/systems/energy';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect,
@@ -18,7 +19,7 @@ import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
          PROJECTILE_CONSTANTS, HIT_FEEDBACK,
          BASE_BANK_DIVISOR, BASE_BANK_TRIM, GUNNERY_MK3_TRIPLE_MULT,
          GUNNERY_MK3_DAMAGE_FRAC, MODULE_DEFS,
-         blastDamageFor, BLAST_ENERGY_COUPLING } from './constants';
+         blastDamageFor, BLAST_ENERGY_COUPLING, weaponConfig, nominalDps, LEGACY_BASE_WEAPON } from './constants';
 import UIOverlay from './components/UIOverlay';
 import { crc32, buildTriggerData, buildRumbleData, buildOutputReport } from './engine/systems/DualSenseHID';
 import { fitFontPx } from './engine/systems/render/hud';
@@ -74,9 +75,9 @@ const App: React.FC = () => {
         (window as any).__omniStats = newStats;
     }, difficultyRef.current);
 
-    // Debug handle.  The game already ships a full in-game DBG menu (pause ▸
-    // Debug Menu), so the engine is deliberately reachable from the console
-    // too: it is what the headless smoke scripts drive, and it costs one
+    // Debug handle.  The game already ships a full in-game debug menu (the DBG
+    // button, on every screen), so the engine is deliberately reachable from the console
+    // too: it is what the Playwright suites in tests/ drive, and it costs one
     // assignment.  Read/poke at your own risk — nothing in the game reads it.
     (window as any).__omniEngine = engine;
 
@@ -96,12 +97,11 @@ const App: React.FC = () => {
     // handler that catches its expand tap, a loadout strip that leaves the
     // viewport — none of those throw, none of them log, and none of them are
     // visible at the one viewport the suites used to run at.  Exposing the
-    // three functions lets the viewport matrix pin them at every width without
+    // layout functions lets the viewport matrix pin them at every width without
     // sampling pixels off a starfield.  Nothing in the game reads this.
-    // `detectionAlpha` (A4) joins them on identical terms: the Scanner's
-    // extended enemy range is a FADE ramp that exists only as a globalAlpha
-    // inside the draw, so a tier that reveals nothing — or reveals at the
-    // wrong mark — is silent.
+    // `detectionAlpha` joins them on identical terms: a scan mark's freshness
+    // fade exists only as a globalAlpha inside the draw, so marks that never
+    // fade — or vanish the instant they appear — are silent.
     (window as any).__omniHud = { fitFontPx, computeMinimapRect, computeLoadoutHUDLayout, computeIndicatorRect, detectionAlpha };
     // Debug handle #4: the menu driver's geometric step rule, so a suite can
     // pin it against a synthetic layout instead of against whatever the menu
@@ -139,7 +139,7 @@ const App: React.FC = () => {
       breakYieldsNothing, SHARD_VARIANTS,
     };
 
-    // Debug handle #6 — the ship tilt-sheet grid.  Same terms as the two
+    // Debug handle #10 — the ship tilt-sheet grid.  Same terms as the two
     // above: `enumerateCells` / `resolveTiltCell` / `cellMatrix` are pure,
     // and they are wrong in a way nothing reports — a cell order that
     // disagrees with the authoring guide, or a mirror that folds the wrong
@@ -176,6 +176,15 @@ const App: React.FC = () => {
       nebulaTileCost, nebulaMergeLoss,
     };
 
+    // Debug handle #12 — the PURE half of the energy-module pipeline (material
+    // table, heat arithmetic, chain planner, fracture profiles, the legacy
+    // weapon map) plus the composed weapon table.  Same terms as the handles
+    // around it: every one of these can be wrong with no symptom — a chain
+    // cap that stopped holding still draws arcs, a thermal glass profile
+    // that equals the mechanical one still shatters.  Nothing in the game
+    // reads it.
+    (window as any).__omniEnergy = { ...Energy, WEAPONS, weaponConfig, nominalDps, LEGACY_BASE_WEAPON };
+
     // Debug handle #9 — the MASS SCALE, on the __omniHid terms and with the
     // sharpest motive of the set.  Under the energy model a body's mass is
     // half of what its every impact SPENDS, so the masses authored across
@@ -198,8 +207,9 @@ const App: React.FC = () => {
       IMPACT_DENSITY, massFor, hullDensity, MASS_SCALE, scaledMass,
       // The three shapes mass takes (see tests/mass.spec.ts): the energy
       // conversion it is measured against, and the absolute thresholds it
-      // is compared to.  Both must carry MASS_SCALE, and both are wrong
-      // with no symptom if they stop.
+      // is compared to.  Neither carries MASS_SCALE — that is what makes
+      // every impact ten times harder, and a compensation in either is
+      // wrong with no symptom.
       IMPACT_ENERGY_PER_DAMAGE, STRUCTURE_CONSTANTS, FLOW_VARIABILITY, AUDIO_CONSTANTS,
       PROJECTILE_CONSTANTS, HIT_FEEDBACK,
       // The BANK re-base and the DERIVED blast, on the same terms as the rest
@@ -217,7 +227,7 @@ const App: React.FC = () => {
       blastDamageFor, BLAST_ENERGY_COUPLING,
     };
 
-    // Debug handle #7 — the bonded-pair blend geometry, on the __omniHid
+    // Debug handle #11 — the bonded-pair blend geometry, on the __omniHid
     // rationale exactly: it is pure, and it is WRONG IN A WAY NOTHING
     // REPORTS.  Every failure mode of a metaball connector is silent — a
     // degenerate pair traces no path, an out-of-domain acos yields NaN
@@ -331,113 +341,9 @@ const App: React.FC = () => {
       }
   };
 
-  const handleToggleDebug = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleDebug();
-  };
-
   const handleSetMapType = (type: MapType) => {
       setMapType(type);
       if (engineRef.current) engineRef.current.setMapType(type);
-  };
-
-  const handleSetForcedEnemy = (subtype: string | null) => {
-      if (engineRef.current) engineRef.current.setForcedTestEnemy(subtype);
-  };
-
-  const handleCycleTrailShape = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleTrailShape();
-  };
-
-  const handleCycleTrailEmitMode = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleTrailEmitMode();
-  };
-
-  const handleToggleLocalGravity = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleLocalGravity();
-  };
-
-  const handleToggleAttractorGravity = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleAttractorGravity();
-  };
-
-  const handleToggleCollisions = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleCollisions();
-  };
-
-  const handleToggleShardTileCollisions = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardTileCollisions();
-  };
-
-  const handleCycleShardPairInterval = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleShardPairInterval();
-  };
-
-  const handleCycleShardTilePairInterval = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleShardTilePairInterval();
-  };
-
-  const handleTogglePerfAuto = () => {
-      if (engineRef.current) engineRef.current.dbg.togglePerfAuto();
-  };
-
-  const handleToggleShardGravity = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardGravity();
-  };
-
-  const handleCycleShardCoat = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleShardCoat();
-  };
-
-  const handleCycleImpactVelocity = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleImpactVelocity();
-  };
-
-  const handleCycleCrashEnergy = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleCrashEnergy();
-  };
-
-  const handleCycleBlastEnergy = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleBlastEnergy();
-  };
-
-  const handleCycleHullDensity = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleHullDensity();
-  };
-
-  const handleToggleShardBlend = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardBlend();
-  };
-
-  const handleToggleShardBonding = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardBonding();
-  };
-
-  const handleToggleNebulaShardCollisions = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleNebulaShardCollisions();
-  };
-
-  const handleTogglePlayerNebulaCollision = () => {
-      if (engineRef.current) engineRef.current.dbg.togglePlayerNebulaCollision();
-  };
-
-  const handleToggleShardSleep = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardSleep();
-  };
-
-  const handleToggleShardViewportCull = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardViewportCull();
-  };
-
-  const handleToggleShardLod = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardLod();
-  };
-
-  const handleToggleMergeRate = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleMergeRate();
-  };
-
-  const handleToggleScreenShake = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleScreenShake();
   };
 
   // Audio settings.  The slider is a live user gesture, so it doubles as
@@ -457,158 +363,14 @@ const App: React.FC = () => {
       e.audio.toggleMute();
   };
 
-  // Synth drafts on/off — the audition switch for recorded takes.
+  // Synth drafts on/off — the audition switch for recorded takes.  UNUSED
+  // since the pause menu's WAV-only button was removed: UIOverlay accepts
+  // `onToggleDrafts` and nothing in it calls it.
   const handleToggleDrafts = () => {
       const e = engineRef.current;
       if (!e) return;
       e.audio.unlock();
       e.audio.draftsEnabled = !e.audio.draftsEnabled;
-  };
-
-  const handleToggleTileOutlines = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleTileOutlines();
-  };
-
-  const handleToggleChevronMode = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleChevronMode();
-  };
-
-  const handleToggleDamageBars = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleDamageTriggeredBars();
-  };
-
-  const handleToggleJoystickDebug = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleJoystickDebug();
-  };
-
-  const handleCycleMinimapMaterial = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleMinimapMaterial();
-  };
-
-  const handleCycleRockPalette = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleRockPalette();
-  };
-
-  const handleCycleFractureMode = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFractureMode();
-  };
-
-  const handleCycleFractureRelax = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFractureRelax();
-  };
-
-  const handleCycleFractureSeparation = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFractureSeparation();
-  };
-
-  const handleCycleFractureSiteScale = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFractureSiteScale();
-  };
-
-  const handleCycleFractureBias = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFractureBias();
-  };
-
-  const handleCycleDamageSpread = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleDamageSpread();
-  };
-
-  const handleCycleGrainMaterial = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleGrainMaterial();
-  };
-
-  const handleCycleGrainKnob = (knob: GrainKnob) => {
-      if (engineRef.current) engineRef.current.dbg.cycleGrainKnob(knob);
-  };
-
-  const handleResetGrainOverrides = () => {
-      if (engineRef.current) engineRef.current.dbg.resetGrainOverrides();
-  };
-
-  const handleCycleBoundaryStrength = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleBoundaryStrength();
-  };
-
-  const handleCycleNebulaWakeSpin = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaWakeSpin();
-  };
-
-  const handleCycleLighting = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleLighting();
-  };
-
-  const handleCycleLightingTier = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleLightingTier();
-  };
-
-  const handleToggleShardShadows = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardShadows();
-  };
-
-  const handleToggleRefraction = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleRefraction();
-  };
-
-  const handleCycleLightBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleLightBrightness();
-  };
-
-  const handleCycleEmitBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleEmitBrightness();
-  };
-
-  const handleCycleTintMix = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleTintMix();
-  };
-
-  const handleCycleLightColor = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleLightColor();
-  };
-
-  const handleCycleFog = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFog();
-  };
-
-  const handleCycleFlashlight = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFlashlight();
-  };
-
-  const handleCycleCausticFade = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleCausticFade();
-  };
-
-  const handleCycleEmitFade = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleEmitFade();
-  };
-
-  const handleCycleEmitShadowTier = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleEmitShadowTier();
-  };
-
-  const handleToggleEmitShadows = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleEmitShadows();
-  };
-
-  const handleToggleEmissive = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleEmissive();
-  };
-  const handleToggleWorldLights = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleWorldLights();
-  };
-  const handleToggleDepthAmbient = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleDepthAmbient();
-  };
-
-  const handleCycleRefractBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleRefractBrightness();
-  };
-
-  const handleCycleShadowSoftness = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleShadowSoftness();
-  };
-
-  const handleToggleRumble = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleRumble();
   };
 
   const handleSetControlScheme = (scheme: ControlScheme) => {
@@ -623,246 +385,19 @@ const App: React.FC = () => {
       if (engineRef.current) void engineRef.current.toggleAdaptiveTriggers();
   };
 
-  const handleCycleTriggerEncoding = () => {
-      if (engineRef.current) engineRef.current.cycleTriggerEncoding();
-  };
+  // The debug panel's rows call the engine DIRECTLY (components/
+  // debugSections.tsx) — this one stable accessor replaced ~130 one-line
+  // `handleCycleX` forwarders and the props that threaded them through
+  // UIOverlay.  An accessor rather than the instance, because the engine is
+  // built in the mount effect above, after the first render.
+  const getEngine = useRef(() => engineRef.current).current;
 
-  const handleTestTriggerLink = () => {
-      if (engineRef.current) engineRef.current.testAdaptiveTriggerLink();
-  };
-
-  const handleToggleRepelPush = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleRepelPush();
-  };
-
-  const handleTogglePlasticAutomata = () => {
-      if (engineRef.current) engineRef.current.dbg.togglePlasticAutomata();
-  };
-
-  const handleTogglePlasticAutomataDirection = () => {
-      if (engineRef.current) engineRef.current.dbg.togglePlasticAutomataDirection();
-  };
-
-  const handleToggleMaterialAutomata = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleMaterialAutomata();
-  };
-
-  const handleCyclePlasticPalette = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlasticPalette();
-  };
-
-  const handleCyclePlasticShardPalette = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlasticShardPalette();
-  };
-
-  const handleCyclePlasticGlowBrightness = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlasticGlowBrightness();
-  };
-
-
-
-
-  const handleCycleNebulaPalette = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaPalette();
-  };
-
-  const handleTogglePlasticBlend = () => {
-      if (engineRef.current) engineRef.current.dbg.togglePlasticBlend();
-  };
-
-  const handleCycleNebulaStretch = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaStretch();
-  };
-
-  const handleCycleNebulaSpriteSize = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaSpriteSize();
-  };
-
-  const handleCycleChipDustPool = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleChipDustPool();
-  };
-
-  const handleToggleScanReveal = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleScanReveal();
-  };
-
-  const handleCycleNebulaDamp = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaDamp();
-  };
-
-  const handleCycleNebulaSpinDamp = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaSpinDamp();
-  };
-
-  const handleCycleNebulaTileShare = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaTileShare();
-  };
-  const handleCycleNebulaDrain = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaDrain();
-  };
-  const handleCycleNebulaBond = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleNebulaBond();
-  };
-
-  const handleCycleShatterGrace = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleShatterGrace();
-  };
-
-  const handleCyclePlayerThrust = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlayerThrust();
-  };
-
-  const handleCyclePlayerSpeed = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlayerSpeed();
-  };
-
-  const handleCycleTileBlendAlpha = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleTileBlendAlpha();
-  };
-
-  const handleCycleShardBlendAlpha = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleShardBlendAlpha();
-  };
-
-  const handleCycleColorBlendInterval = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleColorBlendInterval();
-  };
-
-  const handleToggleShardFlow = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleShardFlow();
-  };
-
-  const handleToggleSnitchCatchMode = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleSnitchCatchMode();
-  };
-
-  const handleCycleSnitchSpeed = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleSnitchSpeed();
-  };
-
-  // Portal tuning (pause ▸ Debug Menu ▸ Portals) — live A/B over the
-  // wormhole's strength and size; every one re-tunes the portals already in
-  // the world, so the comparison is one keypress away from the rift you are
-  // flying past.
-  const handleCyclePortalWarp = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalWarp();
-  };
-  const handleCyclePortalSize = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalSize();
-  };
-  const handleCyclePortalGravity = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalGravity();
-  };
-  const handleCyclePortalGravityRange = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalGravityRange();
-  };
-  const handleCyclePortalLens = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalLens();
-  };
-  const handleCyclePortalLensRadius = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalLensRadius();
-  };
-  const handleCyclePortalLensSpin = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePortalLensSpin();
-  };
-
-  const handleCyclePlayerRoll = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlayerRoll();
-  };
-
-  const handleCyclePlayerHull = () => {
-      if (engineRef.current) engineRef.current.dbg.cyclePlayerHull();
-  };
-
-  const handleCycleRollDamping = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleRollDamping();
-  };
-
-  const handleCycleTiltMode = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleTiltMode();
-  };
-
-  const handleCycleLeanDir = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleLeanDir();
-  };
-
-  const handleCycleTiltSource = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleTiltSource();
-  };
-
-  const handleCycleVelGain = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleVelGain();
-  };
-
-  const handleCycleEnemyScale = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleEnemyScale();
-  };
-
-  const handleCycleSubstepCap = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleSubstepCap();
-  };
-
+  // Render scale stays an App handler because it is App's to do: the cap
+  // changes the canvas backing store, which only the resize routine owns.
   const handleCycleRenderScale = () => {
       cycleRenderScale();
       setRenderScaleName(getActiveRenderScaleName());
       resizeRef.current();
-  };
-
-  const handleCycleHudRate = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleHudRate();
-  };
-
-  const handleCycleSimRate = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleSimRate();
-  };
-
-  const handleCycleSwarmMove = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleSwarmMove();
-  };
-
-  const handleCycleStarDensity = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleStarDensity();
-  };
-
-  const handleCycleStarSize = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleStarSize();
-  };
-
-  const handleCycleStarBands = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleStarBands();
-  };
-
-  const handleCycleStarParallax = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleStarParallax();
-  };
-
-  const handleCycleCollapseMode = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleCollapseMode();
-  };
-
-
-  const handleApplyCorrosion = () => {
-      if (engineRef.current) engineRef.current.debugApplyCorrosion();
-  };
-
-  const handleApplyDisable = () => {
-      if (engineRef.current) engineRef.current.debugApplyDisable();
-  };
-
-  const handleToggleTraits = () => {
-      if (engineRef.current) engineRef.current.toggleTraits();
-  };
-
-  const handleGrantModule = (id: string) => {
-      if (engineRef.current) engineRef.current.debugGrantModule(id);
-  };
-
-  const handleOutfitAll = () => {
-      if (engineRef.current) engineRef.current.debugOutfitAll();
-  };
-
-  const handleResetOutfit = () => {
-      if (engineRef.current) engineRef.current.resetOutfit();
   };
 
   const handleScan = () => {
@@ -871,32 +406,6 @@ const App: React.FC = () => {
 
   const handleSetAutoScan = (on: boolean) => {
       if (engineRef.current) engineRef.current.setAutoScan(on);
-  };
-
-  const handleAddCredits = () => {
-      if (engineRef.current) engineRef.current.addDebugCredits(1_000_000);
-  };
-
-  const handleSpawnDragon = (type: string) => {
-      if (engineRef.current) engineRef.current.debugSpawnDragon(type);
-  };
-
-  const handleSpawnRival = (disposition: string) => {
-      if (engineRef.current) engineRef.current.debugSpawnRival(disposition);
-  };
-
-  const handleSpawnBoss = (id: string) => {
-      if (engineRef.current) engineRef.current.debugSpawnBoss(id);
-  };
-
-  const handlePerfRecToggle = () => {
-      if (engineRef.current) engineRef.current.perfRecToggle();
-  };
-  const handlePerfRecCycleScene = () => {
-      if (engineRef.current) engineRef.current.perfRecCycleScene();
-  };
-  const handlePerfRecExport = (): string => {
-      return engineRef.current ? engineRef.current.perfRecExport() : '';
   };
 
   const handleMoveModule = (
@@ -928,58 +437,6 @@ const App: React.FC = () => {
 
   const handleRepairHull = () => {
       if (engineRef.current) engineRef.current.repairHull();
-  };
-
-  const handleGrantWeapon = (id: string) => {
-      if (engineRef.current) engineRef.current.debugGrantWeapon(id);
-  };
-
-  const handleTeleportStation = () => {
-      if (engineRef.current) engineRef.current.debugTeleportToStation();
-  };
-
-  const handleToggleFFOverlayVectors = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayVectors();
-  };
-
-  const handleToggleFFOverlayCells = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayCells();
-  };
-
-  const handleToggleFFOverlayObstacles = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayObstacles();
-  };
-
-  const handleToggleFFOverlayRebuilds = () => {
-      if (engineRef.current) engineRef.current.dbg.toggleFFOverlayRebuilds();
-  };
-
-  const handleCycleFFOverlaySampleN = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFOverlaySampleN();
-  };
-
-  const handleCycleFFDensity = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFDensity();
-  };
-
-  const handleCycleFFKernelR = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFKernelR();
-  };
-
-  const handleCycleFFTangentMix = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFTangentMix();
-  };
-
-  const handleCycleFFBreathe = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFBreathe();
-  };
-
-  const handleCycleFFLaneJitter = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFLaneJitter();
-  };
-
-  const handleCycleFFPattern = () => {
-      if (engineRef.current) engineRef.current.dbg.cycleFFPattern();
   };
 
   const handleSkipWave = () => {
@@ -1034,147 +491,19 @@ const App: React.FC = () => {
         onRestartRun={handleRestartRun}
         onQuitToMenu={handleQuitToMenu}
         onDismissStageClear={handleDismissStageClear}
-        onToggleDebug={handleToggleDebug}
-        onCycleTrailShape={handleCycleTrailShape}
-        onCycleTrailEmitMode={handleCycleTrailEmitMode}
-        onToggleLocalGravity={handleToggleLocalGravity}
-        onToggleAttractorGravity={handleToggleAttractorGravity}
-        onToggleCollisions={handleToggleCollisions}
-        onToggleShardTileCollisions={handleToggleShardTileCollisions}
-        onCycleShardPairInterval={handleCycleShardPairInterval}
-        onCycleShardTilePairInterval={handleCycleShardTilePairInterval}
-        onTogglePerfAuto={handleTogglePerfAuto}
-        onToggleShardGravity={handleToggleShardGravity}
-        onToggleShardBlend={handleToggleShardBlend}
-        onCycleShardCoat={handleCycleShardCoat}
-        onCycleImpactVelocity={handleCycleImpactVelocity}
-        onCycleCrashEnergy={handleCycleCrashEnergy}
-        onCycleBlastEnergy={handleCycleBlastEnergy}
-        onCycleHullDensity={handleCycleHullDensity}
-        onToggleShardBonding={handleToggleShardBonding}
-        onToggleNebulaShardCollisions={handleToggleNebulaShardCollisions}
-        onTogglePlayerNebulaCollision={handleTogglePlayerNebulaCollision}
-        onToggleShardSleep={handleToggleShardSleep}
-        onToggleShardViewportCull={handleToggleShardViewportCull}
-        onToggleShardLod={handleToggleShardLod}
-        onToggleMergeRate={handleToggleMergeRate}
-        onToggleScreenShake={handleToggleScreenShake}
         onAudioCue={id => engineRef.current?.audio.play(id)}
         onSetSfxVolume={v => { engineRef.current?.audio.unlock(); engineRef.current?.audio.setSfxVolume(v); }}
         onSetMusicVolume={v => { engineRef.current?.audio.unlock(); engineRef.current?.audio.setMusicVolume(v); }}
         onSetVolume={handleSetVolume}
         onToggleMute={handleToggleMute}
             onToggleDrafts={handleToggleDrafts}
-        onToggleTileOutlines={handleToggleTileOutlines}
-        onToggleChevronMode={handleToggleChevronMode}
-        onToggleDamageBars={handleToggleDamageBars}
-        onToggleJoystickDebug={handleToggleJoystickDebug}
-        onCycleMinimapMaterial={handleCycleMinimapMaterial}
-        onCycleLighting={handleCycleLighting}
-        onCycleLightingTier={handleCycleLightingTier}
-        onToggleShardShadows={handleToggleShardShadows}
-        onToggleRefraction={handleToggleRefraction}
-        onCycleRefractBrightness={handleCycleRefractBrightness}
-        onCycleLightBrightness={handleCycleLightBrightness}
-        onToggleEmissive={handleToggleEmissive}
-        onToggleWorldLights={handleToggleWorldLights}
-        onToggleDepthAmbient={handleToggleDepthAmbient}
-        onCycleEmitBrightness={handleCycleEmitBrightness}
-        onToggleEmitShadows={handleToggleEmitShadows}
-        onCycleEmitShadowTier={handleCycleEmitShadowTier}
-        onCycleEmitFade={handleCycleEmitFade}
-        onCycleCausticFade={handleCycleCausticFade}
-        onCycleFlashlight={handleCycleFlashlight}
-        onCycleFog={handleCycleFog}
-        onCycleLightColor={handleCycleLightColor}
-        onCycleTintMix={handleCycleTintMix}
-        onCycleShadowSoftness={handleCycleShadowSoftness}
-        onCycleRockPalette={handleCycleRockPalette}
-        onCycleFractureMode={handleCycleFractureMode}
-        onCycleFractureRelax={handleCycleFractureRelax}
-        onCycleFractureSeparation={handleCycleFractureSeparation}
-        onCycleFractureSiteScale={handleCycleFractureSiteScale}
-        onCycleFractureBias={handleCycleFractureBias}
-        onCycleDamageSpread={handleCycleDamageSpread}
-        onCycleChipDustPool={handleCycleChipDustPool}
-        onCycleGrainMaterial={handleCycleGrainMaterial}
-        onCycleGrainKnob={handleCycleGrainKnob}
-        onResetGrainOverrides={handleResetGrainOverrides}
-        onCycleBoundaryStrength={handleCycleBoundaryStrength}
-        onCycleNebulaWakeSpin={handleCycleNebulaWakeSpin}
-        onToggleRumble={handleToggleRumble}
         onSetControlScheme={handleSetControlScheme}
         onToggleAdaptiveTriggers={handleToggleAdaptiveTriggers}
-        onCycleTriggerEncoding={handleCycleTriggerEncoding}
-        onTestTriggerLink={handleTestTriggerLink}
-        onToggleRepelPush={handleToggleRepelPush}
-        onTogglePlasticAutomata={handleTogglePlasticAutomata}
-        onTogglePlasticAutomataDirection={handleTogglePlasticAutomataDirection}
-        onToggleMaterialAutomata={handleToggleMaterialAutomata}
-        onCyclePlasticPalette={handleCyclePlasticPalette}
-        onCyclePlasticShardPalette={handleCyclePlasticShardPalette}
-        onCyclePlasticGlowBrightness={handleCyclePlasticGlowBrightness}
-        onCycleNebulaPalette={handleCycleNebulaPalette}
-        onTogglePlasticBlend={handleTogglePlasticBlend}
-        onCycleNebulaStretch={handleCycleNebulaStretch}
-        onCycleNebulaSpriteSize={handleCycleNebulaSpriteSize}
-        onToggleScanReveal={handleToggleScanReveal}
-        onCycleNebulaDamp={handleCycleNebulaDamp}
-        onCycleNebulaSpinDamp={handleCycleNebulaSpinDamp}
-        onCycleNebulaBond={handleCycleNebulaBond}
-        onCycleNebulaTileShare={handleCycleNebulaTileShare}
-        onCycleNebulaDrain={handleCycleNebulaDrain}
-        onCycleShatterGrace={handleCycleShatterGrace}
-        onCyclePlayerThrust={handleCyclePlayerThrust}
-        onCyclePlayerSpeed={handleCyclePlayerSpeed}
-        onCycleTileBlendAlpha={handleCycleTileBlendAlpha}
-        onCycleShardBlendAlpha={handleCycleShardBlendAlpha}
-        onCycleColorBlendInterval={handleCycleColorBlendInterval}
-        onToggleShardFlow={handleToggleShardFlow}
-        onToggleSnitchCatchMode={handleToggleSnitchCatchMode}
-        onCycleSnitchSpeed={handleCycleSnitchSpeed}
-        onCyclePortalWarp={handleCyclePortalWarp}
-        onCyclePortalSize={handleCyclePortalSize}
-        onCyclePortalGravity={handleCyclePortalGravity}
-        onCyclePortalGravityRange={handleCyclePortalGravityRange}
-        onCyclePortalLens={handleCyclePortalLens}
-        onCyclePortalLensRadius={handleCyclePortalLensRadius}
-        onCyclePortalLensSpin={handleCyclePortalLensSpin}
-        onCyclePlayerRoll={handleCyclePlayerRoll}
-        onCyclePlayerHull={handleCyclePlayerHull}
-        onCycleRollDamping={handleCycleRollDamping}
-        onCycleTiltMode={handleCycleTiltMode}
-        onCycleLeanDir={handleCycleLeanDir}
-        onCycleTiltSource={handleCycleTiltSource}
-        onCycleVelGain={handleCycleVelGain}
-        onCycleEnemyScale={handleCycleEnemyScale}
-        onCycleSimRate={handleCycleSimRate}
-        onCycleHudRate={handleCycleHudRate}
+        engine={getEngine}
         onCycleRenderScale={handleCycleRenderScale}
-        onCycleSubstepCap={handleCycleSubstepCap}
         renderScaleName={renderScaleName}
-        onCycleSwarmMove={handleCycleSwarmMove}
-        onCycleStarDensity={handleCycleStarDensity}
-        onCycleStarSize={handleCycleStarSize}
-        onCycleStarBands={handleCycleStarBands}
-        onCycleStarParallax={handleCycleStarParallax}
-        onCycleCollapseMode={handleCycleCollapseMode}
-        onApplyCorrosion={handleApplyCorrosion}
-        onApplyDisable={handleApplyDisable}
-        onToggleTraits={handleToggleTraits}
-        onGrantModule={handleGrantModule}
-        onCycleSlotLock={() => engineRef.current?.dbg.cycleSlotLock()}
-        onOutfitAll={handleOutfitAll}
-        onResetOutfit={handleResetOutfit}
         onScan={handleScan}
         onSetAutoScan={handleSetAutoScan}
-        onAddCredits={handleAddCredits}
-        onSpawnDragon={handleSpawnDragon}
-        onSpawnRival={handleSpawnRival}
-        onSpawnBoss={handleSpawnBoss}
-        onPerfRecToggle={handlePerfRecToggle}
-        onPerfRecCycleScene={handlePerfRecCycleScene}
-        onPerfRecExport={handlePerfRecExport}
         onMoveModule={handleMoveModule}
         onPurchaseModule={handlePurchaseModule}
         onPurchaseSlot={handlePurchaseSlot}
@@ -1182,25 +511,11 @@ const App: React.FC = () => {
         onScrapModule={handleScrapModule}
         onUndock={handleUndock}
         onRepairHull={handleRepairHull}
-        onGrantWeapon={handleGrantWeapon}
-        onTeleportStation={handleTeleportStation}
-        onToggleFFOverlayVectors={handleToggleFFOverlayVectors}
-        onToggleFFOverlayCells={handleToggleFFOverlayCells}
-        onToggleFFOverlayObstacles={handleToggleFFOverlayObstacles}
-        onToggleFFOverlayRebuilds={handleToggleFFOverlayRebuilds}
-        onCycleFFOverlaySampleN={handleCycleFFOverlaySampleN}
-        onCycleFFDensity={handleCycleFFDensity}
-        onCycleFFKernelR={handleCycleFFKernelR}
-        onCycleFFTangentMix={handleCycleFFTangentMix}
-        onCycleFFBreathe={handleCycleFFBreathe}
-        onCycleFFLaneJitter={handleCycleFFLaneJitter}
-        onCycleFFPattern={handleCycleFFPattern}
         onSkipWave={handleSkipWave}
         difficulty={difficulty}
         onSetDifficulty={handleSetDifficulty}
         mapType={mapType}
         onSetMapType={handleSetMapType}
-        onSetForcedEnemy={handleSetForcedEnemy}
       />
       </Profiler>
     </div>

@@ -25,7 +25,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } 
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, WEAPONS, WEAPON_LIST, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, LIGHTNING_CHAIN_RANGE, LIGHTNING_CHAIN_COUNT, LIGHTNING_CHAIN_BRANCHES, LIGHTNING_CHAIN_EXCLUDED_VARIANTS, LIGHTNING_ARC_LIFETIME, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { ASSETS } from '../assets';
@@ -42,12 +42,15 @@ import { randomRockNebulaComposition } from './NebulaColor';
 import { DragonInstance, updateDragons, spawnDragon, dragonDeath, dragonSegmentDeath } from './roamers/dragons';
 import { RivalInstance, updateRivals, spawnRival } from './roamers/rivals';
 import { updateSnitch } from './roamers/snitch';
+import type { EnergyFxView, EnergyBeamView } from './systems/render/energyFx';
+import { materialOf, materialDef, ENERGY_CONSTANTS } from './systems/energy';
+import { EnergyState, SeekerDots, tickEnergy, fireInstant, applyProjectilePayload, depositHeat, shareHeat } from './energyEffects';
 import { updateBubbles, maintainAmbientBubbles, seedAmbientBubbles, updateAttachments, updateConsumers } from './roamers/bubbles';
 import { updateBosses, payBossBounty, bossStatsSnapshot } from './bosses';
 import { DebugControls } from './debugControls';
 import { ShockwaveOpts, spawnShockwave as emitShockwave, updateExplosionRings, applyExplosionAoE,
          applyBlastToPlayer, applyKamikazeBlastToPlayer } from './explosions';
-import { computeActiveSlots, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
+import { computeActiveSlots, energyForGunSlot, applyModuleEffects, syncUnlocksToPlayer, syncLoadoutFromSlots,
          firstFreeSlotFor, areaSlots, resaleValue, statBreakdown,
          moveModuleInternal as moveModuleTiles, modulePrice as catalogPrice,
          outfittingSnapshot as buildOutfittingSnapshot } from './outfitting';
@@ -123,10 +126,6 @@ const SALVAGE_STREAK_WINDOW_MS = 1500;
 /** Cap on that climb, so a long magnet train doesn't run off the top. */
 const SALVAGE_STREAK_MAX = 11;
 
-/** DBG (Grain) readouts for the five per-material knob rows: each knob's
- *  live value on the SELECTED material, or 'table' where it defers.  Built
- *  per stats push, which is paused-only for the debug panel — five string
- *  lookups, not a per-frame cost. */
 /** Cap on the recoil a parent takes when it sheds a piece, as a fraction
  *  of the relative ejection velocity.  A nearly-eroded body shedding a
  *  large final piece has `chipMass / remainingMass` well above 1, and the
@@ -201,15 +200,19 @@ function recentreFracturedBody(e: GameEntity, remainder: Vector2[], eps: number)
   wrapPosition(e.position);
 }
 
+/** DBG (Grain) readouts for the seven per-material knob rows: each knob's
+ *  live value on the SELECTED material, or the table's own number marked
+ *  `(def)` where it defers.  Built on every stats push, whether or not the
+ *  debug panel is open — seven string lookups. */
 function grainKnobNamesSnapshot(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const k of GRAIN_KNOB_LIST) out[k] = getGrainKnobName(k);
   return out;
 }
 
-/** How many of the twenty per-material overrides are currently OFF the
- *  variant table.  The panel shows it beside Reset: with four materials
- *  across five knobs there is otherwise no way to tell whether what you
+/** How many of the thirty-five per-material overrides are currently OFF
+ *  the variant table.  The panel shows it beside Reset: with five materials
+ *  across seven knobs there is otherwise no way to tell whether what you
  *  are looking at is the shipped tuning. */
 function grainOverrideCountSnapshot(): number {
   let n = 0;
@@ -243,9 +246,8 @@ export class GameEngine {
   private drops: DropSystem;
   waves: WaveSystem;
   nebulas: NebulaSystem;
-  // Stage 1 of shard-system overhaul — additive skeleton, no-op
-  // update / onDeath.  Existing GameEngine + NebulaSystem code paths
-  // still drive regen / shatter / merge.  See docs/SHARD_SYSTEM.md.
+  // Tile / shard regen, shatter and merge, driven by SHARD_VARIANTS
+  // (CLAUDE.md §5).
   shards: ShardSystem;
   entityIndex: EntityIndex;
   flowField: FlowFieldGrid;
@@ -254,7 +256,7 @@ export class GameEngine {
   // engine/systems/PerfController.ts.
   perfController: PerfController;
   // SFX manager.  PUBLIC because UIOverlay's audio row (master volume +
-  // mute) and the headless smokes both drive it directly — it holds no
+  // mute) and tests/audio.spec.ts both drive it directly — it holds no
   // simulation state, so there is nothing to protect.  See
   // docs/SFX_INVENTORY.md for the id contract and
   // engine/systems/AudioSystem.ts for the voice budget.
@@ -338,9 +340,9 @@ export class GameEngine {
   // the capstone never lands inside a normal wave and cannot start until wave
   // WAVE_INTERVAL is cleared.  Killing that boss freezes the loop on a
   // STAGE-CLEAR screen
-  // (the player is alive, so this pauses rather than ends) and opens a DESCENT
-  // rift beside them.  From there the choice is in-world: down the new rift to
-  // stage N+1, or back through the arena's return rift to the hub.
+  // (the player is alive, so this pauses rather than ends).  The DESCENT rift
+  // that used to open beside them is switched off (engine/bosses.ts), so the
+  // way out is back through the arena's return rift to the hub.
   //
   // `stageIndex` is 0-based DEPTH.  It drives WaveSystem.waveOffset, so enemy
   // growth and the boss rotation continue across a descent instead of
@@ -372,7 +374,12 @@ export class GameEngine {
   credits: number = 0;
   // 2-slot equip loadout (pivot 1b) — DERIVED from the weapon-group GUN
   // hexes via syncLoadoutFromSlots (WeaponSystem is untouched).
-  equippedWeapons: (WeaponType | null)[] = [WeaponType.BLASTER, null];
+  equippedWeapons: (WeaponType | null)[] = ['projectile', null];
+  /** Live energy state: heated set, attractors, the active beam (energyEffects.ts). */
+  energy: EnergyState = new EnergyState();
+  /** The render view of it — one object, refilled per frame (no allocation). */
+  private readonly _energyFx: EnergyFxView = { heated: [], energized: [], beam: null, pulses: [], ring: null, simClock: 0, locks: [], dots: null, trail: null, shocked: [] };
+  private readonly _beamView: EnergyBeamView = { x0: 0, y0: 0, x1: 0, y1: 0, width: 1, color: '#fff', energy: undefined, hit: false, segs: [], nSeg: 0 };
   // ── Hex-slot outfitting with inventory (module-config increment) ────────
   // Modules are discrete non-upgradeable ITEMS (Mk varieties).  Purchases
   // land in `inventory` (tile grid, duplicates allowed); outfitting moves
@@ -390,7 +397,7 @@ export class GameEngine {
   })();
   weaponSlots: (string | null)[] = (() => {
       const s: (string | null)[] = new Array(MODULE_SLOT_COUNT).fill(null);
-      s[0] = 'wpn_blaster'; // run starts with the starter gun mounted center
+      s[0] = 'dlv_projectile'; // run starts with the starter delivery mounted center
       return s;
   })();
   inventory: (string | null)[] = new Array(INVENTORY_CAPACITY).fill(null);
@@ -438,19 +445,49 @@ export class GameEngine {
   forcedTestEnemy: EnemySubtype | null = null;
   private difficultyLevel: number = 3;
   private enemyScale: number = 1;
-  // Map the next restart / initial load should build.  Updated from the
-  // main-menu map-style buttons so the UI-selected map survives the
-  // restartGame() path (which re-instantiates the map class from scratch).
+  // Map the next restart / initial load should build.  Set by `setMapType`
+  // (the debug panel's World & Maps ▸ Maps picker) and rebuilt by every
+  // `resetAndLoadSelectedMap()`; `restartGame()` resets it to the hub.
   // A new run starts on the HUB (roadmap step (k) decision): the player
   // spawns dock-adjacent at the home station and takes a portal out to an
   // arena, so the intended loop — earn → outfit → fight → return — is the
-  // default path.  The main menu's map grid stays a direct-start override
+  // default path.  The debug panel's map picker stays a direct-start override
   // (testing + the showcase maps); direct-starting an arena just skips the
   // hub, and run-state carry works identically either way.
   private selectedMapType: MapType = HUB_DESCRIPTOR.mapType;
 
   // Debug mode
   debugMode: boolean = false;
+
+  // ── The DEBUG PANEL (components/DebugMenu.tsx) ──────────────────────────
+  // Whether the panel is up, and whether it HOLDS the sim while it is.  Engine
+  // state rather than React state because three devices open it (the on-screen
+  // launcher, the ` key, the pad's Select/Share button) and four engine paths
+  // read it (the loop's freeze branch, the pad capture in `pollGamepad`, the
+  // stats payload's panel-only fields, and `draw`'s canvas-HUD hole).  In
+  // memory only, like every other preference in the project.
+  //
+  // Opening the panel NEVER changes game state: it is not a pause, a dock or a
+  // screen.  It floats over whatever screen is up — including live play, which
+  // is what it is for (watching a setting take effect).
+  debugPanelOpen: boolean = false;
+  /** ❄ FREEZE — hold the sim while the panel is open over live play.  Ships
+   *  OFF: the in-play launcher exists to watch a knob take effect, and the
+   *  frozen experience was already one tap away (pause the game first).  It
+   *  never holds a dying or dead player's world — see `debugFreezeHolds`. */
+  debugFreeze: boolean = false;
+  /** Which device last OPENED the panel.  The UI focuses the filter box only
+   *  for the keyboard: a touch open that raised the soft keyboard would bury
+   *  the panel it had just opened under it. */
+  debugPanelVia: 'pointer' | 'key' | 'pad' = 'pointer';
+  /** WHERE the open panel sits on screen, in CSS px, as the panel last
+   *  REPORTED it (DebugMenu: on open, and whenever it or the window resizes)
+   *  — null while it is closed.  The canvas never measures the DOM for this:
+   *  the DOM tells it, on its own schedule, the same way the React profiler
+   *  reports into `noteUiRender`.  Read by `draw`, which hands it to the
+   *  renderer as the hole the screen-space HUD is not drawn in
+   *  (`RenderSystem.hudHole`). */
+  debugPanelRect: { x: number; y: number; w: number; h: number } | null = null;
 
   // Player-trail shape — debug-only A/B selector.  CIRCLE matches the
   // production look; the rest are dev variants exposed via the DBG panel.
@@ -516,8 +553,14 @@ export class GameEngine {
   // what a crash, a detonation and a boss landing all read through — and it
   // shipped OFF, so the default build had no camera reaction to any of them.
   // (Rumble is unaffected either way: `handleScreenShake` fires it ABOVE this
-  // gate on purpose.)  DBG ▸ Visual ▸ "Shake" is the off switch.
+  // gate on purpose.)  DBG ▸ Visual / HUD ▸ Camera & HUD ▸ "Screen shake" is
+  // the off switch.
   screenShakeEnabled: boolean = true;
+  /** DBG ▸ Weapon modules ▸ "Outfit anywhere": lifts `moveModule`'s drydock
+   *  guard so the flowers are editable from the pause menu anywhere on the
+   *  map.  A test affordance, not a rule change — off by default, and it
+   *  survives restarts like the other DBG toggles. */
+  dbgOutfitAnywhere: boolean = false;
 
   // ── Asteroid/shard flow-field DBG state ──────────────────────────────
   // When `shardFlowEnabled` is false, the per-asteroid / per-drop
@@ -574,20 +617,23 @@ export class GameEngine {
   // ── (h) Bosses ────────────────────────────────────────────────────────────
   // A boss is an ordinary wave enemy carrying a BOSS_DEFS phase table, so the
   // only engine state it needs is the live-boss handle the HUD bar reads and
-  // the TIMED shop discount from the model-(d) payout (salvage + discount, no
-  // unlock plumbing).  All three are run-scoped — reset with credits/score.
+  // the kill count.  The payout (score + a salvage spray + a random module,
+  // `payBossBounty` in engine/bosses.ts) keeps no state of its own.  Both are
+  // run-scoped — reset with credits/score.
   liveBoss: GameEntity | null = null;
   bossesKilled = 0;
 
   // ── Space station POI + docking (economy-pivot 1e) ────────────────────────
   // The station lives on the OVERWORLD map (found by isStation at map load).
   // Docking = proximity (one O(1) torus distance per sim step) + an explicit
-  // action (E key / HUD DOCK button).  While `dockedAtStation` the loop
-  // short-circuits the sim exactly like the removed cardChoicePending card
-  // modal did (field stays drawn behind the React station UI) and the
-  // station UI hosts the Drydock shop, the loadout swaps, and hull repair.
-  // Undocked = locked loadout: equipWeapon / purchaseUnlock / purchase-
-  // Upgrade are guarded on this flag.
+  // action (selecting your own ship, the E key or the pad's action button).
+  // While `dockedAtStation` the loop short-circuits the sim exactly like the
+  // removed cardChoicePending card modal did (field stays drawn behind the
+  // React station UI), and the station UI shows the panels its services
+  // offer.  Undocked = committed outfit: the commerce API (moveModule /
+  // purchaseModule / sellModule / repairHull / purchaseSlot) is guarded on
+  // this flag, bar a cargo-only reorder (and, for moveModule, the DBG
+  // "Outfit anywhere" override).
   private stations: GameEntity[] = [];
   private nearestStation: GameEntity | null = null; // nearest in dock range this step
   private dockedStation: GameEntity | null = null;
@@ -631,21 +677,22 @@ export class GameEngine {
   // sweep doesn't bury detail on dense maps.  Cells/obstacles/rebuild
   // overlays always render every cell.
   ffOverlaySampleN: number = 1;
-  // Cycle of cell sizes for the DBG "FF Density" toggle.  Coarsest
-  // first (matches the existing default).  Each step rebuilds both
+  // Flow-field cell size, stepped by DBG ▸ World & Maps ▸ Flow Field ▸
+  // "Density" (FF_DENSITY_CYCLE, coarsest first).  Each step rebuilds both
   // grids — asteroid field via the analytical formula + repulsion,
   // pursuit field lazily on the next sample.  Note: pursuit-field
   // range (MAX_ENEMY_RANGE) is measured in cells, so shrinking the
   // cell size also shrinks the world-units range — at 32 / 6 ≈ 50 %
   // of the default the BFS only fans out ~350 units, leaving enemies
-  // outside that radius to rely on direct steering.  DBG-only knob;
-  // production stays at the default 256.
+  // outside that radius to rely on direct steering.  Ships at 48, the
+  // cycle's second-finest step.
   ffCellSize: number = 48;
   // Wall-repulsion kernel radius for the asteroid field, in cells.
   // R = 0 → legacy 4-cardinal-only scan (A/B baseline); R = 1..5 →
   // (2R+1)² neighbourhood with 1/d² falloff so the flow curves around
-  // tile clusters from several cells away.  Default 3 — matches the
-  // FlowFieldGrid default constant.  DBG-cycle via "FF KernelR".
+  // tile clusters from several cells away.  Ships at 5, pushed over
+  // FlowFieldGrid's own default (3) at every map load.  DBG ▸ World &
+  // Maps ▸ Flow Field ▸ "Kernel R".
   ffKernelR: number = 5;
   // Tangent-mix factor for the wall-repulsion contribution.  0 = pure
   // radial (push perpendicular away from walls — current behaviour
@@ -658,8 +705,8 @@ export class GameEngine {
   ffTangentMix: number = 0.5;
   // Breathing field — scroll rate (rad/s) for the slow undulation
   // that migrates convergence zones so shard piles dissolve.  0 = off
-  // (static field, no periodic re-bake).  DBG-cycle "FF Breathe":
-  // off / slow / med / fast.
+  // (static field, no periodic re-bake).  DBG ▸ World & Maps ▸ Flow
+  // Field ▸ "Breathe": off / slow / med / fast.
   ffBreatheRate: number = 0;
   ffBreathePhase: number = 0;
   private ffBreatheRebakeTimer: number = 0;
@@ -670,9 +717,10 @@ export class GameEngine {
   // Per-shard lane jitter — strength of the persistent perpendicular
   // offset added to each shard's flow target so shards ride slightly
   // different parallel lanes instead of collapsing onto one streamline.
-  // 0 = off.  DBG-cycle "FF Lane": off / low / med / high.
+  // 0 = off.  DBG ▸ World & Maps ▸ Flow Field ▸ "Lane".
   ffLaneJitter: number = 0.2;
-  // Selectable base-flow pattern (DBG "FF Pattern").  DEFAULT routes to
+  // Selectable base-flow pattern (DBG ▸ World & Maps ▸ Flow Field ▸
+  // "Pattern").  DEFAULT routes to
   // the active map's own sampleFlow(); the rest swap in an analytical
   // field (circular / spiral / gravity well / directional / wavy …).
   // Persists across map loads so a pattern can be compared on different
@@ -866,15 +914,16 @@ export class GameEngine {
   };
 
 
-  /** The DEBUG MENU — every toggle and cycle behind pause ▸ Debug Menu, moved
-   *  to engine/debugControls.ts in gauntlet 5f.  Called from the UI as
-   *  `engine.dbg.<toggle>()`; the flags they write are still engine fields. */
+  /** The DEBUG MENU — every toggle and cycle behind the debug panel
+   *  (reachable from every screen), moved to engine/debugControls.ts in
+   *  gauntlet 5f.  Called from the UI as `engine.dbg.<toggle>()`; the flags
+   *  they write are still engine fields. */
   readonly dbg = new DebugControls(this);
 
-  /** Flashlight Kit tool state (user call): whether the kit module is
-   *  installed+active (folded by applyModuleEffects), and the tap-cycled
-   *  level (index into FLASHLIGHT_TOOL_LEVELS: 0 off / 1 medium / 2 high).
-   *  Run-scoped like the outfit it derives from. */
+  /** Light tool state (user call): whether the Light module (catalog id
+   *  `flashlight_kit`) is installed+active (folded by applyModuleEffects),
+   *  and the tap-cycled level (index into FLASHLIGHT_TOOL_LEVELS: 0 off /
+   *  1 medium / 2 high).  Run-scoped like the outfit it derives from. */
   public flashlightEquipped: boolean = false;
   public flashlightLevel: number = 0;
 
@@ -973,6 +1022,8 @@ export class GameEngine {
     this.projectiles = new ProjectileSystem();
     this.weapons = new WeaponSystem(this.projectiles);
     this.weapons.onEnemyFire = (id, x, y) => this.audio.play(id, { x, y });
+    // Beams, radial pulses and instant cones resolve in the energy layer.
+    this.weapons.onInstantFire = (c, p, t) => fireInstant(this, c, p, t);
     this.drops = new DropSystem(this.particles);
     this.drops.sfx = (id, x, y) => this.audio.play(id, { x, y });
     this.waves = new WaveSystem();
@@ -1036,7 +1087,7 @@ export class GameEngine {
       health: 100,
       maxHealth: 100,
       mass: PHYSICS_CONSTANTS.PLAYER_MASS,
-      currentWeapon: WeaponType.BLASTER,
+      currentWeapon: 'projectile',
       weaponCooldown: 0,
       burstQueue: 0,
       burstTimer: 0,
@@ -1098,10 +1149,10 @@ export class GameEngine {
   }
 
   /** Select the active map.  From the main menu this just swaps the
-   *  backdrop the next startGame() will use.  Mid-game (paused or
-   *  playing) it performs a full switch-and-play: reset the run, load
-   *  the chosen map, and drop straight back into PLAYING so the map
-   *  grid in the pause screen acts as a live map picker. */
+   *  backdrop the next startGame() will use.  From any other screen it
+   *  performs a full switch-and-play: reset the run, load the chosen map,
+   *  and drop straight back into PLAYING, so the debug panel's World &
+   *  Maps ▸ Maps picker acts as a live map switch. */
   public setMapType(type: MapType) {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
@@ -1159,7 +1210,7 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || '',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
+      currentWeapon: this.player.currentWeapon !== undefined ? weaponConfig(this.player.currentWeapon).name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -1184,6 +1235,10 @@ export class GameEngine {
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: Math.round(this.player.maxShield ?? 0),
       },
+      hazards: {
+        burn: Math.max(0, (this.player.burnIndicator ?? 0) / ENERGY_CONSTANTS.BURN_INDICATOR_SEC),
+        shock: Math.max(0, (this.player.shockTimer ?? 0) / ENERGY_CONSTANTS.SHOCK_INDICATOR_SEC),
+      },
       scanner: this.scannerMk > 0 ? {
         mk: this.scannerMk,
         range: Math.round(this.scanRanges[1] ?? 0),
@@ -1207,6 +1262,7 @@ export class GameEngine {
         },
       } : undefined,
       outfitting: this.gameState === GameState.PAUSED ? this.outfittingSnapshot() : undefined,
+      debugPanel: this.debugPanelSnapshot(),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -1227,6 +1283,7 @@ export class GameEngine {
       shardLodEnabled: this.renderer.shardLodEnabled,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      outfitAnywhere: this.dbgOutfitAnywhere,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
@@ -1356,9 +1413,10 @@ export class GameEngine {
   }
 
   public pauseGame() {
-    // The docked station UI and the death/run-summary screen already freeze
-    // the sim; stacking the pause menu on top would double up two
-    // full-screen overlays.
+    // The docked station UI, the death/run-summary screen and the stage-clear
+    // screen are already up; stacking the pause menu on top would double up
+    // two full-screen overlays.  (Docked and stage-clear freeze the sim; the
+    // death screen deliberately does not — CLAUDE.md §3.)
     if (this.gameState === GameState.PLAYING && !this.dockedAtStation
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
@@ -1376,6 +1434,53 @@ export class GameEngine {
     }
   }
 
+  /** Open or close the DEBUG PANEL.  Deliberately touches nothing else — not
+   *  `gameState`, not docking, not the death or stage-clear flags — because
+   *  the panel is not a screen: it floats over whichever screen is up, and a
+   *  future overlay gets it for free precisely because opening it asks
+   *  nothing of that overlay.  `via` records the device, for the one thing
+   *  the UI does differently per device (see `debugPanelVia`). */
+  public setDebugPanelOpen(open: boolean, via: 'pointer' | 'key' | 'pad' = 'pointer') {
+    if (open === this.debugPanelOpen) return;
+    this.debugPanelOpen = open;
+    if (open) this.debugPanelVia = via;
+  }
+
+  public toggleDebugPanel(via: 'pointer' | 'key' | 'pad' = 'pointer') {
+    this.setDebugPanelOpen(!this.debugPanelOpen, via);
+  }
+
+  /** The panel reports where it is (or null).  A plain field write: nothing
+   *  reads it until the next `draw`. */
+  public setDebugPanelRect(r: { x: number; y: number; w: number; h: number } | null) {
+    this.debugPanelRect = r;
+  }
+
+  /** The panel's ❄ Freeze toggle.  A preference, not a state change: it only
+   *  HOLDS the sim while `debugFreezeHolds()` says so. */
+  public setDebugFreeze(on: boolean) {
+    this.debugFreeze = on;
+  }
+
+  /** Is the ❄ Freeze actually holding the sim right now?
+   *
+   *  Only over LIVE play.  Every other screen already has its own answer —
+   *  pause, dock and stage-clear freeze through their own branches, the menu
+   *  draws a static frame — and DEATH IS THE ONE THAT MUST NOT FREEZE (user
+   *  call, CLAUDE.md §3): the field keeps fighting behind the summary.  So the
+   *  freeze stands down the moment the player starts dying, through the
+   *  explosion, the beat before the summary, and the summary itself; a panel
+   *  left frozen over a death is simply a panel over a live world.  That is
+   *  what keeps "death does not freeze the game" true with no exception to
+   *  document. */
+  public debugFreezeHolds(): boolean {
+    return this.debugPanelOpen && this.debugFreeze
+        && this.gameState === GameState.PLAYING
+        && !this.dockedAtStation && !this.stageClearPending
+        && !this.deathPending && this.deathDelay <= 0
+        && !this.player.isExploding;
+  }
+
   /** Tear down MAP-SCOPED state and load a fresh copy of `type`.
    *
    *  Everything cleared here rebuilds for the new map on EVERY path —
@@ -1389,6 +1494,7 @@ export class GameEngine {
    *  what makes run state carry across a portal (decision #39d). */
   private loadMapFresh(type: MapType) {
       this.shards.reset();
+      this.energy.reset();
       this.perfController.reset();
       this.activeDrops = [];
       this.portalTransit.length = 0;
@@ -1405,8 +1511,9 @@ export class GameEngine {
       this.dragons = []; // die with the old map's entity list
       this.rivals = [];  // rival ships die with the old map
       // A boss belongs to the wave it capstoned; wave progress is fresh per
-      // entry, so drop the handle with the map.  The RUN-scoped discount it
-      // paid is economy state and survives the transition.
+      // entry, so drop the handle with the map.  What it paid (score,
+      // collected salvage, the module in cargo) is run state and survives
+      // the transition.
       this.liveBoss = null;
       // Station / docking / portal state — the POI entities themselves are
       // rebuilt with the map (loadMap re-finds them); the overworld dragon
@@ -1482,8 +1589,8 @@ export class GameEngine {
       this.snitchCatchCount = 0;
       this.dragonsKilled = 0;
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
-      // Boss payouts ((h) model (d)) are run-scoped like the credits they
-      // discount — a new run starts at full price with no boss in the world.
+      // Boss state ((h)) is run-scoped like the score and credits its payout
+      // feeds — a new run starts with no boss killed and none in the world.
       this.bossesKilled = 0;
       this.liveBoss = null;
 
@@ -1511,7 +1618,7 @@ export class GameEngine {
       // Per-run progression reset — must precede the health/shield refill
       // below so maxHealth/maxShield are back at base before they're topped.
       this.credits = 0;
-      this.resetOutfit(); // back to lean (bare hexes, empty inventory, Blaster on W1)
+      this.resetOutfit(); // back to lean (Base Hull on the centre hex, empty inventory, Projector on W1)
 
       // Clear the WRECK state too (A1).  Before the run-summary screen the
       // player could never be mid-explosion at a run reset — the auto-respawn
@@ -1582,7 +1689,7 @@ export class GameEngine {
       });
 
       // NOTE: `selectedMapType` is deliberately NOT updated.  It means
-      // "the map a NEW RUN builds" — set by the menu's map grid — and a
+      // "the map a NEW RUN builds" — set by the DBG map picker — and a
       // portal is travel within a run, not a new selection.  So restarting
       // after a portal trip returns to the player's chosen start map (the
       // hub by default) rather than stranding the next run in an arena.
@@ -1790,8 +1897,8 @@ export class GameEngine {
   }
 
   /** Dismiss the stage-clear screen and resume the fight-cleared arena.  The
-   *  descent rift and the return rift are both in the world; the player picks
-   *  one by flying to it, which is why this needs no destination argument. */
+   *  way out is the arena's return rift (the descent rift is switched off),
+   *  which the player flies to — why this needs no destination argument. */
   public dismissStageClear() {
       if (!this.stageClearPending) return;
       this.stageClearPending = false;
@@ -1878,19 +1985,20 @@ export class GameEngine {
    *  is the STRAFE term — the thrust input's projection onto the facing
    *  axis's perpendicular — plus the TURN term — the smoothed rate the
    *  facing is swinging, scaled by throttle, the term the aim-locked
-   *  schemes (touch / joystick / gamepad, where thrust is always along the
-   *  nose) actually exercise, scaled by the CENTRIPETAL gate (bank scales
-   *  with real speed), plus the SLIP term (drift relative to the nose
-   *  holds the bank through a hard turn's slide).  PITCH (longitudinal)
-   *  is nose-line thrust directly — held throttle holds the lean, cutting
-   *  it settles level.  Components are signed so reversals swing
-   *  through level instead of teleporting across it, and the signal VECTOR
-   *  is magnitude-clamped so a diagonal cannot out-tilt the authored
-   *  maximum.  Easing is a SECOND-ORDER SPRING (user call): each component
-   *  carries an angular velocity and overshoots-and-settles rather than
-   *  lerping, its frequency divided by √(mass ratio) so a heavy outfit
-   *  tilts ponderously.  TUMBLE mode (DBG "Tilt mode") repurposes the same
-   *  velocity state as a continuous roll rate — see the constants note. */
+   *  schemes (touch, both joysticks, gamepad-thrust and gamepad-left, where
+   *  thrust is always along the nose) actually exercise, scaled by the
+   *  CENTRIPETAL gate (bank scales with real speed), plus the SLIP term
+   *  (drift relative to the nose holds the bank through a hard turn's
+   *  slide).  PITCH (longitudinal) is nose-line thrust directly — held
+   *  throttle holds the lean, cutting it settles level.  Components are
+   *  signed so reversals swing through level instead of teleporting across
+   *  it, and the signal VECTOR is magnitude-clamped so a diagonal cannot
+   *  out-tilt the authored maximum.  Easing is a SECOND-ORDER SPRING (user
+   *  call): each component carries an angular velocity and overshoots-and-
+   *  settles rather than lerping, its frequency divided by √(mass ratio) so
+   *  a heavy outfit tilts ponderously.  TUMBLE mode (DBG "Tilt mode")
+   *  repurposes the same velocity state as a continuous roll rate — see the
+   *  constants note. */
   private _rollPrevFacing: number | null = null;
   private _rollYawRate = 0;
   /** Tilt spring state: the angular velocities of the two eased
@@ -2034,7 +2142,7 @@ export class GameEngine {
     // reach √2 of the authored maximum.
     const sigMag = Math.sqrt(sigLat * sigLat + sigLong * sigLong);
     if (sigMag > 1) { sigLat /= sigMag; sigLong /= sigMag; }
-    // Max angle comes from the DBG feel cycle (Player ▸ "Roll feel");
+    // Max angle comes from the DBG feel cycle (Ship Tilt ▸ "Roll feel");
     // its Default step is PLAYER_ROLL_CONSTANTS.MAX_ANGLE, and Off (0)
     // levels out through this same easing rather than a separate branch.
     const maxAngle = getActivePlayerRollAngle();
@@ -2168,7 +2276,18 @@ export class GameEngine {
   private pollGamepad() {
     const frozen = this.gameState !== GameState.PLAYING || this.dockedAtStation
                 || this.stageClearPending || this.deathPending;
-    this.input.pollGamepad(!frozen);
+    // THE DEBUG PANEL CAPTURES THE PAD.  Menu navigation reuses buttons that
+    // are bound in flight — D-pad is thrust, Cross is fire, Circle is scan —
+    // and GAMEPAD.BUTTONS documents why that is safe: they are only ever
+    // spent while a full-screen overlay has FROZEN the world.  The debug panel
+    // breaks that assumption, because it can be open over live play.  So while
+    // it is up the pad belongs to it outright: no pad thrust or aim, no pad
+    // fire, and the flight edges are drained below rather than banked.  The
+    // keyboard and the canvas still fly the ship; they share no buttons with
+    // the panel.
+    const captured = this.debugPanelOpen;
+    this.input.setPadCaptured(captured);
+    this.input.pollGamepad(!frozen && !captured);
 
     const conn = this.input.consumePadConnectionEvent();
     if (conn) {
@@ -2178,6 +2297,14 @@ export class GameEngine {
         INPUT_CONSTANTS.GAMEPAD.HINT_LIFETIME,
       );
     }
+
+    // The debug panel's own controls, spent here — above every freeze
+    // short-circuit in `loop` — for the same reason PAUSE is: they have to
+    // work from inside a frozen screen.  ` and the pad's Select/Share toggle
+    // it on any screen; Escape only ever closes it.
+    if (this.input.consumeDebugKeyPress()) this.toggleDebugPanel('key');
+    if (this.input.consumePadDebugPress()) this.toggleDebugPanel('pad');
+    if (this.input.consumeEscapePress() && this.debugPanelOpen) this.setDebugPanelOpen(false);
 
     if (this.input.consumePausePress()) {
       // pauseGame() is already a no-op while docked (one full-screen overlay
@@ -2189,10 +2316,14 @@ export class GameEngine {
     // Both of these are DRAINED every frame whether or not they can be spent,
     // so a press made against a frozen world cannot fire later out of context.
     // The one exception is INTERACT while docked — the docked branch below is
-    // its consumer, and undocking is exactly what it is for.
+    // its consumer, and undocking is exactly what it is for.  Under the debug
+    // panel's capture the exception goes too (the panel has the pad), and so
+    // does SCAN, whose Circle half is the panel's BACK: closing the panel must
+    // not also fire a scan into the live world behind it.
     const cycle = this.input.consumeCyclePress();
-    if (cycle && !frozen) this.cycleWeapon();
-    if (frozen && !this.dockedAtStation) this.input.consumeInteractPress();
+    if (cycle && !frozen && !captured) this.cycleWeapon();
+    if ((frozen && !this.dockedAtStation) || captured) this.input.consumeInteractPress();
+    if (captured) while (this.input.consumeScanPress()) { /* drained, not banked */ }
   }
 
   /**
@@ -2202,10 +2333,16 @@ export class GameEngine {
    * needs no game knowledge at all — but BACK means something different on
    * each screen, and only the engine knows which is up.  Deliberately does
    * NOT dismiss the death or stage-clear screens: those are decisions
-   * (respawn / restart / quit; descend / return), and a button that quietly
-   * picks one for you is worse than no button.
+   * (respawn / restart / quit; descend / return — though with the descent
+   * rift switched off the stage-clear screen offers only CONTINUE), and a
+   * button that quietly picks one for you is worse than no button.
    */
   public menuBack() {
+    // The debug panel floats ABOVE every other overlay, so it is the one BACK
+    // dismisses first — backing out of a panel opened over the pause menu
+    // lands on the pause menu, not in the game.  On the death and stage-clear
+    // screens this is the only thing BACK ever does, for the reason above.
+    if (this.debugPanelOpen) { this.setDebugPanelOpen(false); return; }
     if (this.dockedAtStation) { this.undock(); return; }
     if (this.gameState === GameState.PAUSED) { this.resumeGame(); return; }
   }
@@ -2399,7 +2536,7 @@ export class GameEngine {
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
-      currentWeapon: this.player.currentWeapon !== undefined ? WEAPONS[this.player.currentWeapon].name : 'None',
+      currentWeapon: this.player.currentWeapon !== undefined ? weaponConfig(this.player.currentWeapon).name : 'None',
       gameState: this.gameState,
       difficulty: this.difficultyLevel,
       waveNumber: this.waveIndex + 1,
@@ -2423,6 +2560,10 @@ export class GameEngine {
         maxHealth: Math.round(this.player.maxHealth),
         shield: Math.max(0, Math.round(this.player.shield ?? 0)),
         maxShield: Math.round(this.player.maxShield ?? 0),
+      },
+      hazards: {
+        burn: Math.max(0, (this.player.burnIndicator ?? 0) / ENERGY_CONSTANTS.BURN_INDICATOR_SEC),
+        shock: Math.max(0, (this.player.shockTimer ?? 0) / ENERGY_CONSTANTS.SHOCK_INDICATOR_SEC),
       },
       scanner: this.scannerMk > 0 ? {
         mk: this.scannerMk,
@@ -2454,7 +2595,12 @@ export class GameEngine {
       dock: this.dockStatsSnapshot(),
       portal: this.portalStatsSnapshot(),
       station: this.dockedAtStation ? this.stationSnapshot() : undefined,
-      weaponCatalog: this.gameState === GameState.PAUSED ? this.weaponCatalogSnapshot() : undefined,
+      // PANEL-ONLY payloads.  Nothing but a debug row reads these, so they
+      // are built only while the panel is up — on whatever screen that is.
+      weaponModuleCatalog: this.debugPanelOpen ? this.weaponModuleSnapshot() : undefined,
+      debugSlotLock: this.debugPanelOpen
+        ? `${this.slotsUnlocked('ship')}/${MODULE_SLOT_COUNT}` : undefined,
+      debugPanel: this.debugPanelSnapshot(),
       debugMode: this.debugMode,
       trailShape: this.trailShape,
       trailEmitMode: this.trailEmitMode,
@@ -2475,6 +2621,7 @@ export class GameEngine {
       shardLodEnabled: this.renderer.shardLodEnabled,
       mergeRateEnabled: this.perfController.mergeRateEnabled,
       screenShakeEnabled: this.screenShakeEnabled,
+      outfitAnywhere: this.dbgOutfitAnywhere,
       tileOutlinesEnabled: this.renderer.tileOutlinesEnabled,
       chevronsOffscreenOnly: this.renderer.chevronsOffscreenOnly,
       damageTriggeredBars: this.renderer.damageTriggeredBars,
@@ -2629,14 +2776,17 @@ export class GameEngine {
     // the already-built enemy index — the manager is otherwise purely
     // event-driven, so this is the entire per-frame audio cost.
     this.audio.setListener(this.camera.position.x, this.camera.position.y);
-    this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation);
+    // A debug ❄ freeze is a frozen sim like any other, so it silences the
+    // world the way pause and dock do.
+    const debugFrozen = this.debugFreezeHolds();
+    this.audio.setActive(this.gameState === GameState.PLAYING && !this.dockedAtStation && !debugFrozen);
     // The battle layer is reported on the TRANSITION, not every frame.  The
     // score ignores a repeat anyway, so this buys little on its own — what it
     // buys is that the engine stays silent while nothing changes, which is
     // what lets the debug handle drive `setCombat` directly and have the
     // setting stand rather than being overwritten on the next frame.
     const combat = this.gameState === GameState.PLAYING && !this.dockedAtStation
-      && this.inCombatProximity();
+      && !debugFrozen && this.inCombatProximity();
     if (combat !== this.lastReportedCombat) {
       this.lastReportedCombat = combat;
       this.audio.setCombat(combat);
@@ -2666,8 +2816,8 @@ export class GameEngine {
     }
 
     // Stage cleared: the player is ALIVE, so this PAUSES rather than ends —
-    // same freeze as the death screen, dismissed by CONTINUE, after which the
-    // choice (descend / go home) is made in the world by flying to a rift.
+    // a freeze the death screen deliberately does NOT share, dismissed by
+    // CONTINUE, after which the player flies home through the return rift.
     if (this.stageClearPending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
@@ -2681,6 +2831,19 @@ export class GameEngine {
     // available — and the frame still draws, which is what animates it.
     if (this.portalWarpTimer > 0) {
         this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
+        try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
+        this.recordRenderPerf();
+        requestAnimationFrame(this.loop);
+        return;
+    }
+
+    // Debug panel ❄ Freeze: hold the sim while the panel is open over live
+    // play — the pause short-circuit, opted into from the panel's header.
+    // `debugFreezeHolds` is false for a dying or dead player, so this can
+    // never become the death-screen freeze the NOTE below rules out.  After
+    // the warp branch on purpose: a freeze holds the SIMULATION, and the
+    // tunnel beat is wall-clock presentation over a sim that is already held.
+    if (debugFrozen) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
         requestAnimationFrame(this.loop);
@@ -2966,8 +3129,9 @@ export class GameEngine {
   }
 
   /** Haptic feedback with NO camera shake.  Most impacts want both and go
-   *  through `handleScreenShake`; a few — the plain Blaster's shot — want the
-   *  hand to feel something the camera must not react to. */
+   *  through `handleScreenShake`; a few — an uncharged, blast-less projector
+   *  or seeker round, the player's burn — want the hand to feel something
+   *  the camera must not react to. */
   handleRumble = (amount: number, kind: RumbleKind = 'impact') => {
       this.input.rumble(amount, kind);
   }
@@ -3248,7 +3412,7 @@ export class GameEngine {
       // something ALIVE has its own voice.  Checked before the material
       // branch, since a segment is a real tile-variant STRUCTURE.
       if (entity.dragonSegment === true) {
-          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          const mat = GameEngine.materialSfx(entity);
           return { fx: GameEngine.MATERIAL_FX[mat] ?? null, sfx: 'destroy.dragon.segment' };
       }
       if (entity.type === EntityType.ENEMY) {
@@ -3267,7 +3431,7 @@ export class GameEngine {
               : { fx: EXPLOSION_PROFILES.STANDARD, sfx: 'destroy.enemy.standard' };
       }
       if (entity.type === EntityType.STRUCTURE) {
-          const mat = GameEngine.MATERIAL_SFX[entity.shardVariant ?? ''];
+          const mat = GameEngine.materialSfx(entity);
           if (!mat) return { fx: null, sfx: null };
           return {
               fx: GameEngine.MATERIAL_FX[mat] ?? null,
@@ -3338,12 +3502,13 @@ export class GameEngine {
       // Resolved ONCE and reused for the burst below, so a class's look and
       // its voice come from a single classification.
       // STRUCTURE deaths are IDEMPOTENT (V9).  progressFracture can kill
-      // an entity from INSIDE the damage-feedback hook (min-remainder),
-      // after which the outer damage path still sees health <= 0 and
-      // raises onDeath again — the cached decomposition then spawned an
-      // exact duplicate of every fragment (user report: large rocks
-      // releasing doubled shards).  Enemies/player already guard via
-      // isExploding; structures get an explicit stamp, cleared on regen
+      // an entity from INSIDE the damage-feedback hook (`killByFracture`:
+      // the last cell leaving, nothing left binding, or the legacy
+      // min-remainder rule), after which the outer damage path still sees
+      // health <= 0 and raises onDeath again — the cached decomposition
+      // then spawned an exact duplicate of every fragment (user report:
+      // large rocks releasing doubled shards).  Enemies/player already guard
+      // via isExploding; structures get an explicit stamp, cleared on regen
       // revival (completeRegen reuses the entity object).
       if (entity.type === EntityType.STRUCTURE) {
           if (entity.deathDispatched === true) return;
@@ -3399,8 +3564,8 @@ export class GameEngine {
       // flips `active` directly), so they correctly award nothing.
       // scoreScale (default 1) lets the snitch board-clear pay a fraction
       // of the normal kill value per swept enemy.
-      // Boss capstone ((h)): the model-(d) payout (salvage + timed shop
-      // discount) rides ON TOP of the normal enemy death path below — a boss is
+      // Boss capstone ((h)): the payout (score + a salvage spray + a random
+      // module) rides ON TOP of the normal enemy death path below — a boss is
       // still an enemy, so it explodes, pays tier kill points and sprays shards
       // like one.  A rival-stolen kill pays the player nothing, same rule.
       if (entity.isBoss === true && entity.type === EntityType.ENEMY
@@ -3552,16 +3717,20 @@ export class GameEngine {
               // always APPENDED, so the slice past the old length is exactly
               // this break's output whichever style ran, and the rule cannot
               // come to mean different things under the fracture A/B.
+              // The same slice also takes the parent's HEAT, DIVIDED between
+              // the pieces by area — the energy is conserved, not copied
+              // (`shareHeat`).
               const bi = entity.blastImpulse;
-              const before = bi !== undefined ? this.currentMap.entities.length : 0;
+              const before = this.currentMap.entities.length;
               this.shards.shatter(entity, this.currentMap.entities);
+              const ents = this.currentMap.entities;
               if (bi !== undefined) {
-                  const ents = this.currentMap.entities;
                   for (let i = before; i < ents.length; i++) {
                       ents[i].velocity.x += bi.x;
                       ents[i].velocity.y += bi.y;
                   }
               }
+              shareHeat(this, entity, ents, before, ents.length, 0);
           }
           // CLEARED UNCONDITIONALLY, outside the branch above: it is per-LIFE
           // state on an object regen reuses, and several deaths never reach
@@ -3943,7 +4112,7 @@ export class GameEngine {
 
     // (h) bosses: apply the health-fraction phase transitions BEFORE the nest
     // pass, so a phase that raises an escort brood arms its timer on the same
-    // step it is entered.  Also ticks the timed shop-discount window.
+    // step it is entered.
     updateBosses(this, dt);
     // (h) regen trait: tick the burst buckets and heal.  Not boss-only — any
     // enemy carrying the trait is served here.
@@ -4278,9 +4447,12 @@ export class GameEngine {
     // why the sync sits here rather than on the weapon-change path: what the
     // trigger should feel like is a function of what the player is holding
     // RIGHT NOW, and "charging" is a state no weapon-change event fires for.
-    // Three cases, in order of precedence: nothing to fire (no gun, or EMP'd
-    // — the trigger goes slack, which is the disable made physical), winding
-    // up a charged shot (a hard wall), or the equipped gun's own profile.
+    // In order of precedence: the SCHEME first (trigger-thrust makes the
+    // right trigger a throttle too; face-fire moves the gun off it, so it goes
+    // slack), then nothing to fire (no gun, or EMP'd — the trigger goes slack,
+    // which is the disable made physical), then winding up a charged shot
+    // (`chargeTrigger`, a slope that stiffens as the ring fills), and
+    // otherwise the equipped gun's own profile.
     // The call is a struct compare when nothing changed; it is a no-op
     // entirely unless the player has opted into WebHID.
     const thrustScheme = this.input.usesTriggerThrust();
@@ -4294,7 +4466,7 @@ export class GameEngine {
       : this.input.usesFaceFire() ? TRIGGER_OFF
       : (this.player.currentWeapon === undefined || this.player.systemsDisabled) ? TRIGGER_OFF
       : this.player.chargeProgress > 0 ? chargeTrigger(this.player.chargeProgress)
-      : WEAPON_TRIGGERS[this.player.currentWeapon]);
+      : WEAPON_TRIGGERS[weaponConfig(this.player.currentWeapon).delivery]);
 
     // The LEFT trigger is the throttle under the trigger-thrust scheme, and
     // its resistance reports what the engine is doing: it stiffens as the
@@ -4306,12 +4478,11 @@ export class GameEngine {
         ? THRUST_TRIGGER(this.playerSpeedFraction())
         : TRIGGER_OFF);
 
-    // Tick weapon cooldown + burst-fire queue via WeaponSystem — frozen while
-    // EMP-disabled (Stage 3c) so an in-flight burst halts too.
+    // Tick the weapon cooldown via WeaponSystem — frozen while EMP-disabled
+    // (Stage 3c).
     const tWeapons = performance.now();
     if (this.currentMap && !this.player.systemsDisabled) {
-        this.weapons.tickPlayerBurst(this.currentMap.entities, this.player, dt,
-                                     this.handleScreenShake, this.playWeaponSfx);
+        this.weapons.tickPlayerCooldown(this.player, dt);
     }
     this.lastWeaponsMs = performance.now() - tWeapons;
 
@@ -4323,6 +4494,9 @@ export class GameEngine {
     this.updateHomingProjectiles(dt);
     this.updateLightningGravity(dt);
     this.updateProjectileFuses(dt);
+    // Energy modules: queued arcs/attractors from this step's hits, the
+    // bounded heated set, energised gas and the live beam.
+    tickEnergy(this, dt);
     this.updateProjectileTrails(dt);
 
     // Damage Text cleanup.  Expired texts return to the pool for reuse
@@ -4472,19 +4646,16 @@ export class GameEngine {
     this.particles.spawnGlitterTrail(this.currentMap.entities, this.player);
   }
 
-  /** Shard variant → its material's impact / destruction SFX suffix.  One
-   *  table drives both `impact.tile.*` and `destroy.tile.*`/`destroy.shard.*`
-   *  so a material can never sound like one thing when chipped and another
-   *  when broken. */
-  private static readonly MATERIAL_SFX: Record<string, string> = {
-      'glass-tile': 'glass', 'glass-shard': 'glass',
-      'rock-tile': 'rock',   'rock-shard': 'rock',
-      'metal-tile': 'metal', 'metal-shard': 'metal',
-      'plastic-tile': 'plastic', 'plastic-shard': 'plastic',
-      'nebula-tile': 'nebula',   'nebula-shard': 'nebula',
-      // Indestructible tiles never die, but they DO get shot at.
-      'indestructible-tile': 'metal',
-  };
+  /** A structure's material → its impact / destruction SFX suffix, read from
+   *  the central material table (`MATERIALS[m].sfx`).  One source drives both
+   *  `impact.tile.*` and `destroy.tile.*`/`destroy.shard.*`, so a material
+   *  can never sound like one thing when chipped and another when broken —
+   *  and a new material brings its own voice.  (Indestructible tiles are the
+   *  `generic` hull material, which sounds like metal.) */
+  private static materialSfx(e: GameEntity): string | undefined {
+      return e.shardVariant ? materialDef(materialOf(e)).sfx : undefined;
+  }
+
 
   private handleProjectileHit = (impactPos: Vector2, proj: GameEntity, target: GameEntity) => {
     // Impact audio (SFX_INVENTORY §4.3).  This handler already switches on
@@ -4495,7 +4666,7 @@ export class GameEngine {
     } else if (target.type === EntityType.PLAYER) {
         this.audio.play('impact.hull.player', { x: impactPos.x, y: impactPos.y });
     } else if (target.type === EntityType.STRUCTURE) {
-        const mat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+        const mat = GameEngine.materialSfx(target);
         if (mat) this.audio.play(`impact.tile.${mat}`, { x: impactPos.x, y: impactPos.y });
     }
 
@@ -4574,16 +4745,11 @@ export class GameEngine {
         break;
     }
 
-    // PENETRATION FALLOFF reaches the on-hit effects too, so every weapon is
-    // affected equally (user call): a bolt's fourth blast is as weakened as
-    // its fourth direct bite.  The factor is the one PhysicsSystem actually
-    // used for this hit — read, never re-derived, because the grain bore may
-    // have advanced `pierceHits` since.  1 when nothing pierced.
-    const hitFalloff = proj.hitFalloff ?? 1;
-
-    // Lightning projectile: chain to nearby entities on impact
-    if (proj.isLightningProjectile) {
-        this.fireLightningChainFromImpact(impactPos, target, proj, hitFalloff);
+    // ENERGY PAYLOAD (energy modules): heat lands now; an electric
+    // discharge (the charged bolt's chain) is queued for after the physics
+    // step, since it reads the grids.
+    if (proj.energyHeat || proj.energyBurnSeconds || proj.energyElectric) {
+        applyProjectilePayload(this, impactPos, proj, target);
     }
 
     // Cannon AoE: every entity within proj.explosionRadius takes
@@ -4598,7 +4764,8 @@ export class GameEngine {
     // penetration would have made that a full blast per pebble.  An ACTOR
     // (enemy, boss, fauna, the player) still trips it on contact, and
     // `updateProjectileFuses` covers the shell that meets nothing.
-    if (proj.explosionRadius && proj.explosionRadius > 0
+    // A 'fuse' shell (the bare Cannon) is tripped by NOTHING it touches.
+    if (proj.explosionRadius && proj.explosionRadius > 0 && proj.detonateOn !== 'fuse'
         && (proj.detonateOn !== 'enemy' || target.type !== EntityType.STRUCTURE)) {
         applyExplosionAoE(this, impactPos, proj, target);
         proj.detonated = true;
@@ -4654,14 +4821,18 @@ export class GameEngine {
       this.shipSlots[5] = 'scanner_mk5';       // every detection tier — touches the hull core
 
       // Weapon flower: two guns + the four mods around the center gun.
-      this.weaponSlots[0] = 'wpn_blaster';
-      this.weaponSlots[1] = 'wpn_cannon';
+      // Centre gun (0) touches every hex and takes the FIRST modifier in hex
+      // order (the thermal at 5); the second gun (1) touches 0/2/6 and so
+      // takes the electric at 6 — a projector+thermal and a beam+electric.
+      this.weaponSlots[0] = 'dlv_projectile';
+      this.weaponSlots[1] = 'dlv_beam';
       this.weaponSlots[2] = 'gunnery_mk3';
       this.weaponSlots[3] = 'autoloader_mk3';
       this.weaponSlots[4] = 'overcharge';
-      this.weaponSlots[5] = 'piercing_mk3';    // A3 — touches the centre gun
+      this.weaponSlots[5] = 'nrg_thermal';
+      this.weaponSlots[6] = 'nrg_electric';
 
-      const spareGuns = ['wpn_burst', 'wpn_shotgun', 'wpn_bouncer', 'wpn_lightning', 'wpn_homing'];
+      const spareGuns = ['dlv_spread', 'dlv_homing', 'dlv_cannon', 'nrg_kinetic', 'nrg_thermal'];
       for (let i = 0; i < spareGuns.length; i++) this.inventory[i] = spareGuns[i];
       syncLoadoutFromSlots(this);
       this.player.shield = this.player.maxShield ?? 0;
@@ -4669,7 +4840,7 @@ export class GameEngine {
 
   /** Run reset + DBG relock: back to the lean start — empty inventory,
    *  the free Base Hull on the center ship hex (adjacency root) and the
-   *  starter Blaster on gun hex W1. */
+   *  starter Projector (`dlv_projectile`) on gun hex W1. */
   public resetOutfit() {
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
@@ -4677,8 +4848,8 @@ export class GameEngine {
       this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
       this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
       this.shipSlots[0] = 'hull_base';
-      this.weaponSlots[0] = 'wpn_blaster';
-      this.player.currentWeapon = WeaponType.BLASTER;
+      this.weaponSlots[0] = 'dlv_projectile';
+      this.player.currentWeapon = 'projectile';
       this.currentWeaponIndex = 0;
       syncLoadoutFromSlots(this);
   }
@@ -5062,7 +5233,7 @@ export class GameEngine {
       to: { area: 'inventory' | 'ship' | 'weapon'; idx: number },
   ): boolean {
       const cargoOnly = from.area === 'inventory' && to.area === 'inventory';
-      if (!cargoOnly && !this.dockedServices()?.drydock) {
+      if (!cargoOnly && !this.dockedServices()?.drydock && !this.dbgOutfitAnywhere) {
           // Outfitting away from a drydock is the single most common thing
           // a player tries and cannot do — it needs an audible "no".
           this.audio.play('poi.reject');
@@ -5193,49 +5364,198 @@ export class GameEngine {
       return area === 'inventory' || idx < this.slotsUnlocked(area);
   }
 
-  /** DBG: mount one gun variety onto a gun hex (the pause-menu debug
-   *  Weapons rows — the wave-map test path; bypasses the drydock guard).
-   *  Fills the first empty gun hex, else replaces the hex the ACTIVE
-   *  weapon is not in; a displaced gun drops to the inventory if there
-   *  is room (else it is scrapped — DBG only). */
+  /** DBG: equip a weapon (the debug panel's Weapons & Modules ▸ Weapon
+   *  Modules "Equip <delivery>" rows — the wave-map test path; bypasses the
+   *  drydock guard).  Re-lays the weapon flower deterministically: the
+   *  granted gun on hex 1 with its modifier on 2, the kept gun (the active
+   *  weapon's delivery when it differs, else any other) on 4 with its
+   *  modifier on 5, and the shared mods on 0 / 3 / 6.  Whatever no longer
+   *  fits goes to the inventory (dropped if it is full — DBG only), and the
+   *  weapon that was firing stays selected. */
   public debugGrantWeapon(id: string) {
-      const mDef = MODULE_DEFS.find(m => m.weapon === (id as WeaponType));
-      if (!mDef) return;
-      if (this.weaponSlots.includes(mDef.id)) return; // already mounted
-      const gunSlots = this.weaponSlots
-          .map((s, i) => ({ s, i }))
-          .filter(e => e.s !== null && moduleDef(e.s)?.kind === 'weapon');
-      let slot: number;
-      if (gunSlots.length < MAX_INSTALLED_GUNS) {
-          slot = this.weaponSlots.indexOf(null);
-          if (slot === -1) slot = gunSlots.length > 0 ? gunSlots[gunSlots.length - 1].i : 0;
-      } else {
-          // At the gun limit — replace the mounted gun the ACTIVE weapon is
-          // not, so the weapon under test doesn't yank the one being fired.
-          const victim = gunSlots.find(e => moduleDef(e.s!)?.weapon !== this.player.currentWeapon) ?? gunSlots[0];
-          slot = victim.i;
+      // Accepts a delivery ('beam'), a combination ('beam+thermal') or an
+      // OLD id ('CANNON', 'wpn_cannon') — resolved through the legacy map.
+      const parsed = parseWeaponKey(resolveWeaponKey(id));
+      if (!parsed) return;
+      const want = MODULE_DEFS.find(m => m.weapon === parsed.delivery);
+      const wantE = parsed.energy ? MODULE_DEFS.find(m => m.effect?.energy === parsed.energy) : undefined;
+      if (!want) return;
+      const prevDelivery = parseWeaponKey(this.player.currentWeapon)?.delivery;
+
+      // Take the flower apart: guns (with the modifier each one touches) and
+      // everything else.  A DBG grant then lays it out DETERMINISTICALLY so a
+      // modifier touches only the gun it is for — the granted gun on hex 1
+      // with its modifier on 2, the kept gun on 4 with its modifier on 5, and
+      // the shared mods on 0 / 3 / 6, where they touch a gun.  (In play the
+      // player arranges the flower; the adjacency rule is the same.)
+      const active = new Array(MODULE_SLOT_COUNT).fill(false);
+      computeActiveSlots(this, this.weaponSlots, active);
+      const guns: { gun: string; energy: string | null }[] = [];
+      const rest: string[] = [];
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const sid = this.weaponSlots[i];
+          const d = sid !== null ? moduleDef(sid) : undefined;
+          if (sid === null || !d) continue;
+          if (d.kind === 'weapon') {
+              const e = energyForGunSlot(this.weaponSlots, active, i);
+              guns.push({ gun: sid, energy: e ? MODULE_DEFS.find(m => m.effect?.energy === e)!.id : null });
+          } else if (d.family !== 'energy') {
+              rest.push(sid);
+          }
       }
-      const displaced = this.weaponSlots[slot];
-      if (displaced !== null) {
+      // The gun kept beside the granted one: the active weapon's, if it is a
+      // different delivery; else any other.
+      const others = guns.filter(g => moduleDef(g.gun)?.weapon !== parsed.delivery);
+      const kept = others.find(g => moduleDef(g.gun)?.weapon === prevDelivery) ?? others[0];
+      // Everything leaving the flower goes to the inventory (DBG: dropped if full).
+      const stow = (mid: string | null) => {
+          if (!mid) return;
           const inv = this.inventory.indexOf(null);
-          if (inv !== -1) this.inventory[inv] = displaced;
+          if (inv !== -1) this.inventory[inv] = mid;
+      };
+      for (const g of guns) {
+          if (g !== kept && moduleDef(g.gun)?.weapon !== parsed.delivery) stow(g.gun);
+          if (g !== kept && g.energy && g.energy !== wantE?.id) stow(g.energy);
       }
-      this.weaponSlots[slot] = mDef.id;
+      this.weaponSlots.fill(null);
+      this.weaponSlotsUnlocked = Math.max(this.weaponSlotsUnlocked, MODULE_SLOT_COUNT);
+      this.weaponSlots[1] = want.id;
+      if (wantE) this.weaponSlots[2] = wantE.id;
+      if (kept) {
+          this.weaponSlots[4] = kept.gun;
+          if (kept.energy) this.weaponSlots[5] = kept.energy;
+      }
+      const free = [0, 3, 6];
+      for (const mid of rest) {
+          const at = free.shift();
+          if (at === undefined) { stow(mid); continue; }
+          this.weaponSlots[at] = mid;
+      }
       syncLoadoutFromSlots(this);
+      // Keep firing what was being fired (its key may have changed if its
+      // modifier did); the grant does not grab the trigger.
+      const keep = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === prevDelivery);
+      if (keep) this.player.currentWeapon = keep;
   }
 
-  /** Weapon catalog for the pause-menu DEBUG weapons rows (built only
-   *  while paused): every gun variety with its presence + gun-hex index. */
-  private weaponCatalogSnapshot() {
-      return MODULE_DEFS.filter(d => d.family === 'gun').map(d => ({
-          id: d.weapon as string,
-          name: d.label,
-          owned: this.weaponSlots.includes(d.id) || this.inventory.includes(d.id),
-          slot: (() => {
-              const i = d.weapon !== undefined ? this.equippedWeapons.indexOf(d.weapon) : -1;
-              return i === -1 ? null : i;
-          })(),
-      }));
+  // ── DBG: the eight weapon modules (5 deliveries + 3 energy modifiers) ──
+  //
+  // The quick path for testing combinations without the shop: add a module
+  // straight onto the weapon flower (or into cargo when the flower has no
+  // room), take one off again, or clear them all.  Every path ends in
+  // `syncLoadoutFromSlots`, so the loadout, the adjacency fixpoint and the
+  // per-gun modifier are exactly what the real outfitting would produce.
+
+  /** The eight ids, deliveries first, in catalog order. */
+  private weaponModuleIds(): string[] {
+      return MODULE_DEFS
+          .filter(d => d.weapon !== undefined || d.family === 'energy')
+          .map(d => d.id);
+  }
+
+  /** DBG: add one weapon module.  Installs it on the first free weapon hex
+   *  when it can function there (a gun only below the mounted cap); else it
+   *  goes to cargo; no-op when both are full. */
+  public debugAddWeaponModule(id: string): boolean {
+      const def = moduleDef(id);
+      if (!def || !this.weaponModuleIds().includes(id)) return false;
+      const gunsMounted = this.weaponSlots.filter(s => s !== null && moduleDef(s)?.kind === 'weapon').length;
+      const canMount = def.kind !== 'weapon' || gunsMounted < MAX_INSTALLED_GUNS;
+      const free = canMount ? firstFreeSlotFor(this, def) : -1;
+      if (free !== -1) {
+          this.weaponSlots[free] = id;
+      } else {
+          const inv = this.inventory.indexOf(null);
+          if (inv === -1) return false;
+          this.inventory[inv] = id;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+      return true;
+  }
+
+  /** DBG: remove one copy of a weapon module — the INSTALLED one first (the
+   *  last hex holding it), else one from cargo. */
+  public debugRemoveWeaponModule(id: string): boolean {
+      let at = this.weaponSlots.lastIndexOf(id);
+      if (at !== -1) {
+          this.weaponSlots[at] = null;
+      } else {
+          at = this.inventory.lastIndexOf(id);
+          if (at === -1) return false;
+          this.inventory[at] = null;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+      return true;
+  }
+
+  /** DBG: strip every delivery and energy module from the flower and cargo
+   *  (other weapon mods — Gunnery, Autoloader, Overcharge — stay). */
+  public debugClearWeaponModules() {
+      const ids = this.weaponModuleIds();
+      for (let i = 0; i < this.weaponSlots.length; i++) {
+          const s = this.weaponSlots[i];
+          if (s !== null && ids.includes(s)) this.weaponSlots[i] = null;
+      }
+      for (let i = 0; i < this.inventory.length; i++) {
+          const s = this.inventory[i];
+          if (s !== null && ids.includes(s)) this.inventory[i] = null;
+      }
+      syncLoadoutFromSlots(this);
+      this.ensureCurrentWeapon();
+  }
+
+  /** DBG: toggle outfitting away from a drydock (see `dbgOutfitAnywhere`). */
+  public debugToggleOutfitAnywhere() {
+      this.dbgOutfitAnywhere = !this.dbgOutfitAnywhere;
+  }
+
+  /** After a DBG edit: keep firing the current weapon if it is still on the
+   *  flower, else take the first equipped one (or none — weaponless flight
+   *  is legal). */
+  private ensureCurrentWeapon() {
+      const cur = this.player.currentWeapon;
+      if (cur !== undefined && this.equippedWeapons.includes(cur)) return;
+      const cd = cur !== undefined ? parseWeaponKey(cur)?.delivery : undefined;
+      const same = this.equippedWeapons.find(k => k !== null && parseWeaponKey(k)?.delivery === cd);
+      const next = same ?? this.equippedWeapons.find(k => k !== null) ?? undefined;
+      this.player.currentWeapon = next ?? undefined;
+      this.currentWeaponIndex = next ? this.equippedWeapons.indexOf(next) : 0;
+  }
+
+  /** DBG snapshot (paused only): each weapon module with how many are on
+   *  the flower and in cargo. */
+  private weaponModuleSnapshot() {
+      return this.weaponModuleIds().map(id => {
+          const d = moduleDef(id)!;
+          return {
+              id,
+              name: d.label,
+              kind: (d.weapon !== undefined ? 'delivery' : 'energy') as 'delivery' | 'energy',
+              installed: this.weaponSlots.filter(s => s === id).length,
+              stored: this.inventory.filter(s => s === id).length,
+          };
+      });
+  }
+
+  /** DBG / test seam: put a THERMAL packet into a body through the real
+   *  energy path (the same call every thermal weapon makes).  `from` is where
+   *  the heat arrives from — omit it for heat with no direction. */
+  public debugHeat(target: GameEntity, magnitude: number, from?: Vector2) {
+      depositHeat(this, target, magnitude, from ?? null, true);
+  }
+
+  /** The debug panel's state for the UI — four scalars, sent on every push
+   *  (including the short one `skipWave` sends) so the panel never blinks
+   *  shut for a frame because a payload happened to omit it. */
+  private debugPanelSnapshot() {
+      return {
+          open: this.debugPanelOpen,
+          freeze: this.debugFreeze,
+          holding: this.debugFreezeHolds(),
+          via: this.debugPanelVia,
+      };
   }
 
   /** Current kill-combo points multiplier (1 = no combo).  Steps up one
@@ -5597,12 +5917,13 @@ export class GameEngine {
    * the chip path, not a general damage entry point, and a caller that cannot
    * chip a body must not be able to plink its HP instead.
    */
-  chipStructureAt(target: GameEntity, worldPos: Vector2, damage: number, from?: Vector2): boolean {
+  chipStructureAt(target: GameEntity, worldPos: Vector2, damage: number, from?: Vector2, flash = 0.12): boolean {
       if (!this.currentMap) return false;
       if (!target.active || target.isExploding || (target.health ?? 0) <= 0) return false;
       stampLocalImpact(target, worldPos);
       if (!applyBoundaryDamage(target, damage)) return false;
-      markDamaged(target, 0.12);
+      // `flash` 0 = damage that is not a blow (a burn): no whiten.
+      if (flash > 0) markDamaged(target, flash);
       // A shatter reads its direction off the last impact, so point the
       // fragments AWAY from whatever bit it rather than leaving them the
       // stale velocity of some earlier hit.
@@ -5784,10 +6105,11 @@ export class GameEngine {
               if (bound) { stillBound++; continue; } // this hit only cracks it
               if (cells.length <= 1) { hitIdx = cand.i; c = cc; break; }
               // The remainder is the UNION of the cells that stay (V15).
-              // The arc splice below is the fallback: it is exact where it
-              // applies but refuses once a survivor's whole outline lies on
-              // the boundary, which is precisely the tail — and the tail is
-              // where "the last pieces dump at death" comes from.
+              // The arc splice below serves only a body with no grain model:
+              // it is exact where it applies but refuses once a survivor's
+              // whole outline lies on the boundary, which is precisely the
+              // tail — and the tail is where "the last pieces dump at death"
+              // comes from.
               const survivors = cells.filter((_, i) => i !== cand.i);
               // For a grain material the body's outline IS the union of
               // its surviving grains, and that is what makes the break
@@ -5864,8 +6186,15 @@ export class GameEngine {
           // neighbour on the other side left.  So its whole boundary is
           // spent at the moment it comes away, measured 0 partial on
           // every detach.  See docs/MATERIAL_GRAIN_SPEC.md §6.3.
+          const chipAt = this.currentMap.entities.length;
           const chip = this.shards.spawnDetachedCell(
               target, c, original, this.currentMap.entities);
+          // The chip takes its SHARE of the body's heat and the body keeps
+          // the rest (`shareHeat`) — a break conserves heat.
+          if (chip !== null) {
+              shareHeat(this, target, this.currentMap.entities, chipAt,
+                  this.currentMap.entities.length, remainderArea);
+          }
           target.polygonPoints = remainder;
           const massBefore = target.mass;
           if (target.mass !== Infinity && polyArea > 0) {
@@ -5924,9 +6253,9 @@ export class GameEngine {
           invalidateCollisionR(target);
           // The chip's own material, never a hardcoded one: progressive
           // fracture stopped being rock-only at V10, and a glass piece
-          // breaking off must not crack like stone.  Same MATERIAL_SFX
+          // breaking off must not crack like stone.  Same material
           // table `deathFx` reads; a detached cell is always a mobile shard.
-          const chipMat = GameEngine.MATERIAL_SFX[target.shardVariant ?? ''];
+          const chipMat = GameEngine.materialSfx(target);
           this.audio.play(`destroy.shard.${chipMat ?? 'rock'}`, {
               x: target.position.x, y: target.position.y });
 
@@ -6119,39 +6448,68 @@ export class GameEngine {
           this.audio.play('weapon.reject');
       }
 
-      // Keep the HUD weapon index aligned with the player's current weapon in
-      // case WeaponSystem auto-fell back to blaster on an empty mag.
-      if (fired) {
-          this.currentWeaponIndex = WEAPON_LIST.indexOf(this.player.currentWeapon || WeaponType.BLASTER);
-      }
   }
 
-  /** WeaponType → SFX_INVENTORY §4.1 id.  A plain table rather than a
-   *  switch so adding a weapon is a row, matching how ENEMY_BEHAVIOR and
-   *  SHARD_VARIANTS dispatch. */
-  private static readonly WEAPON_SFX: Record<WeaponType, string> = {
-      [WeaponType.BLASTER]:   'weapon.blaster.fire',
-      [WeaponType.BURST]:     'weapon.burst.fire',
-      [WeaponType.SHOTGUN]:   'weapon.shotgun.fire',
-      [WeaponType.BOUNCER]:   'weapon.bouncer.fire',
-      [WeaponType.LIGHTNING]: 'weapon.lightning.fire',
-      [WeaponType.HOMING]:    'weapon.homing.fire',
-      [WeaponType.CANNON]:    'weapon.cannon.fire',
+  /** Hand the renderer this frame's energy view (bounded lists by reference). */
+  private pushEnergyFx() {
+      const v = this._energyFx;
+      v.heated = this.energy.heated;
+      v.energized = this.energy.energized;
+      v.simClock = this.simClock;
+      v.dots = this.energy.dots;
+      v.trail = this.energy.pulseTrail;
+      v.shocked = this.energy.shocked;
+      // SEEKER LOCKS: the distinct enemies the player's homing rounds hold
+      // (refill idiom — no per-frame allocation; a handful of rounds at most).
+      const locks = v.locks;
+      let nl = 0;
+      const projs = this.entityIndex.projectiles;
+      for (let i = 0; i < projs.length; i++) {
+          const p = projs[i];
+          const t = p.homingTarget;
+          if (!p.active || !p.homing || !t || p.ownerType !== EntityType.PLAYER) continue;
+          let dup = false;
+          for (let k = 0; k < nl; k++) if (locks[k] === t) { dup = true; break; }
+          if (!dup && nl < 16) locks[nl++] = t;
+      }
+      if (locks.length !== nl) locks.length = nl;
+      const b = this.energy.beam;
+      if (b) {
+          const bv = this._beamView;
+          bv.x0 = b.x0; bv.y0 = b.y0; bv.x1 = b.x1; bv.y1 = b.y1;
+          bv.width = b.config.beamWidth ?? 3; bv.color = b.config.color;
+          bv.energy = b.config.energy; bv.hit = b.hit;
+          bv.segs = b.light.segs; bv.nSeg = b.light.nSeg;
+          v.beam = bv;
+      } else {
+          v.beam = null;
+      }
+      v.pulses = this.energy.pulses;
+      v.ring = this.energy.ring;
+      this.renderer.energyFx = v;
+  }
+
+  /** Weapon → SFX_INVENTORY §4.1 id.  Keyed on the ENERGY first (a
+   *  thermal weapon sounds like heat whatever delivers it), then on the
+   *  delivery for plain / kinetic fire — the existing voices, re-pointed
+   *  rather than new assets (the audio pass is out of scope). */
+  private static readonly ENERGY_SFX: Record<string, string> = {
+      electric: 'weapon.lightning.fire', thermal: 'weapon.bouncer.fire',
+  };
+  private static readonly DELIVERY_SFX: Record<string, string> = {
+      projectile: 'weapon.blaster.fire', beam: 'weapon.bouncer.fire', spread: 'weapon.shotgun.fire',
+      homing: 'weapon.homing.fire', cannon: 'weapon.cannon.fire',
   };
 
-  /** Fired by WeaponSystem once per spawned player shot.  A charged shot
-   *  LAYERS `weapon.charged.release` over the family voice so every weapon
-   *  reads as the same supercharged gesture (SFX_INVENTORY §4.1). */
-  private playWeaponSfx = (weapon: WeaponType, isCharged: boolean, subShot: number) => {
+  /** Fired by WeaponSystem once per player shot.  A charged shot LAYERS
+   *  `weapon.charged.release` over the family voice (SFX_INVENTORY §4.1). */
+  private playWeaponSfx = (weapon: WeaponConfig, isCharged: boolean, _subShot: number) => {
       const pos = this.player.position;
-      if (subShot > 0) {
-          // Rising triplet: a semitone (×2^(1/12)) per sub-shot.
-          this.audio.play('weapon.burst.sub', {
-              x: pos.x, y: pos.y, pitch: Math.pow(2, subShot / 12),
-          });
-          return;
-      }
-      const id = GameEngine.WEAPON_SFX[weapon];
+      // A shell sounds like a cannon whatever it carries.
+      const id = (weapon.delivery === 'cannon' ? GameEngine.DELIVERY_SFX.cannon : undefined)
+          || (weapon.energy && weapon.energy !== 'kinetic' && GameEngine.ENERGY_SFX[weapon.energy])
+          || (weapon.energy === 'kinetic' && weapon.delivery === 'projectile' ? 'weapon.burst.fire' : undefined)
+          || GameEngine.DELIVERY_SFX[weapon.delivery];
       if (id) this.audio.play(id, { x: pos.x, y: pos.y });
       if (isCharged) this.audio.play('weapon.charged.release', { x: pos.x, y: pos.y });
   };
@@ -6183,6 +6541,35 @@ export class GameEngine {
           // A shell detonates AT MOST ONCE.  A round that already went off on
           // an actor is not blasted again by the stop rule below.
           if (p.detonated) continue;
+          // SEEKER DOTS: a player seeker drops a dot every SPACING units it
+          // flies (torus-wrapped), into the energy layer's fixed ring.
+          if (p.homing && p.active && p.ownerType === EntityType.PLAYER) {
+              const lx = p.dotLastX, ly = p.dotLastY;
+              const dx = lx === undefined ? Infinity : wrapDeltaX(lx, p.position.x);
+              const dy = ly === undefined ? 0 : wrapDeltaY(ly!, p.position.y);
+              if (dx * dx + dy * dy >= SeekerDots.SPACING * SeekerDots.SPACING) {
+                  this.energy.dots.emit(p.position.x, p.position.y, this.simClock, p.color);
+                  p.dotLastX = p.position.x; p.dotLastY = p.position.y;
+              }
+          }
+          // Range falloff for rounds that SLOW in flight (spread pellets,
+          // flame): damage is measured from the speed a round still has, so
+          // bleeding speed is bleeding damage — no curve authored anywhere.
+          if (p.speedRetain !== undefined && p.speedRetain < 1 && p.active) {
+              const k = Math.pow(p.speedRetain, dt);
+              p.velocity.x *= k; p.velocity.y *= k;
+          }
+          // CURVING rounds (the flamer): turn by the pellet's own rate plus a
+          // weave, so a spray draws curling lines.  Speed is untouched.
+          if (p.curveRate !== undefined && p.active) {
+              const age = (p.maxLifetime ?? 0) - (p.lifetime ?? 0);
+              const w = p.curveRate + (p.curveWobble ?? 0)
+                  * Math.sin((p.curvePhase ?? 0) + 2 * Math.PI * (p.curveHz ?? 0) * age);
+              const a = w * dt, c = Math.cos(a), sn = Math.sin(a);
+              const vx = p.velocity.x, vy = p.velocity.y;
+              p.velocity.x = vx * c - vy * sn; p.velocity.y = vx * sn + vy * c;
+              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
+          }
           // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
           // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
           // wherever a round can go no further — its bank ran dry, the grain
@@ -6229,170 +6616,6 @@ export class GameEngine {
   private updateProjectileTrails(dt: number) {
       if (!this.currentMap) return;
       this.trails.updateProjectileTrails(this.currentMap.entities, dt);
-  }
-
-  // ─── Lightning chain (triggered on projectile impact) ───────────────────
-
-  /** `pierceFalloff` is the PENETRATION factor already applied to this hit's
-   *  direct damage — passed in so the chain is weakened equally on a pierced
-   *  shot (user call: every weapon affected equally by the rate).  1 when
-   *  nothing pierced. */
-  private fireLightningChainFromImpact(impactPos: Vector2, firstTarget: GameEntity, proj?: GameEntity, pierceFalloff: number = 1) {
-      // One trigger for the whole chain: every arc in a chain lands within
-      // this id's retrigger window, so the collapse rule turns a five-link
-      // chain into one bigger crackle instead of five thin ones.
-      this.audio.play('impact.lightning.arc', { x: impactPos.x, y: impactPos.y });
-      if (!this.currentMap) return;
-
-      // Per-projectile chain overrides (set by ProjectileSystem.spawn from
-      // WeaponConfig.chainCount/chainRange/chainBranches — populated by
-      // the charged Lightning variant).  Fall back to the global
-      // LIGHTNING_CHAIN_* constants for normal shots.
-      const hopBudget = proj?.chainCount    ?? LIGHTNING_CHAIN_COUNT;
-      const hopRange  = proj?.chainRange    ?? LIGHTNING_CHAIN_RANGE;
-      const branches  = proj?.chainBranches ?? LIGHTNING_CHAIN_BRANCHES;
-      const hopRangeSq = hopRange * hopRange;
-
-      // Build a branching chain (tree, not list).  Each frontier node forks
-      // to up to `branches` nearest unhit targets within `hopRange`.  Damage
-      // falls off by depth (preserving the existing 1-d/maxDepth feel from
-      // the old linear chain).  hitSet is shared globally so two parents at
-      // the same depth never compete for the same child.
-      // Phase 4: walk the pre-filtered enemy + asteroid lists instead of the
-      // full entity array.  Exploding entities are still skipped since the
-      // index holds `active` entities that may be mid-animation.
-      const enemies = this.entityIndex.enemies;
-      const asteroids = this.entityIndex.shardCandidates;
-      const nodesByDepth: GameEntity[][] = [[firstTarget]];
-      const edges: { from: GameEntity; to: GameEntity }[] = [];
-      const hitSet = new Set<string>([firstTarget.id]);
-
-      // Reused candidate buffer.  Cleared at the top of each pickNearestK
-      // call so repeated picks within a single chain don't pile allocations.
-      const candidates: { e: GameEntity; d2: number }[] = [];
-
-      const pickNearestK = (parent: GameEntity, k: number): GameEntity[] => {
-          candidates.length = 0;
-          for (let i = 0; i < enemies.length; i++) {
-              const e = enemies[i];
-              if (e.isExploding || hitSet.has(e.id)) continue;
-              const dx = wrapDeltaX(parent.position.x, e.position.x);
-              const dy = wrapDeltaY(parent.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < hopRangeSq) candidates.push({ e, d2 });
-          }
-          for (let i = 0; i < asteroids.length; i++) {
-              const e = asteroids[i];
-              if (e.isExploding || hitSet.has(e.id)) continue;
-              // Filter inert / dielectric shard variants out of the chain.
-              // See LIGHTNING_CHAIN_EXCLUDED_VARIANTS for the table and
-              // for the plastic-/metal-shard note (Phase 1 g2).
-              if (e.shardVariant && LIGHTNING_CHAIN_EXCLUDED_VARIANTS.has(e.shardVariant)) continue;
-              const dx = wrapDeltaX(parent.position.x, e.position.x);
-              const dy = wrapDeltaY(parent.position.y, e.position.y);
-              const d2 = dx * dx + dy * dy;
-              if (d2 < hopRangeSq) candidates.push({ e, d2 });
-          }
-          candidates.sort((a, b) => a.d2 - b.d2);
-          const picked: GameEntity[] = [];
-          for (let i = 0; i < candidates.length && picked.length < k; i++) {
-              const c = candidates[i];
-              if (hitSet.has(c.e.id)) continue; // race-resilient (shouldn't happen — defensive)
-              picked.push(c.e);
-              hitSet.add(c.e.id);
-          }
-          return picked;
-      };
-
-      const parentOf = new Map<GameEntity, GameEntity>();
-      for (let depth = 1; depth <= hopBudget; depth++) {
-          const prev = nodesByDepth[depth - 1];
-          const next: GameEntity[] = [];
-          for (let p = 0; p < prev.length; p++) {
-              const parent = prev[p];
-              const picked = pickNearestK(parent, branches);
-              for (let c = 0; c < picked.length; c++) {
-                  edges.push({ from: parent, to: picked[c] });
-                  // Who the arc jumped FROM — the contact side for the
-                  // grain model's boundary spend (V15).
-                  parentOf.set(picked[c], parent);
-                  next.push(picked[c]);
-              }
-          }
-          if (next.length === 0) break;
-          nodesByDepth.push(next);
-      }
-
-      // Apply chain damage by depth.  Depth 0 is the direct-hit target
-      // (already damaged upstream by the projectile collision).  Damage at
-      // depth d = baseDmg * (1 - d/maxDepth) — same falloff curve as the
-      // pre-branching linear chain so balance per-target stays consistent.
-      const baseDmg = WEAPONS[WeaponType.LIGHTNING].damage * pierceFalloff;
-      const maxDepth = nodesByDepth.length - 1;
-      for (let d = 1; d <= maxDepth; d++) {
-          const factor = maxDepth > 0 ? Math.max(0, 1 - d / maxDepth) : 1;
-          const dmg = baseDmg * factor;
-          const tier = nodesByDepth[d];
-          for (let i = 0; i < tier.length; i++) {
-              const target = tier[i];
-              if (dmg <= 0) { target.hitFlash = 0.1; continue; } // visual flash only
-
-              // A chain arrives at the body's nearest face, so stamp the
-              // arc's origin as the contact and let the grain model spend
-              // it on boundaries like any other hit (V15).
-              stampLocalImpact(target, parentOf.get(target)?.position);
-              if (!applyBoundaryDamage(target, dmg)) target.health -= dmg;
-              // (h) regen: chain damage feeds the burst bucket like a pellet
-              // does.  Note the chain deliberately BYPASSES the front-shield
-              // plate — it never travels as a projectile, which is exactly why
-              // Lightning is a §7 answer to a directional defence.
-              noteTraitDamage(target, dmg);
-              markDamaged(target, 0.15);
-              target.hitReact = hitReactStrength(dmg, target.maxHealth ?? target.health);
-              this.spawnDamageText(target.position, dmg, target);
-
-              if (target.health <= 0 && !target.isExploding) {
-                  target.lastImpactDamage = dmg;
-                  // Lightning is a player-only weapon — chain kills are
-                  // player-attributed for shard/tile scoring.
-                  target.killedByPlayer = true;
-                  this.handleEntityDeath(target);
-              }
-          }
-      }
-
-      // Only spawn arc visuals if at least one hop landed.
-      if (edges.length === 0) return;
-
-      // Spawn one PARTICLE arc entity per edge in the tree.  Each arc is a
-      // 2-point polyline (parent.position → child.position).  RenderSystem's
-      // existing isLightningArc branch handles the rest.  Cap loosely at
-      // MAX_PARTICLES via ParticleSystem's own bookkeeping; a fully-saturated
-      // default tree (branches=2, depth=2) produces 6 arcs per impact.
-      const arcColor = WEAPONS[WeaponType.LIGHTNING].color;
-      for (let i = 0; i < edges.length; i++) {
-          const { from, to } = edges[i];
-          this.currentMap.entities.push({
-              id: nextId('lightning'),
-              type: EntityType.PARTICLE,
-              position: { x: from.position.x, y: from.position.y },
-              velocity: { x: 0, y: 0 },
-              size: { x: 1, y: 1 },
-              rotation: 0,
-              color: arcColor,
-              active: true,
-              health: 1,
-              maxHealth: 1,
-              lifetime: LIGHTNING_ARC_LIFETIME,
-              maxLifetime: LIGHTNING_ARC_LIFETIME,
-              mass: 0,
-              isLightningArc: true,
-              arcPoints: [
-                  { x: from.position.x, y: from.position.y },
-                  { x: to.position.x,   y: to.position.y   },
-              ],
-          });
-      }
   }
 
   // ─── Cannon AoE — radial damage on projectile impact ───────────────────
@@ -6504,22 +6727,12 @@ export class GameEngine {
   // ─── (h) Bosses ────────────────────────────────────────────────────────
   //
   // A boss is an ordinary counted wave enemy with a BOSS_DEFS phase table.
-  // Everything below is bookkeeping around that: stamp the phase whose
-  // health-fraction gate the boss has fallen past, keep the live-boss handle
-  // for the HUD, and pay the model-(d) bounty on death.
+  // The bookkeeping around that — stamping the phase whose health-fraction
+  // gate the boss has fallen past, the live-boss handle for the HUD, and the
+  // capstone bounty on death — lives in engine/bosses.ts.  What stays on the
+  // engine is the spawn seam (`handleBossSpawn`), the regen trait pass and
+  // `debugSpawnBoss`, further down.
 
-  /** Timed boss shop-discount readout — undefined when no window is running,
-   *  so the shop UI can show the beat only while it is live. */
-  /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
-   *  the same `openPortal` abstraction the dragon and the rivals use. */
-  /** ── The FLASHLIGHT TOOL (user call) ────────────────────────────────
-   *  Cycle the ship's light: off → medium → high → off.  Reachable only
-   *  while the Flashlight Kit module is installed and active
-   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
-   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
-   *  FALLBACK when neither of those is in range — the arbitration in
-   *  updateInteractables stays nearest-wins, the light just claims the
-   *  gesture nothing else wanted. */
   /** Fire a scan (scanner rework, user call).  The scanner is a TOOL the
    *  player operates rather than a passive reveal, so this is the whole
    *  contract: a wavefront leaves the ship, and whatever it crosses is
@@ -6739,10 +6952,11 @@ export class GameEngine {
    *  are stamped INDIVIDUALLY (`detectedAt`) because there are tens of them
    *  and a stale mark left behind by a contact that moved is the whole point
    *  of a sonar reveal.  MATERIALS are not: there can be thousands of mobile
-   *  shards, so tier 1 is revealed as a RADIUS the minimap tests at draw
-   *  time (`materialRevealRadius`), which costs nothing per shard.  The two
-   *  halves are different because the entity counts are different by three
-   *  orders of magnitude, not because they mean different things.
+   *  shards, so the front does not stamp them — when the ping COMPLETES,
+   *  `discoverStructures` flags every tile and every large shard inside the
+   *  tier-1 radius as `found` in one pass.  The two halves are different
+   *  because the entity counts are different by three orders of magnitude,
+   *  not because they mean different things.
    *
    *  Nothing here allocates, and there is no per-entity countdown anywhere:
    *  freshness is a subtraction against `simClock`. */
@@ -6761,9 +6975,9 @@ export class GameEngine {
 
       this.scanPingRadius = cur;
       if (cur >= this.scanPingMax) {
-          // The front has run its course.  `materialRevealAt` is when it
-          // FINISHED, so the material bubble fades on the same clock a
-          // stamped contact does.
+          // The front has run its course.  The `materialReveal*` fields
+          // record where and when it finished, but nothing reads them any
+          // more — the reveal is the `discoverStructures` pass below.
           this.scanPingRadius = 0;
           this.materialRevealAt = now;
           this.materialRevealRadius = this.scanRanges[1] ?? 0;
@@ -6777,13 +6991,22 @@ export class GameEngine {
   }
 
   /** When the last completed ping finished, and how far its tier-1 reach
-   *  went.  Together these are the MATERIAL reveal — a bubble around where
-   *  the player was, rather than a stamp on each of a few thousand shards. */
+   *  went.  UNREAD: these drove the old radius-based MATERIAL reveal, which
+   *  `discoverStructures` replaced; `draw` still copies them to the
+   *  renderer, which reads none of them. */
   public materialRevealAt: number = -1e9;
   public materialRevealRadius: number = 0;
   public materialRevealX: number = 0;
   public materialRevealY: number = 0;
 
+  /** ── The LIGHT TOOL (user call) ─────────────────────────────────────
+   *  Cycle the ship's light: off → medium → high → off.  Reachable only
+   *  while the Light module is installed and active
+   *  (`flashlightEquipped`, folded by applyModuleEffects); the trigger is
+   *  the same SELECT-YOUR-SHIP gesture the dock/portal use, taken as the
+   *  FALLBACK when neither of those is in range — the arbitration in
+   *  updateInteractables stays nearest-wins, the light just claims the
+   *  gesture nothing else wanted. */
   public cycleShipLight(): boolean {
       if (!this.flashlightEquipped) return false;
       this.flashlightLevel = (this.flashlightLevel + 1) % FLASHLIGHT_TOOL_LEVELS.length;
@@ -6793,6 +7016,8 @@ export class GameEngine {
       return true;
   }
 
+  /** Boss-wave entrance: the capstone warps in through the SHARED rift VFX —
+   *  the same `openPortal` abstraction the dragon and the rivals use. */
   private handleBossSpawn = (boss: GameEntity) => {
       this.liveBoss = boss;
       // THE LADDER STOPS HERE (user call).  One seam for both ways a boss
@@ -6820,8 +7045,8 @@ export class GameEngine {
    * and otherwise heal `perSec` toward maxHealth.
    *
    * The bucket is filled by constants.noteTraitDamage() from every player
-   * damage path (projectile, lightning chain, shockwave ring), so splash and
-   * chain damage count toward a burst like pellets do.  Gated by the same DBG
+   * damage path (projectile, the energy layer's damageBody, shockwave ring),
+   * so splash, arc and beam damage count toward a burst like pellets do.  Gated by the same DBG
    * "Traits" toggle as the damage-side traits.
    *
    * O(enemies) with an early field check — the same shape as the kamikaze /
@@ -7337,9 +7562,9 @@ export class GameEngine {
       // again once it has resolved the arrival rift; here it charts the home
       // station, which is what a fresh run on the hub begins with.
       this.chartLandmarks();
-      // A new map's contacts have never been scanned.  The material bubble is
-      // pushed back out of range rather than cleared to 0, so a scan that was
-      // in flight when the player transited cannot leave a stale reveal.
+      // A new map's contacts have never been scanned, so a ping in flight when
+      // the player transited is dropped.  (`materialRevealAt` is reset with
+      // it, though nothing reads it any more — see its declaration.)
       this.scanPingRadius = 0;
       this.materialRevealAt = -1e9;
   }
@@ -7353,6 +7578,11 @@ export class GameEngine {
       // where the frame is drawn rather than read out of the DOM.
       this.renderer.bossBarActive =
           !!(this.liveBoss && this.liveBoss.active && !this.liveBoss.isExploding);
+
+      // The open debug panel is SEE-THROUGH so the world reads through it; the
+      // screen-space HUD does not draw under it (RenderSystem.hudHole).  Null
+      // whenever the panel is shut, whatever rect was last reported.
+      this.renderer.hudHole = this.debugPanelOpen ? this.debugPanelRect : null;
 
       // Transit warp — hand the renderer a plain 0->1 progress, so the beat
       // stays a pure function of one number and the render side owns no
@@ -7385,6 +7615,7 @@ export class GameEngine {
       this.renderer.autoPingRadius = this.autoPingRadius;
       this.renderer.autoPingMax = this.autoPingMax;
       this.renderer.simClock = this.simClock;
+      this.pushEnergyFx();
       this.renderer.materialRevealAt = this.materialRevealAt;
       this.renderer.materialRevealRadius = this.materialRevealRadius;
       this.renderer.materialRevealX = this.materialRevealX;

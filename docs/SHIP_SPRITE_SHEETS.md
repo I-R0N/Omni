@@ -16,15 +16,18 @@ The ship rotates in **three** axes, and they are not equal.
 the yaw axis, so yawing is a rotation *about the view direction*: it
 commutes with the projection and is, exactly, an in-plane rotation of the
 image. `ctx.rotate()` reproduces it with zero error. Baking 24 headings
-into the sheet would multiply every ship by 24 (35 → 840 cells) and buy
-nothing except pixel-art crispness — while *costing* smooth aiming, since
-the hull would snap to 15° while the reticle and the shots stay continuous.
+into the sheet would multiply every ship by 24 — from the 57 unmirrored
+cells, since baked yaw forbids mirroring (§8), to 1,368 — and buy nothing
+except pixel-art crispness, while *costing* smooth aiming, since the hull
+would snap to 15° while the reticle and the shots stay continuous.
 
 **Pitch and roll do need sprites.** They are rotations about axes *lying in
 the screen plane*. They rotate depth into view and genuinely change the
-silhouette, and no 2D transform can produce that. Today they are faked with
-a `cos(tilt)` horizontal squash, which is why the ship reads as a flattening
-sticker rather than a banking hull. That is the gap this art fills.
+silhouette, and no 2D transform can produce that. Without a sheet they are
+faked with a `cos(tilt)` squash along the lean direction (the 'Ship' hull
+step, and the fallback of a sheet with no art), which is why the ship reads
+as a flattening sticker rather than a banking hull. That is the gap this art
+fills. (The whole tilt ships off; §6 says how to turn it on.)
 
 So: **the sheet is a grid over the tilt only, and yaw stays free.**
 
@@ -151,7 +154,9 @@ export const SHIP_SHEET_INTERCEPTOR: ShipSpriteSheet = {
 ```
 
 Then add it to `SHIP_SHEETS`. Select the mode in game at
-**pause ▸ Debug Menu ▸ Ship Tilt ▸ "Hull" ▸ Sheet** (with "Roll feel" stepped off Off — the tilt ships disabled).
+**DBG ▸ Player & Ship ▸ Ship Tilt ▸ "Hull" ▸ Sheet** — the debug panel
+opens from the DBG launcher, the `` ` `` key or a pad's Select / Share, on
+any screen — with "Roll feel" stepped off Off (the tilt ships disabled).
 
 ## 7. Placeholder art, and checking your own
 
@@ -168,12 +173,13 @@ overwrite the files one at a time as real art lands.
 
 ## 8. If you *do* want yaw sprites
 
-`yawSteps: N` bakes N headings, multiplying the cell count by N (35 → 840 at
-N = 24). Two consequences, both real: the aim **snaps** to N headings while
-the reticle and projectiles stay continuous, and `mirrorRoll` must be
-`false` (a flip about a baked-yaw nose line is not an axis-aligned flip, so
-it would reintroduce the resampling that baking yaw exists to avoid). Worth
-it for pixel art that must never be resampled; not otherwise.
+`yawSteps: N` bakes N headings, multiplying the unmirrored cell count by N
+(57 → 1,368 at N = 24). Two consequences, both real: the aim **snaps** to
+N headings while the reticle and projectiles stay continuous, and
+`mirrorRoll` must be `false` (a flip about a baked-yaw nose line is not an
+axis-aligned flip, so it would reintroduce the resampling that baking yaw
+exists to avoid). Worth it for pixel art that must never be resampled; not
+otherwise.
 
 ---
 

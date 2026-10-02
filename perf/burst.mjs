@@ -1,4 +1,5 @@
-/** Burst probe (gauntlet 5c, P7) — one-frame work spikes.
+/** Burst probe (gauntlet 5c P7 — commit 30164f9; not written up in the
+ *  ledger) — one-frame work spikes.
  *
  *  The capture matrix samples whole frames, which is the right lens for
  *  steady state and the wrong one for a SPIKE: a 40 ms hitch that happens

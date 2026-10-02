@@ -442,6 +442,11 @@ step sends every non-`pull_request` event to `test:full`, so a merge into
 the integration branch runs the whole net while PRs INTO it get the cheap
 per-push smoke.  Nothing further to configure.
 
+Note the push list is now the ONLY way a run reaches full scope besides the
+`full-tests` label: a PR's BASE stopped picking the scope (user call,
+2026-09-29), so a PR against `main` runs smoke like any other.  Do not
+expect a plain PR into this branch, or out of it, to run the whole suite.
+
 **A work session's own gate** is therefore CLAUDE.md §7's rule verbatim:
 typecheck + build + `npm test` (smoke) + the suites the change touches, per
 push.  The FULL suite waits for the user's notice that a PR is ready to

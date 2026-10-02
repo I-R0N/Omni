@@ -262,11 +262,14 @@ export class WaveSystem {
    *
    *  Stage 2b: an enemy with `countsTowardWave === false` is skipped — these
    *  are entities spawned BY other entities / that replicate (nest brood,
-   *  bubble offspring).  The wave ends when the COUNTED enemies (the ones
-   *  streamed from the spawn budget — nests, original bubbles, etc.) are all
-   *  dead; uncounted brood may still be alive and simply carry over as
-   *  survivors.  Non-enemy roamers (Snitch / dragon) are INTERACTABLEs and
-   *  never enter `waveEnemyIds`, so they never gate a wave at all.
+   *  dragon-spat gnats) and every AMBIENT bubble (`buildEnemy` forces the
+   *  flag false for them however they spawn).  The wave ends when the
+   *  COUNTED enemies (the ones streamed from the spawn budget, nests
+   *  included) are all dead; uncounted brood / bubbles may still be alive
+   *  and simply carry over as survivors.  The engine-managed roamers never
+   *  enter `waveEnemyIds` — the Snitch is an INTERACTABLE, and the dragon
+   *  head and rivals are ENEMYs spawned outside WaveSystem — so they never
+   *  gate a wave at all.
    *
    *  This also gates the live concurrency cap in emitDueSpawns, so uncounted
    *  brood don't throttle the wave's own spawn stream. */
@@ -411,17 +414,17 @@ export class WaveSystem {
     }
 
     // Boss ((h)): mark it so the HUD bar / render aura / payout paths pick it
-    // up.  The phase itself is applied by GameEngine.updateBosses on the first
-    // tick (phase 0 falls out of the normal health-fraction check), which keeps
-    // ONE code path responsible for phase state.
+    // up.  The phase itself is applied by updateBosses (engine/bosses.ts) on
+    // the first tick (phase 0 falls out of the normal health-fraction check),
+    // which keeps ONE code path responsible for phase state.
     if (BOSS_DEFS[subtype]) {
       enemy.isBoss = true;
       enemy.bossPhase = -1; // "no phase applied yet" → phase 0 stamps next tick
     }
 
     // Bubble consumer (Stage 5): copy the consume config onto the entity so
-    // GameEngine.updateConsumers feeds it nearby shards (clone so per-entity
-    // growth never mutates the shared variant table).
+    // updateConsumers (roamers/bubbles.ts) feeds it nearby shards (clone so
+    // per-entity growth never mutates the shared variant table).
     if (config.consume) {
       enemy.consume = { ...config.consume };
     }

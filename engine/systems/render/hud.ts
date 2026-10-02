@@ -20,10 +20,10 @@
  *  not known at design time.
  */
 import type { RenderSystem } from '../RenderSystem';
-import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, WeaponType, JoystickHUDState, FireButtonHUDState } from '../../../types';
+import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, JoystickHUDState, FireButtonHUDState } from '../../../types';
 import {
     COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS,
-    LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, WEAPONS, SPRITE_CONSTANTS,
+    LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, weaponConfig, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
     INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
@@ -229,12 +229,14 @@ export function renderIndicators(
         // gauntlet step 5 G6).  The exemption meant that approaching a rift
         // gave you the rift ON SCREEN, its own world-space destination tag,
         // AND an edge arrow naming the same destination a second time — the
-        // arrow at its least useful, at the moment it was loudest.  The
-        // range gate stays, so a portal still does not put a permanent arrow
-        // on the edge from across the map; between those two rules the arrow
-        // now covers exactly the case it is good for — the rift is close
-        // enough to matter but not yet visible.  Long-range discovery is the
-        // minimap's job, which G5 just made materially better at it.
+        // arrow at its least useful, at the moment it was loudest.  The old
+        // range gate is now DETECTION (a scan or a natural encounter stamps
+        // `detectedAt`, and the mark fades), so a portal still does not put a
+        // permanent arrow on the edge from across the map; between those two
+        // rules the arrow now covers exactly the case it is good for — the
+        // rift has been detected but is not yet visible.  Long-range
+        // discovery is the minimap's job, which G5 just made materially
+        // better at it.
         if (r.chevronsOffscreenOnly && item.onScreen) continue;
 
         const isBoss   = t.isBoss === true;
@@ -341,8 +343,8 @@ export function renderIndicators(
         // PORTALS NO LONGER PRINT A DISTANCE (G6).  They were the wordiest
         // contact on the screen — name AND number, while an enemy prints
         // nothing — and the number was the redundant half: a portal arrow
-        // only appears inside INDICATOR_RANGE now, and the size ramp already
-        // says how far through that range you are.  The NAME stays, because
+        // only appears while its detection mark is fresh, and the size ramp
+        // already says how far away it is.  The NAME stays, because
         // an unlabelled arrow is ambiguous the moment a second rift is on
         // the same edge, which on the hub is the normal case.
         const portalName = isPortal ? (t.name ?? '')
@@ -545,8 +547,8 @@ export function renderLoadoutHUD(
     const { SLOT_H, SLOT_RADIUS: RADIUS } = LOADOUT_HUD_CONSTANTS;
     const H = UI_CONSTANTS.HUD;
     const { startY, slotW, slotXs } = computeLoadoutHUDLayout(width, height);
-    const activeWeapon = player.currentWeapon ?? WeaponType.BLASTER;
-    const equipped = player.equippedWeapons ?? [WeaponType.BLASTER, null];
+    const activeWeapon = player.currentWeapon ?? null;
+    const equipped = player.equippedWeapons ?? [null, null];
 
     ctx.save();
     ctx.textAlign  = 'center';
@@ -573,7 +575,7 @@ export function renderLoadoutHUD(
             continue;
         }
 
-        const wCfg   = WEAPONS[wType];
+        const wCfg   = weaponConfig(wType);
         const active = wType === activeWeapon;
 
         // The FILL is the transparent half of the widget (user call: HUD
@@ -608,7 +610,13 @@ export function renderLoadoutHUD(
         ctx.font        = `bold ${Math.max(H.TEXT.MICRO, Math.min(H.TEXT.ROW, slotW * 0.115))}px monospace`;
         ctx.globalAlpha = active ? 1.0 : 0.65;
         ctx.fillStyle   = active ? '#ffffff' : H.MUTED_COLOR;
-        ctx.fillText(wCfg.name.toUpperCase(), x + slotW / 2, y + SLOT_H - 16);
+        ctx.fillText(wCfg.name.toUpperCase(), x + slotW / 2, y + SLOT_H - 18);
+        // The COMBINATION it is: delivery · energy modifier (energy modules).
+        ctx.font        = `${H.TEXT.MICRO}px monospace`;
+        ctx.globalAlpha = active ? 0.8 : 0.45;
+        ctx.fillStyle   = H.MUTED_COLOR;
+        ctx.fillText(`${wCfg.delivery}${wCfg.energy ? ' · ' + wCfg.energy : ''}`.toUpperCase(),
+                     x + slotW / 2, y + SLOT_H - 6);
     }
 
     ctx.globalAlpha = 1;
@@ -951,11 +959,12 @@ export function renderMinimap(
     // the terrain blit and before the contacts, so it reads as a property of
     // the terrain rather than as another thing to look at.
     // The DBG cycle picks WHICH material layer is drawn.  The DOTS half is
-    // then filtered PER SHARD in the buffer fill, against the same CHARTED
-    // memory the terrain blit is masked to — material is remembered exactly
-    // as the ground around it is.  The FLOW half cannot be: a streamline is
-    // an inferred FIELD rather than a set of seen objects, so it is gated on
-    // owning the instrument that infers it.
+    // then filtered PER SHARD in the buffer fill: a shard draws only once it
+    // is `found` (met, or inside a scan's bubble) and within
+    // MINIMAP_CONSTANTS.RANGE — the same object tracking the terrain layer
+    // holds.  The FLOW half cannot be: a streamline is an inferred FIELD
+    // rather than a set of seen objects, so it is gated on owning the
+    // instrument that infers it.
     const materialMode = getActiveMinimapMaterial();
     const flowAllowed = r.scannerMk > 0;
     // Hoisted: ONE lookup for the whole pass, not one per contact — the
@@ -1123,14 +1132,12 @@ export function renderMinimap(
         if (dotX < mapX || dotX > mapX + currentSize || dotY < mapY || dotY > mapY + currentSize) continue;
 
         // ── Mobile material (shards) ──────────────────────────────────
-        // Only in 'dots' mode.  The default is the flow layer above: a dot
-        // per shard is a few thousand identical marks that average out to a
-        // grey wash, and it answers a question ("where is that rock") the
-        // player never asks of a 75px map.
+        // Only in 'dots' mode — the shipped default (user call: the map is
+        // asked "what is out there", and a dot answers it directly); the flow
+        // layer above is two clicks of the cycle away (dots → off → flow).
         if (entity.type === EntityType.STRUCTURE) {
-            // A Scanner Mk I (A4) draws the dots on top of whatever the cycle
-            // is doing.  ONE definition of the answer, shared with the buffer
-            // fill in RenderSystem — see RenderSystem.minimapShardDots.
+            // ONE definition of the answer, shared with the buffer fill in
+            // RenderSystem — see RenderSystem.minimapShardDots.
             if (!shardDots) continue;
             ctx.globalAlpha = 1;
             ctx.fillStyle = entity.color;

@@ -5,7 +5,8 @@
  *  and the bouncer round negated one velocity component off a tile face. Both
  *  now go through `PhysicsSystem.deflectProjectile`, which owns the mirror,
  *  the rotation, the snap, and the rule that stops a just-deflected bolt from
- *  being deflected again on the next step.
+ *  being deflected again on the next step — and so does the third caller the
+ *  generalization below added, a non-arc shield's deflect at CONTACT.
  *
  *  On top of that the SHIELD side was generalized: deflection used to require
  *  an ARC (`shieldArcHalfWidth`), so the player's own bubble — and the bosses'
@@ -31,11 +32,6 @@
 
 import { test, expect } from '@playwright/test';
 import { boot, engine, startRun, waitForStats, waitForEngine } from './helpers';
-
-/** SHIELD_CONSTANTS.COLLISION_MULTIPLIER — hard-coded, not imported
- *  (harness rule 7). It is the radius at which a non-arc shield turns a shot
- *  away, and also where the ring is drawn. */
-const SHIELD_REACH_MULT = 1.8;
 
 /** A still player in empty space with a working shield core, so the only
  *  thing that can touch it is the synthetic bolt. */
@@ -73,6 +69,9 @@ function shootPlayer(page: any, o: {
     p.systemsDisabled = opt.disabled === true;
     p.health = p.maxHealth;
 
+    // 1.8 = SHIELD_CONSTANTS.COLLISION_MULTIPLIER, hard-coded (harness rule
+    // 7): a live shield inflates the player's collision shape by it, and on
+    // this axis that shape's face is where the shield catches the bolt.
     const reach = Math.max(p.size.x, p.size.y) * 0.5 * 1.8;
     const gap = opt.where === 'hull' ? 0 : reach - 2;
     const proj: any = {
@@ -269,13 +268,13 @@ test.describe('a live shield turns a shot away', () => {
   });
 });
 
-test.describe('one deflection primitive, two callers', () => {
+test.describe('one deflection primitive, every caller', () => {
   test('a bolt already travelling outward is never deflected twice', async ({ page }) => {
     const watch = await boot(page);
     await shieldedPlayer(page);
 
     /*  The `v·n >= 0` guard IS the no-immediate-re-trigger rule, and it lives
-     *  in the helper so both callers get it.  Pinned directly on the static
+     *  in the helper so every caller gets it.  Pinned directly on the static
      *  rather than through a collision, because it is the one part of the
      *  primitive with no observable side effect when it fires correctly. */
     const r = await engine(page, e => {
@@ -302,47 +301,8 @@ test.describe('one deflection primitive, two callers', () => {
 
     watch.assertClean();
   });
-
-  test('a bouncer still reflects off a tile face and spends a bounce', async ({ page }) => {
-    const watch = await boot(page);
-    await shieldedPlayer(page);
-
-    /*  The second caller.  Its normal is an axis-aligned tile face, for which
-     *  the helper's mirror reduces to negating one component — which is
-     *  exactly the arithmetic this path did by hand before the fold.  Driven
-     *  against a REAL static tile off the glass field so the variant gate
-     *  (`nebula-tile` passes through) is the shipped one. */
-    const r = await engine(page, e => {
-      const t = e.currentMap.entities.find((x: any) =>
-        x.active && x.type === 'STRUCTURE' && x.mass === Infinity);
-      if (!t) throw new Error('no static tile on the glass field');
-      const proj: any = {
-        id: 'defl_bounce', type: 'PROJECTILE', isBouncer: true, bouncesRemaining: 3,
-        position: { x: t.position.x + t.size.x * 0.25, y: t.position.y },
-        velocity: { x: -12, y: 0 }, rotation: Math.PI,
-        size: { x: 6, y: 6 }, mass: 1, active: true, color: '#fff',
-        damage: 5, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-      };
-      const before = { vx: proj.velocity.x, bounces: proj.bouncesRemaining, tileHp: t.health };
-      e.physics.resolveCollision(proj, t, { x: -4, y: 0 });
-      return {
-        before,
-        vx: proj.velocity.x,
-        bounces: proj.bouncesRemaining,
-        active: proj.active === true,
-        tileHp: t.health,
-        outsideFace: proj.position.x > t.position.x + t.size.x * 0.5,
-      };
-    });
-
-    expect(r.vx, 'the entry face flipped its travel').toBeCloseTo(-r.before.vx, 5);
-    expect(r.active, 'and the round lives on').toBe(true);
-    expect(r.bounces, 'one bounce spent').toBe(r.before.bounces - 1);
-    expect(r.outsideFace, 'snapped clear of the face it hit').toBe(true);
-    expect(r.tileHp, 'a bounce is not a hit — the tile is unharmed').toBe(r.before.tileHp);
-
-    watch.assertClean();
-  });
+  // (The bouncer tile-face caller was retired with the ricochet primitive —
+  //  energy modules; the shield ring is now the helper's one caller.)
 });
 
 test.describe('the real fight, not a synthetic pair', () => {

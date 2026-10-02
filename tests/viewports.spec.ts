@@ -18,14 +18,14 @@
  *
  *  Three things it deliberately does NOT do:
  *
- *  - It does not re-run the other 111 tests at six sizes. Those assert
+ *  - It does not re-run the other suites at six sizes. Those assert
  *    behaviour, and behaviour is not a function of viewport; multiplying
  *    them would buy a six-times-longer merge gate and no information.
  *  - It does not screenshot. Visual regression is parked (tiers 3–5) and a
  *    capture with no assertion is not a test.
- *  - It does not reimplement any layout arithmetic. The three pure layout
+ *  - It does not reimplement any layout arithmetic. The pure layout
  *    functions are driven through `window.__omniHud` (App.tsx, debug handle
- *    #4) for the same reason `input.spec.ts` drives the HID builders through
+ *    #5) for the same reason `input.spec.ts` drives the HID builders through
  *    `window.__omniHid`: they are pure, and they are wrong in a way nothing
  *    reports.
  */
@@ -33,9 +33,12 @@
 import { test, expect, type Page } from '@playwright/test';
 import { boot, engine, startRun, waitForStats, waitForEngine, dockAtStation } from './helpers';
 
+/** A screen rect, edges in CSS px. */
+type Box = { l: number; t: number; r: number; b: number };
+
 /** The tap-target floor, hard-coded rather than imported (harness rule 7 —
  *  a test that imports the value it checks asserts that a constant equals
- *  itself). Matches `screens.spec.ts` and the `TAP` class in UIOverlay. */
+ *  itself). Matches the `TAP` class in components/uiClasses.ts. */
 const TAP_FLOOR = 40;
 
 const VIEWPORTS = [
@@ -53,11 +56,12 @@ const VIEWPORTS = [
 
 /** Interactive elements below the tap floor, in the CURRENTLY-VISIBLE DOM.
  *
- *  The debug menu is excluded by construction rather than by a filter: it is
- *  collapsed by default and this suite never opens it. That exemption is
- *  deliberate and documented (5d D4) — a developer surface behind two
- *  dropdowns trades reach for density, and a 40px floor on ~90 diagnostic
- *  rows would add screens of scroll to a panel whose whole job is density. */
+ *  The debug PANEL is excluded by construction rather than by a filter: it
+ *  is closed by default and this suite never opens it. That exemption is
+ *  deliberate and documented (5d D4) — a developer surface trades reach for
+ *  density, and a 40px floor on ~200 diagnostic rows would add screens of
+ *  scroll to a panel whose whole job is density.  Its LAUNCHER is an
+ *  ordinary control on every screen and is held to the floor like any other. */
 async function smallTargets(page: Page) {
   return page.evaluate((floor: number) => {
     const out: { label: string; w: number; h: number }[] = [];
@@ -140,7 +144,7 @@ for (const vp of VIEWPORTS) {
     test('the menus lay out inside the window and clear the tap floor', async ({ page }) => {
       const watch = await boot(page);
 
-      // Main menu, then with both dropdowns' non-debug half open.
+      // Main menu, then with the Controls & Basics panel open.
       expect(await offViewport(page), 'main menu').toEqual([]);
       expect(await smallTargets(page), 'main menu tap targets').toEqual([]);
 
@@ -243,12 +247,12 @@ for (const vp of VIEWPORTS) {
       watch.assertClean();
     });
 
-    test('the boss bar never lands on the readout stack', async ({ page }) => {
+    test('the boss bar never lands on the readout row', async ({ page }) => {
       const watch = await boot(page);
       await startRun(page);
       await engine(page, e => e.transitionToMap('arena_universe'));
       await waitForStats(page, s => s.currentMapType === 'UNIVERSE', 'the arena');
-      // Money and two status effects, so the chip stack is at its TALLEST —
+      // Money and two status effects, so the readout row is at its TALLEST —
       // which is the state the collision happened in.
       await engine(page, e => {
         e.awardScore(123456);
@@ -259,36 +263,42 @@ for (const vp of VIEWPORTS) {
       await engine(page, e => e.debugSpawnBoss('BOSS_WARDEN'));
       await waitForStats(page, s => !!s.boss, 'the boss bar');
 
-      const hits = await page.evaluate(() => {
+      const { hits, examined } = await page.evaluate(() => {
         const bar = document.querySelector('[data-testid="boss-bar"]');
-        if (!bar) return ['no boss bar rendered'];
+        if (!bar) return { hits: ['no boss bar rendered'], examined: 0 };
         const b = bar.getBoundingClientRect();
         const out: string[] = [];
-        for (const el of Array.from(document.querySelectorAll('div'))) {
-          if (el === bar || bar.contains(el) || el.contains(bar)) continue;
-          const c = el.className;
-          // The HUD readout chips — the stack the bar used to land on.
-          if (typeof c !== 'string' || !/backdrop-blur-sm/.test(c)) continue;
+        let examined = 0;
+        // Everything else in the top band, selected by STRUCTURE — the class
+        // this used to key on left the chips in U6 and the check went
+        // silently empty.
+        for (const el of Array.from(document.querySelectorAll('[data-testid="hud-top"] *'))) {
+          if (bar.contains(el) || el.contains(bar)) continue;
           const r = el.getBoundingClientRect();
-          if (r.width === 0) continue;
+          if (r.width === 0 || r.height === 0) continue;
+          examined++;
           const clear = r.right <= b.left || b.right <= r.left
                      || r.bottom <= b.top || b.bottom <= r.top;
-          if (!clear) out.push((el.textContent || '').trim().slice(0, 30));
+          if (!clear) {
+            out.push(el.getAttribute('data-testid')
+              || (el.textContent || '').trim().slice(0, 30) || el.tagName);
+          }
         }
-        return out;
+        return { hits: out, examined };
       });
       expect(hits, 'HUD chips overlapping the boss bar').toEqual([]);
+      expect(examined, 'the readout row was actually measured').toBeGreaterThan(4);
 
       // And the bar itself stays on screen.
       const bb = (await page.getByTestId('boss-bar').boundingBox())!;
       expect(bb.x).toBeGreaterThanOrEqual(0);
       expect(bb.x + bb.width).toBeLessThanOrEqual(vp.w + 0.5);
 
-      // The top bar is `justify-between` with three items — vitals chip,
-      // readout stack, pause button — and an unshrinkable middle SHOVES THE
-      // LAST ONE OUT. That is a real regression this caught at 320px while
-      // U5 was being written: the pause button left the screen. So both
-      // ends of the row are pinned, not just the bar between them.
+      // The readout ROW wraps, but PAUSE (with the DBG launcher under it)
+      // sits in a `shrink-0` column outside it — an unshrinkable middle is
+      // what shoved the pause button off a 320px screen while U5 was being
+      // written. So both ends of the band are pinned, not just the bar
+      // above them.
       for (const id of ['player-vitals', 'Pause']) {
         const el = id === 'Pause'
           ? page.getByRole('button', { name: 'Pause' })
@@ -346,7 +356,7 @@ for (const vp of VIEWPORTS) {
        * the HUD").  The arrows ride this rect's edge, so what has to hold is
        * that the rect CLEARS the two HUD bands — otherwise an arrow at a
        * near-vertical bearing, which is "directly ahead" and "directly
-       * behind", draws underneath the chip stack or the loadout strip.
+       * behind", draws underneath the readout row or the loadout strip.
        *
        * This is the whole reason the rect is a pure exported function: an
        * arrow under a chip throws nothing and logs nothing, and it is a
@@ -376,6 +386,128 @@ for (const vp of VIEWPORTS) {
       watch.assertClean();
     });
 
+    test('the debug launcher has a slot of its own, on every screen', async ({ page }) => {
+      /*  The top HUD row and both bottom corners were already full when the
+       *  launcher arrived, so it lives in two places: stacked under PAUSE in
+       *  live play, and floating bottom-right over a full-screen overlay —
+       *  where every overlay pads its scroll end clear of it.  Both homes are
+       *  asserted here because both are functions of the viewport. */
+      const watch = await boot(page);
+      const intersects = (a: Box, b: Box) =>
+        !(a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t);
+
+      // ── Live play: under PAUSE, clear of everything else on the HUD ──
+      await startRun(page);
+      // Both joystick schemes, because each draws a FIRE button — the one
+      // piece of canvas furniture that can sit on the launcher's side.
+      for (const scheme of ['joystick-right', 'joystick-left']) {
+        await engine(page, (e, s: string) => e.setControlScheme(s), scheme);
+        await waitForEngine(page, e => !!e.input.getFireButtonState(), 'the fire button');
+        const g = await page.evaluate(() => {
+          const hud = (window as any).__omniHud;
+          const eng = (window as any).__omniEngine;
+          const W = window.innerWidth, H = window.innerHeight;
+          const box = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            return { l: r.left, t: r.top, r: r.right, b: r.bottom };
+          };
+          const launcher = document.querySelector('[data-testid="debug-launcher"]')!;
+          // Everything else in the top band — readout chips, status badges,
+          // the scan button, PAUSE — excluding only what contains the
+          // launcher (the band and its control column).
+          const band: { label: string; box: Box }[] = [];
+          for (const el of Array.from(document.querySelectorAll('[data-testid="hud-top"] *'))) {
+            if (el.contains(launcher) || launcher.contains(el)) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            band.push({
+              label: el.getAttribute('data-testid') || el.getAttribute('aria-label')
+                || (el.textContent || '').trim().slice(0, 24) || el.tagName,
+              box: box(el),
+            });
+          }
+          const mm = hud.computeMinimapRect(H, false);
+          const mmOpen = hud.computeMinimapRect(H, true);
+          const L = hud.computeLoadoutHUDLayout(W, H);
+          const fb = eng.input.getFireButtonState();
+          return {
+            W, H,
+            launcher: box(launcher),
+            band,
+            canvas: [
+              { label: 'minimap', box: { l: mm.x, t: mm.y, r: mm.x + mm.size, b: mm.y + mm.size } },
+              { label: 'minimap (open)', box: { l: mmOpen.x, t: mmOpen.y, r: mmOpen.x + mmOpen.size, b: mmOpen.y + mmOpen.size } },
+              ...L.slotXs.map((x: number, i: number) =>
+                ({ label: `loadout slot ${i}`, box: { l: x, t: L.startY, r: x + L.slotW, b: H } })),
+              { label: 'FIRE button', box: { l: fb.x - fb.radius, t: fb.y - fb.radius, r: fb.x + fb.radius, b: fb.y + fb.radius } },
+            ],
+            ind: hud.computeIndicatorRect(W, H),
+          };
+        });
+
+        const l = g.launcher;
+        expect(l.l, `${scheme}: launcher left edge`).toBeGreaterThanOrEqual(0);
+        expect(l.r, `${scheme}: launcher right edge`).toBeLessThanOrEqual(g.W + 0.5);
+        expect(Math.min(l.r - l.l, l.b - l.t), `${scheme}: launcher clears the tap floor`)
+          .toBeGreaterThanOrEqual(TAP_FLOOR);
+        const hits = [...g.band, ...g.canvas]
+          .filter(o => intersects(l, o.box)).map(o => o.label);
+        expect(hits, `${scheme}: what the launcher overlaps`).toEqual([]);
+        // Above the touch stick's zone, which starts 30% of the way down
+        // (INPUT_CONSTANTS.JOYSTICK.ZONE_TOP_FRAC) on whichever side it is.
+        expect(l.b, `${scheme}: launcher above the stick's zone`).toBeLessThanOrEqual(g.H * 0.30);
+        // And the off-screen arrows ride BELOW the control column, the band
+        // UI_CONSTANTS.INDICATORS.CONTROL_COLUMN_INSET reserves for it.
+        expect(g.ind.top, `${scheme}: arrows clear the launcher`).toBeGreaterThan(l.b);
+      }
+
+      // ── Over an overlay: floating, and every overlay's scroll end clears it ──
+      const fabClearOf = (overlay: string) => page.evaluate((sel: string) => {
+        const ov = document.querySelector(sel) as HTMLElement;
+        ov.scrollTop = ov.scrollHeight;
+        const f = document.querySelector('[data-testid="debug-launcher"]')!.getBoundingClientRect();
+        const W = window.innerWidth, H = window.innerHeight;
+        const out: string[] = [];
+        if (f.left < 0 || f.right > W + 0.5 || f.bottom > H + 0.5) out.push('launcher off screen');
+        for (const el of Array.from(ov.querySelectorAll('button, select, input, h2, p'))) {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) continue;
+          if (!(r.right <= f.left || f.right <= r.left || r.bottom <= f.top || f.bottom <= r.top)) {
+            out.push((el.getAttribute('data-testid') || (el.textContent || '').trim().slice(0, 24)
+              || el.tagName).replace(/\s+/g, ' '));
+          }
+        }
+        return out;
+      }, overlay);
+
+      await engine(page, e => e.pauseGame());
+      await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+      expect(await fabClearOf('[data-overlay="pause"]'), 'pause: under the launcher').toEqual([]);
+      await engine(page, e => e.resumeGame());
+      await waitForStats(page, s => s.gameState === 'PLAYING', 'the run resumed');
+
+      await engine(page, e => e.addDebugCredits(200000));
+      await dockAtStation(page);
+      for (const tabId of ['shop', 'outfit', 'ship'] as const) {
+        const tab = page.getByTestId(`station-tab-${tabId}`);
+        if (!(await tab.count())) continue;
+        await tab.click();
+        expect(await fabClearOf('[data-overlay="station"]'), `station ${tabId}: under the launcher`).toEqual([]);
+      }
+      await engine(page, e => e.undock());
+      await waitForStats(page, s => !s.dock?.docked, 'undocked');
+
+      await engine(page, e => e.startExplosion(e.player));
+      await waitForStats(page, s => !!s.runSummary, 'the run summary');
+      expect(await fabClearOf('[data-overlay="death"]'), 'death: under the launcher').toEqual([]);
+
+      await engine(page, e => e.quitToMenu());
+      await waitForStats(page, s => s.gameState === 'MENU', 'the main menu');
+      expect(await fabClearOf('[data-overlay="menu"]'), 'main menu: under the launcher').toEqual([]);
+
+      watch.assertClean();
+    });
+
     test('every banner the game can actually produce fits this window', async ({ page }) => {
       const watch = await boot(page);
       await startRun(page);
@@ -388,16 +520,24 @@ for (const vp of VIEWPORTS) {
        * So "always fits" is not the contract and asserting it would be
        * asserting a guarantee the function does not make. What matters is
        * the ENVELOPE: every string the game can really put in a banner must
-       * fit WITHOUT reaching the floor, at every viewport. That is pinned
-       * against the real BOSS_DEFS roster rather than a hardcoded list, so
-       * adding a long boss name fails here instead of clipping in play.
+       * fit WITHOUT reaching the floor, at every viewport. The authored
+       * parts — boss names, the capstone's reward label — are read off the
+       * live game rather than typed here, so a long one fails this test
+       * instead of clipping in play.
+       *
+       * One family is NOT listed: a boss's PHASE announcement
+       * (`BossPhaseDef.announce`). Measured at 320px, two of the Bastion's
+       * reach the floor ('BASTION — REPAIR SYSTEMS ONLINE' clips outright) —
+       * a product issue this test cannot fix, so they are left out rather
+       * than pinned red.
        *
        * The pathological case is kept alongside, asserting the documented
        * give-up (exactly the floor, not zero and not NaN). */
-      // The boss NAMES come from the sim, not from a list duplicated here:
-      // spawn each capstone through the real DBG path and read the name the
-      // HUD publishes. A new boss with a long name then fails this test
-      // rather than clipping in play.
+      // The capstone IDs are listed here (harness rule 7 — a new capstone is
+      // a visible edit to this list and to the count below); their NAMES
+      // come from the sim: spawn each through the real DBG path and read the
+      // name the HUD publishes, so a long rename fails this test rather than
+      // clipping in play.
       const bossNames: string[] = [];
       for (const id of ['BOSS_WARDEN', 'BOSS_SCATTER', 'BOSS_SIEGE']) {
         await engine(page, (e, bid: string) => e.debugSpawnBoss(bid), id);
@@ -410,7 +550,14 @@ for (const vp of VIEWPORTS) {
       }
       expect(bossNames.length, 'the capstone roster').toBe(3);
 
-      const fit = await page.evaluate((names: string[]) => {
+      // The capstone's reward is a random module drawn from the catalog the
+      // shop sells (bosses.ts `grantBossModule`), so every label in it is a
+      // reward subtext the game can put up.
+      const rewardLabels: string[] = await engine(page, e =>
+        e.outfittingSnapshot().catalog.map((c: { label: string }) => c.label));
+      expect(rewardLabels.length, 'the reward catalog').toBeGreaterThan(0);
+
+      const fit = await page.evaluate(({ names, rewards }: { names: string[]; rewards: string[] }) => {
         const hud = (window as any).__omniHud;
         const ctx = document.createElement('canvas').getContext('2d')!;
         const W = window.innerWidth;
@@ -422,14 +569,22 @@ for (const vp of VIEWPORTS) {
           ctx.font = `bold ${px}px monospace`;
           return { text, px, min, width: ctx.measureText(text).width };
         };
-        // Every MAIN line a banner can carry, and every SUBTEXT line.
+        // The capstone's salvage (BOSS_CONSTANTS.SALVAGE_DROPS 12 ×
+        // SALVAGE_CONSTANTS.CREDITS_PER_DROP 1000, localised as the banner
+        // does) and the snitch's SCORE_CONSTANTS.SNITCH_POINTS (1500),
+        // hard-coded per harness rule 7.
+        const salvage = `+◈${(12 * 1000).toLocaleString()}`;
+        // Every MAIN line a banner can carry (bar the phase announcements
+        // above), and every SUBTEXT line.
         const mains = [
-          'WAVE 1', 'WAVE 12',
+          'WAVE 1', 'WAVE 12', 'WAVE 12 CLEARED', 'SNITCH CAUGHT',
           ...names,
           ...names.map(b => `${b} DESTROYED`),
         ];
         const subs = [
           'DESTROY 6 HOSTILES', 'DESTROY 24 HOSTILES', 'WAVE 6  ·  CAPSTONE',
+          '120S', 'WAVE 12 CLEARED  +1500 PTS', 'PHASE 3', `${salvage} SALVAGE`,
+          ...rewards.map(r => `${salvage}  ·  ${r.toUpperCase()}`),
         ];
         return {
           W, safe,
@@ -438,7 +593,7 @@ for (const vp of VIEWPORTS) {
           absurd: measure('A VERY LONG CAPSTONE NAME THAT NOBODY WOULD EVER WRITE', BASE, MIN),
           noShrink: measure('WAVE 1', BASE, MIN).px,
         };
-      }, bossNames);
+      }, { names: bossNames, rewards: rewardLabels });
 
       for (const m of [...fit.mains, ...fit.subs]) {
         expect(m.px, `"${m.text}": never above the design size`).toBeLessThanOrEqual(48);

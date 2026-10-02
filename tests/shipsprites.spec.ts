@@ -211,12 +211,13 @@ test.describe('the sheet renders in a real run', () => {
     await waitForStats(page, s => s.hullModeName === 'Sheet', 'the sheet hull');
 
     // The placeholder cells ship with the repo, so this exercises the REAL
-    // blit path (resolve -> nearest -> drawImage), not the squash fallback.
-    const ready = await page.evaluate(() => {
-      const r: any = (window as any).__omniEngine.renderer ?? null;
-      return !!r;
-    });
-    expect(ready).toBe(true);
+    // blit path (resolve -> nearest -> drawImage), not the squash fallback —
+    // once they have LOADED.  `anyReady` is the gate the draw path reads, and
+    // until it holds Sheet mode silently draws the legacy squash instead.
+    await waitForEngine(page, e => {
+      const c = e.renderer._shipSheets.get('base');
+      return !!c && c.anyReady(e.renderer._getImg);
+    }, 'the placeholder cells to load');
 
     await engine(page, e => e.input.keys.add('KeyS'));
     await waitForEngine(page, e => Math.abs(e.player.visualRoll ?? 0) > 0.4,
@@ -224,7 +225,7 @@ test.describe('the sheet renders in a real run', () => {
     await engine(page, e => e.input.keys.delete('KeyS'));
     await waitForEngine(page, e => (e.player.visualRoll ?? 1) === 0, 'levelled off');
 
-    // Back to the shipped default so nothing leaks into another spec.
+    // Seven more clicks lap the 8-step hull cycle back to the shipped 'Ship' default.
     await engine(page, e => { for (let i = 0; i < 7; i++) e.dbg.cyclePlayerHull(); });
     await waitForStats(page, s => s.hullModeName === 'Ship', 'back to the sprite default');
 

@@ -26,12 +26,13 @@
  */
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EngineStats, WeaponType } from '../types';
+import { weaponKey, type EnergyModifier } from './systems/energy';
 import {
     MODULE_DEFS, ModuleDef, ModuleFamily, moduleDef, moduleFitsSlot,
     MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT,
     INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS,
     slotUnlockCost,
-    HEX_ADJACENCY, WEAPONS, WEAPON_LIST, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
+    HEX_ADJACENCY, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
     SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
   massFor, hullDensity, SPRITE_CONSTANTS,
 } from '../constants';
@@ -52,11 +53,15 @@ export function computeActiveSlots(g: GameEngine, slots: (string | null)[], out:
         for (let i = 0; i < slots.length; i++) {
             const id = slots[i];
             if (id === null || out[i]) continue;
-            const req = MODULE_REQUIREMENTS[moduleDef(id)!.family];
+            // An id the catalog does not know (a retired module) is inert
+            // rather than a crash — unknown modules fail SAFE.
+            const def = moduleDef(id);
+            const req = def ? MODULE_REQUIREMENTS[def.family] : undefined;
             if (!req) continue;
             for (const n of HEX_ADJACENCY[i]) {
                 const nid = slots[n];
-                if (nid !== null && out[n] && req.includes(moduleDef(nid)!.family)) {
+                const nfam = nid !== null ? moduleDef(nid)?.family : undefined;
+                if (nfam !== undefined && out[n] && req.includes(nfam)) {
                     out[i] = true;
                     changed = true;
                     break;
@@ -116,7 +121,8 @@ export function applyModuleEffects(g: GameEngine) {
     fold(g.weaponSlots, g.activeWeapon);
     g.moduleSpeedMult = 1 + speed;
     // Ship weight: flying light is faster — an unladen ship earns the
-    // BASE_BOOST, a heavy one drags (Blaster-only ≈ the 1.0 baseline).
+    // BASE_BOOST, a heavy one drags (the lean Base Hull + Projector, weight
+    // 2.0, is ×1.05).
     g.shipWeight = shipWeight;
     g.moduleThrustMult = (1 + accel)
         * (SHIP_WEIGHT.BASE_BOOST / (1 + SHIP_WEIGHT.DRAG_PER_WEIGHT * shipWeight));
@@ -149,10 +155,10 @@ export function applyModuleEffects(g: GameEngine) {
     g.scannerMk = scanner;
     g.scanRanges = scannerRangesFor(scannerMarks);
     g.player.overchargeUnlocked = overcharge;
-    // Flashlight Kit: the ship-tap light tool exists only while the kit is
-    // installed and ACTIVE (touching a hull, like every utility).  Losing
-    // the kit also turns the light OFF — an uninstalled tool must not leave
-    // its beam burning.
+    // The Light module (catalog id `flashlight_kit`): the ship-tap light tool
+    // exists only while it is installed and ACTIVE (touching a hull, like
+    // every utility).  Losing the module also turns the light OFF — an
+    // uninstalled tool must not leave its beam burning.
     if (!flashlight) g.flashlightLevel = 0;
     g.flashlightEquipped = flashlight;
 }
@@ -170,20 +176,40 @@ export function syncUnlocksToPlayer(g: GameEngine) {
     if (cur === undefined || !g.equippedWeapons.includes(cur)) {
         const first = g.equippedWeapons.find((w): w is WeaponType => w !== null);
         g.player.currentWeapon = first;
-        g.player.burstQueue = 0;
-        g.currentWeaponIndex = first !== undefined ? WEAPON_LIST.indexOf(first) : 0;
+        g.currentWeaponIndex = 0;
     }
+}
+
+const _activeScratch: boolean[] = new Array(MODULE_SLOT_COUNT).fill(false);
+
+/** The ENERGY MODIFIER a gun at weapon-hex `gunIdx` carries: the first ACTIVE
+ *  energy module touching it, in hex order, or null (the unmodified
+ *  delivery).  A modifier touching two guns modifies both — it is adjacency,
+ *  the same rule every weapon-mod already lives by. */
+export function energyForGunSlot(slots: (string | null)[], active: boolean[], gunIdx: number): EnergyModifier | null {
+    const adj = HEX_ADJACENCY[gunIdx];
+    if (!adj) return null;
+    for (const n of adj) {
+        const id = slots[n];
+        if (id === null || !active[n]) continue;
+        const e = moduleDef(id)?.effect?.energy;
+        if (e) return e;
+    }
+    return null;
 }
 
 /** Rebuild the derived weapon loadout from the mounted guns (any
  *  weapon hex, slot order; ≤ MAX_INSTALLED_GUNS by the move guard),
  *  then re-sync the player entity + recompute activity/effects. */
 export function syncLoadoutFromSlots(g: GameEngine) {
+    // Energy modifiers are per GUN, so the loadout needs activity first.
+    const active = _activeScratch;
+    computeActiveSlots(g, g.weaponSlots, active);
     const guns: WeaponType[] = [];
     for (let i = 0; i < g.weaponSlots.length; i++) {
         const id = g.weaponSlots[i];
         const def = id !== null ? moduleDef(id) : undefined;
-        if (def?.weapon !== undefined) guns.push(def.weapon);
+        if (def?.weapon !== undefined) guns.push(weaponKey(def.weapon, energyForGunSlot(g.weaponSlots, active, i)));
     }
     for (let i = 0; i < g.equippedWeapons.length; i++) {
         g.equippedWeapons[i] = guns[i] ?? null;
@@ -217,7 +243,7 @@ export function resaleValue(g: GameEngine, idx: number, fraction: number): numbe
     if (id === null) return null;
     const def = moduleDef(id);
     if (!def) return null;
-    // Priced off the DISCOUNTED cost, not the catalog cost — see modulePrice.
+    // Priced through modulePrice, not off the raw catalog cost — see there.
     return Math.round(modulePrice(def.cost) * fraction);
 }
 
@@ -266,17 +292,17 @@ export function moveModuleInternal(
     return true;
 }
 
-/** Shop price for a catalog cost after the run's TIMED boss discount ((h)
- *  payout model (d): a boss kill makes the shop cheaper for a window rather
- *  than unlocking anything).  RESALE IS PRICED OFF THE SAME NUMBER
- *  (resaleValue) — if buying were discounted while sell-back stayed on full
- *  catalog cost, buy-then-sell would profit `discount - (1 - SELL_FRACTION)`
+/** Shop price for a catalog cost — the ONE pricing seam.  Identity today:
+ *  the timed boss shop discount it used to apply ((h) payout model (d)) was
+ *  removed when the capstone started dropping a module instead.  RESALE IS
+ *  PRICED OFF THE SAME NUMBER (resaleValue), and any future price modifier
+ *  must join this seam: when buying was discounted while sell-back stayed on
+ *  full catalog cost, buy-then-sell profited `discount - (1 - SELL_FRACTION)`
  *  of cost per cycle, i.e. an infinite money pump above a 10% discount. */
 export function modulePrice(cost: number): number {
     return Math.max(0, Math.round(cost));
 }
 
-/** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
 /** Per-stat module attribution for the Ship Status panel (A2).
  *
  *  Walks the two hex groups exactly the way `applyModuleEffects`'s `fold`
@@ -435,6 +461,7 @@ export function statBreakdown(g: GameEngine) {
     ];
 }
 
+/** Hex-slot outfitting snapshot for the station UI (+ pause readout). */
 export function outfittingSnapshot(g: GameEngine) {
     const hexSnap = (slots: (string | null)[], active: boolean[]) => slots.map((id, i) => {
         if (id === null) return null;
@@ -477,8 +504,9 @@ export function outfittingSnapshot(g: GameEngine) {
         inventory: g.inventory.map(id => {
             if (id === null) return null;
             const def = moduleDef(id)!;
-            // Both resale values track the same discounted price the shop
-            // charges, so a discount can never be laundered into credits.
+            // Both resale values track the same price the shop charges
+            // (modulePrice), so no price modifier can be laundered into
+            // credits.
             const price = modulePrice(def.cost);
             return {
                 id, label: def.label, kind: def.kind as string, family: def.family as string, group: def.group as string,
@@ -490,8 +518,8 @@ export function outfittingSnapshot(g: GameEngine) {
         // slot walk applyModuleEffects folds, so the UI never recomputes a
         // derived stat — it only renders what the sim is already using.
         statLines: statBreakdown(g),
-        // Catalog prices are the DISCOUNTED prices the shop will actually
-        // charge ((h) boss payout model (d)), so the UI needs no arithmetic.
+        // Catalog prices are the prices the shop will actually charge (via
+        // modulePrice), so the UI needs no arithmetic.
         catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
             const price = modulePrice(d.cost);
             return {

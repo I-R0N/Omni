@@ -43,7 +43,8 @@ import NEBULA_MANIFEST from 'virtual:nebula-manifest';
 export const NEBULA_IMAGES_ALL: readonly string[] = NEBULA_MANIFEST;
 
 // Historical baseline: the original nine nebula images (00-08).  Kept as a
-// named subset so the DBG panel can A/B compare "old art" vs "everything".
+// named subset so "old art" could be A/B'd against "everything" (the DBG
+// row that did it is gone — see setActiveNebulaSet below).
 // Rendered from the discovered manifest so a missing file stops rendering,
 // but never includes any of the newer art by accident.
 const SET_A_BASENAMES = new Set([
@@ -64,8 +65,9 @@ export const NEBULA_IMAGES_SET_B: readonly string[] =
 export type NebulaSet = 'A' | 'B' | 'ALL' | 'N16';
 
 // NEBULA_IMAGES is the currently-active list — swapped via
-// setActiveNebulaSet() (wired to the DBG panel).  Consumers read the same
-// array reference, so in-place mutation propagates to all of them.
+// setActiveNebulaSet().  Consumers read the same array reference, so
+// in-place mutation propagates to all of them.  Nothing calls it today (the
+// DBG set cycle is gone), so the active set is always ALL.
 export const NEBULA_IMAGES: string[] = [...NEBULA_IMAGES_ALL];
 
 export function setActiveNebulaSet(set: NebulaSet): string[] {
@@ -176,9 +178,10 @@ export const SHIP_SHEETS: Record<string, ShipSpriteSheet> = {
  * The ONE definition, because three sites need it and they all had their own
  * copy of the same two lines: the map-load tile factory, the shatter-dust
  * puff, and (as of the child-sprite change) every nebula fragment a break
- * produces.  Reading `NEBULA_IMAGES` rather than a captured list is
- * load-bearing — the DBG set cycle mutates that array IN PLACE, so a helper
- * holding its own copy would keep handing out sprites from the retired set.
+ * produces.  Reading `NEBULA_IMAGES` rather than a captured list keeps it
+ * correct if the set is ever swapped again — `setActiveNebulaSet` mutates
+ * that array IN PLACE (nothing calls it today), so a helper holding its own
+ * copy would keep handing out sprites from the retired set.
  *
  * Falls back to the procedural puff marker when the manifest is empty, which
  * is what the copies did and is what keeps a nebula body from rendering as a

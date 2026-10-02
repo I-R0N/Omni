@@ -12,7 +12,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, stats, startRun, waitForStats, dockAtStation, waitForTransit } from './helpers';
+import { boot, engine, stats, startRun, waitForStats, advanceSim, waitForTransit } from './helpers';
 
 const STAGE_WAVE_COUNT = 6; // BOSS_CONSTANTS.WAVE_INTERVAL (5) + the capstone
 
@@ -138,10 +138,10 @@ test.describe('death screen', () => {
     expect(after.pos).toEqual(before.pos);
     expect(after.credits).toBe(before.credits);
 
-    // And pausing is refused while a full-screen overlay is up.
-    await engine(page, e => e.pauseGame());
-    const s = await stats(page);
-    expect(s.gameState).toBe('PLAYING');
+    // And pausing is refused while a full-screen overlay is up.  Read off
+    // the engine in the same breath as the call: the stats payload would say
+    // PLAYING for a frame even if the pause had landed (harness rule 12).
+    expect(await engine(page, e => { e.pauseGame(); return e.gameState; })).toBe('PLAYING');
 
     watch.assertClean();
   });
@@ -190,7 +190,9 @@ test.describe('death screen', () => {
     });
     // And it lands in PLAY, not in the menu.
     expect(restarted.gameState).toBe('PLAYING');
-    // Back at the hub: a restart resets the map override to the front door.
+    // Back at the hub: restartRun reloads the map the run STARTED on
+    // (selectedMapType — the hub here); it is quitting to the menu
+    // (restartGame) that resets a DBG map override.
     expect(restarted.currentMapType).toBe('OVERWORLD');
 
     // ── MAIN MENU: wipe and return to the menu ───────────────────────────
@@ -205,23 +207,8 @@ test.describe('death screen', () => {
     watch.assertClean();
   });
 
-  test('the three buttons clear the 40px tap-target floor at 390px', async ({ page }) => {
-    const watch = await boot(page);
-    await startRun(page);
-    await engine(page, e => e.startExplosion(e.player));
-    await waitForStats(page, s => !!s.runSummary, 'the run summary');
-
-    for (const id of ['death-respawn', 'death-restart', 'death-menu']) {
-      const box = await page.getByTestId(id).boundingBox();
-      expect(box, `${id} should be laid out`).not.toBeNull();
-      expect(box!.height, `${id} height`).toBeGreaterThanOrEqual(40);
-      // And it must fit the phone it is played on.
-      expect(box!.x).toBeGreaterThanOrEqual(0);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(390);
-    }
-
-    watch.assertClean();
-  });
+  // The three buttons' 40px tap floor is not re-checked here: viewports.spec
+  // asserts it for the same three testids at 390×844 and five other sizes.
 });
 
 test.describe('a boss ends the ladder', () => {
@@ -250,27 +237,39 @@ test.describe('a boss ends the ladder', () => {
     const before = await engine(page, e => ({
       halted: !!e.waves.halted,
       waveIndex: e.waveIndex,
+      pending: e.waves.spawnList.length - e.waves.nextSpawnIdx,
     }));
     expect(before.halted, 'the ladder runs normally before the boss').toBe(false);
+    // The precondition, not the claim (harness rule 13): wave 1 streams its
+    // budget over ~30 s, so ordinary spawns are still queued when the boss
+    // warps in.  Without them the drop below would have nothing to drop.
+    expect(before.pending, 'ordinary spawns still queued').toBeGreaterThan(0);
 
     await engine(page, e => e.debugSpawnBoss('BOSS_WARDEN'));
     await waitForStats(page, s => !!s.boss, 'the boss to warp in');
 
     const during = await engine(page, e => ({
       halted: !!e.waves.halted,
-      grace: e.waves.waveGraceTimer ?? 0,
       waveIndex: e.waveIndex,
+      pending: e.waves.spawnList.length - e.waves.nextSpawnIdx,
     }));
     expect(during.halted, 'the ladder stops the moment the boss appears').toBe(true);
-    // No countdown left advertising a wave that is not coming.
-    expect(during.grace).toBe(0);
+    // A boss warped in MID-wave ends that wave's stream: the ordinary spawns
+    // still queued behind it belong to a wave that is over, so none of them
+    // may land on top of the fight.  (A capstone keeps its own escort; this
+    // is a DBG warp-in during wave 1, so there is none.)
+    expect(during.pending, 'the ordinary spawns queued behind the boss are dropped').toBe(0);
     expect(during.waveIndex, 'and it stops where it was, it does not jump')
       .toBe(before.waveIndex);
 
     // Kill it through the real death path, then dismiss the stage-clear
     // screen so the arena is running again — this is the moment the ladder
-    // used to pick back up.
+    // used to pick back up.  Rival warp-ins are switched off first: the
+    // bounty's score would call hostile rivals down on a lean ship parked
+    // for the whole wait below (harness rule 14), and rivals are not the
+    // ladder.
     await engine(page, e => {
+      e.nextRivalScore = Number.POSITIVE_INFINITY;
       const boss = e.currentMap.entities.find((x: any) => x.isBoss && x.active);
       boss.killedByPlayer = true;
       e.handleEntityDeath(boss);
@@ -279,11 +278,15 @@ test.describe('a boss ends the ladder', () => {
     await engine(page, e => e.dismissStageClear());
     await waitForStats(page, s => !s.stageClear, 'the screen to dismiss');
 
-    // Give the arena real time — longer than a grace period — with the sim
+    // Give the arena more than a grace period of SIM time, with the sim
     // running, which is what makes this a test of the resume and not of the
-    // freeze.
+    // freeze.  Wall clock would not do: the rout ended the wave and armed a
+    // 4.5 s grace, about 2.6 s of it is still left after the stage-clear
+    // beat, and on a software-rendered runner a few seconds of wall clock is
+    // LESS sim than that — the wait would end before a wrongly restarted
+    // ladder could show.
     const after0 = await engine(page, e => e.waveIndex);
-    await page.waitForTimeout(2500);
+    await advanceSim(page, 6); // > WAVE_CONSTANTS.GRACE_PERIOD (4.5 s)
     const after = await engine(page, e => ({
       halted: !!e.waves.halted,
       waveIndex: e.waveIndex,
@@ -291,6 +294,7 @@ test.describe('a boss ends the ladder', () => {
     }));
     expect(after.halted, 'still halted after the boss is dead').toBe(true);
     expect(after.waveIndex, 'and no new wave started').toBe(after0);
+    expect(after.state, 'the routed wave completed and nothing replaced it').toBe('cleared');
 
     watch.assertClean();
   });
@@ -316,8 +320,8 @@ test.describe('a boss ends the ladder', () => {
 });
 
 test.describe('stage-clear screen', () => {
-  /** Warp a capstone in on an ARENA (the hub runs no waves, so a DBG boss
-   *  there has no ladder to descend from) and kill it. */
+  /** Warp a capstone in on an ARENA (the hub runs no waves, and bosses.ts
+   *  only raises the stage-clear screen on a wave map) and kill it. */
   async function clearAStage(page: any, bossId = 'BOSS_WARDEN') {
     await startRun(page);
     await engine(page, e => e.transitionToMap('arena_universe'));
@@ -339,9 +343,12 @@ test.describe('stage-clear screen', () => {
 
     // THE BEAT: the screen does not snap up on the killing blow.  The sim
     // keeps running for STAGE_CLEAR_DELAY_SEC so the explosion, debris and
-    // salvage spray land before control is taken away.
-    const immediately = await stats(page);
-    expect(immediately.stageClear).toBeUndefined();
+    // salvage spray land before control is taken away.  Read off the ENGINE:
+    // the stats payload lags a frame (harness rule 12), so it would show no
+    // screen here even if the kill had raised one at once.
+    const beat = await engine(page, e => ({ pending: e.stageClearPending, delay: e.stageClearDelay }));
+    expect(beat.pending, 'no screen on the killing blow').toBe(false);
+    expect(beat.delay, 'the beat is armed and counting').toBeGreaterThan(0);
 
     const cleared = await waitForStats(page, s => !!s.stageClear, 'the stage-clear screen');
     const sc = cleared.stageClear!;

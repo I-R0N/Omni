@@ -43,6 +43,11 @@ export interface RendererDiagnostics {
   chevronsOffscreenOnly: boolean;
   damageTriggeredBars: boolean;
   bossBarActive: boolean;
+  /** Where the open DEBUG PANEL sits (CSS px), or null.  Pushed per frame by
+   *  GameEngine.draw; the screen-space HUD is clipped out from under it, since
+   *  the panel is see-through.  A second renderer may ignore it (the panel is
+   *  a debug surface). */
+  hudHole: { x: number; y: number; w: number; h: number } | null;
   /** Transit-warp progress 0->1 while a wormhole flight is in flight; null
    *  otherwise.  Pushed per frame by GameEngine.draw. */
   portalWarp: number | null;
@@ -53,8 +58,9 @@ export interface RendererDiagnostics {
   /** SCANNER — pushed per frame by GameEngine.draw from the module fold and
    *  the live ping.  `scannerMk` is the highest mark aboard (which detection
    *  TIERS are reachable) and `scanRanges` is the per-tier reach; the rest
-   *  carry the ping and the material bubble.  With no scanner the minimap and
-   *  the off-screen arrows show nothing but the always-charted landmarks. */
+   *  carry the ping and the auto sweep.  With no scanner the minimap and the
+   *  off-screen arrows show only what natural encounter has detected
+   *  (`SCANNER.ENCOUNTER_RANGE`) plus the always-charted landmarks. */
   scannerMk: number;
   scanRanges: number[];
   scanPingRadius: number;
@@ -63,6 +69,11 @@ export interface RendererDiagnostics {
   autoPingRadius: number;
   autoPingMax: number;
   simClock: number;
+  /** Energy-module feedback view (render/energyFx.ts). */
+  energyFx: import('./render/energyFx').EnergyFxView | null;
+  /** The last completed ping's WHEN / HOW FAR / WHERE — UNREAD by the
+   *  renderer since `GameEngine.discoverStructures` replaced the radius
+   *  reveal; still pushed by GameEngine.draw. */
   materialRevealAt: number;
   materialRevealRadius: number;
   materialRevealX: number;

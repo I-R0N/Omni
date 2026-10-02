@@ -111,13 +111,31 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   // count, so a very large body gets coarser grains rather than hundreds
   // of cells.  Constant grain size holds BETWEEN the two.
   sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
+  // ENERGY FRACTURE PROFILE (energy modules, §7): the energy that first
+  // breaks into a body scales the site count it decomposes with — glass
+  // under heat fails into a few large pieces, under a slug into many.  It
+  // applies AFTER the material clamp because that is the point (a thermal
+  // pane below glass's own floor), bounded to [2, 1.5 × max] so a profile
+  // can neither degenerate the pattern nor blow the decomposition budget.
+  const siteScale = e.fractureProfile?.siteScale;
+  const baseSites = sites;
+  if (siteScale !== undefined && siteScale !== 1) {
+    sites = Math.max(2, Math.min(Math.ceil(f.grainCountMax * 1.5), Math.round(sites * siteScale)));
+  }
+  // Remembered so the boundary model can keep the MATERIAL's toughness: a
+  // profile changes how a body breaks, never how hard it is (see
+  // `bondStrengthFor`).  Undefined when the pattern is the material's own.
+  // Set only when needed (CLAUDE.md §4: optional fields stay optional), so
+  // a body no profile ever touched never grows the key.
+  if (sites !== baseSites) e.fractureSiteRatio = baseSites / sites;
+  else if (e.fractureSiteRatio !== undefined) e.fractureSiteRatio = undefined;
 
   const seed = e.crackSeed ?? (e.crackSeed = seedFromEntityId(e.id));
 
   const ip = localImpactPoint(e);
   const biasOverride = getFractureBiasOverride();
   const impact = ip !== null
-    ? { x: ip.x, y: ip.y, bias: biasOverride ?? f.impactBias }
+    ? { x: ip.x, y: ip.y, bias: biasOverride ?? e.fractureProfile?.bias ?? f.impactBias }
     : undefined;
 
   e.fractureEdges = undefined; // edges are derived — never outlive the cells
@@ -298,7 +316,24 @@ export function bondStrengthFor(e: GameEntity): number | null {
   const f = grainSpecFor(e.shardVariant);
   const s = f?.bondStrength;
   if (s === undefined) return null;
-  return s * getBoundaryStrengthScale();
+  return s * getBoundaryStrengthScale() * profileBondScale(e);
+}
+
+/** A FRACTURE PROFILE CHANGES HOW A BODY BREAKS, NOT HOW TOUGH IT IS (energy
+ *  modules).  A profile that decomposes a body into fewer, larger grains
+ *  (metal under a slug) leaves less interior boundary, and HP is DERIVED
+ *  from boundary — measured, metal's derived HP fell 470 → 260 at 0.4× the
+ *  sites.  Toughness is `bondStrength`'s job (and heat's), so the per-pixel
+ *  strength of such a pattern is scaled back up by the site ratio to the
+ *  power the boundary length actually follows.  0.65 is that fit, measured
+ *  across all four grain materials on real tiles (derived HP lands within
+ *  1-2% of the unscaled pattern's).  Only while the pattern it describes
+ *  exists: an invalidated pattern's ratio is stale until it is rebuilt. */
+const PROFILE_BOND_EXPONENT = 0.65;
+function profileBondScale(e: GameEntity): number {
+  const r = e.fractureSiteRatio;
+  if (r === undefined || e.fractureCells === undefined || !(r > 0)) return 1;
+  return Math.pow(r, PROFILE_BOND_EXPONENT);
 }
 
 /** MEASURED: the interior boundary a decomposition puts inside a body, per
@@ -353,10 +388,12 @@ export function estimateBoundaryHp(variantId: ShardVariantId, size: number, merg
 export function ensureBoundaryModel(
   e: GameEntity,
 ): { edges: FractureEdge[]; fill: number[]; strength: number } | null {
-  const strength = bondStrengthFor(e);
-  if (strength === null) return null;
+  if (bondStrengthFor(e) === null) return null;
   const edges = ensureFractureEdges(e);
   if (edges === null || edges.length === 0) return null;
+  // Read AFTER the pattern exists: its site ratio (a fracture profile) is
+  // part of the strength — see `profileBondScale`.
+  const strength = bondStrengthFor(e)!;
 
   // The edge array is rebuilt whenever the pattern is (a DBG knob, a
   // merge): re-seed the fills to match rather than index a stale array.

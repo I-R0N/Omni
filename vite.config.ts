@@ -63,6 +63,10 @@ function nebulaManifestPlugin(): Plugin {
 /**
  * SFX manifest — auto-discovers recorded takes in `public/assets/sfx/`.
  *
+ * These WAVs are the SECOND tier, a fallback: AudioSystem fetches a take only
+ * for an id that no decoded cinematic bank (`public/assets/audio/`) covers,
+ * which today is none of them.
+ *
  * Same shape as the nebula plugin above and for the same reason: dropping a
  * file into the folder should be the whole workflow.  With 100+ sound ids and
  * several takes wanted per id, a hand-maintained list in the registry would be
@@ -77,7 +81,8 @@ function nebulaManifestPlugin(): Plugin {
  * A file is matched to an id by LONGEST-PREFIX against the ids the registry
  * actually declares, which happens at runtime where that set is known — so
  * this plugin only has to list what exists, not understand it.  A file that
- * matches nothing is ignored (and reported by `scripts/smoke/assets.mjs`).
+ * matches nothing is ignored, listed in the pause menu's audio panel, and
+ * caught by `tests/audio.spec.ts`, which asserts there are none.
  */
 function sfxManifestPlugin(): Plugin {
   const VIRTUAL_ID = 'virtual:sfx-manifest';

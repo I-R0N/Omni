@@ -5,6 +5,71 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Bastion siege shell inherits the bare Cannon's fuse (parked 2026-10-02)
+
+Found while re-checking the tests and docs cleanup (I-R0N/Omni#106) against
+the energy modules (I-R0N/Omni#104).  It was out of scope there, so it is
+parked here.  `BOSS_WEAPONS.SIEGE` in `constants.ts` spreads the BARE
+`WEAPONS.cannon` and restates damage, speed, lifetime, mass and an authored
+splash.  It does not restate `detonateOn`, `boreCostScale`, `color` or `size`.
+#104 made the bare Cannon a small, white, time-fused penetrator, and the
+Bastion's shells inherited all of that:
+
+- **No splash on contact.**  Under `detonateOn: 'fuse'`, nothing the shell
+  touches trips the charge (`GameEngine.handleProjectileHit`).  A shell that
+  hits the player lands only its 9 direct damage.  The splash is what stops
+  "hug the hull" working, and it now comes only from the fuse.  A shell that
+  stops in terrain sits there waiting for its fuse instead of going off.
+- **A narrow bore.**  At `boreCostScale` 0.25, each shell bores four times as
+  deep through cover as the old one.
+- **The wrong look.**  The shells are white (`BARE_CANNON_COLOR`) at size 12.
+  The old battery fired purple shells (`CANNON_COLOR`) at size 16.
+
+**Fix.**  Either restate the fields on `SIEGE` (`detonateOn: 'enemy'`,
+`boreCostScale: 1`, `color: CANNON_COLOR`, `size: 16`), or spread
+`WEAPONS['cannon+kinetic']`, the old shell's successor.  `SIEGE` already
+restates its own `mass` and `explosionDamage`, so neither needs re-solving.
+
+**An older limit to settle in the same pass.**  At speed 11, the 0.42 s fuse
+ends a shell about 277 units out (11 × 60 × 0.42).  The Bastion's
+`preferredDistance` is 620, so a shell that misses goes off harmlessly in
+mid-flight.  The old Plasma Cannon shell had the same limit.  The comment
+beside `SIEGE` and CLAUDE.md §5 both point here.
+
+## A lit beam outlives the ship (parked 2026-10-02)
+
+This is cosmetic, and was found in the same re-check as the entry above.  If
+the player dies with a beam lit, the beam stays drawn, frozen in place,
+through the whole death beat.  It was confirmed headless: the beam was still
+lit one second after death.
+
+**Cause.**  `tickEnergy` runs in step 7 of `updateGameLogic`, after the step
+that returns early while `player.isExploding` (CLAUDE.md §3).  So the
+`isExploding` clear at the top of `tickBeam` in `engine/energyEffects.ts`
+never runs.  Meanwhile `GameEngine.pushEnergyFx` keeps handing the stale
+`energy.beam` to the renderer every frame.  The electric spread ring
+(`tickRing`) and in-flight kinetic pulses (`tickPulses`) stop the same way,
+so they also freeze on screen.
+
+**Fix.**  Clear the beam, the ring and the pulse burst when the player starts
+exploding.  Do it from the death path itself, or in the `isExploding` branch
+before it returns.  Decide in the same change whether pulses already in
+flight should finish their flight or vanish.  Don't move `tickEnergy` above
+the early return.  The energy layer is meant to stop while dead: CLAUDE.md §3
+says heat neither cools nor burns until the respawn.
+
+## Holding a beam on TOUCH — fold into a hold-to-shoot design (parked 2026-09-29)
+
+The beam is now a held blade (PR #104): it extends from the muzzle, stays out
+while a fire control is held, follows the aim, and retracts on release.
+`InputSystem.isFireHeld` counts the pad's fire point, the onscreen fire
+button, Space/Enter, and a mouse press only in schemes where the pointer does
+not fly the ship.  In the default TOUCH scheme a held finger is STEERING, so a
+touch player can only tap — the beam lights for its own `beamDuration` and
+retracts.  User call: park it, because the user may move the whole game to a
+HOLD-TO-SHOOT design, and holding a beam on touch belongs to that pass rather
+than a one-off gesture (second finger, etc.) now.
+
 ## Controller schemes — refinement pass (parked 2026-08-15)
 
 > **Now THREE pad schemes, not two** (2026-08-19): `gamepad-left` joined
@@ -17,7 +82,7 @@ Add entries freely; revisit during planning.
 > does aim-where-you-fly cost too much when something is behind you?
 
 
-Both pad schemes are SHIPPED AND UNTUNED. The wire format is settled
+All three pad schemes are SHIPPED AND UNTUNED. The wire format is settled
 (`zones`, confirmed on hardware) and the plumbing is covered by tests, but
 every judgement call below was made without a pad in hand and none of it has
 been felt. Parked deliberately: these are looking-and-feeling questions, and
@@ -25,16 +90,14 @@ guessing at them from here is how G12 shipped three bugs.
 
 ### PS5 / full-pad scheme (`gamepad`)
 
-The seven adaptive-trigger profiles in `WEAPON_TRIGGERS` plus the two
-state-driven ones (`chargeTrigger`, `THRUST_TRIGGER`) are authored, not
-tuned. Open:
+The five adaptive-trigger profiles in `WEAPON_TRIGGERS` (one per DELIVERY
+since the energy modules) plus the two state-driven ones (`chargeTrigger`,
+`THRUST_TRIGGER`) are authored, not tuned. Open:
 
-- **Is the Blaster's rattle better than a click?** It fires 7x/s, so a click
-  is fatigue — but a low-frequency `vibration` may just read as mush. This is
-  the single most likely wrong call in the table.
-- **Do Burst's three notches read as three?** `texture` quantises to ten
-  travel zones; three notches inside one pull may blur into one texture.
-- **Is the Cannon's ramp a deep pull or just heavy?** And does Homing's
+- **Is the Projector's rattle better than a click?** It fires ~5.5x/s, so a
+  click is fatigue — but a low-frequency `vibration` may just read as mush.
+  This is the single most likely wrong call in the table.
+- **Is the Cannon's ramp a deep pull or just heavy?** And does the Seeker's
   shallower ramp feel distinct from it, or are two `slope` guns one gun?
 - **Do the state-driven pair land?** Does the charge wall growing under the
   finger read as CHARGING, and does the thrust trigger stiffening near the
@@ -77,7 +140,7 @@ Open:
 
 ### Related, already parked
 
-The one-stick/two-button scheme above (its own entry) is the next step past
+The one-stick/two-button scheme below (its own entry) is the next step past
 `gamepad-thrust` — same motivation, fewer controls still. If the minimal
 scheme's premise holds, that entry gets easier; if it does not, both should
 be reconsidered together.
@@ -115,12 +178,6 @@ synthetic pointer).
 What the design has to answer, and none of it is hard so much as it is a set
 of decisions:
 
-- **One stick doing three jobs.** Direction and throttle already come from
-  one deflection under `gamepad`, so that half is solved. Aim is the problem:
-  the ship would have to AIM WHERE IT FLIES, exactly as the joystick touch
-  schemes already do (`pointerAims: false`, the stick writes the synthetic
-  pointer). So the mechanism exists — this scheme reuses the joystick
-  schemes' rule with a pad as the source.
 - **Two buttons for four actions.** Shoot and charge already share one
   control everywhere (`CHARGE_FULL` on a hold). Actions is the crowded one:
   dock / enter portal is already ONE arbitrated trigger (`updateInteractables`
@@ -163,33 +220,17 @@ bolts also ricochet into nearby entities. Implications for future waves:
 
 ---
 
-## Generalize the projectile-deflection function
+## Generalize the projectile-deflection function — DONE (5d P2/P3)
 
-**Context:** `PhysicsSystem.tryArcShieldIntercept` currently hard-codes the
-deflection logic to the Bulwark's directional arc shield: it reflects a
-covered projectile's velocity about the radial normal, snaps it to the ring,
-drains the shield, and sparks. The *deflection mechanic itself* (reflect a
-projectile off a surface, re-own it, FX) is reusable and worth extracting.
-
-**Future use cases:**
-- A player-side **deflector / parry** ability or a reflective shield module
-  that bounces enemy fire back at its source (re-owning the bolt to PLAYER).
-- **Reflective tiles / hazards** (mirror walls) that ricochet any projectile.
-- A boss **spin-reflect** phase, or an enemy that parries on a timing window.
-- Deflect-with-redirect (home the reflected bolt at the nearest hostile)
-  rather than a pure mirror.
-
-**Shape to aim for:** a small helper like
-`deflectProjectile(proj, surfaceNormal, opts)` that does the reflect + snap +
-rotation + optional re-own / speed-scale / spread, with the caller deciding
-when it fires (arc-shield gate, tile SAT normal, parry window, …). The bouncer
-weapon's tile-reflection math (`resolveCollision` isBouncer branch) is a
-second existing reflection implementation — fold both onto the shared helper.
-
-**Gotchas:** keep it toroidal-safe (snap position relative to the surface
-owner, re-wrap after), preserve `hitEntityIds`/`pierce` semantics, and avoid
-immediate re-trigger (the arc version gates on `v·n < 0` so an outward bolt
-isn't re-deflected).
+`PhysicsSystem.deflectProjectile(proj, nx, ny, opts)` is the one reflection
+primitive — the arc-shield intercept and every non-arc shield (at contact)
+call it (the bouncer's tile face went with the Laser) — and `DeflectOptions`
+carries re-own /
+speed-scale / spread / keepHoming; the player's shield uses the re-own as a
+PARRY.  See CLAUDE.md §8 "EVERY live shield DEFLECTS".  Still unbuilt:
+reflective tiles / mirror walls, a boss spin-reflect phase or a timed enemy
+parry, and redirecting a NON-homing bolt at the nearest hostile rather than
+mirroring it.
 
 ---
 
@@ -211,11 +252,12 @@ armors its back and flanks. Three clean counters:
 
 **Reuses what's already built:**
 - **Directional gate, inverted.** `PhysicsSystem.shieldCoversHit` /
-  `tryArcShieldIntercept` (Bulwark arc shield) already gate whether a shot
-  connects by bearing. A mounted turret is the same sector flipped to a
-  *vulnerable* arc facing the exposed normal: shots from OUTSIDE the arc spark
-  off the armored casing (deflect/no-op), shots from inside land. Best built
-  on top of the parked "generalize the projectile-deflection function" helper.
+  `tryShieldDeflect` (the arc-shield intercept; was `tryArcShieldIntercept`)
+  already gate whether a shot connects by bearing. A mounted turret is the
+  same sector flipped to a *vulnerable* arc facing the exposed normal: shots
+  from OUTSIDE the arc spark off the armored casing (deflect/no-op), shots
+  from inside land. Best built on top of `PhysicsSystem.deflectProjectile`
+  (shipped, 5d P2/P3).
 - **Stationary AI.** Turret is already `maxSpeed:0` with the no-move branch —
   fixed mount position needs no physics changes. Aim is just clamped to the
   outward arc (it already rotates to track; bound the rotation so it holds fire
@@ -226,34 +268,39 @@ armors its back and flanks. Three clean counters:
 **Genuinely new work:**
 - **Tile↔turret link.** Add `mountTileId` (+ outward normal angle) on the
   turret; each step it reads the mount tile's alive state to toggle
-  protected/exposed. VERIFY FIRST: does ShardSystem regen REUSE the same tile
-  entity id (link survives) or spawn a fresh one (link breaks → re-acquire by
-  position)? Pick the approach after checking.
+  protected/exposed. ANSWERED: regen REUSES the same entity object
+  (`ShardSystem.completeRegen`), so the id — and the link — survive.
 - **Map placement.** No "place enemy X on tile Y" authoring path exists today
-  (maps populate procedurally in `MapClasses.populate`). Add a pass that finds
-  exterior cluster tiles (≥1 empty hex neighbour), picks an exposed face, and
-  spawns a turret there facing the outward normal — density/placement as a
-  per-map knob, since these are designed hazards.
+  (maps populate procedurally via `BaseMapLayer.populateTileClusters`). Add a
+  pass that finds exterior cluster tiles (≥1 empty hex neighbour), picks an
+  exposed face, and spawns a turret there facing the outward normal —
+  density/placement as a per-map knob, since these are designed hazards.
 - **Exposed-kill state.** A flag that, while the mount tile is gone, drops the
   directional gate AND makes the turret take full damage (≈1-shot feel).
 - **Wave accounting.** As map features they must NOT count toward wave
-  completion — depends on the planned **Stage-2b `countsTowardWave`** flag
-  (non-wave entities). Slot this after that refactor lands.
+  completion — set `countsTowardWave: false` (shipped in Stage 2b;
+  `WaveSystem.countLiveTracked` honours it).
 
 **Gotchas:** torus-correct the mount normal + bearing math (`wrapDeltaX/Y`);
 mount on a predictable-regen tile variant (rock/metal) so the exposure window
 behaves; a turret whose tile never regens (e.g. nebula-off) stays a one-shot
-kill once broken — fine, but intentional. Sequence: do the deflection-helper
-generalization + Stage-2b accounting first, then this is mostly composition.
+kill once broken — fine, but intentional. Both prerequisites (the deflection
+helper and `countsTowardWave`) have shipped, so this is now mostly
+composition.
 
 ---
 
 ## Trail Gradient Caching
 
-**Context:** `renderTrails` in `RenderSystem.ts` calls `ctx.createLinearGradient` every frame
-for the player engine trail. Trail coordinates change each frame (trail points move with the
-ship), so the gradient can't trivially be reused across frames. The payoff is smaller than the
-drop-loop and tile-gradient fixes already landed.
+**Context (updated 2026-09):** the PLAYER trail no longer uses a gradient —
+it is stamped shapes or a PATH polyline, both batched — one fill/stroke per
+change of a 64-step alpha (`drawPlayerTrail`,
+`engine/systems/render/effects.ts`).  The per-frame `ctx.createLinearGradient`
+now lives in `drawTrailStrip` (same file): one per visible PROJECTILE trail
+(player seekers excepted — they draw a dot trail in `render/energyFx.ts`) and
+one for the snitch's comet tail.  Trail points move
+every frame, so the gradient can't trivially be reused.  Measure a
+projectile-heavy scene before doing anything.
 
 **Options to explore:**
 - Pre-render the trail to an offscreen canvas at a fixed orientation, then `drawImage` rotated.
@@ -263,229 +310,7 @@ drop-loop and tile-gradient fixes already landed.
 
 ---
 
-## Exotic Enemy Types + AI Taxonomy / Wave-Accounting Refactors — DONE
-
-> **RESOLVED (Stages 0–7, PR #67).**  Everything here shipped, in the exact
-> sequence this entry proposed.  Both structural gates: the AI
-> behavior-dispatch table (`ENEMY_BEHAVIOR` -> `moveStrategies`) replaced the
-> two-routine `ENEMY_ROLE` branch, and wave accounting gained
-> `countsTowardWave`.  All three reusable mechanics: provoked-on-hit,
-> generalized consume-and-grow (`updateConsumers`, `consume` PERF_TASKS
-> entry), attach + `'disable'`.  All four enemies: turret -> swarm+nest ->
-> bubble -> dragon.  What is still open is BALANCE, which has its own entry
-> ("Exotic-enemy roster (Stages 0-7)") — kept below for the design
-> rationale only.
-
-
-**Context:** Wishlist of more "alien/foreign" enemies with richer behavior variety:
-aggro-on-hit-only soft-body bubbles (wander, eat shards, grow, multiply, stick to
-entities and disable weapon/shield only when provoked); a large snake/dragon roamer
-that appears/leaves via portal and consumes tiles/shards to grow; small swarm enemies
-released by a nest entity; static base-defender homing-missile turrets. Feasibility is
-good — the bottleneck is not render/physics but two structural gates plus a few
-reusable mechanics.
-
-**Already-built primitives to reuse:**
-- **Snitch** (`GameEngine.updateSnitch`/`spawnSnitch`): persistent, engine-managed
-  special entity riding the flow field with burst/coast AI, comet tail, and its own
-  appear/leave lifecycle — the template for any roamer (esp. the dragon).
-- **Status framework** (`StatusEffectKind`/`EffectPayload`/`StatusEffect`): already
-  generic; reserved "Disruptor"/EMP kind is the home for weapon/shield disable.
-- **Homing projectiles** (`homing`/`homingStrength`/`targetEntityId`): the turret's
-  missiles are a weapon config away.
-- **Shard merge/grow** (`composeEntities`, `mergeCount`, `densityTier`, TILE_SNAP):
-  model for the bubble/dragon eat→grow→multiply loop.
-- **Aggro hooks** (`aggroTimer`, aggro-on-nearby-death): partial precedent for
-  "provoked on hit."
-- **Tile-destroy → FlowFieldGrid incremental patch**: a dragon eating tiles plugs in.
-- **PACK_SYNC**: half of "swarm" flocking already exists.
-
-**Per-idea verdict (effort, low→high):**
-- *Static homing-missile turret* — easiest, near-buildable today. New work: a no-move
-  AI branch (skip movement, keep aim) + a homing weapon config.
-- *Swarm + nest spawner* — low risk. New work: static spawner entity; **wave-clear
-  accounting** for brood.
-- *Snake/dragon portal roamer* — medium-high; great mini-boss (roadmap wave-8 slot).
-  New work: segmented body + per-segment collision, portal FX. Reuses Snitch lifecycle.
-- *Aggro-on-hit soft-body bubble* — highest (multi-PR). New work: passive/reactive AI,
-  consume-grow, multiply (with hard cap), attach-to-target disable, soft-body render.
-
-**Two structural gates to clear FIRST (so each new enemy doesn't fight the architecture):**
-1. **AI taxonomy is rigid.** Today `ENEMY_ROLE` ∈ {RAMMING, SHOOTING} → exactly two
-   routines (`updateBasicDogfighter`, `updateSkirmisher`) with an idle/chase state
-   machine. Refactor toward a **behavior-dispatch table** (per-subtype
-   movement/targeting/special function map) before adding wildly different behaviors.
-2. **Wave completion accounting.** A wave ends when *budget spawned AND every spawned
-   enemy dead*. Self-replicating bubbles, nest brood, and portal roamers all break
-   "is the field clear?" Add an explicit rule — a `countsTowardWave` flag, or track
-   brood under a parent (kill nest → clear swarm). The Snitch sidesteps this by being a
-   non-enemy INTERACTABLE with its own lifecycle (good model for the dragon).
-
-**Three reusable mechanics to build once (not per-enemy):**
-1. **Provoked flag** stamped in the PhysicsSystem projectile-damage path (passive-until-hit).
-2. **Generalized consume-and-grow** ("A absorbs B → A grows, B deactivates"), as a
-   PerfController-gated neighbor pass with a hard entity cap (`enforceCap`-style) to
-   stop runaway multiplication.
-3. **Attach + disable** — `attachedToId` (snap to target each frame) + a `disable`
-   StatusEffectKind. Generalizes to grapples/EMP later.
-
-**Gotchas:** the world is a torus with no edges — "appears/leaves via portal" is a
-spawn/despawn-with-VFX event, not off-map traversal. All new neighbor scans must use
-`wrapDeltaX/Y` and register a `PERF_TASKS` entry (no private frame counters).
-
-**Suggested sequence:** turret → (AI behavior-dispatch refactor + wave-accounting flag)
-→ swarm+nest → provoked/disable mechanics → bubble → dragon mini-boss.
-
----
-
-## Damage-triggered health / shield bars (remove always-on bars) — DONE
-
-> **SHIPPED (gauntlet 5d, U5) — with ONE prescription REVERSED.**  The system
-> landed as designed: `healthBarTimer` + `markDamaged`/`markShieldDamaged`
-> stamped at every damage path, `renderHealthBar` gated on the timer with a
-> fade, the shield strip generalized to any shielded entity,
-> `alwaysShowHealthBar` for priority targets (the dragon takes it; capstone
-> bosses deliberately do not), and DBG ▸ Visual ▸ "HP bars" as the A/B.
->
-> **Reversed by user call (U6): the player KEEPS a floating bar.**  This entry
-> argued the player's world-space bar was redundant with the HUD readout and
-> should be dropped.  In play it is not — the bar is where the eye already is,
-> the chip is where the exact figure is, and they wear the same three urgency
-> bands so they cannot read as two opinions.  `renderPlayerVitalsBar` draws it
-> permanently (never damage-triggered: your own condition is the one thing you
-> must not have to provoke into view), with the shield strip appearing only
-> once `maxShield > 0`.  See CLAUDE.md §8.
->
-> One gap this entry did not anticipate, caught by U5's own suite: a hit fully
-> absorbed by a SHIELD armed no bar, so the strip could only appear once the
-> shield had already failed — backwards for a readout whose job is to be
-> watched draining.  Hence `markShieldDamaged` as a separate stamp.
-
-
-**Context:** Every player and enemy currently draws a persistent floating
-health bar (and the player a shield bar) every frame via
-`RenderSystem.renderHealthBar(entity, rx, ry)`. They're always on, even at full
-health and even on trivial one-shot enemies, which clutters the screen and
-reads as "tracked HUD" rather than world feedback. The goal: **stop drawing
-bars by default** and instead **flash a bar in only when the entity takes
-damage**, fading it back out shortly after — so a bar is a hit reaction, not a
-permanent label.
-
-The bubble already set the precedent for per-entity suppression
-(`renderHealthBar` early-returns on `enemyShape === 'bubble'`, plus gnats are
-implicitly fine since they're 1-HP). This generalizes that idea to everyone.
-
-**Already-built hooks to reuse:**
-- **`RenderSystem.renderHealthBar`** — single draw site for player + enemy bars;
-  gate its body on a visibility timer instead of always drawing.
-- **`hitFlash`** (and player **`shieldHitFlash`**) — already stamped on the
-  entity at most damage sites and decays each frame. The bar's appear-on-damage
-  trigger wants the *same* stamp sites but a *longer* linger than the brief
-  whiten flash, so add a dedicated `healthBarTimer` rather than overloading
-  `hitFlash` (whose short lifetime drives the scale-punch/whiten).
-- **`UI_CONSTANTS.HEALTH_BAR`** — already the home for widths/heights/offsets;
-  add `SHOW_DURATION` + `FADE_DURATION` here.
-- **Generalized shields** — `shield`/`maxShield` now live on any entity (Bulwark),
-  and shield absorption is entity-agnostic (PhysicsSystem + AoE). So the shield
-  bar should show for ANY shielded entity on a shield hit, not just the player.
-- **Player HUD** — `EngineStats.playerStats` already feeds a persistent
-  health/shield readout in `UIOverlay`, so the player's *floating* bar is
-  redundant; it can become on-hit juice only, or be dropped entirely for the
-  player (HUD is the canonical readout) while enemies keep the transient bar.
-
-**Proposed system:**
-1. Add `healthBarTimer?: number` to `GameEntity`. Stamp it to
-   `HEALTH_BAR.SHOW_DURATION` at every site that reduces `health` OR `shield`.
-2. Centralize the stamp: a one-line `markDamaged(entity)` helper (sets
-   `hitFlash` + `healthBarTimer` together) called from the damage paths —
-   PhysicsSystem projectile-damage path, the AoE shockwave loop
-   (`updateExplosionRings`), ram/crash damage, kamikaze blast, the corrosion /
-   bubble-latch drains, lightning. (These sites already set `hitFlash`
-   piecemeal; folding both into one helper is the minimal viable
-   centralization — a full `applyDamage(entity, amount, opts)` is a bigger
-   refactor and optional.)
-3. Tick `healthBarTimer` down each frame (a cheap pass, or decay inside
-   `renderHealthBar` using `dt`/`performance.now()` like other render timers).
-4. `renderHealthBar` draws only while `healthBarTimer > 0`, easing alpha over
-   the last `FADE_DURATION`. Draw the shield bar for any `maxShield > 0` entity
-   (drop the player-only gate). Keep the bubble / gnat suppression.
-
-**Considerations / edge cases:**
-- **Bosses / priority targets**: some enemies *should* keep a persistent bar.
-  Add an opt-in `alwaysShowHealthBar?: boolean` (or a per-archetype flag) so the
-  dragon / future bosses bypass the timer.
-- **Full-health never-hit** entities show nothing (desired) — the bar only ever
-  appears post-damage.
-- **Regen enemies** (planned trait): a bar refilling after the timer expired is
-  invisible; that's fine (the player only needs the readout during/after a
-  trade), but if it feels off, re-stamp the timer on regen ticks too.
-- **Player floating bar → screen HUD (user direction):** REMOVE the player's
-  floating health bar (drawn under the ship) and move it to the **screen HUD**,
-  and show a **numeric readout** alongside the bar (e.g. `87/100`). The engine
-  already feeds `EngineStats.playerStats` (health / maxHealth / shield) to
-  `UIOverlay`, so the persistent player readout lives there — add the bar + the
-  `health/maxHealth` number to the HUD and drop the world-space player bar in
-  `renderHealthBar`. Do the same for shield (`shield/maxShield`) if shown.
-  Enemies keep the transient world-space bar. (Consider still flashing a brief
-  on-hit bar/flash under the player for hit juice — optional.)
-- **Perf**: this is a net *reduction* in draw calls (most entities draw no bar
-  most frames); the only new cost is a per-entity timer decrement.
-
-**Tuning knobs:** `UI_CONSTANTS.HEALTH_BAR.SHOW_DURATION` /
-`FADE_DURATION`; the existing width/height/offset entries; the optional
-`alwaysShowHealthBar` flag for bosses.
-
----
-
-## Weapon ammo model + menu clarity + purchase-UI parity — SUPERSEDED
-
-> **SUPERSEDED (2026-07-24, station/module increments):** item 1 shipped as
-> the weapons-ammo pivot (ammo deleted entirely — pivot 1b); items 2–3 were
-> replaced wholesale by the hex-slot module UI (guns are module items in the
-> shared hex flowers/inventory/shop renderers, so locked-vs-unlocked and
-> purchase-UI parity no longer exist as separate surfaces).  Kept for
-> reference only.
-
-**Context / request:** Three related weapon-UX asks.
-
-1. **Simplify the ammo model.** Weapons today carry per-weapon ammo costs
-   (`WEAPONS[w].ammoCost` / `chargedAmmoCost`) drawn from the shared ammo pool
-   (the d1 consolidation). Reconfigure to ONE of:
-   - **Unlimited ammo** — drop ammo entirely (or keep it purely cosmetic), so
-     weapon choice is about function, not resource management; OR
-   - **Uniform ammo cost** — every weapon costs the SAME per shot, so switching
-     weapons never changes how fast you burn the pool.
-   Pick per user direction (an `AskUserQuestion` when the task starts). Touches
-   `WEAPONS` cost fields, `WeaponSystem` fire/charge deduction, the ammo HUD, and
-   `DropSystem` ammo drops (if ammo is removed, the whole ammo-drop economy —
-   `AMMO_*`, drop merge, magnet — goes cosmetic or gets pulled; flag that scope).
-
-2. **Weapon menu: clearer locked vs. unlocked.** The weapon select/cycle should
-   visibly distinguish **unlocked** weapons from **locked** ones (the run starts
-   Blaster-only; the rest are Drydock unlocks — `unlockedWeapons` /
-   `ownedWeapons`). Show locked entries greyed/with a lock badge rather than
-   hidden, so the player sees what's available to buy. `UIOverlay` weapon menu +
-   `EngineStats.unlocks` / `.shop`.
-
-3. **Tie weapon-menu and pause-menu purchase graphics together.** The weapon
-   menu and the pause-menu **Drydock** (where weapons/shield/overcharge are
-   bought via `purchaseUnlock`) currently render differently. Unify them so a
-   weapon reads the SAME (icon, name, locked/owned state, cost) in both places —
-   ideally one shared weapon-card component/render used by both surfaces.
-
-**Touch points:** `constants.ts` `WEAPONS` / `WEAPON_LIST` / `UNLOCK_DEFS` /
-`AMMO_CONSTANTS`; `engine/systems/WeaponSystem.ts` + `DropSystem.ts`;
-`components/UIOverlay.tsx` (weapon menu + Drydock/Unlocks panels);
-`GameEngine.purchaseUnlock` + the `EngineStats.shop` / `.unlocks` payloads.
-Note: #1 is a gameplay-economy change (playtest it); #2/#3 are UI-only.
-
----
-
 ## Swarm gnat + Bubble — feel / tuning pass
-
-> **Heading restored 2026-08-19.**  This entry had lost its `##` heading and
-> was rendering INSIDE the superseded ammo entry above — a live tuning
-> checklist filed under a SUPERSEDED banner.  Nothing about it is superseded.
 
 **Context:** A fast iteration session reshaped the SWARM gnat default and built
 out the BUBBLE into a full ambient third-party creature. The feel is broadly
@@ -494,8 +319,8 @@ item, not a redesign. Everything below is data-driven (constants), so tuning is
 edit-and-playtest with no structural work.
 
 **What changed this session (so the tuning has context):**
-- **Swarm gnat default** → `weave` (serpentine), still DBG-cyclable (Player ▸
-  "Gnat move").
+- **Swarm gnat default** → `weave` (serpentine), still DBG-cyclable (Enemies &
+  Bosses ▸ Enemy Tuning ▸ "Gnat move").
 - **Bubble** went from a simple wave enemy to **ambient flow-riding fauna**
   (`ambient` + `maintainAmbientBubbles`, never gates a wave) that is a **true
   third party** (`thirdParty`: enemy fire hits it; it retaliates against whoever
@@ -508,12 +333,15 @@ edit-and-playtest with no structural work.
   hit / player terrain-slam). Movement is **slow when passive, fast only when
   hunting** (aggro-only bursts/lunges). HP **50 base, maxHealth linear with
   size**. Starts **half size, grows slow**. Removed **health bars** (bubble) and
-  **off-screen chevrons** (bubble + snitch).
+  **off-screen chevrons** (bubble + snitch) — the bubble's chevron was later
+  RESTORED (purple, its own `MAX_VISIBLE_BUBBLE` budget, blinking red while it
+  hunts the player); the snitch's was not.
 
 **Tuning checklist (current values → things to feel out):**
 - **Aggro triggers:** `BUBBLE_CONSTANTS.COLLIDE_AGGRO_SPEED` (3.5 — the
   "more than a light touch" ram threshold; watch for gentle grazes provoking, or
-  hard rams not) · `AGGRO_LOSE_RANGE` (950 — leash).
+  hard rams not) · `AGGRO_LOSE_RANGE` (950 — leash) · `AGGRO_TIMEOUT_SEC`
+  (6 — left alone this long, it calms).
 - **Hunt speed / catch-ability:** `AI_CONFIG.BUBBLE.PROVOKED_SPEED_MULT` (2.2) ·
   `BURST_SPEED_MULT` (1.7) / `BURST_ACCEL_MULT` (2.2) / `BURST_INTERVAL` (1.6) /
   `BURST_DURATION` (0.6) / `SEEK_ACCEL_MULT` (1.4). If a fully-grown bubble runs
@@ -527,6 +355,9 @@ edit-and-playtest with no structural work.
   `DIGEST_DURATION` (5.5 base, ×richness) · `RICH_MIN/MAX` (0.6/2.0) ·
   `growthPerEat` (3) / `consume.maxSize` (58) · `HEAL_PER_RICH` (6) · base
   `health` (50) + the size-linear maxHP curve (`syncBubbleMaxHealth`).
+- **Mouth size / bite:** `consume.swallowMaxFrac` (1) · `consume.bite`
+  (damage 3, interval 1.2 s, reach 8, `tiles: true`) — bodies bigger than the
+  mouth, and tiles, are chipped through `chipStructureAt` instead.
 - **Toxic detection:** `isToxicShard` flags plastic + **green-dominant nebula**
   shards via a hex-channel check — if some green nebulae miss (or non-green trip
   it), switch to a specific nebula-variant/palette test instead.
@@ -535,9 +366,9 @@ edit-and-playtest with no structural work.
   `AMBIENT_RESPAWN_INTERVAL` (4) · `multiply.atSize` (50) / `maxPopulation` (14)
   · `DRIFT_SPEED` (2.2) · `SHARD_VISION` (280) · `CALM_VISIBILITY` (0.45).
 - **Render polish (optional):** the squash-cling amount + EMP-arc look are
-  inline in `RenderSystem.drawEnemyShape`'s bubble branch; enemy latches get the
-  squash but no arcs (arcs are the player-only EMP tell) — could add a chew FX
-  for enemy latches.
+  inline in `drawEnemyShape`'s bubble branch (`render/enemyShapes.ts`); enemy
+  latches get the squash but no arcs (arcs are the player-only EMP tell) —
+  could add a chew FX for enemy latches.
 
 **All knobs live in:** `AI_CONFIG.BUBBLE` (movement), `BUBBLE_CONSTANTS`
 (engagement/sickness/ambient), and the `ENEMY_VARIANTS.BUBBLE` `consume` /
@@ -545,50 +376,10 @@ edit-and-playtest with no structural work.
 
 ---
 
-## Swarm gnats — collide with asteroids + tiles — DONE
-
-**RESOLVED (physics-shard-broadphase branch):** the `diesOnContact` collision
-early-out in `PhysicsSystem.checkAndResolveCollision` was removed, so gnats now
-take STANDARD enemy collisions — they bounce off tiles / asteroids and each other
-instead of phasing through. The gnat still POPS only on player contact (the
-resolveCollision ENEMY-vs-PLAYER branch is gated on the target being the player),
-so hitting a tile bounces rather than kills it; enemy fire still can't hit them
-(friendly-fire filter). Measured cost of the feared dense-flock case was small
-(0.68 ms collisions with 60 gnats in a tile field) — the boids separation keeps a
-flock spaced, so few pairs actually overlap past the circle broadphase, and the
-predicted O(k²) blow-up didn't materialise. Verified: a gnat spawned on a tile is
-pushed off + survives; a gnat on the player pops + deals damage; 0 errors. The
-mitigations below (structure-only / PerfController gate / repel-steer) are left as
-notes in case a future denser brood needs them.
-
-**Original context / request:** SWARM gnats used to **phase through all terrain** — the
-Stage-4 perf simplification skips collision for every pair except the player +
-player projectiles (`PhysicsSystem.checkAndResolveCollision` `diesOnContact`
-early-out), so a big flock stays cheap. **Request: make gnats collide with
-asteroids and tiles** (mobile shards + static tiles) so they can't fly through
-the environment and read as physical.
-
-**Tradeoff to weigh (this is why it was skipped):** re-enabling gnat↔structure
-SAT is exactly the per-pair cost the early-out removed, and gnats spawn in dense
-flocks (Nest brood, Dragon spit). Naïvely turning it on scales badly. Options:
-- Collide with STRUCTURE only (keep gnat↔gnat and gnat↔enemy skipped) — the
-  cheapest way to get "bounces off terrain" without full participation.
-- Gate by flock size / on-screen only via `PerfController` so a huge off-screen
-  cloud doesn't pay for it.
-- A lightweight repel/steer-around instead of hard SAT impulse (cheaper, and
-  avoids gnats piling against a wall).
-
-**Touch points:** the `diesOnContact` early-out in
-`PhysicsSystem.checkAndResolveCollision`; the flat-fill gnat render path in
-`RenderSystem.drawEnemyShape`; `AISystem.updateSwarm` (may want terrain-aware
-steer). Measure a worst-case flock before/after.
-
----
-
 ## Rival ships (Stage 7) — polish + tuning follow-ups
 
 **Context:** Rivals shipped as bespoke engine-managed roamers
-(`GameEngine.updateRivals`, `RIVAL_CONSTANTS`) — player-like privateers that
+(`engine/roamers/rivals.ts`, `RIVAL_CONSTANTS`) — player-like privateers that
 warp in on a cadence, hunt the wave enemies (stealing the player's points +
 drops), and per disposition (hostile / ally / neutral) fight, ignore, or
 retaliate against the player. First pass is intentionally lean; revisit:
@@ -600,8 +391,9 @@ retaliate against the player. First pass is intentionally lean; revisit:
   let them `phasesTerrain` (cheapest, but less "ship-like").
 - **Theft legibility.** The point-steal is currently pure denial (the player
   just gains nothing). Add a visible cue — a rival-coloured "+N stolen" popup at
-  the kill, a running per-rival `stolen` tally (already tracked on
-  `RivalInstance`) surfaced in the HUD, or a brief tether/flash.
+  the kill, a running per-rival `stolen` tally (`RivalInstance.stolen` is
+  declared but never incremented — the tally itself is unbuilt) surfaced in
+  the HUD, or a brief tether/flash.
 - **Enemy↔rival collateral.** Today enemies can't damage rivals (friendly-fire
   filter), so rivals are only threatened by the player. Consider letting some
   enemy fire hit rivals (make them `thirdParty`, or a `hitsRivals` flag) so the
@@ -609,9 +401,10 @@ retaliate against the player. First pass is intentionally lean; revisit:
 - **Ally value.** Allies help by thinning enemies but still deny loot/points —
   net they may feel bad. Consider allies occasionally gifting a drop, reviving a
   combo, or drawing aggro without stealing.
-- **Cadence / wave integration.** Spawn cadence is a flat timer while a wave is
-  active (`SPAWN_INTERVAL ± SPAWN_VAR`, capped `MAX_RIVALS`). Tie frequency /
-  disposition mix / count to wave index or difficulty; maybe a "rival wave".
+- **Cadence / wave integration.** Spawn cadence is SCORE-driven: one random
+  rival per `SCORE_INTERVAL` (1000) points earned, capped at `MAX_RIVALS` (6),
+  on any map. Tie frequency / disposition mix / count to wave index or
+  difficulty; maybe a "rival wave".
 - **Combat depth.** All rivals use one blaster. Give dispositions/sprites
   distinct weapons (the sprite already hints an archetype), evasion, or shields.
 - **Bounty / risk balance.** `TIER`-scaled bounty + full loot spray on a
@@ -619,8 +412,8 @@ retaliate against the player. First pass is intentionally lean; revisit:
 - **Damage indication.** Strengthen the feedback when a rival takes damage —
   the current sprite hit-flash + disposition health bar read, but rivals want
   clearer damage numbers and a hit reaction that pops against the busy field
-  (e.g. a bigger spark burst, a brief outline, or the damage-triggered-bar
-  system once that lands). Verify world-space damage numbers actually fire for
+  (e.g. a bigger spark burst or a brief outline — the damage-triggered bar has
+  since shipped, 5d U5). Verify world-space damage numbers actually fire for
   rivals (`spawnDamageText` gate) and read at typical zoom.
 - **Contrast glow / standout.** Rivals can blend into the enemy field (they use
   retired enemy PNGs). Add a subtle contrast glow / rim-light in the disposition
@@ -630,8 +423,8 @@ retaliate against the player. First pass is intentionally lean; revisit:
   highlight in `RenderSystem`'s rival sprite branch.
 
 **All knobs live in:** `RIVAL_CONSTANTS` (cadence / stats / weapon / dispositions
-/ portal) in `constants.ts`; lifecycle in `GameEngine.updateRivals` /
-`spawnRival` / `fireRivalShot` / `rivalVacuumDrops`.
+/ portal) in `constants.ts`; lifecycle in `engine/roamers/rivals.ts`
+(`updateRivals` / `spawnRival` / `fireRivalShot` / `rivalVacuumDrops`).
 
 ---
 
@@ -645,7 +438,9 @@ while the physics half ships.
 push in `PhysicsSystem.applyGravity`.  One predicate, defaulting by TYPE
 (every `ENEMY`, plus the snitch), so bubbles, dragons, rivals and any future
 roamer are covered the day they exist.  The pull is not cancelled — they
-drift in from range and are held off at a standoff of roughly 215 units.
+drift in from range and are held off at a standoff of roughly 235 units (the
+avoid push reaches 240; the old ~215 predates the well's retune to g1500 /
+range 525).
 
 **Why that is a stopgap.**  It is a FORCE, not a decision.  Nothing in the
 game *knows* a rift is there; it is simply pushed away from one, which means:
@@ -683,8 +478,8 @@ trapped.
 Kamikaze, Bulwark, Turret, Swarm+Nest, Bubble, Dragon, Rivals) plus the older
 base roster. Each was tuned in isolation during its build; a holistic balance
 pass is owed once they all appear together in real timed waves. This is the
-BALANCE bucket (feel / numbers) — the separate perf/optimization work on the
-new engine-managed roamers is tracked in the plan (`exotic-enemies-optimization`).
+BALANCE bucket (feel / numbers) — the perf/optimization pass on the roamers
+SHIPPED (decision #33); its leftovers are the next entry.
 
 Known tuning wants (add freely):
 
@@ -697,16 +492,17 @@ Known tuning wants (add freely):
 - **Rivals (Stage 7)** — balance the bounty vs. the time cost of chasing one,
   the loot-steal rate, disposition mix, and ship stats (HP/weapon). See the
   dedicated "Rival ships" entry above for the deeper feature follow-ups
-  (terrain nav, theft legibility, enemy↔rival collateral, ally value). Perf is
-  tracked separately in the plan.
+  (terrain nav, theft legibility, enemy↔rival collateral, ally value).
 - **Dragon** — roam/leave timing, attack cadence once provoked, segment HP,
-  the doubling kill payout curve, and how/whether it enters normal play (DBG-only
-  today).
+  the doubling kill payout curve, and how it enters normal play (today the
+  Overworld keeper spawns one — 25 s after arriving on the Overworld, then 90 s
+  after the last one is gone, `OVERWORLD_CONSTANTS`; arenas only via DBG).
 - **Kamikaze / Turret / Swarm / Nest** — revisit blast radius, missile homing
   strength, gnat bite, and brood cap against the timed-wave budgets.
-- **Cross-roster** — once (f) Timed waves lands, tune per-wave spawn budgets so
-  the exotic types are introduced legibly (the scripted teaching waves exist;
-  the mix beyond them needs balancing).
+- **Cross-roster** — now that (f) waves have landed (completion waves,
+  clear-the-field), tune per-wave spawn budgets so the exotic types are
+  introduced legibly (the scripted teaching waves exist; the mix beyond them
+  needs balancing).
 
 All knobs live in `ENEMY_VARIANTS` / `ENEMY_TRAITS` / `AI_CONFIG` /
 `BUBBLE_CONSTANTS` / `DRAGON_CONSTANTS` / `RIVAL_CONSTANTS` in `constants.ts`.
@@ -722,25 +518,19 @@ here for a future perf beat.
 
 - **`updateConsumers` dynamic-grid query.** The consume-and-grow scan
   (bubble/dragon eating) is `O(calm consumers × all mobile shards)` over the full
-  `entityIndex.asteroids` list. It is already `PerfController`-gated (`consume`)
+  `shardCandidates` list. It is already `PerfController`-gated (`consume`)
   and early-outs for every non-idle consumer, but on a shard-dense field a single
   calm bubble still walks the whole shard list each scan step. A real fix is a
   spatial near-query, but PhysicsSystem only exposes a **static**-grid helper
   (`forEachStaticNear`) today — a `forEachDynamicNear` over the per-frame dynamic
   grid would be needed. More invasive than a zero-behaviour pass warranted.
 
-- **Portal / death particle-burst counts. — RESOLVED (exotic-enemies-opt).** The
-  spawn-burst hitch was fully addressed: (1) the cosmetic-ring `validHitIds`
-  O(all-entities) scan in `spawnShockwave` now skips for damage-0/knockback-0
-  rings; (2) `ParticleSystem`'s per-spawn `enforceTypeCap` O(N) rescans were
-  batched to once/frame in the engine loop (zero visual change — the cap and the
-  dropped-oldest set are identical); (3) burst counts trimmed ~40 % (enemy death
-  16–24/9 → 10–13/5, portal 30/16 → 18/10, dragon death 40 → 24; user-approved
-  visual reduction). Left here only as a pointer. NOTE: the same per-spawn
-  `enforceCap` pattern still exists for **projectiles** (`ProjectileSystem.spawn`
-  → `enforceCap`, MAX_PROJECTILES) — untouched because projectiles are gameplay
-  entities (cap timing can affect a frame), a candidate for the same once/frame
-  batching if a projectile-heavy weapon ever profiles hot.
+- **Projectile `enforceCap` per spawn.** The particle-burst hitch was fixed
+  in that pass (particle caps are enforced once per frame from the engine
+  loop), but the same O(N) per-spawn cap check still runs for PROJECTILES
+  (`ProjectileSystem.spawn` → `enforceCap`, `MAX_PROJECTILES`) — left alone
+  because projectiles are gameplay entities (cap timing can affect a frame);
+  batch it once/frame if a projectile-heavy weapon ever profiles hot.
 
 - **`maintainAmbientBubbles` / nest brood census.** Small `O(enemies)` integer
   counts run every step. Cheap enough that gating them (they only ACT on a timer)
@@ -799,14 +589,16 @@ Do NOT start from the engine again without new evidence. In particular the
 and CLAUDE.md §4 records that the intuitive fix there — normalising entity
 hidden classes — measured **1.9× slower** on the real population.
 
+---
+
 ## Physics / shard broadphase at high entity counts (separate perf pass)
 
 **Partly addressed on the `physics-shard-broadphase` branch (PR #70).** What
 landed there, zero-behaviour:
-- **Broadphase per-pair math** — `resolveAsteroidPair` now caches
-  `invMass`/`effInvMass` on a mass-keyed self-invalidating field (removes 2 div +
-  2 pow per pair) and dedups pairs on a numeric `_pairSeq` instead of an `a.id >
-  b.id` string compare.
+- **Broadphase per-pair math** — `resolveAsteroidPair` (`resolveShardPair`
+  since V6) now caches `invMass`/`effInvMass` on a mass-keyed
+  self-invalidating field (removes 2 div + 2 pow per pair) and dedups pairs
+  on a numeric `_pairSeq` instead of an `a.id > b.id` string compare.
 - **Render-bucket pooling** — the per-frame `{entity,rx,ry}` render candidate
   buckets (`_visibleEntities` / nebula tile+shard / trail / particle) were the
   dominant per-frame allocator (~60–90k small objects/sec in a tile-dense scene,
@@ -847,7 +639,7 @@ dense-cell cost from O(k²) to ≈O(k·K). Set K high so it engages ONLY on the
 spike-causing clusters and leaves normal density byte-identical.
 
 **Where:** `PhysicsSystem.resolveShardPairs` (the `for i / 3×3 cell / for j` inner
-loop, ~L1672). Add the cell-pile threshold + a per-substep rotating offset
+loop). Add the cell-pile threshold + a per-substep rotating offset
 (`shardPairCallCount % stride`) so the covered subset advances each call. Keep the
 existing `_pairSeq` dedup, sleep skip, and viewport gate.
 
@@ -858,15 +650,46 @@ headless scene (confirm no visible sustained interpenetration) before shipping,
 since the shard-field feel is user-protected. Tune K / stride in
 `SHARD_PAIR_CONSTANTS`.
 
-**Other candidate levers (heavier, lower priority):** cheaper dynamic-grid rebuild
-/ query, a `forEachDynamicNear` helper (also unblocks the parked
-`updateConsumers` query), revisiting the shard-merge cull rate under max load.
+**Other candidate levers (heavier, lower priority):** a cheaper dynamic-grid
+QUERY (the rebuild went allocation-free in 5c — `CellBuckets`), a
+`forEachDynamicNear` helper (also unblocks the parked `updateConsumers`
+query), revisiting the shard-merge cull rate under max load.
 **Delicate** (merge / regen / neighbour-count all key off exact shard positions),
 so any of these warrants its own branch + verification.
 
 Knobs: `PhysicsSystem` (static/dynamic grids, `SPATIAL_GRID_SIZE`), `ShardSystem`,
 `SHARD_PAIR_CONSTANTS` / `SHARD_TILE_PAIR_CONSTANTS` / `LOCAL_MERGE_CONSTANTS` /
 `PERF_TASKS` in `constants.ts`.
+
+---
+
+## Shard flow field — the PR #56 audit's open follow-ups
+
+Moved here in the 2026-09 docs cleanup, which retired
+`docs/FLOW_FIELD_AUDIT.md` (in git history at `ca0ad8e`).  The audit's main
+answer still holds — don't consolidate: `FlowField.ts`, the analytical
+sampler, and `FlowFieldGrid`'s baked shard field are complementary.  Its
+follow-up briefs, as they stand:
+
+- **FF-1a — the blocked-cell fallback is still un-deflected.**  A blocked
+  cell bakes to a zero vector, and `FlowFieldGrid.sampleShardFlow` answers a
+  zero cell with the bare analytical sampler, so a shard knocked into a tile
+  cell gets the undeflected base direction back — which can push it deeper
+  into the wall before the next collision impulse.  The brief's fix: return
+  the nearest OPEN cell's baked vector instead.  It changes shard feel in
+  narrow channels, so it needs an A/B.
+- **FF-1b — SHIPPED.**  Wall repulsion is no longer 4-cardinal: a
+  `(2R+1)²` kernel with 1/d² weight plus a tangent mix (defaults R = 3,
+  tangent 0.5; DBG ▸ World & Maps ▸ Flow Field ▸ "Kernel R" / "Tangent").
+- **FF-2 — revisit the obstacle filter if a finite-mass wall ships.**
+  `FlowFieldGrid.initObstacles` bakes only `mass === Infinity` tiles, nebula
+  excluded, so a wall-like tile given finite mass (to make it shoveable, say)
+  would silently drop out of the obstacle bitmap.
+- **FF-3 — no timer on the shard-flow bake.**  `flowFieldMs` covers only
+  `flushEnemyField`; the map-load bake (`buildShardFlowField`) and the
+  per-destruction patch (`onTileDestroyed`) are untimed.  Low priority — the
+  work is not hot — but cheap, and it would catch a sampler that grew
+  expensive.
 
 ---
 
@@ -983,16 +806,17 @@ playtime accumulates.  One bucket, tune together:
 - **Mk trade-in** — duplicates stack and Mk II doesn't obsolete Mk I;
   90% sell-back mostly covers respec, but consider a true trade-in (old
   mark credited against the next mark) if buy-sell-buy feels clunky.
-- **Weapon weight numbers** — `WEAPON_WEIGHT` (BASE_BOOST 1.10, DRAG
-  0.10) is explicitly provisional; verify weaponless flight feels like a
-  real option and heavy arsenals a real cost.
+- **Ship weight numbers** — `SHIP_WEIGHT` (BASE_BOOST 1.15,
+  DRAG_PER_WEIGHT 0.05; every module weighs now, not just guns) is
+  explicitly provisional; verify weaponless flight feels like a real option
+  and a full outfit a real cost.
 - **Resale fractions** — 90% sell-back makes respeccing nearly free
   (possibly fine — outfitting experimentation is the fun); revisit
   `MODULE_RESALE` (and the 9% scrap floor) once the death penalty /
   income pacing land, since all three shape how precious credits feel.
 
 Knobs: `MODULE_DEFS` costs, `SALVAGE_CONSTANTS`, `MODULE_RESALE`,
-`WEAPON_WEIGHT`, `ENEMY_SCALING`, `STATION_CONSTANTS.REPAIR_COST_PER_HP`.
+`SHIP_WEIGHT`, `ENEMY_SCALING`, `STATION_CONSTANTS.REPAIR_COST_PER_HP`.
 
 ### Persistent state (what survives a run) — DEPENDENT on the tuning pass
 
@@ -1007,96 +831,6 @@ hub with wave maps as excursions, and where does state live
 meaning of every price in the economy, so re-run the tuning numbers with
 persistence in view.
 
-### Pause-menu stat legibility — per-module effect attribution — DONE
-
-> **SHIPPED (Phase 3 Pair A).**  Both candidate shapes landed, not one:
-> `EngineStats.outfitting.statLines` carries the full derived-stat set with
-> PER-MODULE attribution, built by `GameEngine.statBreakdown()` from the same
-> slot walk `applyModuleEffects` folds — so the UI renders and never
-> recomputes, and the panel cannot disagree with the sim.  Rows expand to
-> their contributors; tapping a hex highlights every stat it feeds.  Shared
-> verbatim by the pause menu and the docked station via `renderShipStatus()`.
-
-
-(Note: ship modules already function with the free Base Hull — it is the
-family-`hull` adjacency root on the center hex, touching all six ring
-slots — so there is no first-purchase gate to soften.)  What's wanted: a
-clear display of player / ship / weapon stats in the pause menu with an
-intuitive understanding of what each installed module contributes.
-Candidate shape: expand the Ship Status panel to the full derived-stat
-set (hull, shield, regen, damage, fire rate, speed, acceleration
-including weapon-weight drag), each stat expandable to its contributing
-modules; and/or tapping a hex highlights the stats it feeds, with the
-module's exact effect shown in the detail strip.  Touch points:
-`applyModuleEffects` already sums ACTIVE effects — expose a per-module
-breakdown on `EngineStats.outfitting`; `UIOverlay` pause Ship Status +
-`renderModuleDetail`.
-
----
-
-## Portal off-screen indicators behave unlike every other indicator (2026-08-05) — RESOLVED
-
-> **RESOLVED (step 5, G6 — decision #46b): option 2, plus a third change.**
-> The arrow is now suppressed once the rift is on screen (the world-space tag
-> takes over), and it no longer prints a DISTANCE readout — both halves of the
-> old redundancy are gone, and there are now NO exemptions from the
-> offscreen-only rule.  The RANGE GATE was deliberately KEPT: a portal is a
-> fixed landmark, so the two rules together bracket the case the arrow is
-> actually good for — close enough to matter, not yet visible.  Long-range
-> discovery moved to the minimap, where `PORTAL_BLIP` draws the rift as an
-> ANOMALY (spinning colour-filled diamond + radar ping) that clamps to the
-> border instead of being culled.
->
-> The one divergence this entry named that SURVIVES is R2 in the 5d ledger: a
-> portal's ARROW is the legend's green while its BLIP carries the rift's own
-> violet/sky, so an outbound and a return rift are tellable apart on the map.
-> Documented as a deliberate exemption in CLAUDE.md §8.
-
-
-**Context:** raised in playtest during the Phase 3 Pair A session, after the
-off-screen indicators were reworked (edge-anchored, size-coded, typed by
-colour).  The portal arrow now reads as an exception to the rules every other
-contact follows, and the exceptions compound at close range.
-
-Where a portal diverges today (all in `RenderSystem.renderIndicators` +
-`PORTAL_CONSTANTS`):
-
-- **Range-gated, not always-on.** Enemies are indicated at any distance and
-  fade toward an alpha floor; a portal shows NO arrow at all until the player
-  is inside `PORTAL_CONSTANTS.INDICATOR_RANGE`, then appears abruptly at full
-  strength.  Every other type fades in; this one pops.
-- **Exempt from offscreen-only suppression.** Every other contact's arrow
-  disappears once you can see the thing.  The portal's persists — so at close
-  range you get the rift ON SCREEN plus an edge arrow pointing at it.
-- **Carries the most text of any type.** Destination name AND a distance
-  readout, while ordinary enemies now print no number at all (their size
-  carries distance).  Stack that on the rift's own world-space tag and the
-  same destination is named two or three times at once.
-
-Net effect: approaching a portal, the arrow is redundant with the thing it
-points at; far from one, there is no arrow to find it by (the minimap anomaly
-blip is doing that job).  Neither end matches how the player has learned to
-read the other five contact types.
-
-**Candidate directions** (none chosen — this is a design call):
-
-1. **Make it obey the normal rules** — drop the suppression exemption and the
-   range gate, let it fade with distance like everything else, and lean on the
-   minimap blip for long-range discovery.  Cheapest; costs the guaranteed
-   labelled cue on approach.
-2. **Keep the exemption, drop the redundancy** — suppress the arrow once the
-   rift is on screen (the world-space tag takes over), keep it while the
-   portal is off screen and in range.  Preserves the navigation cue and kills
-   the double-labelling.
-3. **Promote portals to a separate NAVIGATION layer** rather than a contact
-   type — a distinct treatment (waypoint-style) that isn't competing with the
-   threat arrows at all, which is arguably what a fixed landmark wants.
-
-**Touch points:** `RenderSystem.renderIndicators` (the `isPortal` exemptions
-and the label block), `UI_CONSTANTS.INDICATORS`, `PORTAL_CONSTANTS`
-`INDICATOR_RANGE`, and `MINIMAP_CONSTANTS.PORTAL_BLIP` (which currently
-carries long-range discovery and would carry more under option 1).
-
 ---
 
 ## Portal persistence — stages that stay cleared, and enemies that creep back (2026-08-07)
@@ -1105,6 +839,12 @@ carries long-range discovery and would carry more under option 1).
 > `docs/PORTAL_AND_WORLD_LAYER_PLAN.md` §6, and the persistence decision it
 > waits on is that doc's open decision #1.  Tracked as **F1**/**F2** in
 > `docs/CONFIG_CHANGES_PHASED_PLAN.md`.
+>
+> **Descent is switched off** (user call, pending the descent rework): the
+> post-boss rift no longer opens (`engine/bosses.ts` keeps
+> `openDescentPortal` uncalled), so the SHALLOW version below is not
+> reachable in play; `transitionToMap(id, { descend: true })` and
+> `stageIndex` are intact.
 
 **Context:** raised in playtest while the stage-descent capstone was being
 built.  The session deliberately shipped the SHALLOW version (kill the boss →
@@ -1163,10 +903,10 @@ Doing Shape 1 first is what makes Shape 2 tractable.
 
 **Context:** raised during the stage-descent session, as design notes for the
 procedural AREAS that will replace today's hand-built test arenas.  The
-descent portal currently picks a RANDOM arena descriptor as an explicit
-placeholder (`GameEngine.openDescentPortal`) — this entry is what should
-eventually sit behind that seam.  Not for that session; recorded for the
-Overworld / procedural-areas work.
+descent portal picked a RANDOM arena descriptor as an explicit placeholder
+(`openDescentPortal`, now in `engine/bosses.ts` and uncalled — descent is
+switched off) — this entry is what should eventually sit behind that seam.
+Not for that session; recorded for the Overworld / procedural-areas work.
 
 ### 1. An area is a COMBINATION of materials
 
@@ -1216,7 +956,8 @@ structural furniture rather than an area's material identity.
 `Record<MapType, …>` of per-variant counts.  A generated area needs the same
 shape produced at RUNTIME from the drawn combination — so either
 MAP_POPULATION grows a "generated" branch, or the generator emits a
-population record the existing `MapClasses.populate()` path consumes
+population record the existing `BaseMapLayer.populateTileClusters` /
+`populateNebulaClusters` path (already `MAP_POPULATION`-driven) consumes
 unchanged.  The latter is much less invasive and keeps one populate path.
 
 ### 4. A real map GRAPH — nodes and edges
@@ -1267,55 +1008,21 @@ node ids; and destroyed terrain does not persist across re-entry.
 
 ---
 
-## Automated test suite — investigate a real harness (2026-08-08) — PARTLY ADOPTED
+## Automated test suite — the three tiers still parked (2026-08-08)
 
-> **STANCE DECIDED; TIERS 1, 2 and 6 SHIPPED (roadmap 5b, decision #46a).**
-> The "explicitly NOT decided" question at the bottom of this entry is
-> answered: the project adopted a harness when it went public and gained a
-> collaborator with no session history.  What exists now — `tests/` as repo
-> artifacts driving the real engine in a real browser (tier 1), `npm run
-> typecheck` (tier 2), and `.github/workflows/pr-checks.yml` running
-> typecheck -> build -> Playwright on every PR as the merge gate (tier 6).
->
-> **Still parked, deliberately:** tier 3 (Vitest over the pure layer), tier 4
-> (headless Node sim tests) and tier 5 (visual regression — still the
-> flakiest and most maintenance-hungry, still last).  Read the tier list below
-> as three remaining items, not six.
+> Tiers 1 (the Playwright suites in `tests/`) and 2 (`npm run typecheck`)
+> SHIPPED in roadmap 5b (decision #46a), and tier 6 (CI gating) is
+> `.github/workflows/pr-checks.yml`, the merge gate — see CLAUDE.md §7.
+> Still parked, deliberately:
 
-
-**Raised as a merge risk during the Phase 3 Pair A gauntlet.**  The project
-has, by design, no test runner and no lint step (CLAUDE.md §7: "Don't invent
-one unless the user asks").  Validation today is `npm run build` — which only
-type-checks — plus whatever headless Playwright smokes the session author
-happens to write.  Those smokes have proven genuinely valuable (the Pair A
-session ran 436 assertions across 7 suites and they caught real regressions:
-a wreck-state leak on restart, indicator budgets culling the nearest contacts,
-a stale-`dist` false pass), but they are **session-scoped scratchpad files**,
-not repo artifacts.  They evaporate with the session.  The next session
-re-derives them from scratch, and nothing prevents a later change from
-silently breaking behaviour an earlier session proved.
-
-That is the actual risk: **there is no regression net that outlives a
-session.**  Every guarantee this repo has is re-established by hand, per
-session, by whoever remembers to.
-
-**What to investigate** (roughly in order of value-per-effort):
-
-1. **Promote the smokes into the repo.**  The cheapest large win.  They
-   already drive the real engine in a real browser through
-   `window.__omniEngine` / `window.__omniStats` (CLAUDE.md §8), so there is
-   nothing to port — it is `npm i -D @playwright/test`, a `tests/` directory,
-   a `test` script, and a decision about where the preview server comes from.
-   The debug handles exist precisely for this and cost nothing per frame.
-2. **A type-check script.**  `tsc --noEmit` as its own npm script, so a type
-   error surfaces without a full Vite build.  Minutes of work.
 3. **Unit tests for the pure layer.**  Vitest over the genuinely pure,
    dependency-free functions: `engine/toroidal.ts` (wrap math — the single
    most invariant-critical code in the repo and the easiest to break
    silently), the `constants.ts` pure helpers (`isBossWave`, `bossForWave`,
    `buildWaveSpawnList`, `buildBossWaveSpawnList`, `enemyHpMult`,
-   `getWaveSpawnBudget`, `modulePrice`, `moduleFitsSlot`), and the module
-   adjacency fixpoint.  No DOM, no canvas, fast.
+   `getWaveSpawnBudget`, `moduleFitsSlot`), `modulePrice`
+   (`engine/outfitting.ts`), and the module adjacency fixpoint.  No DOM, no
+   canvas, fast.
 4. **Headless SIM tests without a browser.**  The engine constructs a
    `GameEngine` before `initCanvas`; a large amount of sim logic (waves,
    physics stepping, module effects, death routing) may be drivable in Node
@@ -1327,86 +1034,6 @@ session, by whoever remembers to.
    session already burned real time on canvas-sampling flakiness (the fix was
    to PAUSE the sim and classify by dominant-hue histogram rather than
    brightest pixel).  Do this LAST, and only for surfaces that are stable.
-6. **CI gating.**  Today's two workflows (`pr-preview`, `publish-standalone`)
-   gate nothing.  Once (1)–(3) exist, run them on PR.
-
-**Explicitly NOT decided:** whether the project wants this at all.  The
-no-test-runner stance is deliberate and has kept the repo light.  The
-counter-argument is that the codebase is now ~15k lines with a god-class
-orchestrator, three exotic engine-managed roamers, a boss phase machine and a
-module system, and the cost of a silent regression has grown a lot since that
-stance was set.  **Decide the stance first, then pick tiers** — a half-adopted
-harness that nobody runs is worse than none.
-
----
-
-## Viewport coverage — test more than 390×844 (2026-08-08) — DONE
-
-> **SHIPPED (gauntlet 5d, U4).**  `tests/viewports.spec.ts` — 44 tests over
-> exactly the six viewports tabled below (320×568 / 390×844 / 430×932 /
-> 768×1024 / 1024×768 / 1440×900), plus the mid-session resize this entry
-> called "cheaper than it sounds": portrait -> landscape -> desktop -> 320 ->
-> back, watching a planted probe keep drifting at every stop.  The
-> scroll-width and 40px tap-target checks generalized directly, as predicted.
-> Canvas-pixel assertions stayed pinned to one viewport; visual regression
-> stays parked (tier 5 below).
->
-> `window.__omniHud` was added for it, exposing the pure canvas-HUD layout
-> functions (`fitFontPx`, `computeMinimapRect`, `computeLoadoutHUDLayout`,
-> `computeIndicatorRect`) on the `__omniHid` rationale — they are pure, and
-> they are wrong in a way nothing reports.  Its stated dependency (the
-> test-harness entry) cleared first, as sequenced.
-
-
-**Raised as a merge risk during the Phase 3 Pair A gauntlet.**  Every UI
-assertion written in that session ran at a single viewport: **390×844**, the
-iPhone the game is actually played on.  That is the right primary target, and
-it is the *hard* one (it is where the death screen, the stage-clear screen,
-the boss HUD bar, the hex flowers and the wave banner all had to be made to
-fit).  But it is one point in a space, and several of this session's changes
-are **size-dependent by construction**:
-
-- `RenderSystem.fitFontPx` scales banner text off canvas width — its
-  behaviour at 1920px (never shrinks) and at 320px (shrinks hard, possibly to
-  the readability floor) is untested.
-- Off-screen indicators anchor to an INSET VIEWPORT RECT
-  (`UI_CONSTANTS.INDICATORS.EDGE_INSET`) and ramp size by distance; the inset
-  is a fixed px value, so it is proportionally huge on a small screen and
-  negligible on a large one.
-- The boss HUD bar was explicitly "sized so all of it survives a 390px-wide
-  screen" — meaning it was tuned to a floor, not designed responsively.
-- The station and pause panels are honeycomb hex grids with drag-and-drop;
-  hex layout is computed, and both the drag ghost and the drop targets are
-  position-sensitive.
-- The minimap is a fixed `MINIMAP_CONSTANTS.SIZE` square with a fixed margin,
-  and the wave banner is positioned relative to it.
-
-**Viewports worth covering:**
-
-| Viewport | Why |
-|---|---|
-| 320×568 (iPhone SE, 1st gen) | the narrowest phone still in use — the real floor |
-| 390×844 (iPhone 12–15) | today's only target; keep it |
-| 430×932 (Pro Max) | the large-phone case |
-| 768×1024 (iPad portrait) | tablet portrait — tall, but wide enough to change layout |
-| 1024×768 (iPad landscape) | the first genuinely LANDSCAPE case |
-| 1440×900 / 1920×1080 (desktop) | where the game is developed and where nothing shrinks |
-
-**Also worth testing, and cheaper than it sounds:** a **mid-session resize**.
-Rotating a phone or resizing a desktop window is a real user action, and
-nothing in the current suites ever changes the viewport after load.  Caches
-keyed on canvas size (the nebula render fast-path, gradient caches, the
-minimap) are exactly the sort of thing that survives a resize incorrectly.
-
-**Cheapest path:** the existing smokes already take a viewport in
-`browser.newContext({ viewport })`; parameterising the DOM-layout assertions
-over a viewport list is a loop, not a rewrite.  The scroll-width check
-(`document.documentElement.scrollWidth <= width`) and the ≥40px tap-target
-check generalise directly.  The canvas-pixel assertions do not, and should
-stay pinned to one viewport.
-
-**Depends on** the test-suite entry above: this is only worth building on top
-of a harness that outlives a session.
 
 ---
 
@@ -1415,9 +1042,10 @@ of a harness that outlives a session.
 **Raised in playtest** ("the nebula shards spin in the opposite direction
 than what they should"), and the user has explicit interest in building the
 real thing.  The interim fix shipped: the player-wake swirl's spin sign is
-now the DBG cycle Visual ▸ "Neb spin" — `physical` (wake shear: starboard
-pass → clockwise) / `inverted` / `random` (the old id-parity vortices) — so
-the handedness can be A/B'd in flight.  That is a SIGN policy, not physics.
+now the DBG cycle Materials ▸ Nebula ▸ "Neb spin" — `physical` (wake shear:
+starboard pass → clockwise) / `inverted` / `random` (the old id-parity
+vortices) — so the handedness can be A/B'd in flight.  That is a SIGN
+policy, not physics.
 
 **What the real system is:** angular state as a first-class part of the
 impulse solver.
@@ -1425,7 +1053,7 @@ impulse solver.
 - **Moment of inertia** per entity (from size/mass; a disc approximation is
   fine) beside `mass`, with `Infinity` for statics mirroring the mass axis.
 - **Off-centre impacts apply torque**: `resolveCollision` /
-  `resolveAsteroidPair` compute the contact point already (MTV); the impulse
+  `resolveShardPair` compute the contact point already (MTV); the impulse
   they apply should also change `rotationSpeed` by `r × J / I` on both
   bodies, and the contact-point VELOCITY (linear + ω×r) should feed the
   restitution instead of the centre velocity.
@@ -1434,7 +1062,7 @@ impulse solver.
 - **Spin → translation coupling** (a spinning shard grinding along a wall
   walks sideways) is optional polish; decide when the base lands.
 
-**Why its own session** (CLAUDE.md §8 already warns): the per-pair solver is
+**Why its own session** (the broadphase entry warns): the per-pair solver is
 the hottest code in the engine and "delicate — merge / regen / neighbour-
 count all key off exact shard positions".  Adding angular terms changes
 resting-contact behaviour (spin jitter is the classic failure), interacts
@@ -1444,7 +1072,7 @@ adds work per contact pair.  Sequence: base I + impact torque on the
 player/enemy/shard paths → wake swirl re-derived → sleep/merge re-verified →
 perf capture.  Knobs should land beside `PHYSICS_CONSTANTS`.
 
-**Touch points:** `PhysicsSystem.resolveCollision` / `resolveAsteroidPair` /
+**Touch points:** `PhysicsSystem.resolveCollision` / `resolveShardPair` /
 `applyNebulaPlayerPull` (which then loses its hand-signed kick), the shard
 sleep gates, `SHARD_VARIANTS` if per-material inertia is wanted.
 
@@ -1462,6 +1090,8 @@ already written — none blocks anything, and none is a defect.
    emerald PRIMARY because amber on that screen is the descent rift's colour
    and an amber button reads as "descend".  Counter-argument: the screen is
    amber-themed throughout and the button tied it together.
+   *(2026-09: the descent rift is switched off — no amber rift exists in
+   play, so "amber reads as descend" is moot until the descent rework.)*
 2. **R2 — Portal arrow green vs minimap blip violet/sky.**  The one contact
    exempt from the G5 colour-faithfulness rule, documented as deliberate.
    Two ways out if wanted: tint the arrow to match the rift, or keep the
@@ -1479,7 +1109,9 @@ already written — none blocks anything, and none is a defect.
    exactly at the 390px design target; 320 plus a six-figure balance is 29px
    short and `truncate` degrades gracefully.  The alternatives all trade a
    guarantee for it (wrapping headers can overflow outright on longer future
-   names).
+   names).  *(5d U8 later changed this screen: the title now shares a sticky
+   row with UNDOCK at `text-lg`, and the balance sits on its own row —
+   re-measure at 320 before deciding.)*
 
 The full argument for each — with measurements and the before/after pairs —
 stays in the 5d ledger; this entry exists so the look pass has one place to
@@ -1498,10 +1130,11 @@ answer to "can I put fire on the right bumper" is a new scheme.
 **What exists already, and is most of the substrate:**
 
 - `INPUT_CONSTANTS.GAMEPAD.BUTTONS` is already a table of *action → button
-  indices* (`FIRE`, `FIRE_FACE`, `INTERACT`, `CYCLE_WEAPON`, `PAUSE`, `DPAD`,
-  `THROTTLE`, plus the menu-nav group). A rebind is a write to that table, not
-  new plumbing — the poll reads it through `padGroupValue` / `padGroupEdge`,
-  which already accept a GROUP of indices rather than one button.
+  indices* (`FIRE`, `FIRE_FACE`, `INTERACT`, `SCAN`, `CYCLE_WEAPON`, `PAUSE`,
+  `DPAD`, `THROTTLE`, `DEBUG`, plus the menu-nav `CONFIRM` / `BACK`). A
+  rebind is a write to that table, not new plumbing — the poll reads it
+  through `padGroupValue` / `padGroupEdge`, which already accept a GROUP of
+  indices rather than one button.
 - `CONTROL_SCHEME_RULES` is the one table every "what does this scheme do"
   read goes through, so a custom scheme is a rules row with user-supplied
   values rather than a new code path.
@@ -1537,7 +1170,8 @@ needs only (1) and (2).
 ## Depth-scoped darkness belongs to the universe map structure (2026-08-20)
 
 **The mechanism is BUILT, TESTED, and SHIPPED OFF** (`constants.ts`
-`depthAmbientEnabled = false`; DBG ▸ Debug Menu ▸ "Depth dark" turns it on).
+`depthAmbientEnabled = false`; DBG ▸ Visual / HUD ▸ Lighting ▸ "Depth dark"
+turns it on).
 A7 of the lighting gauntlet added depth-scoped ambient darkness: each descent
 adds the light tier's `ambientPerStage` of fog-dark (capped at
 `AMBIENT_DEPTH_CAP` = 4 stages), folded into the fog compositor's dark fill
@@ -1549,7 +1183,10 @@ ladder, the cap, and the toggle restore.
 **Why it ships off (user call):** the "depth" it keys on is not yet a real
 place.
 
-- **Today's post-boss rifts have no depth in them.**  A descent rift just
+- **Descent is switched off today** (`engine/bosses.ts`, pending the descent
+  rework), so `stageIndex` never leaves 0 in normal play and this mechanism
+  has nothing to key on even if enabled.
+- **The post-boss rifts have no depth in them.**  A descent rift just
   travels the player from one arena to another — every arena hangs off the
   one Overworld, and the "descent target" is a RANDOM interchangeable
   descriptor.  `stageIndex` is a linear counter that says how many amber
@@ -1562,7 +1199,7 @@ place.
   portals just bounce between maps on the primary overworld layer.
 
 **Where it should land:** the planned universe-map work — see "Area
-composition — material combinations + a real map graph" (its Shape 4, the
+composition — material combinations + a real map graph" (its §4, the
 node/edge graph) and "Portal persistence — stages that stay cleared".  Once a
 node has a stable identity and a real DEPTH coordinate that survives
 travelling away and back, the darkness becomes a property of the node
@@ -1578,7 +1215,7 @@ does, depth-darkness and depth-composition should read the same coordinate.
 
 ---
 
-## Two device-quantified perf items for the next perf session (2026-08-21)
+## The sim wall at ~5k entities — gravity collapse (2026-08-21)
 
 Surfaced by the A9 device captures (`docs/GAUNTLET_LIGHTING_LOG.md`) while
 proving the lighting layer innocent — the light/fog columns read ≤ 0.38 ms
@@ -1611,63 +1248,15 @@ a dpr-2 phone.
   collapse speed (fast enough to matter, slow enough to watch), and
   whether deep-space collapses should seed new minable clusters (ties into
   the area-composition entry's regional identity).
-- **Tinted-sprite cache thrash — FIXED (same day): the cache now
-  quantises its hex key to 17-step buckets** (`RenderSystem.
-  quantizeTintHex`, applied at both key seams; pinned by the
-  lighting-suite tint-bucket test).  Kept here for the record of the
-  mechanism, since equilibrating hues defeating an exact-key cache is a
-  shape that could recur elsewhere:  Not population per se: `ENEMY_NEBULA_BURST` sprays
-  cosmetic nebula dust tinted to each dead enemy's colour, and
-  `NebulaSystem.equilibrateColors` drifts every shard hue toward its
-  neighbours continuously — so every hue step mints a NEW `(sprite, hex)`
-  key against the 256-entry `getTintedSprite` cache, each miss building a
-  128² canvas.  The key stream never repeats by construction; the cache
-  cannot converge.  Measured: 374 new tints in ONE frame, 41 450 misses in
-  36 s, 12 ms peak, during a heavy late-run fight on a map with NO nebula
-  terrain.  Candidate fixes, cheapest first: QUANTISE the hex in the cache
-  key so equilibration steps land on reusable buckets (visual granularity
-  cost is a few colour steps); skip equilibration for single-hex dust;
-  cap the dust population.  Quantising the key is likely a one-line fix
-  with a measurable win — verify with the PerfRecorder tint line.
+- **Tinted-sprite cache thrash — FIXED 2026-08-21**
+  (`RenderSystem.quantizeTintHex` buckets the hex key; pinned by the
+  lighting suite's tint-bucket test).  The shape to remember: a continuously
+  drifting hue (`NebulaSystem.equilibrateColors`) defeats any exact-key cache.
 
 Also noted for the same session: the planned desktop-browser framerate
 investigation (user report, 2026-08-16) — the PerfRecorder now carries
 light/fog columns and a self-describing `set` line, so a desktop capture
 will attribute correctly out of the box.
-
----
-
-## Six recorded takes are longer than their polyphony allows (2026-08-26)
-
-Found by `scripts/smoke/assets.mjs` once the recorded library grew from 3
-files to 66. Not a code problem — a re-export, whenever the sounds get
-another pass.
-
-| id | takes | length | budget |
-|---|---|---|---|
-| `weapon.cannon.fire` | a, b, c | 380 ms | ≤ 300 ms |
-| `enemy.shot.boss` | a, b, c | 340 ms | ≤ 300 ms |
-
-**Why the length matters, and why it is not just "a bit long".** Each id has
-a polyphony cap — how many copies may sound at once — and a take that outlives
-the gap between triggers starves its own cap: the fourth shot steals the voice
-of the first, so a sustained burst audibly cuts itself off mid-tail. The
-guideline is the cap times the fire interval, and 300 ms is where these two
-sit. The cannon is the more likely to be noticed, because it is a weapon the
-player fires deliberately and listens to.
-
-Two ways out, and the choice is aesthetic rather than technical:
-
-- **Shorten the takes** to ~280 ms, keeping the transient and trimming the
-  tail. Cheapest, and the tail is the part least likely to be missed on a
-  weapon that is about impact.
-- **Raise the polyphony** for these two ids so the overlap is legal. Costs
-  voices from a budget that already thins tier 3 first under load, so it
-  trades against material chatter in exactly the frames where a cannon is
-  most likely to be firing.
-
-Deliberately NOT auto-fixed: these are authored assets, and trimming someone's
-recording to satisfy a linter is the wrong default.
 
 ---
 
@@ -1749,6 +1338,16 @@ span.  The warm-up was reverted, because relocating a defect is not fixing it.
 defaults to `off`); movers repopulating the scene (this test already calls
 `quietScene`, which halts the wave ladder and stops the ambient keeper).
 
+**One correction to that last line (2026-09-29).**  `quietScene` did not
+keep the scene still: emptying the field closed the halted wave on the next
+step, and its clear beat — 88 particles and two rings, spawned at the ship
+— was live through the first reads (measured over eight local runs: 90
+particles at the first read, 34-54 at the second).  The helper now waits
+for that beat and sweeps it.  With the particles gone the reference STILL
+drifts (first read 15.8-20.1, third 21.2-22.9 across the same eight runs),
+so the beat was noise on top of this defect, not its cause, and the entry
+stays open.
+
 **What it needs:** find what varies in the light stack over ~2 s at ~200
 units from a stationary player, then give the bound a reference that does not
 move — averaging it across the settle window it already runs, or anchoring it
@@ -1762,6 +1361,8 @@ light is blue-green (125, 211, 252), so its green sits 7.7% above its own
 mean and the comparison was tighter than the physical claim it is written to
 make.  It compares green to green now.  That is weaker by exactly that 7.7%,
 and it is the comparison the sentence above it describes.
+
+---
 
 ## Grain `sizeSpread` and `bondSpread` — parked at 0 for the four (user call)
 
@@ -1882,6 +1483,12 @@ break, which is the whole property the grain model exists to have.
 **Status:** designed with the user, not built. Supersedes the current
 `tickMetalAssembly` lattice. User call: give up triangular bonding for
 metal entirely.
+
+> See also `docs/MATERIAL_GRAIN_SPEC.md` §3 (PROPOSED unified bonding — the
+> same lattice replacement, stated for every material).  The BREAK half has
+> already moved: a dying composite fractures its own hull, and
+> `decomposeMetalComposite` is only the legacy A/B (CLAUDE.md §8 "THE
+> LATTICE IS HOW METAL JOINS").
 
 ### Why the lattice has to go
 
@@ -2094,6 +1701,13 @@ must not be built.
 
 ## Penetration bore tracks as a FRACTURE MODEL (2026-09-06) — user call
 
+> **Step 5 of "Unified impact physics" (2026-09-12) answered items 1–3 for
+> PROJECTILES.**  `pierce` and the Penetration module are deleted; every
+> round is an energy bank and EVERY hit on a grain body walks its chord
+> (`borePierceTrack`), so depth is energy ÷ the material's per-grain price
+> and the falloff is `1 - bite/energy`.  Still open: a HULL track (a crash
+> deposits at one contact), track WIDTH, and item 4.
+
 **The observation.** Option C's penetration bore — a bolt walking its own
 chord through a body, spending one charge and one falloff step per GRAIN
 (`PhysicsSystem.borePierceTrack`) — produces a fracture pattern the user
@@ -2136,10 +1750,11 @@ penetration path:
    weapon?**  **PARTLY ANSWERED by step 3**: it belongs to neither as an
    authored number.  The global knob and the unused per-weapon seam are
    both deleted, and the rate is now DERIVED per weapon from its energy
-   bank (`1 - 1/(1 + pierce)`).  The material-side question survives in a
-   sharper form — a stuff's `bondStrength` already decides how much energy
-   an advancing shot gives up per grain, so a material-specific ABSORPTION
-   rate on top of that would need to say what it adds.
+   bank (step 3: `1 - 1/(1 + pierce)`; since step 5, `1 - bite/energy`).
+   The material-side question survives in a sharper form — a stuff's
+   `bondStrength` already decides how much energy an advancing shot gives
+   up per grain, so a material-specific ABSORPTION rate on top of that
+   would need to say what it adds.
 4. **Interaction with `damageSpread`.**  The bore works as well as it does
    *because* every material ships `damageSpread: 0`, so each stamp spends
    sequentially outward from its own point.  A non-zero spread would
@@ -2221,9 +1836,10 @@ work is presentational.
    they must not disagree about price or availability, and `slotUnlockCost`
    through the `modulePrice` seam is what keeps that true.
 5. **`MODULE_SLOT_UNLOCK.START` is the cap TODAY**, so none of this is
-   reachable in a shipped run without DBG ▸ Modules ▸ "Lock slots".  The
-   balance call — what a hull actually starts with — belongs to the economy
-   pass, and this UI work should not settle it by accident.
+   reachable in a shipped run without DBG ▸ Economy ▸ Salvage & Stations ▸
+   "Lock slots".  The balance call — what a hull actually starts with —
+   belongs to the economy pass, and this UI work should not settle it by
+   accident.
 
 ### Related
 
@@ -2281,9 +1897,8 @@ pointing at.
 boundaries too, so eight of the nine share one model and only path 9 (the
 dragon's `consumeTile`, which deletes the tile outright) stands outside it —
 as a swallow rather than a hit, which is arguably correct.  What remains open
-is the OTHER half of the asymmetry, and it is step 4's: a bolt bores a pane
-grain by grain, while a hull at speed still deposits at ONE point and leaves
-no track.
+is the OTHER half of the asymmetry (§9): a bolt bores a pane grain by grain,
+while a hull at speed still deposits at ONE point and leaves no track.
 
 ### 2. The four overlaps
 
@@ -2292,9 +1907,10 @@ no track.
    is left).  The second is the real model; the first is a legacy the
    collision paths still speak.  Every new material inherits both.
 
-2. **TWO ENERGY MODELS, one real and one authored.**  **RESOLVED for the
-   WEAPON half in step 3 (damage is kinetic; see §9); the crash half is
-   step 4's, and it is now the only one left authored.**
+2. **TWO ENERGY MODELS, one real and one authored.**  **RESOLVED — the
+   WEAPON half in step 3 (damage is kinetic), the crash half in step 4 (a
+   crash spends its kinetic energy, though its GATES stay authored — §9);
+   see §8.**
    Collisions already
    compute genuine mechanics — `impactStrength` is
    `(1+e)·|v_n|·effInv_self/(effInv_self+effInv_other)`, a real velocity
@@ -2305,7 +1921,7 @@ no track.
 
 3. **THE FALLOFF IS A SECOND KNOB FOR SOMETHING THE FIRST SHOULD ALREADY
    SAY.**  **RESOLVED in step 3 — both knobs are deleted and the decay is
-   derived per weapon as `1 - 1/(1 + pierce)`; see §9.**
+   derived (`1 - bite/energy` since step 5 retired `pierce`); see §8.**
    `PIERCE_FALLOFF_RATE` decays damage per hit, and
    `PIERCE_SPEED_RETAIN` decays SPEED per hit — and ships at `1.0`, a no-op.
    If damage were kinetic (`½mv²`, or `mv`), the falloff would **fall out of
@@ -2316,7 +1932,7 @@ no track.
 
 4. **`pierceCount` IS A BUDGET, WHICH IS NOT A PHYSICAL QUANTITY.**
    **RESOLVED in step 5 — `pierce`, `pierceCount` and `MAX_PIERCE` are all
-   deleted and a round authors its `mass` directly; see §11.**  Step 3 made
+   deleted and a round authors its `mass` directly; see §8.**  Step 3 made
    the budget physical without removing it (`pierce` sized the energy bank at
    `(1 + pierce)` bites); step 5 removed the count.  A shot
    gets N discrete charges regardless of what it hits — a 36px pane and a
@@ -2340,7 +1956,7 @@ area), which is precisely the physical constant this wants.  The proposal:
   with the right curve.  `PIERCE_FALLOFF_RATE` and `PIERCE_SPEED_RETAIN`
   collapse into one another and then into nothing.
 - ~~**The player bores terrain by the same routine.**~~  **DELIVERED in
-  SUBSTANCE, not in form (step 4, §10).**  The user's point was that a hull
+  SUBSTANCE, not in form (step 4, §8).**  The user's point was that a hull
   should behave like a piercing bolt, and it now does in the way that
   mattered: it spends kinetic energy on grain boundaries and pays for what it
   breaks.  What it does NOT yet do is deposit along a CHORD — that is the
@@ -2363,7 +1979,7 @@ area), which is precisely the physical constant this wants.  The proposal:
   buying sectional density instead; what the measurement showed is that
   sectional density is exactly what GUNNERY already buys once `damageFrac`
   scales the mass as well as the bite, so a second module selling the same
-  physical property had nothing left of its own to sell.  See §11.
+  physical property had nothing left of its own to sell.  See §8.
 
 ### 4. What must NOT be unified
 
@@ -2394,17 +2010,17 @@ PR.  The honest sequencing:
 2. ~~**Route paths 3, 4 and 5 through `applyBoundaryDamage`**~~ — **SHIPPED
    (2026-09-07)**, see §8 below.
 3. ~~**Make projectile damage kinetic**, retire the falloff rate and the
-   speed retain~~ — **SHIPPED (2026-09-11)**, see §9 below.  §7's warning
+   speed retain~~ — **SHIPPED (2026-09-11)**, see §8 below.  §7's warning
    that "the implied conversion constant is not a constant" turned out to be
    an artefact of `PROJECTILE_CONSTANTS.MASS`, not a property of the roster.
 4. ~~**Give hulls a bore track**~~ — **SHIPPED (2026-09-11) as an energy
-   spend rather than a track**, see §10 below.  The measurement changed what
+   spend rather than a track**, see §8 below.  The measurement changed what
    this step had to be: a hull ALREADY passes through terrain, so what was
    missing was not passage but that the speed it lost had nothing to do with
    what it broke.  A per-grain hull track is still open, and is now purely a
    DEPOSITION-GEOMETRY question — see the "Penetration bore tracks as a
    FRACTURE MODEL" entry, which is where it belongs.
-5. ~~**Revisit `pierceCount`**~~ — **SHIPPED (2026-09-12)**, see §11 below.
+5. ~~**Revisit `pierceCount`**~~ — **SHIPPED (2026-09-12)**, see §8 below.
    Removing the budget did change what the Penetration module *is*, and the
    user's call was that it is nothing: penetration is emergent, so the module
    is deleted and Gunnery absorbs it.
@@ -2497,971 +2113,75 @@ proposal's SUBSTRATE holds — `bondStrength` really is a specific fracture
 energy and the derived HP behaves as one — but NO SINGLE CONSTANT FITS
 TODAY'S GAME.**  Step 3 is a deliberate re-pricing, not a refactor.
 
-### 8. What step 2 SHIPPED (2026-09-07)
-
-Paths 3, 4 and 5 now spend on grain boundaries
-(`PhysicsSystem.crashBoundaryDamage` / `crashContactOn`; CLAUDE.md §8 carries
-the rule).  A crushed tile cracks and sheds grains the way a shot one does.
-
-The DEFECT it removed was larger than the entry anticipated, and was measured
-rather than argued: because the crash paths decremented `health` directly
-while the first weapon hit rewrote `maxHealth` to the derived total,
-**shooting a tile once made it 4-50× harder to ram through** — rock 9 → 50
-crashes, plastic 8 → 400, metal 120 → 468.  Nothing about the tile got
-tougher; the unit it was counted in changed.  Virgin and once-shot counts are
-now identical.
-
-Four decisions worth keeping:
-
-- **The spend is NOT kinetic, deliberately.**  Making it so is step 3 and
-  re-prices the roster (§7).  A crash spends one authored HP expressed in the
-  derived budget (`maxHealth / authoredMaxHealth`), which keeps every ram
-  count exactly what it shipped as.  Step 3 replaces that conversion with an
-  energy; until then it is the documented seam.
-- **The contact point is on the HULL**, not the impactor's centre — a
-  460-unit boulder's centre is a couple of hundred units outside the 36px
-  tile it is crushing, and both halves of the grain model read that point.
-- **A body with no grain model still breaks**, by falling back to the
-  whole-body decrement.  This is where the crash paths differ from
-  `chipStructureAt`, which refuses such a body outright.
-- **`damageSpread: 0` is preserved**: each crash stamps its own point and
-  spends sequentially outward from it, so a crush erodes a face rather than
-  blurring the whole body.
-
-Pinned by `tests/terrain.spec.ts` ("a crush spends on grain boundaries"), all
-three claim-tests verified to FAIL with the routing removed.
-
-### 9. What step 3 SHIPPED (2026-09-11)
-
-**Projectile damage is kinetic.**  A bolt carries ENERGY, and what it lands is
-what that energy is worth at the speed it still has.
-`IMPACT_ENERGY_PER_DAMAGE` (32) is the ONE conversion §4 demands between the
-structural world and the actor world.
-
-**§7's blocker dissolved rather than being paid.**  The measured 9..90 KE per
-point of damage was an artefact of every projectile flying at `mass: 1` — with
-mass pinned, the variation between a Laser pulse and a Cannon shell had nowhere
-to live but the constant.  `projectileMassFor` solves mass from the damage,
-muzzle speed and pierce each weapon already authors, so **the constant is
-constant, the spread becomes SECTIONAL DENSITY, and the roster keeps every
-number it had.**  No re-pricing was needed and the §7 counterplay table is
-untouched by construction.
-
-| weapon | mass | | weapon | mass |
-|---|---|---|---|---|
-| Blaster | 1.00 | | Laser | 1.78 |
-| Shotgun | 0.96 | | Seeker | 3.56 |
-| Burst Rifle | 2.40 | | Cannon | 3.56 |
-| Lightning | 0.85 | | enemy bolt | 7.90 |
-
-**PIERCE BELONGS IN THE SOLVE**, and leaving it out is the mistake this
-invites — caught during implementation, not in review.  A bolt whose whole
-energy equals one bite spends itself on contact, so every weapon stops dead and
-the Laser's `pierce: 4` is unreachable.  The bank is `(1 + pierce)` bites, which
-is the same statement as sectional density.
-
-**The falloff is DERIVED, per weapon**: `1 - 1/(1 + pierce)` — Laser 0.80/hit,
-Burst 0.67, Shotgun 0.50, a non-piercing bolt stops dead.  `PIERCE_FALLOFF_RATE`
-and `PIERCE_SPEED_RETAIN` were the two halves of that one number and are
-deleted.  The Penetration module now buys ENERGY, not licences.
-
-**DBG "Impact vel"** is the one judgement call, because energy is
-frame-dependent and `INHERIT_SHOOTER_VELOCITY` is 1.0.  Index 0 `muzzle` ships
-(day-one neutral); `relative` scores true closing energy and finishes the
-unification, at 2.2–5× for a charging ship (POCKET cruise; ~9.5× on the big
-maps).
-
-**The spawn-HP mismatch is closed too.**  `estimateBoundaryHp` predicts what
-`ensureBoundaryModel` will derive, sharing the model's own site-count rule.
-Authored against derived went rock ×0.96 → ×0.96, glass ×1.32 → ×1.01, plastic
-×2.46 → ×0.95, metal ×3.15 → ×0.94.  That ratio was not cosmetic: a crash spends
-`derived / authored`, so it was a silent ram-count dial.
-
-**What step 4 now has to do is smaller than this entry assumed.**  Measured
-through the real player-crash branch: a ship ALREADY passes through terrain —
-below `CRASH_VELOCITY_THRESHOLD` it bounces (`vx` reverses, ×−0.5), at or above
-it the branch returns before any impulse and the ship ploughs on at ×0.65 the
-incoming speed, at every speed.  So the threshold is already a bounce/passage
-switch.  What is missing is that **the speed lost has no relation to what was
-broken**: from cruise, a ship crosses 5 tiles and decays 21.6 → 14.1 → 9.1 →
-5.9 → 3.9 **identically for glass, rock and metal** — glass shatters all five,
-metal (470 derived HP) loses none, and the ship cannot tell the difference.
-Step 4 is making that speed loss equal the energy actually spent, not adding
-passage.
-
-### 10. What step 4 SHIPPED (2026-09-11)
-
-**A crash spends its KINETIC energy**, through the same
-`IMPACT_ENERGY_PER_DAMAGE` a weapon hit uses, scaled by a new
-`CRASH_ENERGY_COUPLING`.  Twice the closing speed is four times the bite.
-Step 2's "one authored HP" was the documented seam this replaces.
-
-**REDUCED MASS collapses the two gates.**  `m1 m2 / (m1 + m2)` is the energy
-available in a contact and degrades to the impactor's own mass against a
-static body, so the SPEED gate and the MOMENTUM gate stop being two different
-ideas of what a gate is.
-
-**The coupling is an EFFICIENCY, not a tap**, and this is the thing that was
-got wrong first.  A hull that deposits 6 damage does not lose 6 damage worth
-of speed and keep the rest — it loses all of what it spent, and only ~11% of
-that does useful breaking work.  Charging only the absorbed part was measured:
-a ship at cruise crossed **41 rock tiles** losing 3% a tile.
-
-**Calibrated on ROCK, unchanged at 9 rams**, so the anchor is a played number.
-Everything else then differs by derived toughness: glass 1 (V9), plastic
-8 → 65, metal **24..144 → 78**.  Metal is the headline — its old count was a
-density-tier lottery, six tiles of identical toughness taking 24 to 144 rams,
-because a crash spent one authored HP and metal authors `24 × densityTier`
-against a flat derived HP.
-
-**The defect, measured before and after.**  From cruise, a ship used to cross
-five tiles decaying 21.6 → 14.1 → 9.1 → 5.9 → 3.9 IDENTICALLY for glass, rock
-and metal.  It now crosses 4 glass (all destroyed) or 4 rock (3 destroyed),
-and is stopped DEAD inside the first plastic or metal tile.
-
-**Two bugs worth keeping**, both found by measurement rather than review: the
-budget must be read AFTER `ensureBoundaryModel` rewrites `health` (reading it
-early charged a hull against plastic's authored 8 instead of its derived 390,
-and let a ship grind through 23 plastic tiles breaking none), and the energy
-must be spent AFTER the knockback, because every momentum consumer reads
-`proj.velocity` for its direction — paid earlier, a bolt whose bite exhausted
-its bank delivered a knockback of exactly zero, which took out the whole
-knockback suite.
-
-**What is NOT done**: the hull deposits at one contact point, not along a
-chord.  A per-grain hull track — and whether a wide track should free several
-grains as ONE fragment — stays parked under "Grain clusters" and "Penetration
-bore tracks as a FRACTURE MODEL".
-
-### 11. What step 5 SHIPPED (2026-09-12)
-
-**PENETRATION IS EMERGENT, AND THE MODULE THAT SOLD IT IS DELETED** (user
-call).  The brief for this step was "make penetration a natural effect that
-comes out for all impacts", and the module followed from that rather than the
-other way round: once depth is energy divided by what the target charges,
-there is no count left for an item to grant.
-
-**`pierce` is gone; a round authors its `mass`.**  `WeaponConfig.pierce`,
-`GameEntity.pierceCount`, `MAX_PIERCE`, `pierceBonus` and `withPierceBonus`
-are all deleted.  A round now carries two numbers that answer different
-questions: `damage` is the BITE one contact deposits, `mass` with `speed` is
-the BANK.  The authored masses are EXACTLY what step 3's `(1 + pierce)` solve
-produced (Blaster 1.0, Burst 2.4, Shotgun 0.96, Laser 1.7778, Lightning
-0.8521, Seeker and Cannon 3.5556), so retiring the vocabulary rebalanced
-nothing — `perf/impact-audit.mjs` §2 measures the banks back out at 1/3/2/5/1/1/1
-bites.
-
-**GUNNERY ABSORBED IT.**  `damageFrac` scales the bite AND the mass together,
-so a mark buys a denser round: it bites harder and carries further, which
-under the energy model is one statement.  Scaling only the bite — which is
-what the module did while mass was derived FROM damage — would make a Gunnery
-round hit harder and stop SOONER, out of a fixed bank.
-
-**THREE THINGS FELL OUT, and two of them were not planned.**
-
-1. **Depth is the TARGET's price, not the weapon's.**  A grain costs
-   `grainSize × bondStrength`: glass 6.0, rock 5.6, plastic 10.8, metal 14.4.
-   Measured with an energy-bound round (12 of energy): rock 3 grains, glass 2,
-   plastic 2, metal 1 — the price ordering exactly, with the SAME total energy
-   spent in every case.
-2. **Overkill carries through on ACTORS** — the actor-side half of step 4's
-   "pay for what you broke".  A body absorbs only what it had, so a 4-damage
-   Blaster bolt is charged 1 by a 1-HP gnat and punches FOUR of them
-   (measured) while one rock tile still stops it dead.  A PLATE is not
-   overkill: armour and the front shield stop a round rather than run out of
-   room, so a reduced hit pays in full.
-3. **No single shot can destroy a grain tile**, however much energy it
-   carries, because the deposit is capped by the CHORD.  A 36px glass pane is
-   ~3 grains deep, so one contact leaves at most ~18 against a derived HP near
-   49.  This is "passage, not gouge" doing what it says — a hyper-energetic
-   round punches a clean hole and flies on — but it is the one consequence
-   most likely to be read as a bug, and it invalidated a terrain test whose
-   setup one-shot a tile with a `damage: 500` shell.
-
-**THE CANNON NEEDED ITS OWN RULE (5a, user call).**  `applyExplosionAoE` fired
-on EVERY hit, so a shell carrying N penetration detonated N+1 times; universal
-penetration would have made that a full blast per pebble.  `detonateOn:
-'enemy'` means only an ACTOR trips the charge, with `fuseSeconds` (0.42) as
-the fallback so a shell that meets nothing still ends in a blast.  Measured: a
-shell passes through 18 of 18 tiny/small/medium rock shards without
-detonating.
-
-**TWO MEASUREMENT TRAPS, both of which produced a confidently wrong answer
-first.**  Capping a bore step at the BITE rather than the remaining ENERGY let
-a bolt bore for ever, so depth fell back to `bodyWidth / grainSize` and
-finer-grained plastic measured DEEPER than pricier, coarser glass.  And
-comparing depth at HIGH energy measures the chord rather than the price — at
-20 bites metal took 5 steps to glass's 3, exactly backwards — so the
-regression drives an energy-bound round and asserts `alive === false` to prove
-it is not chord-bound.
-
-**What is still NOT done**: the hull still deposits at one contact point
-rather than along a chord (unchanged from §10), and the bore is a line rather
-than a track with width — both still parked under "Penetration bore tracks as
-a FRACTURE MODEL" and "Grain clusters".
-
-### 12. The step-5 follow-up: a fast ship was flying through terrain (2026-09-12)
-
-**REPORTED**: "the player now literally passes through tiles at high impact
-energy — this was explicitly not the intent."  Correct, and it was a real
-defect rather than a tuning question.
-
-**THE CAUSE IS OLDER THAN THE ENERGY MODEL.**  Every contact is tested at the
-END of a step, so a body moving further in one step than its target is wide is
-clear on both sides of it and never tests as touching.  The ship's contact
-window against a 36-unit tile is ±28 units and a substep moves half the
-velocity, so the hole opens near 90 u/step — inside the ship's own 120 cap.
-
-**STEP 4 IS WHAT MADE IT REACHABLE.**  The flat 35%-per-tile retention it
-replaced bled a ship below the tunnelling speed within a tile or two, so
-nothing could stay fast enough to fall in.  Spending real energy lets a ship
-that broke something cheap keep nearly all its speed, and it then outruns the
-test.  This is the general lesson worth keeping: **removing a blunt damper can
-expose a latent hole rather than create one**, and the symptom will be
-attributed to the change that exposed it.
-
-**MEASURED**, through the engine's own physics step against a ten-tile wall at
-the ship's 120 cap — before: out the far side still doing 114.1 with seven
-tiles whole and unmarked behind it (rock; glass 114.5; metal escaped at 160).
-After: stopped dead with nothing crossed untouched, on all three materials at
-60 / 90 / 120 / 160.
-
-**FIXED** by `PhysicsSystem.sweepRewind` — a body whose PATH crossed something
-is put back where it met it, and the ordinary broadphase, SAT, MTV, crash
-spend and `payForCrash` then run exactly as they do at walking pace.  See
-CLAUDE.md §8 for the five rules that hold it up; the two that were measured
-into place are that the rewind must target ENTRY rather than closest approach
-(closest approach reads as "already moving apart" and is refused), and that
-the step's path must be RECORDED rather than re-derived, since a rewind
-invalidates the obvious reconstruction.
-
-**STILL OPEN, and deliberately**: this is contact recovery, not continuous
-collision detection.  A body is rewound to where it met ONE thing; it does not
-sweep a corridor and it does not deposit along the chord it cut.  Both belong
-to the parked "Penetration bore tracks as a FRACTURE MODEL" entry, which is
-the same geometry question asked of the hull.
-
-
----
-
-### 13. The second step-5 follow-up: a ram that held did no damage and stopped dead (2026-09-12)
-
-**REPORTED**: "the player ship colliding still does not do damage like
-projectiles.  This appears to have regressed severely."
-
-**TWO DEFECTS, ONE SYMPTOM**, both in the player-vs-structure branch of
-`PhysicsSystem.resolveCollision`, and — this is the part worth keeping —
-**neither of them moved a ram COUNT**.  `perf/impact-audit.mjs` §5 and §5b
-read exactly the same before and after the fix (rock 9, glass 1, plastic 65,
-metal flat 78), because both defects were about who was BILLED and whether
-the ship came off, not about how much a crash spends.  An audit that measures
-"how many rams to break this" is structurally blind to "and what happened to
-the ship each time".
-
-1. **IT NEVER BOUNCED.**  Every path through the branch `return`ed before the
-   impulse at the bottom of the function.  The indestructible path did so on
-   the strength of a comment saying "the player already shed velocity above"
-   — that was `CRASH_VELOCITY_RETENTION`, which step 4 deleted, so the comment
-   documented a line that no longer existed.  **A deleted mechanism leaves its
-   justifications behind**, and they read as current.
-
-2. **A SURVIVING BODY WAS CHARGED THE WHOLE SWING.**  `payForCrash` bills
-   `absorbed / CRASH_ENERGY_COUPLING`.  A body that HOLDS absorbs exactly
-   `crashDamageFor` = coupling × KE, so the divide hands the bill straight
-   back as the ship's ENTIRE normal-direction kinetic energy.  Not "too
-   much" — algebraically all of it, every time, independent of the tile.
-   The coupling is an EFFICIENCY (only ~11% of a contact does breaking work);
-   dividing it out is only correct where the absorbed figure is a REMAINING
-   BUDGET rather than the full offer, which is to say only where the body
-   actually broke.
-
-**THE SYMPTOM**, measured on a 55-HP rock tile at 12 u/step: 21 damage dealt
-and the ship stopped DEAD, embedded, with no bounce — three standing starts
-to break one rock.  Which reads exactly as "colliding does no damage", because
-what the player sees is a ship that stops and a tile that is still there.
-
-**FIXED** by deciding both questions off one test — did the wall hold?
-Broke through → charge and carry on.  Held → charge nothing and FALL THROUGH
-to the impulse, bouncing like any other collision with something solid.  The
-mobile path keeps its own early return (the momentum hand-off above already
-shoved it; letting the impulse run too would shove it twice).
-
-**MEASURED AFTER**: v5 / v8 / v12 into rock deal 3 / 8.8 / 21.3 and come off
-at −0.3 / −0.5 / −0.8; v20 breaks through and carries on at ~7 (against 19.3
-with the break-path charge removed, which is the negative control for the
-other half); v40 into metal deals 258.7 and throws the ship back at −12.9.
-
-**THE ENERGY IS NOT LOST BY NOT CHARGING IT.**  The bounce is where it goes.
-That is the invariant to keep in mind if anything ever reintroduces a
-velocity tax on this path: a crash has exactly two sinks, the break and the
-rebound, and billing both is billing twice.
-
----
-
-### 14. Glass loses its threshold, and mass becomes a stated scale (2026-09-12)
-
-Two follow-ups from the same play-test, both about the energy model being
-undermined by numbers that pre-dated it.
-
-#### 14a. The glass whole-pane crash rule
-
-**REPORTED**: "Ranking a glass plate over a threshold may be the error I'm
-experiencing — this deviated from the energy model and should be removed."
-
-Correct, and it is the clearest single example of what the unified-impact
-work exists to remove.  V9 gave a glass tile a whole-pane crash rule: any
-crash over `CRASH_VELOCITY_THRESHOLD` spent its ENTIRE remaining boundary
-budget.  So glass was the one material whose crash outcome was a **threshold
-question** — did you clear the gate, yes or no — while rock, plastic and
-metal had long since become **amount questions**.  A ship at 4.1 u/step and
-a ship at 40 destroyed a pane identically.
-
-It survived step 2 (which routed it through the grain model rather than
-around it) and step 4 (which made every other crash kinetic) because each of
-those steps preserved it *deliberately*, as "unchanged in meaning".  That is
-the lesson worth keeping: **a special case carried forward with a note
-saying it is unchanged will survive every refactor that is careful**, and
-the care is what hides it.  Only a play-test found it.
-
-**MEASURED**: 1 ram → 9, landing beside rock's 9 — which is the tell that
-the model is now doing the talking, since glass and rock share
-`bondStrength` 0.4 and derive 50.0 and 54.7 HP.  The audit's "KE per derived
-HP" column went FLAT across all four materials (296 / 324 / 286 / 299);
-glass was the one breaking it.
-
-**The sharp form of the regression** is not the ram count — a count would
-pass against a build that merely raised the threshold.  It is that a SLOW
-qualifying crash now leaves the pane standing, which only an amount model
-can produce.
-
-#### 14b. The mass scale
-
-**REPORTED**: "this energy transfer feels good overall but I think we need
-to scale mass for projectiles, the player and entities."
-
-The diagnosis was right and the measurement located it precisely.  Mass used
-to be an IMPULSE term and nothing else, so its numbers only had to be right
-relative to each other inside the solver.  The energy model made mass half
-of what every impact SPENDS — so four unrelated ladders silently became one
-balance surface, and nothing made it readable.
-
-**MEASURED** (`perf/impact-audit.mjs` §7, added for this), as mass per d²:
-
-| class | range | reading |
-|---|---|---|
-| shards | 0.0100 .. 0.0300 | coherent — material density, glass:rock:metal 1:1.8:3 |
-| enemies | 0.0102 .. 0.0400 | inside the material band |
-| projectiles | 0.0139 .. 0.0960 | wide, but authored as energy banks |
-| **player** | **0.2500** | **alone** — 25× glass, 8× rock, 2× the dragon |
-
-A 20-unit hull massing 100 was as dense as nothing else in the game.
-
-**FIXED** by stating the scale rather than by moving the ship (user call): a
-ship is a machine, not a rock, and should plow through gravel.  `PLAYER_MASS`
-is now `massFor(PLAYER_BASE_SIZE, IMPACT_DENSITY.HULL)` — exactly 100, so
-nothing re-priced — and the four shard `sizeToMass` ladders read the same
-table, so the material ratio lives in one place.  `HULL_DENSITY_CYCLE` is
-the live A/B, because ONE number moves crash energy, knockback, the
-body-impact shake and the roll spring together and that is a play question.
-
-**Two classes deliberately do not derive**, and the reason generalises:
-**never couple a physical quantity to a visual one.**  A projectile's `mass`
-is its energy BANK; deriving it from the drawn `size` would make a bolt's
-damage a function of its sprite — and the Cannon proves the point, drawn at
-16 against the Blaster's 6 while massing 3.56 against 1.00, so its density
-is the *lowest* of any round and would have to be authored low anyway.  No
-information gained, one hazard introduced.
-
-**STILL OPEN**: whether the hull should sit that far above the material band
-at all is now a question someone can *ask*, which it was not before.  The
-ladder exists to answer it in play.  Two enemy densities are also flagged
-rather than fixed: the DRAGON at 0.1221 (a mini-boss, deliberately
-immovable) and the BUBBLE at 0.0400 — denser than metal, which reads
-backwards for a gas blob, but its mass 9 is load-bearing and the
-immovability fix rests on that exact impulse arithmetic.
-
-**A MEASUREMENT TRAP worth recording**, because it cost two wrong readings.
-Measuring "how much does one ram take" by running the ship to rest counts
-RAMS, not bite — a lighter ship comes off faster and comes back for more, so
-a half-mass hull read 1.5× the damage.  And resetting a tile's `health`
-between arms does NOT reset its `fractureEdgeFill`, so the second arm
-reports ACCUMULATED erosion (measured 21.3 / 31.9 / 37.2 as the hull got
-*lighter*, which is a running total, not a heavier bite).  One contact, one
-fresh tile.
-
----
-
-### 15. Every mass x10, so impacts hit ten times harder (2026-09-12)
-
-**ASKED**: "Mass of the player should increase by a factor of ten for
-default ... do the same increase to projectiles and everything else as well
-— 10x", with "areas and sizes of objects should stay constant."
-
-**AND THE FIRST ATTEMPT GOT IT EXACTLY BACKWARDS**, which is the entry worth
-keeping.  Every impact in this engine is worth `mass / IMPACT_ENERGY_PER_DAMAGE`,
-so the "careful" move looked like scaling that conversion alongside the
-masses — preserving every ram count and every weapon number.  That makes the
-whole change a **no-op**: bigger numbers, identical game.  The user's
-response was blunt and correct: *"I legitimately don't understand what the
-point of increasing the mass ten times and then scaling impacts back just as
-much is."*
-
-The lesson is not about physics.  It is that **"nothing changed" is a
-suspicious outcome for a change someone deliberately asked for.**  Energy
-collisions had been the session's whole subject; a mass increase inside that
-work could only have been about making collisions carry more.  Preserving
-the old balance was defensible in the abstract and wrong in context, and no
-amount of measurement would have caught it because the measurement confirmed
-exactly what the mistaken intent predicted.
-
-**WHAT SHIPS**: `MASS_SCALE = 10` multiplies mass SOURCES only.  Nothing is
-compensated — not the energy conversion, not the crash gates, not the flow
-reference, not the audio pitch, not the kick impulse.
-
-Measured at the audit's 6 u/step ram: rock **9 → 1**, glass 9 → 1, plastic
-65 → 7, metal 78 → 8.  A round's energy bank is 10x too, so a Blaster bolt
-punches twelve gnats instead of four and the Laser's falloff is 49/50 a hit
-against its old 4/5.
-
-**RATIOS ARE INVARIANT AND THAT IS WHY THIS WAS EASY TO GET WRONG**: the
-impulse split, the body-impact shake, the roll spring, the ship-weight
-normalisation all cancel a uniform factor, so the ship still handles like
-itself — and *every ratio-shaped test in the suite stayed green through
-both the wrong version and the right one.*  Only the comparisons move.
-
-**TWO THINGS LOOKED LIKE MASS THRESHOLDS AND WERE NOT**, both caught by
-measuring rather than reading:
-
-- **A `/ literal` next to a mass is only a threshold if the mass is on the
-  other side of a comparison.**  `PhysicsSystem`'s shard push,
-  `0.20 / Math.max(1, target.mass / 10)`, reads as "a gate at 10" and is
-  really `min(0.20, 2 / mass)` — an inverse-mass term with a cap on the
-  *result*.  Scaling the 10 put it an order of magnitude from the enemy path
-  it must agree with (0.1125 against 1.125).
-- **A value converted out of authored units must never be written back into
-  an authored field.**  `withGunnery` set `mass: projectileMassFor(config)
-  * mult` into `WeaponConfig.mass`, whose contract is the authored number,
-  so the next conversion scaled it again: a Gunnery mark multiplied the
-  round's mass by 13.6 against its bite's 1.36.
-
-**STILL OPEN**: at this energy a hull occasionally LEAPS a glass tile —
-about 1 run in 6 on the full-speed glass charge, caught by
-`tests/terrain.spec.ts`'s `ghosted` counter.  `sweepRewind` resolves the
-EARLIEST contact in a step and refuses later ones (its documented
-backward-only rule); a tile destroyed outright by a hull that keeps most of
-its speed is a case that rule was not built for.  That belongs to the sweep,
-not to the mass work, and needs its own pass.
-
-### 16. Penetration is re-based, and the blast joins the model (2026-09-12)
-
-**REPORTED**: "the weapons penetrate too much at base level right now.  This
-current level of damage from weapons should occur at roughly 3 MkIII gunnery
-modules.  Additionally the cannon blast effect no longer does much damage.
-This needs to be aligned with the new model."
-
-**TWO ASKS, AND THE FIRST ONE HAS A TRAP IN IT.**  The obvious reading of
-"too much damage at base" is to scale the round down — both its numbers.
-That does not work, and the arithmetic says why in one line: the falloff is
-`1 - bite/energy`, so dividing the BITE and the BANK by the same factor
-leaves the ratio untouched and a round punches exactly as many bodies as
-before.  **Penetration is bank-shaped.**  Only `mass` moves.
-
-That also makes the change safe in the way the user implicitly asked for:
-`damage` is untouched at every Gunnery level, so no enemy takes longer to
-kill, no §7 trait threshold shifts, and the §7 weapon×trait table still
-holds.
-
-**THE CALIBRATION IS THE USER'S**, and it is a statement about progression
-rather than a number chosen here: today's reach is what a fully-gunned ship
-should have.  So the base bank is today's over what three Gunnery Mk III
-multiply it by — `BASE_BANK_DIVISOR = 1 + 3 × 0.36 = 2.08` — and
-`withGunnery` multiplies it straight back, so the two ends meet by
-construction rather than by tuning.
-
-MEASURED through the real resolver (`perf/impact-audit.mjs` §8, added for
-this — 1-HP gnats measure the bank directly, since a bolt is charged only
-what a body could absorb):
-
-| weapon | base before | base after | 3× Mk III after |
-|---|---|---|---|
-| Blaster | 31 | 15 | 36 |
-| Burst | 121 | 58 | 136 |
-| Shotgun | 41 | 20 | 51 |
-| Laser | 201 | 97 | 226 |
-| Lightning | 81 | 39 | 86 |
-| Seeker | 71 | 34 | 76 |
-| Cannon | 171 | 82 | 176 |
-
-Every before/after ratio lands on 2.05..2.09 against the 2.08 divisor, and
-the fully-gunned column sits just above the old base — "roughly", which is
-what was asked for.
-
-**A SECOND AUTHORED-UNITS BUG, IN THE SITE NOBODY LOOKED AT.**  The mass
-work found and fixed `withGunnery` writing `projectileMassFor(config) * mult`
-back into `WeaponConfig.mass` — a field whose contract is the AUTHORED
-figure, so the next conversion applied `MASS_SCALE` again.  `chargedConfigOf`
-had the identical bug at four call sites and kept it: every charged shot flew
-ten times too heavy (a charged Blaster carried a 2000 bank against its
-intended 200).  It survived because an over-penetrating charge looks exactly
-like a strong charge.  **The lesson generalises past this bug**: when a unit
-error is found at one site, the question is not "is it fixed" but "how many
-other sites convert the same way", and the answer here was four.
-
-**THE BLAST.**  `explosionDamage: 10` was the last damage number in the
-roster still authored as a flat scalar while everything around it became
-kinetic — and it did not merely fall behind, it was scaled by a `hitFalloff`
-that only started meaning something in step 3, so the same constant got
-quietly weaker.  It is now `blastDamageFor(mass, speed)`: the shell's own
-kinetic energy times `BLAST_ENERGY_COUPLING` (0.2), the sibling of
-`CRASH_ENERGY_COUPLING` — a hull couples ~11% of a contact into breaking
-work, a shaped charge a fifth of its energy into the blast.  Measured on a
-bystander at half the radius: **5.2 → 10.4**, with a peak of 17.3 against
-the Cannon's 18 direct bite.
-
-Three properties fall out rather than being written: it rides GUNNERY for
-free, a CHARGED shell blasts harder by being heavier, and a shell that spent
-its bank boring blasts weaker — because the `× hitFalloff` already at the
-call site IS the fraction of launch energy left, so peak × (E/E₀) is the
-energy it still carries with no second curve anywhere.
-
-**ABSENT MEANS DERIVED; A VALUE MEANS AUTHORED.**  `BOSS_WEAPONS.SIEGE`
-keeps its own `explosionDamage: 6`.  Deriving it would have tripled the
-Bastion's splash as a side effect of fixing the player's gun, which is a
-boss rebalance nobody asked for — and a designed encounter's number is one
-someone chose.
-
-**WHAT THE TESTS COULD NOT SEE, AND WHY THREE OF THEM MOVED.**  Three
-existing assertions stated the bank as a product (`5 * 10` bites, `49/50`
-decay, `10` bites) — all correct, all now wrong by exactly the divisor.  They
-are rewritten to READ `MASS_SCALE` and `BASE_BANK_DIVISOR` live and compute,
-because that bank has now moved twice and a product written out is a claim
-about whichever build wrote it.  Same rule the nebula grain-size default
-taught: a default that moves a measured quantity has to be walked past every
-assertion written against it.
-
-**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
-by this.
-
-### 17. A shell that stops, blasts (2026-09-13)
-
-**REPORTED**: "The cannon doesn't appear to blast when hitting tiles or
-shards.  If the cannon runs out of mechanical travel energy then it should
-also blast.  So the two criteria should be time out and energy depletion."
-
-**THE GAP WAS REAL AND STEP 5a PUT IT THERE.**  `detonateOn: 'enemy'` is what
-stops a heavy round being a contact mine — terrain does not trip the charge,
-the shell bores instead — and the fallback for a shell that meets nothing was
-the fuse.  But a shell that meets TERRAIN and stops meets neither: the gate
-refuses the tile, and the fuse never arrives.  It simply vanished.
-
-**THE CRITERIA ARE NOW THREE**, not two, and the third is the user's:
-an ACTOR contact, the FUSE, and RUNNING OUT OF TRAVEL ENERGY.  The actor
-contact is kept deliberately and it is not a quibble — a Cannon shell carries
-a bank of ~86 damage-equivalents against an 18 bite, so it does NOT stop on a
-real enemy; under "stop or fuse" alone the weapon would pass through its
-target and blast somewhere behind it.  Energy depletion is what covers
-terrain, where the shell genuinely stops.
-
-**THE BUG UNDER THE BUG**, and the reason the first attempt failed with the
-flag set correctly the whole time: `updatePhysics` ends with an
-entity-compaction pass that releases INACTIVE projectiles to the pool, and
-`releaseToPool` clears `explosionRadius` / `explosionDamage`.  So a round
-deactivated at the stop is a BLANK by the time `updateGameLogic` reaches the
-fuse pass — mid-step, in the same substep.  The fix is that the stop site
-leaves the round ALIVE and lets the fuse pass end it.  **The general lesson:
-when deferring work to a later phase of the same step, the question is not
-only "does the later phase run" but "does anything between them recycle what
-I am deferring".**  Object pools are exactly where that bites.
-
-**AND THE BLAST STOPPED READING TRAVEL ENERGY.**  Entry 16 derived
-`explosionDamage` at spawn from the round's muzzle energy and left the AoE's
-existing `× hitFalloff` in place, documented as "a shell that spent its bank
-boring blasts weaker".  That is wrong twice over.  It DOUBLE-COUNTS — the
-charge is already a function of the round's energy — and it makes this
-entry's whole trigger inert by construction: a shell detonating *because* it
-ran out of travel energy has ~none left, so the blast fired at the exact
-moment the rule exists for would land ~zero.  A warhead does not shrink
-because the shell flew through a wall.  Mass sizes the charge; travel energy
-only decides how far it gets.
-
-**AT MOST ONCE.**  A round drained to nothing on an ACTOR takes both paths at
-once, so `GameEntity.detonated` guards it — in TWO places, the stop site and
-the fuse pass, which is why the regression goes red only when both are
-removed (measured: two damaging rings instead of one).  Both flags are per
-LIFE and are cleared on the pooled spawn path; a recycled shell that kept
-`detonated` would never explode again, and one that kept `blastPending` would
-explode on spawn.
-
-MEASURED (`perf/impact-audit.mjs` §8, a bystander 55 off the blast centre):
-on an actor contact 6.4, on energy depletion against terrain **0 → 5.9**.
-
-### 18. A further 40% off the base bank (2026-09-13)
-
-**REPORTED**: "Weapons are still a little too powerful.  Let's reduce down
-another 40% ish."
-
-**ONE LINE, AND THE REASON IT IS ONE LINE IS ENTRY 16.**  Penetration is
-bank-shaped — the falloff is `1 - bite/energy`, so only `mass` can move it —
-and entry 16 put every player gun's authored mass behind a single divisor for
-exactly this.  So the change is a factor over that divisor and nothing else:
-no weapon row moved, no bite moved, no §7 threshold moved.
-
-**THE DIVISOR IS TWO FACTORS NOW, AND THEY ARE KEPT APART ON PURPOSE.**
-
-- `GUNNERY_MK3_TRIPLE_MULT` = `1 + 3 × 0.36` = 2.08 — the PROGRESSION anchor.
-  It is a claim about ANOTHER TABLE (what `MODULE_DEFS` grants) and is pinned
-  against the live catalog in `tests/weapons.spec.ts`.
-- `BASE_BANK_TRIM` = 0.6 — this entry.  A play-tested feel number over the
-  anchor, pinned only as a composition.
-
-Folding them into one literal would have been shorter and would have lost
-which half a future Gunnery retune is allowed to move.  The rule
-generalises: **when a constant is the product of a pinned relationship and a
-free one, write it as the product** — the alternative is a number that half a
-test suite is entitled to change.
-
-**THE HONEST CONSEQUENCE, stated because it is easy to read as a bug.**
-Three Mk III still multiply the base bank by exactly 2.08 — the LADDER is the
-anchor's and is untouched — but they now land at 0.6 of the pre-rebase round
-rather than on it.  Restoring the old reach would take ~7 marks, which the
-hex-slot count puts out of range.  That is what the call asks for; what moved
-is where the ladder starts, not its shape.
-
-MEASURED through the real resolver (`perf/impact-audit.mjs` §8):
-
-| weapon | before trim | after trim | 3× Mk III after |
-|---|---|---|---|
-| Blaster | 15 | 9 | 22 |
-| Burst | 58 | 35 | 82 |
-| Shotgun | 20 | 12 | 31 |
-| Laser | 97 | 58 | 136 |
-| Lightning | 39 | 24 | 52 |
-| Seeker | 34 | 21 | 46 |
-| Cannon | 82 | 50 | 106 |
-
-Every base lands on 0.60..0.62 of its previous value — the 40% asked for.
-
-**AND A COUPLED CONSEQUENCE THAT IS THE MODEL WORKING.**  Entry 16 derived
-the Cannon's blast from the shell's OWN mass, so the trim rode straight
-through it: peak 17.3 → 10.4 against an unchanged 18 direct bite.  A lighter
-shell carries a smaller charge — that is what deriving it means, and undoing
-it by re-authoring `explosionDamage` would put back the flat scalar the whole
-step removed.  The dial for the charge ALONE is `BLAST_ENERGY_COUPLING` (DBG
-▸ Player ▸ "Blast energy", step 2× is that A/B), never the trim, which is
-about penetration.  This is worth writing down because the coupling's own
-calibration sentence — "the charge is worth about one more hit" — was
-measured at the old bank and is now a ratio of ~0.6, so the comment beside
-the constant had to be corrected rather than left claiming a number it no
-longer produces.  **A calibration sentence is a measurement with a date on
-it**; anything that moves one of its inputs has to re-read it.
-
-Two stale claims were swept out in the same pass, both left by entry 17:
-the `BLAST_ENERGY_COUPLING` comment still described the `× hitFalloff`
-scaling that entry 17 deleted, and `CLAUDE.md`'s blast block still quoted
-the pre-trim peak.
-
-**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15) is untouched
-by this.
-
-### 19. A condensing nebula cloud mostly stays nebula (2026-09-13)
-
-**REPORTED**: "reduce the frequency of nebula shards merging into other
-materials significantly while [increasing] the frequency (or reallowing) of
-nebula shards converting into nebula tiles."
-
-**TWO ASKS THAT TURN OUT TO BE ONE NUMBER.**  Both outcomes are the two arms
-of a single roll inside `NebulaSystem.onComposeNebulaShardPair`, which was a
-bare `Math.random() < 0.5`.  So the change is one named share, not two knobs
-that could be set to contradict each other.
-
-MEASURED FIRST (a probe over the real sim, instrumenting the adapter rather
-than differencing populations — a tile can also be destroyed and a condensed
-shard can merge on, so a population count measures the wrong thing):
-
-| | pairs | tile rolls | placed | lost | material |
-|---|---|---|---|---|---|
-| NEBULA_FIELD 90 s | 76 | 41 (53.9%) | 41 | 0 | 35 |
-| UNIVERSE 90 s | 18 | 11 (61.1%) | 10 | 1 | 7 |
-
-So the split really was running at its nominal rate, and nebula was leaving
-the family about as often as it rebuilt itself.  After the change, material
-outcomes fell 29 → 6 per 90 s on NEBULA_FIELD with tile placements flat
-(41 → 39).
-
-**THE MEASUREMENT FOUND A SECOND THING NOBODY WAS LOOKING FOR**, which is the
-argument for measuring before tuning.  `transmuteToTileAt` searches the origin
-hex plus its six neighbours and returns false when all seven are occupied —
-and the caller did nothing with that.  Both source shards have already faded
-by then, so the pair's mass was simply DESTROYED: 9.1% of tile rolls on
-UNIVERSE, a loss only the tile arm could suffer.  It was documented as an
-"acceptable fallback for a 50/50 roll where the shard side always succeeds",
-which was defensible at an even split and stops being defensible the moment
-the tile arm carries 7/8 of the traffic.  **A tolerance written against a
-ratio expires when the ratio moves** — and nothing announces that, because a
-silent loss has no symptom at all.
-
-The fix hands the mass back as a nebula-shard.  Falling through to the
-material arm would have been the other obvious option and is exactly wrong:
-it would turn a crowded neighbourhood into the conversion this entry exists
-to make rare.
-
-**WHAT IS DELIBERATELY UNCHANGED.**  Rock-derived dust (`fromRock`) still
-always returns to rock and is never eligible for a tile.  That dust was rock
-a moment ago — a chip thrown by `GRAIN_CHIP_DUST` — so returning it is
-CONSERVATION, not conversion, and a tile there would mint nebula out of
-terrain.  It bypasses the roll entirely, which is why the effective material
-rate on a natural map sits above the nominal share (20% against 12.5% on
-UNIVERSE, with 3 of 45 pairs rock-derived).  The knob also never changes
-WHICH material a cloud picks — only how often it picks one at all.
-
-Shipped behind `NEBULA_TILE_SHARE_CYCLE` (DBG ▸ Visual ▸ "Neb solid", index 0
-ships) because the direction was the user's and the exact share is a feel
-call they should be able to judge in play; `half (old)` is the pre-call
-behaviour, one click from the end.
-
-`tests/nebulacondense.spec.ts` pins all three claims, each verified red under
-its own targeted revert.  The no-op branch is FORCED rather than waited for:
-at ~9% of rolls a test that waited for it would be a flake generator.
-
-### 20. The tile roll is origin-blind (2026-09-13)
-
-**REPORTED**: "Tile or other material derived dust should also turn into
-nebula tiles at the same rate as regular virgin nebula shards."
-
-**THIS REVERSES ENTRY 19's ONE CARVE-OUT**, which that entry had argued was
-load-bearing ("rock-derived dust is exempt and must stay so").  The argument
-was that returning a rock chip's dust to rock is CONSERVATION and routing it
-to a nebula tile would mint nebula out of terrain.  That reads the timeline
-backwards: by the time a puff is coalescing with another puff it IS nebula,
-and exempting it made material-derived cloud a second class that could only
-ever leave the family.  Origin still decides WHICH material the other branch
-condenses into — rock dust returns to rock — and that is the half which really
-is conservation; the tile roll is not.
-
-`fromRock` therefore no longer reaches `onComposeNebulaShardPair` at all, and
-was removed from the `ShardAdapter` signature rather than left unread.  **A
-parameter nobody reads is worse than no parameter**: it says origin still
-matters at the adapter, which is exactly the thing that stopped being true.
-
-Only ROCK dust ever carried the flag, so glass / plastic / metal dust was
-already rolling the tile at the full rate — the ask was, precisely, the rock
-carve-out.
-
-**A PROXY THAT LOOKS LIKE THE PREDICATE IS NOT THE PREDICATE.**  The first
-in-play measurement keyed on `material === 'rock-shard'` — the committed
-target — because the adapter no longer sees `fromRock`.  That reads
-rock-committed pairs as the MAJORITY on UNIVERSE (88 of 128), which made the
-change look enormous.  It is wrong: a cloud whose blended HUE maps to rock
-commits to rock-shard without ever having been rock dust.  Hooking the
-ShardSystem seam that still holds the source shards gives the real figure, and
-it is the opposite shape — rock-DERIVED pairs are 2 of 113 and 0 of 258 in a
-passive run, matching entry 19's earlier 3 of 45.
-
-So the honest statement is two-part: the RATE claim is measured through the
-real adapter at 800 pairs a side (rock-derived and virgin roll the tile within
-a fraction of a percent), and the in-play effect is concentrated wherever rock
-is actually being BROKEN — a probe watching an idle map barely sees this rule
-at all.  An ablation run also has to put its flag in place with
-`page.evaluate`, not `addInitScript` after `goto`, which applies only to later
-navigations: the first ablated arm silently measured the unablated build, and
-the tell was that the "exempt" arm still produced tiles.
-
-**AND THE REGRESSION FLAKED FIRST TIME, for two compounding reasons** worth
-keeping: a sibling test walks the same DBG cycle and leaves it wherever it
-finished, so an undialled run measures whatever step ran last; and at the
-p = 0.5 that stale dial left behind, a 400-sample 5-point band is 1.4 s.d. —
-about one failure in six with the product perfectly correct.  Dialling
-explicitly and sizing N and the band off the binomial (800 a side, 6 points =
-~3.6 s.d. at the shipped p = 0.875) fixes both.  **A band nobody computed is a
-flake with a delay on it.**
-
-### 21. The nebula material ledger (2026-09-13)
-
-**REPORTED**: "the amount of nebula shard material required to create a nebula
-tile [must be] greater than the amount of nebula shard material created by
-shattering a nebula tile.  This prevents nebula clouds from growing.  This
-should apply to nebula shards that merge together to form larger nebula shards
-as well."
-
-**THE LOOP WAS OPEN BY A FACTOR OF TWO, AND ENTRIES 19-20 WIDENED IT.**  A tile
-shatters into its own Voronoi cells, each worth the default ONE condense unit —
-measured on 40 real tiles, 3-4 children.  A tile COST
-`NEBULA_CONDENSE[committed material].units`, which is 2 for glass and rock.  So
-tile → shatter → coalesce → tile ran at ~2x.  The structural defect is precise
-and worth naming: **the tile branch of the crystallise roll had no price of its
-own**, because the roll happens in the adapter AFTER the accumulation gate, and
-the gate was keyed on a MATERIAL the cloud was not going to become.  Entry 19
-then pushed 7/8 of outcomes down exactly that unpriced branch.
-
-MEASURED on a passive NEBULA_FIELD (nothing shooting anything) over 150 s, by
-building the stashed tree rather than patching the current one in-page:
-
-| | nebula bodies | crystallising pairs | tiles made |
-|---|---|---|---|
-| before | 1152 → 1226 (**+6.4%**) | 128 | 112 |
-| after | 1128 → 1116 (**-1.1%**) | 8 | 7 |
-
-**THE TWO NUMBERS ARE COUPLED, AND THAT IS THE TRAP.**  `TILE_COST` and
-`MERGE_LOSS` look independent and are not: a cloud repeatedly eating 1-unit
-debris follows `u' = (u + 1)(1 - MERGE_LOSS)`, which converges on a CEILING of
-`(1 - MERGE_LOSS) / MERGE_LOSS`.  If that ceiling sits below `TILE_COST`, no
-cloud ever affords a tile again — a dead feature that throws nothing, logs
-nothing and simply looks like tiles having stopped.  The rule is
-`MERGE_LOSS < 1 / (TILE_COST + 1)`; at the shipped 5 / 0.1 the ceiling is 9.
-**Two knobs that each look reasonable alone can compose into a setting nobody
-chose** — so they share one DBG row and the fixed point is asserted per step.
-
-**COMPARE AGAINST THE MAX, NOT THE MEAN.**  The yield is 3.92 on average and 4
-at its luckiest.  A cost of 5 makes the inequality true of EVERY tile; a bound
-set on the mean would still let a lucky run ratchet upward, which is the shape
-of bug that takes minutes of play to become visible and is then hard to
-attribute.
-
-**THE YIELD SIDE IS MEASURED, NEVER DECLARED.**  The regression breaks real
-tiles through the real death path and counts the units that come back, because
-the child count falls out of the grain spec's site placement, its count clamps
-AND the sliver-retirement pass.  A test that read `NEBULA_TILE_SHATTER_YIELD_MAX`
-on both sides of the inequality would check a constant against itself and pass
-for ever while a `grainSize` retune re-opened the loop — the exact failure mode
-CLAUDE.md §8 already records for nebula's grain size moving two test margins.
-
-**AND THE STALL PATH NEEDED ITS OWN ANSWER.**  The accumulation gate is not
-sufficient: `NEBULA_CONDENSE_STALL_BONDS` force-crystallises a cloud that never
-reached its cost, so `canAffordTile` is passed to the adapter separately.
-Without it a stalled under-price cloud still buys a tile, which is the whole
-loop again through a side door.
-
----
-
-### 22. What the play-test returned: the charge, its ring, and the cloud (2026-09-15)
-
-The session's checklist came back with A, C, D and E good, B2-B7 good, and
-three items to act on.  All three are recorded here because each is a
-different KIND of finding, and only one of them was a bug.
-
-**(1) The coupling doubles, 0.2 -> 0.4.**  A TUNING call, made through the
-dial the model already named.  "The charge is worth about one more hit" is
-the statement behind the coupling, and `BASE_BANK_TRIM` had quietly made it
-worth ~0.6 of one (10.4 against an unchanged 18 bite) by taking 40% off every
-base bank — the blast derives from the shell's mass, so it rode the bank
-down.  Play-tested through the DBG 2x step and then BAKED, per §8's rule
-that a settled value moves into the constant and the knob returns to 1x.
-Measured after: **peak 20.8 against the same 18 bite**; a bystander at half
-the radius loses 9.24.  The ladder's 0.5x step is now the A/B against the
-pre-call blast.
-
-**(2) The ring grows with the round.**  NOT a bug in the arithmetic, which is
-the part worth keeping: three Gunnery Mk III measured the blast at exactly
-x2.08 (20.8 -> 43.2) both before and after this change.  What was wrong is
-that `explosionRadius` was AUTHORED FLAT, so the ring the player watches was
-pixel-for-pixel identical at every mark and the only tell that the mark had
-landed was a damage number on a bystander — hence the report, "I can't
-clearly tell that the blast grows".  `withGunnery` now scales the reach by
-**sqrt(mult)** (110 -> 158.6), because in a 2D world the ring's AREA is what
-the energy buys and a linear radius would count the mark twice over.  Gated
-on the blast being DERIVED, so an authored `explosionDamage` (the Bastion's
-shells) keeps its authored reach too.
-
-> The general lesson, and the reason this is written down rather than just
-> fixed: **a derived quantity that only surfaces in a number nobody reads is
-> indistinguishable, in play, from one that does not move.**  Every other
-> derivation in this work bought a visible consequence for free — a heavier
-> shell bores further, a faster ram breaks more.  This one did not, and
-> nothing in the model said so.
-
-**(3) A blast pushes cloud, it does not break it.**  The only real defect of
-the three.  Nebula takes the voronoi GEOMETRY without the grain damage model
-(CLAUDE.md §8), so it carries no boundaries for `applyBoundaryDamage` to
-spend on and the ring sweep fell through to the whole-body `health -=`.
-Against a 1-HP tile that is instant death for everything inside the radius,
-so one Cannon shell cleared a bank outright — **measured 11 of 11 destroyed
-with the rule removed, 0 of 28 with it**.  A shockwave has nothing solid to
-grip a gas with; the knockback is the whole of what it does to one.
-
-Three things about the fix are deliberate.  The FEEDBACK is skipped with the
-damage rather than beside it — a hit flash and a damage number on a body that
-lost nothing is precisely the misreading the rule exists to remove.  It is the
-BLAST only: shooting a cloud still breaks it, and the shell's own direct hit
-is untouched.  And only the MOBILE half of the family can actually be shoved
-(measured: shard speeds 0.01-0.02 -> 0.24-0.85), because a static tile's
-infinite mass is what bolts it to its hex coordinate — pushing one would break
-the regen, neighbour-count and transmutation logic that all assume
-`position === hexCoord`.
-
-Its regression carries a CONTROL body in the same ring, for a reason that
-generalises to every "X is now immune" test: **"nothing died" is equally true
-of a ring that never fired.**
-
-**E3 was explicitly declined** (user call): the nebula crystallising loop is
-slower after entry 21 (128 -> 8 pairs per 150 s) and that is wanted as it is.
-`NEBULA_DRAIN_CYCLE` stays where it is.
-
-**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).
-
----
-
-### 23. The cloud rule was one variant too wide (2026-09-17)
-
-Entry 22's third finding shipped a guard written against "nebula", and the
-follow-up play-test caught what that cost: **blasts stopped shattering nebula
-tiles**, which is not what was asked for and is its own regression.
-
-MEASURING BOTH ARMS is what reframed it.  The build before entry 22 did TWO
-different things to a nebula bank, and only one of them was wrong:
-
-| | before entry 22 | after entry 22 | now |
-|---|---|---|---|
-| tiles in the ring | shatter into cells | untouched | shatter into cells |
-| shards in the ring | **0 of 15 survive** | untouched | all survive |
-
-So the tiles were always correct — a tile decomposes into its Voronoi cells,
-which is a cloud being broken UP.  What was wrong was the shards, which
-declare `shatter.kind: 'none'` and so hand back nothing when they die.  A
-guard naming "nebula" stopped the good half with the bad.
-
-**THE RULE IS NOW A PROPERTY** (user call: option B).
-`constants.breakYieldsNothing` is true of a body whose death would yield no
-children, and the ring's two hardcoded variant-name checks collapse into it:
-*a blast may not damage a body that cannot express being broken.*  Today it
-selects exactly `nebula-shard` (`kind: 'none'`) and `indestructible-tile`
-(powerlaw, `countMax: 0`).  The caveat worth keeping is the VORONOI one: for
-a voronoi variant the count fields are vestigial legacy-A/B values, so
-reading a zero there would exempt a material that breaks perfectly well.
-
-One consequence is deliberate and is a small behaviour change beyond the
-ask: the indestructible wall no longer flashes under a blast either.  Damage
-feedback follows damage, and a number on a body that lost nothing was always
-the misreading this rule removes.
-
-**THE PIECES NOW CARRY THE SHOVE**, and the obvious way to do it is dead.
-Scaling the stamped `lastImpactVelocity` with the charge is measurably a
-NO-OP: the shatter's forward term is
-`min(SHATTER_SCATTER_SPEED_CAP, impactSpeed × forwardDrag + …)` and the ring's
-fixed stamp of 8 already saturates that 2.5 cap at every charge size, so the
-cap — shared by every material's break — would have to move first.  The live
-lever is a separate `GameEntity.blastImpulse`: the ring stamps the outward
-push the parent was about to take, and `handleEntityDeath` adds it to every
-child at the single shatter call site.  Measured: mean fragment speed
-2.93 → **5.45** for 4× the knockback.
-
-> The reason this is at the call site rather than in the three per-style
-> child recipes: children are always APPENDED, so the slice past the old
-> length is exactly this break's output whichever style ran — which is also
-> what stops the rule meaning two different things under the fracture A/B.
-
-**TWO TEST-SHAPE LESSONS**, both found by negative controls rather than by
-review, and both general:
-
-- **A sample that is not filtered to the thing under test passes for the
-  wrong reason.**  The shard-survival claim counted every nebula shard on the
-  map, so "all of them survived" was true of shards nowhere near the blast —
-  and it passed against a build with the exemption deliberately removed.
-- **A sabotage that does not change behaviour is not a control.**  The first
-  attempt at that revert fell through to a second arm of the predicate and
-  still returned true, so the "failing" run was measuring the shipped rule.
-  A control has to be checked for having actually landed.
-
-**STILL OPEN**: the glass-leap gap in `sweepRewind` (entry 15).
+### 8. What shipped (steps 2–5 and their follow-ups)
+
+Every step in §5 shipped between 2026-09-07 and 09-12, and every play-test
+follow-up after it by 09-21.  The RULES they left are current, and live in
+CLAUDE.md: §5 (WEAPONS — the energy bank, the base-bank trim, the Cannon's
+detonation and derived blast) and §8 (the crash spend, the sweep, the glass
+rule, the mass scale, the nebula condensation ledger, the blast-and-cloud
+rule).  (The energy modules kept these rules but retired the roster they
+were tuned on: the old Cannon's actor-or-stop detonation now belongs to the
+three cannon combinations, and the bare Cannon goes off on its fuse
+alone.)  `perf/impact-audit.mjs` re-measures what they left (its §5 crash
+counts, §7 mass scale, §8 penetration and blast).  The per-step ledger that
+stood here — steps 2–5 and follow-ups 12–23, with every measurement, bug and
+lesson — is in git history at `ca0ad8e` (this file, before the 2026-09 docs
+cleanup).
+
+- **Step 2 (09-07)** — crashes spend on grain boundaries
+  (`PhysicsSystem.crashBoundaryDamage` / `crashContactOn`), so shooting a
+  tile no longer makes it 4-50× harder to ram through.
+- **Step 3 (09-11)** — projectile damage is kinetic
+  (`IMPACT_ENERGY_PER_DAMAGE`, the one conversion §4 asks for); the two
+  falloff knobs are deleted, and `estimateBoundaryHp` closes the spawn-HP
+  mismatch.
+- **Step 4 (09-11)** — a crash spends its kinetic energy (`crashDamageFor`:
+  reduced mass × `CRASH_ENERGY_COUPLING`) and the impactor pays for what it
+  broke (`payForCrash`), replacing the flat `CRASH_VELOCITY_RETENTION`.
+- **Step 5 (09-12)** — `pierce`, `pierceCount`, `MAX_PIERCE` and the
+  Penetration module are deleted; a round authors its `mass` (its energy
+  bank), Gunnery scales bite and mass together, and the Plasma Cannon trips
+  only on ACTORS, with a fuse fallback (`detonateOn`, `fuseSeconds`).
+- **Follow-ups (09-12 → 09-17)** — `sweepRewind`, so a fast ship cannot fly
+  through terrain; a ram that holds bounces and is charged nothing; glass
+  loses its whole-pane crash rule; mass becomes a stated scale
+  (`IMPACT_DENSITY` / `massFor`, `HULL_DENSITY_CYCLE`) and then
+  `MASS_SCALE` = 10, un-compensated; the base bank is re-based and trimmed
+  (`BASE_BANK_DIVISOR` = `GUNNERY_MK3_TRIPLE_MULT` / `BASE_BANK_TRIM`); the
+  blast is the shell's own energy (`blastDamageFor`, `BLAST_ENERGY_COUPLING`
+  0.4, ring × √mult), is payload rather than travel energy, and fires when a
+  shell stops (`blastPending`, at most once via `detonated`); a condensing
+  nebula cloud mostly stays nebula (`NEBULA_TILE_SHARE_CYCLE`, origin-blind)
+  under the `NEBULA_MATERIAL` ledger; and a blast breaks cloud up rather than
+  deleting it (`breakYieldsNothing`, `blastImpulse`).
+- **09-21** — the glass-leap gap is closed (`SWEEP_DEEP_FRAC`, d15a63e): a
+  body that arrives DEEP is rewound as well as one that outran its step.
+
+### 9. Still open
+
+1. **A hull deposits at ONE contact, not along a chord.**  `sweepRewind` is
+   contact recovery, not continuous collision detection — it puts a body
+   back where it met one thing, and neither sweeps a corridor nor deposits
+   along the chord it cut — and the bore is a line rather than a track with
+   width.  Both are geometry questions: "Penetration bore tracks as a
+   FRACTURE MODEL" and "Grain clusters (A4-B)".
+2. **The crash GATES are still authored.**  `CRASH_VELOCITY_THRESHOLD` (the
+   player's, pure speed) and `SHARD_CRASH_MOMENTUM` (a shard's, pure
+   momentum) still decide WHETHER a crash spends at all, so §3's fourth
+   bullet — the threshold as a consequence of energy — is not delivered.
+3. **Should the hull sit so far above the material band?**
+   `IMPACT_DENSITY.HULL` is 2.50 against the materials' 0.10–0.30 — by design
+   (a ship is a machine and should plow gravel), but not re-reviewed since
+   `MASS_SCALE` made every impact ten times harder.  DBG ▸ Player & Ship ▸
+   Impact Model ▸ "Hull density" is the A/B.
+4. **Path 9 in §1's table is not the path that runs.**  `consumeTile` is
+   unreachable — `updateConsumers` walks `entityIndex.shardCandidates`,
+   which holds no static tiles — and the dragon devours terrain through its
+   own pass in `engine/roamers/dragons.ts` (`forEachStaticNear` →
+   `appendDragonSegment`, the tile becoming a body segment).  Either way it
+   stands outside the boundary model, which is arguably correct; what wants
+   deciding is the dead `eats: 'tile'` branch.
 
 ---
 
@@ -3482,7 +2202,7 @@ from one double click.
 each correct in isolation:
 
 - **The fire queue is never drained during the warp beat.**  `loop()` returns
-  above the sim while `portalWarpTimer > 0` (GameEngine.ts:2660), so
+  above the sim while `portalWarpTimer > 0` (`GameEngine.loop`), so
   `getFireEvents()` — the weapon tick, sim step 7 — does not run for the whole
   `PORTAL_WARP_CYCLE[0]` = **1.4 s**.  `InputSystem.fireEvents` is an unbounded
   array cleared only by that drain (and one-at-a-time by `claimTapNear`), and
@@ -3505,8 +2225,9 @@ across a freeze**, spent at the one place in the run where the player is
 guaranteed to be standing in a portal's mouth.
 
 **The E key is immune and the pad is not**, which is a useful tell for
-anything that fixes this.  `dockKeyHeld` is only updated inside
-`updateInteractables`, so a key held (or released and re-pressed) through the
+anything that fixes this.  `dockKeyHeld` is only updated where E is read —
+`updateInteractables`, and the undock check while docked, neither of which
+runs during the warp — so a key held (or released and re-pressed) through the
 frozen window still reads as held and cannot re-trigger.  The pad's
 `padInteractPresses` is a COUNTER, and `pollGamepad` runs at the top of
 `loop` above every freeze short-circuit, so a pad double-press banks exactly
@@ -3579,3 +2300,15 @@ The shipped set, all in one place so a tuning pass has a baseline:
 cue, the halved `FADE_OUT_SEC`, and the `setTargetAtTime` ramp shape.  All
 settled — see `docs/AUDIO_AUTHORING.md`, *A MAP CHANGE IS NOT A LULL* and
 *A MAP CHANGE ALSO STARTS A NEW SONG*.
+
+---
+
+## Audio ideas retired with `docs/AUDIO_PLAN.md` (2026-09 docs cleanup)
+
+Two ideas from that deleted pre-audio plan were never built; the full text is
+in git history at `ca0ad8e`.  A music DIRECTOR driven by a table of game
+states (hub vs arena, wave vs grace, threat, boss phase, docked, death)
+rather than today's one combat-proximity switch, with REGIONAL beds as a
+property of the area node (see "Area composition"); and scheduling cues on
+the `AudioContext` clock, so a multi-step frame does not machine-gun sounds
+that should be simultaneous (`play()` starts every voice at `currentTime`).

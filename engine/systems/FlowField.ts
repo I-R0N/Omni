@@ -79,11 +79,12 @@ export function sampleFlow(wx: number, wy: number): FlowVector {
 
 // ─── selectable flow patterns (DBG) ─────────────────────────────────────────
 //
-// A bank of analytical unit-vector fields the DBG "FF Pattern" cycle can
-// swap in over a map's own flow.  All are pure functions of world position
-// (no time/state), so the baked grid can sample them exactly like the map
-// sampler.  DEFAULT is sentinel-only — GameEngine routes it to the active
-// map's own sampleFlow() rather than this function.
+// A bank of analytical unit-vector fields the DBG Flow Field ▸ "Pattern"
+// cycle can swap in over a map's own flow.  All are pure functions of
+// world position (no time/state), so the baked grid can sample them
+// exactly like the map sampler.  DEFAULT is sentinel-only — GameEngine
+// routes it to the active map's own sampleFlow() rather than this
+// function.
 //
 // Gravity-well / spiral / outward patterns reference the map centre (0,0)
 // and are NOT seam-continuous (opposite sides of the wrap point opposite

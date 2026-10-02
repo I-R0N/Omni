@@ -272,7 +272,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
 function fireDragonMissile(g: GameEngine, d: GameEntity) {
     const M = DRAGON_CONSTANTS.MISSILE;
     const cfg = {
-        type: WeaponType.HOMING, name: 'Dragon Missile', cooldown: 1,
+        delivery: 'homing', name: 'Dragon Missile', cooldown: 1,
         speed: M.speed, damage: M.damage, lifetime: M.lifetime, color: M.color, size: M.size,
         count: 1, spread: 0, recoil: 0,
         homing: true, homingStrength: M.homingStrength, glow: true,

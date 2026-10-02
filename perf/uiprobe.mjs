@@ -25,7 +25,7 @@
  *  on-device Perf REC captures settle the levels.
  *
  *  Usage:
- *    node perf/uiprobe.mjs --mode attribute   # states x HUD rates (the matrix)
+ *    node perf/uiprobe.mjs --mode attribute   # states x HUD rates (default)
  *    node perf/uiprobe.mjs --mode ablate      # frame time with React cut out
  *    node perf/uiprobe.mjs --mode validate    # re-validate the instrument
  *    node perf/uiprobe.mjs --mode attribute --repeat 5 --ms 10000
@@ -35,6 +35,8 @@
  *  gate table for what it measured).  Re-add it before trusting a fresh set of
  *  numbers from a changed UI layer: an instrument reading zero and a cost that
  *  is genuinely gone look identical, which is what started this whole exercise.
+ *  Against the shipped App.tsx (no ballast) every level reads the same, which
+ *  is why `attribute`, not `validate`, is the default mode.
  *
  *  `--mode ablate` is the cross-check that shares NONE of the profiler's
  *  assumptions: it nulls onStatsUpdate and reads frame time.
@@ -50,7 +52,7 @@ const VIEWPORT = { width: 390, height: 844 };
 
 const argv = process.argv.slice(2);
 const flag = (n, d = null) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? (argv[i + 1] ?? true) : d; };
-const mode = flag('mode', 'validate');
+const mode = flag('mode', 'attribute');
 const SAMPLE_MS = Number(flag('ms', 6000));
 const REPEATS = Number(flag('repeat', 3));
 
@@ -159,6 +161,7 @@ async function startRun(page) {
       // The instrument passes only if uiActualMs tracks it proportionally
       // AND frame time moves with it.
       console.log(`\n=== PHASE 1 SELF-VALIDATION — ballast sweep (${REPEATS}x ${SAMPLE_MS}ms) ===\n`);
+      console.log('(needs the ballast component re-mounted in App.tsx — see the header;\n without it every level below reads the same)\n');
       const LEVELS = [0, 250, 1000, 4000];
       const results = [];
       for (const n of LEVELS) {
@@ -213,7 +216,6 @@ async function startRun(page) {
     } else {
       // ── PHASE 2 ATTRIBUTION ───────────────────────────────────────────
       console.log(`\n=== PHASE 2 ATTRIBUTION (${REPEATS}x ${SAMPLE_MS}ms, container) ===\n`);
-      await page.evaluate(() => { window.__omniBallast = 0; }).catch(() => {});
 
       const STATES = [
         ['in-play (hub)', async (p) => { await startRun(p); }],
@@ -255,14 +257,15 @@ async function startRun(page) {
           let stateOk = true;
           for (let r = 0; r < REPEATS; r++) {
             await boot(page);
-            // cycleHudRate walks [60,30,15]; step until we land on target.
-            await page.evaluate((target) => {
-              const e = window.__omniEngine;
-              for (let i = 0; i < 4; i++) {
-                if ((window.__omniStats?.hudRateName ?? '60Hz') === target + 'Hz') break;
-                e.dbg.cycleHudRate();
-              }
-            }, hz);
+            // cycleHudRate walks [60,30,15] and every repeat boots a fresh
+            // page at 60Hz, so the step count is fixed.  Do NOT loop on
+            // __omniStats.hudRateName: it refreshes only on the next stats
+            // push, so inside one evaluate it reads 60Hz throughout, and the
+            // loop that used to be here always clicked four times — landing
+            // every "@15Hz" row on 30Hz.  The rate is checked below instead.
+            await page.evaluate((clicks) => {
+              for (let i = 0; i < clicks; i++) window.__omniEngine.dbg.cycleHudRate();
+            }, { 60: 0, 30: 1, 15: 2 }[hz]);
             await setup(page);
             const s = summarize(await page.evaluate(COLLECT, SAMPLE_MS));
             if (r === 0) {
@@ -272,6 +275,7 @@ async function startRun(page) {
                          rate: window.__omniStats?.hudRateName, prof: !!window.__omniStats?.perf?.uiProfiled };
               });
               if (!st.prof) { console.log('  !! PROFILER NOT ACTIVE — rebuild with OMNI_PROFILE_REACT=1'); stateOk = false; }
+              if (st.rate !== hz + 'Hz') { console.log(`  !! HUD rate reads ${st.rate}, wanted ${hz}Hz — row skipped`); stateOk = false; }
             }
             runs.push(s);
           }

@@ -277,7 +277,7 @@ export function drawDropShape(
     } else if (entity.type === EntityType.INTERACTABLE && entity.isSnitch) {
         // ── Snitch — golden comet core ────────────────────────────
         // The tail is the gold trail strip + sparkle motes emitted by
-        // GameEngine.updateSnitch; this draws the core: wide gold
+        // updateSnitch (roamers/snitch.ts); this draws the core: wide gold
         // bloom, solid gold body, hot white-gold centre.  Pulse keyed
         // to nowSec so the core flickers like a guttering flame.
         const r = entity.size.x / 2;

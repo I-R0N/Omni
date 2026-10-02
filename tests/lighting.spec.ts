@@ -1,4 +1,5 @@
-/** Unified tile lighting — occluders and the shadow-cast light (gauntlet A1-A4).
+/** Unified lighting — the light layer and everything built on it (gauntlet
+ *  A1–A10, plus the Light-module tool era).
  *
  *  See `docs/GAUNTLET_LIGHTING_LOG.md`.  What is pinned here is the part of
  *  the lighting system that can be WRONG WITH NO SYMPTOM until it is very
@@ -27,6 +28,16 @@
  *     test measures a ring of bearings around the light's OWN centre,
  *     because a two-point probe taken from screen centre reported that as
  *     "the shadow is a bit weak" rather than "there is no shadow".
+ *
+ *  The rest of the file pins the layer's SHIPPED DEFAULTS and that each DBG
+ *  A/B is a true restore — `unified` over a zero-cost `legacy`, tier `low`,
+ *  softness `diffuse`, refraction + emission ON, emitter shadows / tint mix /
+ *  fog / depth darkness OFF, the DBG flashlight `off` (the Light module's
+ *  tool owns the beam; see flashlight.spec.ts) — plus refraction and the TIR
+ *  ramp, emitters (colour, fade, nebula, bubbles), the beam, the light colour
+ *  and the material tint, fog of war and the minimap's memory veil, world
+ *  lights, depth darkness, the perf-snapshot wiring, and the sprite tint
+ *  cache.
  *
  *  The lighting MODE is driven through `engine.renderer.setLighting(...)`.
  *  Occluders are read off `renderer._lightOccluders` / `_lightOccluderCount`
@@ -102,7 +113,6 @@ test.describe('occluder collection', () => {
     await startRun(page, 'UNIVERSE');
     await engine(page, e => e.renderer.setLighting('unified'));
     await parkInCluster(page);
-    await waitForEngine(page, e => e.renderer._lightOccluderCount >= 0, 'a lighting frame');
 
     // Classify the collected set against the live entities, with SHARD
     // SHADOWS both off and on.  An earlier version of this test asserted a
@@ -189,12 +199,10 @@ test.describe('occluder collection', () => {
     expect(killed.length).toBeGreaterThan(0);
 
     // The set is rebuilt per frame from the live static grid, so the dead
-    // tiles must be gone immediately — not on some later invalidation.
-    await waitForEngine(
-      page,
-      e => e.renderer._lightOccluderCount >= 0,
-      'a lighting frame after the kill',
-    );
+    // tiles must be gone immediately — not on some later invalidation.  Two
+    // rendered frames guarantee at least one full collection after the kill.
+    await engine(page, () => new Promise<void>(r =>
+      requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     const after = await engine(page, (e) => {
       const n = e.renderer._lightOccluderCount;
       const occ = e.renderer._lightOccluders.slice(0, n);
@@ -205,7 +213,7 @@ test.describe('occluder collection', () => {
         );
         if (hit && !hit.active) stale++;
       }
-      return { n, stale };
+      return { stale };
     });
 
     expect(after.stale).toBe(0);
@@ -266,9 +274,9 @@ test.describe('occluder collection', () => {
       // its own test), and EMISSIVE would add a second light at the glass
       // tile's own position, inside the band being measured.  Neither belongs
       // in a measurement of "how much light does a translucent body withhold".
-      // The FLASHLIGHT is pinned to `radial` too, now that `beam` ships: the
-      // measurement below reads the light on a ring/bearing the beam would
-      // simply not illuminate.
+      // There must BE a player light, and a RADIAL one: the DBG flashlight
+      // ships 'off' (the tool era — see flashlight.spec.ts), and a cone would
+      // leave the ring/bearings below unlit.
       const beam0 = e.renderer.getFlashlight();
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
         e.renderer.cycleFlashlight();
@@ -705,7 +713,7 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
-  test('refraction: OFF by default, and ON it MOVES the light rather than adding it', async ({ page }) => {
+  test('refraction ships ON, and it MOVES the light rather than adding it', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
     // Hold the scene still for the pixel readings below — see `quietScene`.
@@ -764,9 +772,9 @@ test.describe('occluder collection', () => {
         return on.map((v, i) => v - base[i]);
       };
 
-      // The FLASHLIGHT is pinned to `radial` too, now that `beam` ships: the
-      // measurement below reads the light on a ring/bearing the beam would
-      // simply not illuminate.
+      // There must BE a player light, and a RADIAL one: the DBG flashlight
+      // ships 'off' (the tool era — see flashlight.spec.ts), and a cone would
+      // leave the ring/bearings below unlit.
       const beam0 = e.renderer.getFlashlight();
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
         e.renderer.cycleFlashlight();
@@ -907,7 +915,7 @@ test.describe('occluder collection', () => {
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'off'; i++) {
         e.renderer.cycleFlashlight();
       }
-      return { full, dim, dimmest, tierOnly, names: e.renderer.getLightBrightness() };
+      return { full, dim, dimmest, tierOnly };
     });
 
     // The light has to be doing something at all, or the rest is vacuous.
@@ -921,7 +929,7 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
-  test('emissive: lit metal re-radiates, and only when asked to', async ({ page }) => {
+  test('emissive ships on: lit metal re-radiates, and off leaves only the player light', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
     // Hold the scene still for the pixel readings below — see `quietScene`.
@@ -1131,14 +1139,15 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
-  test('nebula emits in its OWN colour, and still casts nothing', async ({ page }) => {
+  test('nebula emits without casting, and the tint mix moves its glow from the light\'s colour to its own', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'NEBULA_FIELD');
 
     // Nebula is `passThrough`: it must never enter the occluder pool (it is
     // the most numerous static tile on the natural maps, and handing it the
-    // pool would blank the terrain shadows), and it must still light, in the
-    // colour it blended for itself.  Those two requirements are why emitters
+    // pool would blank the terrain shadows), and it must still light — in the
+    // light's colour at the shipped tint mix `off`, and in the colour it
+    // blended for itself at `full`.  Those two requirements are why emitters
     // have a buffer of their own.
     const r = await engine(page, async (e) => {
       const tiles = e.currentMap.entities.filter(
@@ -1235,10 +1244,9 @@ test.describe('occluder collection', () => {
         const lit = await sample(true);
         return { base, lit };
       };
-      // The COLOUR assertions run at the ends of the tint-mix knob, because
-      // at the shipped default an emitter is deliberately half the body's
-      // colour and half the light's — so "it emits red" is only the whole
-      // truth at `full`, and `off` is where the old behaviour lives.
+      // The COLOUR assertions run at the two ends of the tint-mix knob: at
+      // `full` an emitter wears the body's own colour, and at `off` — the
+      // shipped default since A5q — the light's.
       const off = await sample(false);
       const onPair = await mix('full');
       const asLightPair = await mix('off');
@@ -1490,9 +1498,9 @@ test.describe('occluder collection', () => {
       e.renderer.setLighting('unified');
       if (e.renderer.getRefraction()) e.renderer.toggleRefraction();
       if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
-      // The FLASHLIGHT is pinned to `radial` too, now that `beam` ships: the
-      // measurement below reads the light on a ring/bearing the beam would
-      // simply not illuminate.
+      // There must BE a player light, and a RADIAL one: the DBG flashlight
+      // ships 'off' (the tool era — see flashlight.spec.ts), and a cone would
+      // skip the hex below whenever the sweep carried it outside the beam.
       const beam0 = e.renderer.getFlashlight();
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
         e.renderer.cycleFlashlight();
@@ -1558,10 +1566,10 @@ test.describe('occluder collection', () => {
     await startRun(page, 'METAL_FIELD');
 
     // Ships as `off` now (user call, superseding the beam default): the
-    // flashlight became the KIT-gated ship-tap TOOL, so the DBG global —
-    // the raw dev override under it — carries no beam until cycled.  The
-    // cone geometry below is still driven through the DBG cycle, so set it
-    // to `beam` explicitly.
+    // flashlight became the Light-module-gated ship-tap TOOL, so the DBG
+    // global — the raw dev override under it — carries no beam until cycled.
+    // The cone geometry below is driven through the DBG cycle directly:
+    // `radial` is the control, `narrow` the cone, `off` the zero-width beam.
     const dflt = await engine(page, e => e.renderer.getFlashlight());
     expect(dflt).toBe('off');
 
@@ -1642,7 +1650,7 @@ test.describe('occluder collection', () => {
 
     await engine(page, (e) => {
       clearInterval((window as any).__beamPin);
-      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'beam'; i++) {
+      for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'off'; i++) {
         e.renderer.cycleFlashlight();
       }
       if (!e.renderer.getEmissive()) e.renderer.toggleEmissive();
@@ -1800,7 +1808,9 @@ test.describe('occluder collection', () => {
         };
         requestAnimationFrame(t);
       });
-      // Away from it first, so the count below is about THIS bubble.
+      // `emitters > 0` could be any bubble in range; what ties this to THIS
+      // one is its own `_emitTint`, stamped only on the path that records a
+      // bubble as an emitter.
       bubble.position.x = 6000; bubble.position.y = 6000;
       await settle(1);
       await new Promise<void>(res => requestAnimationFrame(() => res()));
@@ -1843,9 +1853,9 @@ test.describe('occluder collection', () => {
       if (e.renderer.getRefraction()) e.renderer.toggleRefraction();
       if (e.renderer.getEmissive()) e.renderer.toggleEmissive();
       e.renderer.setLighting('unified');
-      // The FLASHLIGHT is pinned to `radial` too, now that `beam` ships: the
-      // measurement below reads the light on a ring/bearing the beam would
-      // simply not illuminate.
+      // There must BE a player light, and a RADIAL one: the DBG flashlight
+      // ships 'off' (the tool era — see flashlight.spec.ts), and a cone would
+      // leave the ring/bearings below unlit.
       const beam0 = e.renderer.getFlashlight();
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
         e.renderer.cycleFlashlight();
@@ -2002,9 +2012,9 @@ test.describe('occluder collection', () => {
     // far enough out that the light cannot reach either.
     const r = await engine(page, async (e) => {
       e.renderer.setLighting('unified');
-      // Pinned to `radial` now that `beam` ships: the sample patch sits at a
-      // fixed bearing from the ship, and whether a CONE happens to cover it
-      // depends on where the pointer is — which is not what this measures.
+      // Pinned to `radial`: the DBG flashlight ships 'off' (the tool era), and
+      // with a CONE, whether the sample patch is lit would depend on where the
+      // pointer is — which is not what this measures.
       const beam0 = e.renderer.getFlashlight();
       for (let i = 0; i < 10 && e.renderer.getFlashlight() !== 'radial'; i++) {
         e.renderer.cycleFlashlight();
@@ -2292,9 +2302,10 @@ test.describe('occluder collection', () => {
 
     // PLASTIC_FIELD because plastic-tile carries a `glow` block and renders
     // on the material slow path, so under LEGACY the bloom demonstrably runs
-    // (lastTileLightingCount counts tiles the bloom spent >1us on).  Under
-    // UNIFIED the same parked frame must count ZERO — the point light owns
-    // "the near face is lit" now, and the bloom would be double-lighting.
+    // (lastTileLightingCount counts tiles the bloom actually PAINTED this
+    // frame).  Under UNIFIED the same parked frame must count ZERO — the
+    // point light owns "the near face is lit" now, and the bloom would be
+    // double-lighting.
     const r = await engine(page, async (e) => {
       const frames = (n: number) => new Promise<void>(res => {
         let i = 0;
@@ -2431,7 +2442,7 @@ test.describe('occluder collection', () => {
     watch.assertClean();
   });
 
-  test('A7: depth darkens the world through the fog, and the hub never does', async ({ page }) => {
+  test('A7: depth darkens the world through the fog, capped at four stages, and depth 0 never does', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
     // Hold the scene still for the pixel readings below — see `quietScene`.
@@ -2574,8 +2585,8 @@ test.describe('occluder collection', () => {
     // ...the fog's does only while a fog rung is on...
     expect(r.fogOff).toBe(0);
     expect(r.fogOn).toBeGreaterThan(0);
-    // ...and under legacy both drain to zero — the ring is 45 frames of
-    // zeroes by now, so a stale timer would be caught here.
+    // ...and under legacy both drain to zero — 70 frames leaves the whole
+    // 60-frame ring zeroed, so a stale timer would be caught here.
     expect(r.litLegacy).toBe(0);
     expect(r.fogLegacy).toBe(0);
     watch.assertClean();
@@ -2585,13 +2596,14 @@ test.describe('occluder collection', () => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
 
-    // THE TINT STORM (device captures, A9b): enemy-death nebula dust
-    // equilibrates its hue continuously, so exact (sprite, hex) keys form a
-    // never-repeating stream and the 256-entry cache rebuilds a 128px
-    // canvas per shard per hue step — 497 in one measured frame.  The fix
-    // quantises the hex to 17-step buckets at BOTH key seams.  This pins
-    // the behaviour, not the speed: two hexes inside one bucket must share
-    // one canvas, and the second lookup must not count a miss.
+    // THE TINT STORM (device captures; docs/GAUNTLET_LIGHTING_LOG.md A9–A10):
+    // enemy-death nebula dust equilibrates its hue continuously, so exact
+    // (sprite, hex) keys form a never-repeating stream and the 256-entry
+    // cache rebuilds a 128px canvas per shard per hue step — 497 in one
+    // measured frame.  The fix quantises the hex to 17-step buckets at BOTH
+    // key seams.  This pins the behaviour, not the speed: two hexes inside
+    // one bucket must share one canvas, and the second lookup must not count
+    // a miss.
     const r = await engine(page, async (e) => {
       const rs = e.renderer;
       const src = e.player.sprite;

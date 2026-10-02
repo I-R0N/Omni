@@ -72,7 +72,6 @@ import { boot, enableTilt, engine, startRun, waitForEngine, waitForStats } from 
 /** PLAYER_ROLL_CONSTANTS, hard-coded rather than imported (harness rule 7). */
 const MAX_ANGLE = 0.85;
 const SPRING_OMEGA = 12;
-const SPRING_ZETA = 0.55;
 
 const DT = 1 / 60;
 
@@ -141,7 +140,7 @@ function driveTurn(
   }, o);
 }
 
-test.describe('the roll signal is the lateral thrust component', () => {
+test.describe('the strafe term — lateral thrust banks, nose-line thrust does not', () => {
   test('strafing banks, nose-line thrust flies level, and the sign follows the side', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
@@ -261,10 +260,6 @@ test.describe('the slip term — the drift of a hard turn holds the bank', () =>
         e._rollYawRate = 0;
         e._rollVel = 0;
         e._pitchVel = 0;
-      e._rollVel = 0;
-      e._pitchVel = 0;
-    e._rollVel = 0;
-    e._pitchVel = 0;
         for (let i = 0; i < 240; i++) {
           e.player.velocity.x = 0;
           e.player.velocity.y = a.vf * e.lastMaxSpeed;
@@ -306,8 +301,6 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
       e._rollYawRate = 0;
       e._rollVel = 0;
       e._pitchVel = 0;
-    e._rollVel = 0;
-    e._pitchVel = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
       // Hold the throttle straight along the nose: with the washout gone
@@ -349,8 +342,6 @@ test.describe('the pitch half — thrust holds the lean, cutting it settles', ()
       e._rollYawRate = 0;
       e._rollVel = 0;
       e._pitchVel = 0;
-    e._rollVel = 0;
-    e._pitchVel = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
       let roll = 0, pitch = 0, maxTilt = 0;
@@ -400,8 +391,6 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e._rollYawRate = 0;
       e._rollVel = 0;
       e._pitchVel = 0;
-    e._rollVel = 0;
-    e._pitchVel = 0;
       e.player.visualPitch = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
@@ -418,8 +407,6 @@ test.describe('the DBG feel cycle steps the bank depth live', () => {
       e._rollYawRate = 0;
       e._rollVel = 0;
       e._pitchVel = 0;
-    e._rollVel = 0;
-    e._pitchVel = 0;
       e.player.visualPitch = 0;
       e.player.velocity.x = 0;
       e.player.velocity.y = 0;
@@ -500,7 +487,7 @@ test.describe('the rotation-damping cycle', () => {
     await enableTilt(page);
 
     /** One tick into a full strafe from level, at the current damping —
-     *  the first-tick delta IS the effective attack rate. */
+     *  the first-tick delta is ω²·A·dt², so it reads the spring's ω. */
     const oneTick = () => driveRoll(page, { facing: 0, mx: 0, my: 1, ticks: 1 });
 
     // Cycle order is Floaty / Default / Stiff / Snappy, shipped at

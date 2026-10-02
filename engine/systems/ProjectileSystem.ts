@@ -1,4 +1,4 @@
-import { GameEntity, EntityType, Vector2, WeaponConfig, WeaponType } from '../../types';
+import { GameEntity, EntityType, Vector2, WeaponConfig } from '../../types';
 import {
   PROJECTILE_CONSTANTS,
   SPRITE_CONSTANTS,
@@ -13,6 +13,10 @@ import { nextId } from './IdAllocator';
 import { enforceTypeCap } from './enforceCap';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
 
+/** A seeker keeps its lock until the target is this far outside the acquire
+ *  range (squared ratio), so a lock does not flicker at the rim. */
+const HOMING_LOCK_KEEP_SQ = 1.5 * 1.5;
+
 /**
  * ProjectileSystem — owns projectile lifecycle: spawning, homing steering,
  * lightning gravity attraction, and the hard cap on active projectiles.
@@ -21,6 +25,82 @@ import { wrapDeltaX, wrapDeltaY } from '../toroidal';
  * callers provide the entity list the projectiles should be appended to and
  * read from.
  */
+/**
+ * SEEKER GUIDANCE ALONG A HERMITE CURVE (user call: keep the acceleration
+ * style, but fly something closer to a Hermite curve).
+ *
+ * Each step the round plans a CUBIC HERMITE path from where it is, leaving
+ * along its own velocity, to where the target WILL be when it gets there
+ * (the target's velocity × time-to-go), ARRIVING along the line of sight at
+ * its own speed.  It then applies that curve's acceleration at the start —
+ * for a Hermite segment of duration T that is
+ *
+ *      a = (6·(P1 − P0) − 4·v·T − 2·u·s·T) / T²
+ *
+ * with P0/P1 the ends, v the velocity, u the arrival direction and s the
+ * speed.  Only the part PERPENDICULAR to the velocity is applied, capped by the
+ * round's turn authority (`homingStrength`), so it still steers by
+ * acceleration and keeps its speed — but the path it traces bends early and
+ * gently and lands straight, instead of the old constant-rate pursuit that
+ * swung wide, overshot and orbited a target it could not turn inside.
+ * Re-planned every step, so a manoeuvring target is followed smoothly.
+ *
+ * THE ACCELERATION STYLE is the throttle: the turn authority is a LATERAL
+ * ACCELERATION fixed at launch (ω × launch speed), so a round turns tighter
+ * the slower it flies (radius = s² / a).  When the target sits inside the
+ * round's turning circle — the case that used to orbit forever — it BRAKES to
+ * the speed that circle allows (never below `SEEK_MIN_SPEED_FRAC` of launch),
+ * and once the target is ahead it ACCELERATES back to its launch speed at the
+ * same rate.  Units are the sim's: velocity per 60 Hz frame, so dt is taken
+ * in frames.
+ */
+const SEEK_TURN_PER_STRENGTH = 5;      // rad/s of turn authority per unit homingStrength
+const SEEK_MIN_T = 3;                  // frames: never plan a curve shorter than this
+const SEEK_MIN_SPEED_FRAC = 0.4;       // the slowest a braking round flies, × launch speed
+const SEEK_THROTTLE_PER_FRAME = 0.08;  // speed change per frame, × launch speed
+function steerHermite(p: GameEntity, dx: number, dy: number, tvx: number, tvy: number, dt: number): void {
+  const v = p.velocity;
+  const s = Math.hypot(v.x, v.y);
+  if (!(s > 1e-3)) return;
+  const frames = dt * 60;
+  const s0 = p.spawnSpeed && p.spawnSpeed > 0 ? p.spawnSpeed : s;
+  // Time-to-go (frames) and the target's position then.
+  let T = Math.max(SEEK_MIN_T, Math.hypot(dx, dy) / s);
+  let px = dx + tvx * T, py = dy + tvy * T;
+  T = Math.max(SEEK_MIN_T, Math.hypot(px, py) / s);
+  px = dx + tvx * T; py = dy + tvy * T;
+  const pl = Math.hypot(px, py) || 1;
+  const ux = px / pl, uy = py / pl;
+  // The Hermite start acceleration (per frame²).
+  let ax = (6 * px - 4 * v.x * T - 2 * ux * s * T) / (T * T);
+  let ay = (6 * py - 4 * v.y * T - 2 * uy * s * T) / (T * T);
+  // Steer: drop the along-track part — the throttle below owns speed.
+  const hx = v.x / s, hy = v.y / s;
+  const along = ax * hx + ay * hy;
+  ax -= along * hx; ay -= along * hy;
+  // Turn authority: a lateral acceleration fixed at launch speed.
+  const aMax = (SEEK_TURN_PER_STRENGTH * (p.homingStrength ?? 1) / 60) * s0;
+  const lat = Math.hypot(ax, ay);
+  if (lat > aMax) { ax *= aMax / lat; ay *= aMax / lat; }
+  // Throttle: the circle through the target tangent to the velocity has
+  // radius d / (2 sin θ); the round can hold it at s ≤ √(aMax · R).
+  const sinT = Math.abs(hx * uy - hy * ux);
+  const cosT = hx * ux + hy * uy;
+  let want = s0;
+  if (sinT > 1e-3 || cosT < 0) {
+    const R = cosT < 0 ? pl / 2 : pl / (2 * sinT);
+    want = Math.min(s0, 0.9 * Math.sqrt(aMax * R));
+  }
+  want = Math.max(s0 * SEEK_MIN_SPEED_FRAC, want);
+  const step = s0 * SEEK_THROTTLE_PER_FRAME * frames;
+  const ns = want > s ? Math.min(want, s + step) : Math.max(want, s - step);
+  let nx = v.x + ax * frames, ny = v.y + ay * frames;
+  const nl = Math.hypot(nx, ny) || 1;
+  nx = (nx / nl) * ns; ny = (ny / nl) * ns;
+  v.x = nx; v.y = ny;
+  p.rotation = Math.atan2(ny, nx);
+}
+
 export class ProjectileSystem {
   // Perf instrumentation — wall time (ms) of the most recent homing and
   // lightning-gravity passes.  Both are O(P×E) scans that can grow once
@@ -54,23 +134,26 @@ export class ProjectileSystem {
     // Clear optional projectile-only fields so the next spawn's reuse
     // path starts from a clean slate — spawn() re-sets the fields it
     // cares about, but a config-mismatched leftover (e.g. previous shot
-    // was lightning chain with chainBranches set, next shot is a plain
-    // bouncer) would otherwise carry stale config through.
+    // carried an electric payload, next shot is a plain round) would
+    // otherwise carry stale config through.
     e.targetEntityId = undefined;
     e.hitEntityIds = undefined;
     e.arcPoints = undefined;
     e.isLightningProjectile = undefined;
-    e.isBouncer = undefined;
     e.isLightningArc = undefined;
-    e.bouncesRemaining = undefined;
     e.explosionRadius = undefined;
     e.explosionDamage = undefined;
     e.explosionKnockback = undefined;
     e.glow = undefined;
-    e.chainCount = undefined;
-    e.chainRange = undefined;
-    e.chainBranches = undefined;
     e.isCharged = undefined;
+    e.hitFalloff = undefined;
+    e.energyHeat = undefined;
+    e.energyBurnSeconds = undefined;
+    e.energyBurnRate = undefined;
+    e.energyElectric = undefined;
+    e.energyBlastHeat = undefined;
+    e.speedRetain = undefined;
+    e.homingTarget = undefined;
     e.homing = undefined;
     e.homingStrength = undefined;
     this._pool.push(e);
@@ -103,19 +186,9 @@ export class ProjectileSystem {
     }
 
     const halfSpread = (config.spread * (Math.PI / 180)) / 2;
-    // Omnidirectional layout: count projectiles at equal angular spacing
-    // around 360° starting at the aim direction.  Used by the charged
-    // Bouncer nova; falls through to the standard fan when omniDirectional
-    // is unset.
-    const omniStep = config.omniDirectional && config.count > 1
-      ? (Math.PI * 2) / config.count
-      : 0;
-
     for (let i = 0; i < config.count; i++) {
       let currentAngle = angle;
-      if (omniStep > 0) {
-        currentAngle = angle + omniStep * i;
-      } else if (config.count > 1) {
+      if (config.count > 1) {
         const step = (halfSpread * 2) / (config.count - 1);
         currentAngle = (angle - halfSpread) + (step * i);
       } else if (config.spread > 0) {
@@ -175,11 +248,11 @@ export class ProjectileSystem {
       // override and wins (BOSS_WEAPONS.SIEGE).  Computed ONCE here so the
       // pooled and fresh arms below cannot disagree about it.
       const blastDamage = config.explosionRadius && config.explosionRadius > 0
-        ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed))
+        ? (config.explosionDamage ?? blastDamageFor(projMass, muzzleSpeed) * (config.blastScale ?? 1))
         : config.explosionDamage;
-      const isLight = config.type === WeaponType.LIGHTNING || undefined;
-      const isBnc   = config.type === WeaponType.BOUNCER || undefined;
-      const bouncesRem = config.type === WeaponType.BOUNCER ? config.bounceCount : undefined;
+      // The charged bolt (projectile + electric) keeps the old Lightning's
+      // curve toward targets and its electric render.
+      const isLight = (config.energy === 'electric' && config.delivery === 'projectile') || undefined;
       const pooled = this._pool.pop();
       if (pooled) {
         // Reuse path: in-place reset.  Optional fields the pool's
@@ -214,13 +287,17 @@ export class ProjectileSystem {
         pooled.pierceHits = 0;
         if (pooled.trail) pooled.trail.length = 0; else pooled.trail = [];
         pooled.isLightningProjectile = isLight;
-        pooled.isBouncer = isBnc;
-        pooled.bouncesRemaining = bouncesRem;
         pooled.explosionRadius = config.explosionRadius;
         // Unconditional, like every other config-derived field on this path:
         // a recycled shell that kept a previous gun's fuse would detonate on
         // a timer it never armed.
         pooled.detonateOn = config.detonateOn;
+        pooled.boreCostScale = config.boreCostScale;
+        // A curving pellet rolls its own bend (unconditional: pooled state).
+        pooled.curveRate = config.curve ? (Math.random() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * Math.random()) : undefined;
+        pooled.curveWobble = config.curve ? (config.wobble ?? 0) : undefined;
+        pooled.curveHz = config.curve ? (config.wobbleHz ?? 0) : undefined;
+        pooled.curvePhase = config.curve ? Math.random() * Math.PI * 2 : undefined;
         pooled.fuseTimer = config.fuseSeconds;
         // Unconditional like the fuse beside it, and for a sharper reason: a
         // recycled shell that kept `detonated` from its last life would never
@@ -231,10 +308,17 @@ export class ProjectileSystem {
         pooled.explosionDamage = blastDamage;
         pooled.explosionKnockback = config.explosionKnockback;
         pooled.glow = config.glow;
-        pooled.chainCount = config.chainCount;
-        pooled.chainRange = config.chainRange;
-        pooled.chainBranches = config.chainBranches;
         pooled.isCharged = config.isCharged;
+        // Energy payload — unconditional, the same pooled-object rule.
+        pooled.hitFalloff = undefined;
+        pooled.energyHeat = config.heat;
+        pooled.energyBurnSeconds = config.burnSeconds;
+        pooled.energyBurnRate = config.burnRate;
+        pooled.energyElectric = config.electric;
+        pooled.energyBlastHeat = config.blastHeat;
+        pooled.speedRetain = config.speedRetain;
+        pooled.homingTarget = undefined;
+        pooled.dotLastX = undefined; pooled.dotLastY = undefined;
         pooled.appliesEffect = config.appliesEffect; // undefined for normal shots → cleared
         // Rival-shot flags (Stage 7) are stamped by GameEngine AFTER spawn, so a
         // recycled rival projectile MUST clear them or a reused player/enemy shot
@@ -270,20 +354,26 @@ export class ProjectileSystem {
           pierceHits: 0,
           trail: [],
           isLightningProjectile: isLight,
-          isBouncer: isBnc,
-          bouncesRemaining: bouncesRem,
           explosionRadius: config.explosionRadius,
           explosionDamage: blastDamage,
           explosionKnockback: config.explosionKnockback,
           detonateOn: config.detonateOn,
+          boreCostScale: config.boreCostScale,
+          curveRate: config.curve ? (Math.random() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * Math.random()) : undefined,
+          curveWobble: config.curve ? (config.wobble ?? 0) : undefined,
+          curveHz: config.curve ? (config.wobbleHz ?? 0) : undefined,
+          curvePhase: config.curve ? Math.random() * Math.PI * 2 : undefined,
           fuseTimer: config.fuseSeconds,
           blastPending: false,
           detonated: false,
           glow: config.glow,
-          chainCount: config.chainCount,
-          chainRange: config.chainRange,
-          chainBranches: config.chainBranches,
           isCharged: config.isCharged,
+          energyHeat: config.heat,
+          energyBurnSeconds: config.burnSeconds,
+          energyBurnRate: config.burnRate,
+          energyElectric: config.electric,
+          energyBlastHeat: config.blastHeat,
+          speedRetain: config.speedRetain,
           appliesEffect: config.appliesEffect,
         });
       }
@@ -325,6 +415,7 @@ export class ProjectileSystem {
       // Capture the winning delta so we don't pay a second wrapDelta pair to
       // recompute it on the steer below.
       let targetDx = 0, targetDy = 0;
+      let targetVx = 0, targetVy = 0;
 
       if (p.ownerType === EntityType.ENEMY) {
         // Enemy missiles (Turret) home on the PLAYER, regardless of range —
@@ -333,43 +424,42 @@ export class ProjectileSystem {
         if (playerHomeable) {
           targetDx = wrapDeltaX(p.position.x, player.position.x);
           targetDy = wrapDeltaY(p.position.y, player.position.y);
+          targetVx = player.velocity.x; targetVy = player.velocity.y;
           hasTarget = true;
         }
       } else {
-        // Player homing weapon: steer toward the nearest enemy within range.
-        let minDist = acquireRangeSq;
-        for (let j = 0; j < enemies.length; j++) {
-          const e = enemies[j];
-          const dx = wrapDeltaX(p.position.x, e.position.x);
-          const dy = wrapDeltaY(p.position.y, e.position.y);
-          const d2 = dx * dx + dy * dy;
-          if (d2 < minDist) {
-            minDist = d2;
-            targetDx = dx;
-            targetDy = dy;
-            hasTarget = true;
+        // PLAYER seeker: LOCK the nearest ENEMY in acquire range and hold it
+        // while it lives and stays within LOCK_KEEP × the acquire range —
+        // enemies only (user call), never terrain.  The lock is on the round
+        // (`homingTarget`), which is also what the target bracket draws.
+        let t = p.homingTarget;
+        if (t && (!t.active || t.isExploding || t.type !== EntityType.ENEMY)) t = undefined;
+        if (t) {
+          const dx = wrapDeltaX(p.position.x, t.position.x);
+          const dy = wrapDeltaY(p.position.y, t.position.y);
+          if (dx * dx + dy * dy > acquireRangeSq * HOMING_LOCK_KEEP_SQ) t = undefined;
+        }
+        if (!t) {
+          let minDist = acquireRangeSq;
+          for (let j = 0; j < enemies.length; j++) {
+            const e = enemies[j];
+            if (!e.active || e.isExploding) continue;
+            const dx = wrapDeltaX(p.position.x, e.position.x);
+            const dy = wrapDeltaY(p.position.y, e.position.y);
+            const d2 = dx * dx + dy * dy;
+            if (d2 < minDist) { minDist = d2; t = e; }
           }
         }
-      }
-
-      if (hasTarget) {
-        const desiredAngle = Math.atan2(targetDy, targetDx);
-        let angleDiff = desiredAngle - p.rotation;
-
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-
-        const turnRate = 5 * (p.homingStrength ?? 1) * dt;
-        if (Math.abs(angleDiff) < turnRate) {
-          p.rotation = desiredAngle;
-        } else {
-          p.rotation += Math.sign(angleDiff) * turnRate;
+        p.homingTarget = t;
+        if (t) {
+          targetDx = wrapDeltaX(p.position.x, t.position.x);
+          targetDy = wrapDeltaY(p.position.y, t.position.y);
+          targetVx = t.velocity?.x ?? 0; targetVy = t.velocity?.y ?? 0;
+          hasTarget = true;
         }
-
-        const speed = Math.sqrt(p.velocity.x ** 2 + p.velocity.y ** 2);
-        p.velocity.x = Math.cos(p.rotation) * speed;
-        p.velocity.y = Math.sin(p.rotation) * speed;
       }
+
+      if (hasTarget) steerHermite(p, targetDx, targetDy, targetVx, targetVy, dt);
     }
 
     this.lastHomingMs = performance.now() - t0;

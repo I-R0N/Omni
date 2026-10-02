@@ -18,7 +18,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { boot, engine, startRun, dockAtStation } from './helpers';
+import { boot, engine, startRun, waitForStats, dockAtStation } from './helpers';
 import type { EngineStats } from '../types';
 
 type StatLines = NonNullable<EngineStats['outfitting']>['statLines'];
@@ -102,15 +102,16 @@ async function outfitAndRead(page: any, moduleIds: { area: 'ship' | 'weapon'; id
   );
 }
 
-/** The four outfits.  Chosen to make every branch of the panel fire at least
- *  once: the lean start, a fully-connected ship, one with an OFFLINE module,
- *  and plating without a core. */
+/** The four outfits.  Chosen to make every REFOLDED branch of the panel fire
+ *  at least once: the lean start, a fully-connected ship, one with an OFFLINE
+ *  module, and plating without a core.  (The scanner line is the one row not
+ *  refolded: a mark contributes a reach, not an amount that sums.) */
 const OUTFITS = {
   lean: [] as { area: 'ship' | 'weapon'; idx: number; id: string }[],
   connected: [
     { area: 'ship' as const, idx: 1, id: 'hull_mk2' },
     { area: 'ship' as const, idx: 2, id: 'engine_mk1' },
-    { area: 'ship' as const, idx: 3, id: 'thrusters_mk1' },  // touches nothing but hull… see below
+    { area: 'ship' as const, idx: 3, id: 'thrusters_mk1' },  // live via the engine on hex 2
     { area: 'ship' as const, idx: 4, id: 'shield' },
     { area: 'ship' as const, idx: 5, id: 'plating_mk1' },
     { area: 'weapon' as const, idx: 2, id: 'gunnery_mk3' },
@@ -129,18 +130,32 @@ const OUTFITS = {
 };
 
 test.describe('stat attribution', () => {
-  test('all eleven stat lines are present, in both the pause menu and the station', async ({ page }) => {
+  test('all ten stat lines render, identically, at the station and in the pause menu', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    // Docked: the station's Ship Status block.
-    await dockAtStation(page);
-    const docked = await engine(page, e => e.outfittingSnapshot().statLines.map((l: any) => l.id));
-    await engine(page, e => e.undock());
+    // The Ship Status rows actually RENDERED inside one overlay, read off the
+    // DOM.  Not `outfittingSnapshot()`: both screens are fed by that one
+    // function, so comparing its output with itself would pass whatever
+    // either screen drew — the two renderShipStatus() call sites are the
+    // thing under test.
+    const rendered = (overlay: string) => page.$$eval(
+      `[data-overlay="${overlay}"] button[data-testid^="stat-"]`,
+      (els: Element[]) => els.map(el => (el.getAttribute('data-testid') ?? '').slice('stat-'.length)));
 
-    // Paused: the pause menu's CARGO panel renders the SAME widget.
+    // Docked: the station's SHIP tab.
+    await dockAtStation(page);
+    await page.getByTestId('station-tab-ship').click();
+    await expect(page.locator('[data-overlay="station"]').getByTestId('stat-hull')).toBeVisible();
+    const docked = await rendered('station');
+    await engine(page, e => e.undock());
+    await waitForStats(page, s => !s.station, 'undock');
+
+    // Paused: the pause menu renders the SAME widget.
     await engine(page, e => e.pauseGame());
-    const paused = await engine(page, e => e.outfittingSnapshot().statLines.map((l: any) => l.id));
+    await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
+    await expect(page.locator('[data-overlay="pause"]').getByTestId('stat-hull')).toBeVisible();
+    const paused = await rendered('pause');
 
     // The FULL row set, in order.  Pinned exactly rather than loosely,
     // because a line that quietly stops being built is invisible in play —
@@ -176,6 +191,16 @@ test.describe('stat attribution', () => {
 
       const r = await outfitAndRead(page, plan as any);
       const L = r.statLines as StatLines;
+
+      // The CONNECTED outfit's premise: every module in it is live.  A refold
+      // agrees with the sim whether a module is live or not (an offline one
+      // is left out of both sides), so without this a 'connected' ship that
+      // had quietly gone offline would still pass — on a weaker case than
+      // the one it names.
+      if (name === 'connected') {
+        const offline = [...r.ship, ...r.weapon].filter(h => h && !h.active).map(h => h!.id);
+        expect(offline, 'every module in the connected outfit is live').toEqual([]);
+      }
 
       // ── Max hull: base 100 + Σ active maxHp ────────────────────────────
       const hull = line(L, 'hull');

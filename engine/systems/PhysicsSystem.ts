@@ -1,5 +1,6 @@
 
 
+import { mechanicalScale, materialOf, stampFractureProfile } from './energy';
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
 import { applyBoundaryDamage, ensureBoundaryModel, stampLocalImpact, bondStrengthFor } from './fractureCache';
@@ -111,6 +112,11 @@ const _dentPreSnapshot: Float64Array = new Float64Array(16);
 // step.  When an entity's history empties (or it gets transmuted /
 // composed / dies) the recovery pass / clear sites remove it.
 export const pendingPlasticDentEntities: Set<GameEntity> = new Set();
+
+/** A kinetic round passing through a drifting GAS body shoves it along the
+ *  round's travel by this fraction of the round's speed, capped. */
+const GAS_DISPLACE_PER_SPEED = 0.08;
+const GAS_DISPLACE_MAX_DV = 2.5;
 
 export class PhysicsSystem {
   // Dual-grid system:
@@ -575,8 +581,8 @@ export class PhysicsSystem {
               entity.nebulaSpawnTimer = undefined;
           }
       }
-      // Nebula shard merge cooldown — skip gravity pull + merge checks
-      // in NebulaSystem.updateDynamics while this is positive.  Only
+      // Nebula shard merge cooldown — skip gravity pull + bond formation
+      // in ShardSystem's merge broadphase while this is positive.  Only
       // NEBULA_SHARDs carry this field in practice, but ticking it
       // unconditionally is a single branch per entity and keeps the
       // timer model consistent.
@@ -642,18 +648,18 @@ export class PhysicsSystem {
           wrapPosition(entity.position);
 
           // Apply Friction.  Stage 5: gate by per-entity damping
-          // override (today: nebula-shards) instead of EntityType so
-          // the shard-family unification doesn't lose nebula's
-          // characteristic cloud drag.
+          // override (today: nebula-shards and metal composites) instead
+          // of EntityType so the shard-family unification doesn't lose
+          // nebula's characteristic cloud drag.
           if (entity.linearDamping !== undefined) {
-            // Custom heavy linear & angular damping (nebula-shards
-            // today, future variants opt in via the same per-entity
-            // field at spawn time).  Falls back to NEBULA_CONSTANTS
-            // values for entities that don't set them.
+            // Custom heavy linear & angular damping (nebula-shards and
+            // metal composites today; future variants opt in via the
+            // same per-entity field at spawn time).  Falls back to
+            // NEBULA_CONSTANTS values for entities that don't set them.
             // DBG "Neb damp" applies HERE, at the read, so a click re-tunes
             // every puff already drifting rather than only the next shatter.
-            // Nebula-only: the damping fields are generic and plastic /
-            // metal shards set them too, so the knob has to name its
+            // Nebula-only: the damping fields are generic and metal
+            // composites set them too, so the knob has to name its
             // material or it becomes a global drag dial.
             const isNebulaBody = entity.shardVariant === 'nebula-shard';
             const linearD = isNebulaBody
@@ -827,8 +833,8 @@ export class PhysicsSystem {
           // Normalised radial (shard → player).
           const rx = dx * invDist;
           const ry = dy * invDist;
-          // Spin HANDEDNESS is a DBG cycle (Visual ▸ "Neb spin") while the
-          // proper rotational mechanics are parked (see PARKING_LOT):
+          // Spin HANDEDNESS is a DBG cycle (Materials ▸ Nebula ▸ "Neb spin")
+          // while the proper rotational mechanics are parked (see PARKING_LOT):
           //  - `physical` (default): the wake shear — the ship's velocity
           //    crossed with the ship→shard vector — so a shard passed on the
           //    STARBOARD side turns CLOCKWISE on screen and a port-side one
@@ -944,10 +950,10 @@ export class PhysicsSystem {
             // Mobile shard-family entities get the close-attractor crush
             // (mobile shards = STRUCTURE with finite mass).  A wormhole
             // portal SWALLOWS instead: the radius is the visual event
-            // horizon (0.62 × r, the dark disc dropShapes draws), so the
-            // shard disappears while covered by it, and there is no damage
-            // popup — matter falling past a horizon is silent, and a crush
-            // number over the rift would be pure noise.
+            // horizon (`portalHorizonRadius`, the dark disc dropShapes
+            // draws), so the shard disappears while covered by it, and there
+            // is no damage popup — matter falling past a horizon is silent,
+            // and a crush number over the rift would be pure noise.
             // Dragon body segments are exempt: they are chain-snapped to the
             // head's path every frame (velocity is moot) and dying any way
             // but a SHOT must go through the sever machinery, not a silent
@@ -1397,7 +1403,7 @@ export class PhysicsSystem {
   // {x,y} per step — the walk runs inside the collision path.
   private readonly _borePoint: Vector2 = { x: 0, y: 0 };
   /** Set by `borePierceTrack`: did the bolt come out the FAR SIDE of the
-   *  body it just bored, or did it run out of charges inside it?  A
+   *  body it just bored, or did it run out of energy inside it?  A
    *  scratch flag rather than a returned object so the walk allocates
    *  nothing. */
   private _boreExited = false;
@@ -1547,7 +1553,12 @@ export class PhysicsSystem {
       // metal 8x1.8 = 14.4.  THAT ratio is the whole of step 5: depth becomes
       // `energy / price`, so the same shell crosses glass and stops in metal
       // without either being written down anywhere.
-      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0));
+      // A NARROW PENETRATOR (`boreCostScale` < 1) pays — and so deposits —
+      // only that fraction of each grain's price: deeper, and gentler on
+      // every boundary it crosses.
+      const grainCost = Math.max(1e-6, grain * (bondStrengthFor(target) ?? 0)
+          * Math.max(0.02, Math.min(1, proj.boreCostScale ?? 1)));
+      const heatScale = mechanicalScale(materialOf(target), target.heat);
       let ordinal = proj.pierceHits ?? 0;
       let steps = 0;
       for (;;) {
@@ -1562,7 +1573,9 @@ export class PhysicsSystem {
           const remaining = PhysicsSystem.projectileEnergyLeft(proj);
           if (remaining <= PhysicsSystem.SPENT_EPSILON) break;  // spent; stops inside
           const bite = Math.min(remaining, grainCost);
-          if (!applyBoundaryDamage(target, bite)) {
+          // A HOT body's boundaries are weakened (energy modules): the same
+          // work breaks more of them.  The bolt still pays the cold price.
+          if (!applyBoundaryDamage(target, bite * heatScale)) {
               // The model went away under us (an empty decomposition).
               // Nothing has been spent yet on the first step, so hand the
               // body back to the ordinary path rather than eating the hit.
@@ -1580,6 +1593,16 @@ export class PhysicsSystem {
           if (steps > PhysicsSystem.MAX_BORE_STEPS) break;
       }
       proj.pierceHits = ordinal;
+      // THE ROUND IS WHERE ITS WALK ENDED.  The walk is the round's own path
+      // through the body, so it is moved there: out of the far side when it
+      // exited (or broke the body), or to the grain it stopped in.  Left at
+      // the entry face it would still be inside the body next substep.
+      // Written as a DISPLACEMENT from where the round is, so it holds in
+      // whichever frame the broadphase shifted the pair into.
+      if (steps > 0) {
+          proj.position.x += (lx * cw - ly * sw) - ex;
+          proj.position.y += (lx * sw + ly * cw) - ey;
+      }
       // A bolt that walked out of the far side with nothing left has not
       // exited in any sense that matters — it stops at the surface.
       if (this._boreExited
@@ -1612,10 +1635,11 @@ export class PhysicsSystem {
   /**
    * Reflect a projectile off a surface — the ONE deflection primitive.
    *
-   * Three places in this engine bounce a bolt off something: a shield ring, a
-   * bouncer round off a tile face, and (eventually) a parry or a mirror
-   * hazard.  They differ only in WHERE the normal comes from and what happens
-   * to ownership afterwards, so the mirror itself lives here and the caller
+   * Both shield kinds bounce a bolt off themselves — an arc shield's ring
+   * before the body SAT, a non-arc pool at contact — and the retired Laser's
+   * tile-face bounce was a third caller.  They differ only in WHERE the
+   * normal comes from and what happens to ownership afterwards (a player
+   * PARRY re-owns the bolt), so the mirror itself lives here and the caller
    * decides when it fires.
    *
    * `nx`/`ny` must be a UNIT normal pointing OUT of the surface.  Returns false
@@ -1638,7 +1662,7 @@ export class PhysicsSystem {
       if (vdotn >= 0) return false;
 
       // v' = v − 2(v·n)n.  For an axis-aligned normal this reduces to negating
-      // one component, which is exactly what the bouncer's tile path did by
+      // one component, which is what the retired bouncer's tile path did by
       // hand before it was folded onto this.
       let rx = vx - 2 * vdotn * nx;
       let ry = vy - 2 * vdotn * ny;
@@ -2089,11 +2113,12 @@ export class PhysicsSystem {
       tile._occluderR = undefined;   // the shadow radius is derived from the polygon
       if (tile._staticCached === true) tile._staticCached = false;
 
-      // Damage cracks are no longer appended here.  Rock / metal tiles
-      // and shards now share the seeded, HP-driven crack overlay in
-      // RenderSystem.drawDamageCracks (keyed off health/maxHealth), so
-      // the fracture pattern is deterministic per entity and accrues as
-      // HP drops rather than spawning fresh random segments per hit.
+      // Damage cracks are no longer appended here.  The render-time crack
+      // overlay (render/tileShapes.ts overlayMaterialCracks) draws them: a
+      // grain material's own boundaries under voronoi, the seeded
+      // HP-driven spokes (drawDamageCracks, keyed off health/maxHealth)
+      // otherwise — deterministic per entity either way, accruing as
+      // damage lands rather than spawning fresh random segments per hit.
   }
 
   // ── THE STATIC-GEOMETRY QUERY LAYER ─────────────────────────────────
@@ -2609,7 +2634,7 @@ export class PhysicsSystem {
    * weapon hit and the bubble's bite use, so a crushed tile cracks and sheds
    * grains the way a shot one does.
    *
-   * Returns false HAVING DONE NOTHING for a body that is not running the
+   * Returns null HAVING DONE NOTHING for a body that is not running the
    * grain model (indestructible, nebula, or any variant under the DBG legacy
    * fracture mode).  Unlike `GameEngine.chipStructureAt` — which refuses such
    * a body outright, because it is the chip path — the crash paths MUST still
@@ -2627,8 +2652,10 @@ export class PhysicsSystem {
    * spent `derived / authored`, so metal — whose authored HP is
    * `24 x densityTier` while its derived HP is flat — took 24 to 144 rams
    * across six tiles of IDENTICAL toughness.  Energy never consults an
-   * authored number, so that lottery is gone.  Rock is the calibration
-   * anchor and is unchanged at 9; see CRASH_ENERGY_COUPLING for the rest.
+   * authored number, so that lottery is gone.  Rock was the calibration
+   * anchor (unchanged at 9 rams when this landed; MASS_SCALE has since
+   * made every impact ten times harder — 1 ram at the audit's 6 u/step,
+   * CLAUDE.md §8); see CRASH_ENERGY_COUPLING for the rest.
    *
    * GLASS HAS NO SPECIAL CASE (user call).  V9 gave a glass tile a
    * whole-pane rule — any crash over the threshold spent its ENTIRE
@@ -3374,8 +3401,8 @@ export class PhysicsSystem {
       if (distSq > (rA + rB + 10)**2) return;
 
       // Terrain slam (Stage 5): the player hitting a tile / asteroid fast stamps
-      // a short window GameEngine.updateBubbles reads to shake a latched bubble
-      // free.  STRUCTURE covers static tiles + mobile shards.
+      // a short window updateBubbles (roamers/bubbles.ts) reads to shake a
+      // latched bubble free.  STRUCTURE covers static tiles + mobile shards.
       if (a.type === EntityType.STRUCTURE || b.type === EntityType.STRUCTURE) {
           const ply = a.id === 'player' ? a : (b.id === 'player' ? b : null);
           if (ply && Math.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
@@ -3387,7 +3414,7 @@ export class PhysicsSystem {
       // opposite sides of the seam (|b - a| > HALF_MAP), shift b into
       // a's frame for the duration of this check so vertex math stays
       // local.  After resolution we re-wrap both positions so anything
-      // the bouncer / positional-correction path wrote to a.position or
+      // the deflect / positional-correction path wrote to a.position or
       // b.position in the shifted frame returns to canonical coords.
       const offsetX = (a.position.x + wdx) - b.position.x;
       const offsetY = (a.position.y + wdy) - b.position.y;
@@ -3421,7 +3448,7 @@ export class PhysicsSystem {
 
       if (shifted) {
           // Normalize any positions the resolver may have written in b's
-          // shifted frame (bouncer reflection, SLOP correction, etc.).
+          // shifted frame (shield deflection, SLOP correction, etc.).
           wrapPosition(a.position);
           wrapPosition(b.position);
       }
@@ -3762,9 +3789,17 @@ export class PhysicsSystem {
           // gravity field; contact alone is a pure pass-through with
           // no destruction.
           const isShatterable = nebula.shardVariant === 'nebula-tile';
+          // A KINETIC ROUND BREAKS A CLOUD TILE THE WAY A SHIP FLYING THROUGH
+          // IT DOES (user call): the static tile breaks up into its drifting
+          // cells and the round flies on, uncharged — a gas absorbs no energy.
+          // Once per round per tile (the hit list), like the displacement
+          // below; a round never takes the ship's impact cooldown.
+          const roundThrough = other.type === EntityType.PROJECTILE
+              && !(other.hitEntityIds !== undefined && other.hitEntityIds.includes(nebula.id));
           const shatters = isShatterable
-                            && (other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
-                            && (other.nebulaImpactCooldown ?? 0) <= 0;
+                            && (((other.type === EntityType.PLAYER || other.type === EntityType.ENEMY)
+                                 && (other.nebulaImpactCooldown ?? 0) <= 0)
+                                || roundThrough);
           if (shatters) {
               // Size floor check: below MIN_SHATTER_DIAMETER the child
               // diameter would be too small to spawn, so just pass through.
@@ -3799,9 +3834,33 @@ export class PhysicsSystem {
                   // with mergeFadeTimer set, so fading shards drop out
                   // of broadphase automatically on the next frame.
                   //
-                  // Arm the striker's post-shatter cooldown.
-                  other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
+                  // Arm the striker's post-shatter cooldown (a ship's; a
+                  // round is gated by its hit list instead).
+                  if (other.type === EntityType.PROJECTILE) {
+                      (other.hitEntityIds ?? (other.hitEntityIds = [])).push(nebula.id);
+                  } else {
+                      other.nebulaImpactCooldown = NEBULA_CONSTANTS.IMPACT_COOLDOWN;
+                  }
                   if (onDeath) onDeath(nebula);
+              }
+          }
+          // A ROUND THROUGH A GAS (energy modules, user call): mechanical
+          // energy DISPLACES a drifting gas body it passes through, exactly
+          // as a kinetic beam does — a shove along the round's travel, once
+          // per round, capped.  (A static cloud TILE is broken up above.)
+          // The round is not charged for either: a gas takes no damage, so it
+          // absorbs no energy.
+          if (other.type === EntityType.PROJECTILE && nebula.mass !== Infinity
+              && nebula.velocity && other.velocity) {
+              const hit = other.hitEntityIds ?? (other.hitEntityIds = []);
+              if (!hit.includes(nebula.id)) {
+                  hit.push(nebula.id);
+                  const sp = Math.hypot(other.velocity.x, other.velocity.y);
+                  if (sp > 1e-6) {
+                      const dv = Math.min(GAS_DISPLACE_MAX_DV, sp * GAS_DISPLACE_PER_SPEED);
+                      nebula.velocity.x += (other.velocity.x / sp) * dv;
+                      nebula.velocity.y += (other.velocity.y / sp) * dv;
+                  }
               }
           }
           // No impulse / no positional correction regardless of outcome.
@@ -3858,157 +3917,16 @@ export class PhysicsSystem {
           if (target.type === EntityType.ENEMY && proj.ownerType === EntityType.ENEMY
               && !target.thirdParty && !proj.hitsEnemies) return;
           if (proj.hitsEnemies && target.isRival) return;
-
-          // Bouncer projectiles reflect off STRUCTURE tiles + glass-shards
-          // (today's "tile shards"); they pass through every other shard
-          // variant (rock-shards, nebula tiles, nebula shards).
-          //
-          // Stage 5: shard-family entities all share EntityType.STRUCTURE
-          // now, so distinguishing static tiles vs glass-shards needs a
-          // variant check.  STRUCTURE-tile variants (glass / plastic /
-          // metal / indestructible) are mass=Infinity, so we can short-
-          // circuit on that for tile reflection.  Mobile shards then
-          // need a per-variant check — only glass-shard reflects.
-          if (proj.isBouncer) {
-              let isReflective = false;
-              if (target.type === EntityType.STRUCTURE) {
-                if (target.mass === Infinity) {
-                  // Static tile.  All STRUCTURE tile variants reflect EXCEPT
-                  // nebula-tile (passThrough = true).
-                  isReflective = target.shardVariant !== 'nebula-tile';
-                } else {
-                  // Mobile shard.  Only glass-shard reflects.
-                  isReflective = target.shardVariant === 'glass-shard';
-                }
-              }
-              const isTile = isReflective;
-              // Bounce-count gate: when bouncesRemaining is set (post-d2
-              // pierce-beam), the projectile dissipates after N reflections
-              // instead of bouncing forever inside its lifetime window.
-              // bouncesRemaining=0 means "no bounces left" → deactivate on
-              // the contact frame, fire onHit at the contact point, skip
-              // the reflection math.
-              if (isTile && proj.velocity && proj.bouncesRemaining !== undefined && proj.bouncesRemaining <= 0) {
-                  if (onHit) onHit(proj.position, proj, target);
-                  proj.active = false;
-                  return;
-              }
-              if (isTile && proj.velocity) {
-                  // Tiles are axis-aligned AABBs, and the projectile is thin and
-                  // rotated along its travel direction — SAT's minimum-overlap axis
-                  // is often the wrong reflection axis. Instead, infer the entry
-                  // face from the projectile's velocity direction and the tile's
-                  // dilated AABB: for each axis, compute the reverse-unwind time
-                  // to exit the corresponding entry face. The axis with the smaller
-                  // unwind time was the most-recently-crossed face → that's the
-                  // face we bounce off of.
-                  const tileHX = target.size.x / 2;
-                  const tileHY = target.size.y / 2;
-
-                  // Effective projectile half-extents along world X and Y,
-                  // accounting for the projectile's rotation. This lets us push
-                  // the projectile out just enough to clear the tile face,
-                  // avoiding big visual teleports that break the trail.
-                  const cosR = Math.abs(Math.cos(proj.rotation));
-                  const sinR = Math.abs(Math.sin(proj.rotation));
-                  const hw = proj.size.x / 2;
-                  const hh = proj.size.y / 2;
-                  const hxEff = cosR * hw + sinR * hh;
-                  const hyEff = sinR * hw + cosR * hh;
-
-                  const vx = proj.velocity.x;
-                  const vy = proj.velocity.y;
-                  const relX = proj.position.x - target.position.x;
-                  const relY = proj.position.y - target.position.y;
-
-                  // Reverse-unwind time to the entry face along each axis, using
-                  // a conservative dilated AABB (use max effective half-extent).
-                  const dHX = tileHX + hxEff;
-                  const dHY = tileHY + hyEff;
-                  let tX = Infinity;
-                  let tY = Infinity;
-                  if (vx >  0.0001) tX = (relX + dHX) / vx;  // entered through left face
-                  else if (vx < -0.0001) tX = (relX - dHX) / vx;  // entered through right face
-                  if (vy >  0.0001) tY = (relY + dHY) / vy;
-                  else if (vy < -0.0001) tY = (relY - dHY) / vy;
-
-                  // Contact point on the tile face, clamped to the tile's extent —
-                  // this is where sparks should spawn so they sit on the surface
-                  // rather than inside the tile.
-                  let contactX = 0;
-                  let contactY = 0;
-
-                  // Pick the entry axis: the one with the SMALLER reverse-unwind
-                  // time was crossed last, so that's the face we're reflecting off.
-                  // Snap the projectile position to just outside that face + ε.
-                  //
-                  // The face normal then goes through the SHARED deflection
-                  // helper — the same one the shield ring uses.  For an
-                  // axis-aligned normal its mirror reduces to negating one
-                  // component, which is exactly the arithmetic this branch used
-                  // to do by hand.  `keepHoming` because a tile bounce is the
-                  // bouncer working as designed, not a shot being turned away.
-                  if (tX <= tY) {
-                      const nx = vx > 0 ? -1 : 1;
-                      contactX = target.position.x + nx * tileHX;
-                      contactY = Math.max(
-                          target.position.y - tileHY,
-                          Math.min(target.position.y + tileHY, proj.position.y)
-                      );
-                      PhysicsSystem.deflectProjectile(proj, nx, 0, {
-                          snapX: target.position.x + nx * (tileHX + hxEff + 0.5),
-                          keepHoming: true,
-                      });
-                  } else {
-                      const ny = vy > 0 ? -1 : 1;
-                      contactY = target.position.y + ny * tileHY;
-                      contactX = Math.max(
-                          target.position.x - tileHX,
-                          Math.min(target.position.x + tileHX, proj.position.x)
-                      );
-                      PhysicsSystem.deflectProjectile(proj, 0, ny, {
-                          snapY: target.position.y + ny * (tileHY + hyEff + 0.5),
-                          keepHoming: true,
-                      });
-                  }
-
-                  // Decrement remaining-bounces counter (set on bouncer
-                  // projectiles via WeaponConfig.bounceCount).  Counter is
-                  // checked at the top of the reflection branch on the
-                  // *next* tile contact; the projectile keeps moving on
-                  // this frame after the reflection.
-                  if (proj.bouncesRemaining !== undefined) {
-                      proj.bouncesRemaining -= 1;
-                  }
-
-                  // A RICOCHET MAY RE-HIT WHAT IT ALREADY STRUCK (user call).
-                  // A reflection is a discrete "the beam left and is coming
-                  // back" event, so the struck-ID list is cleared HERE rather
-                  // than by weakening the `alreadyHit` guard in the projectile
-                  // branch — that guard is load-bearing for an unrelated
-                  // reason (it stops a bolt in SUSTAINED OVERLAP with a body
-                  // from re-damaging it every substep at 120Hz), and the list
-                  // simply refills after the bounce, so same-contact dedup is
-                  // preserved on both legs of the flight.
-                  //
-                  // The semantics this produces are the intended reading: the
-                  // bolt's ENERGY is a lifetime bank, so a bouncing beam lands
-                  // only what it can still afford however many times it turns
-                  // around, each bite further down the curve its own mass
-                  // sets.  Bounces buy COVERAGE, not extra damage — do not
-                  // "fix" that by refilling the bank on a bounce.
-                  //
-                  // Length-reset, not a fresh array (CLAUDE.md §8's refill
-                  // rule): this runs inside the collision path.
-                  if (proj.hitEntityIds !== undefined) proj.hitEntityIds.length = 0;
-
-                  // Fire the impact callback AFTER the reflection so sparks spawn
-                  // on the tile's surface and spray along the outgoing (reflected)
-                  // velocity direction — away from the tile, not into it.
-                  if (onHit) onHit({ x: contactX, y: contactY }, proj, target);
-                  return;
-              }
-          }
+          // A BODY A ROUND HAS ALREADY STRUCK IS NOT STRUCK AGAIN.  A round
+          // still overlapping it on the next substep (it bored through a tile
+          // wider than one step, or came to rest inside one) is passing
+          // through or resting, not hitting — before this it was damaged a
+          // second time on the single-spend path and then STOPPED, so no
+          // bored round ever came out of a tile wider than its own step.  A
+          // shield PARRY clears the list when it re-owns a bolt
+          // (`deflectProjectile`), so a parried bolt may strike what it was
+          // refused before.
+          if (proj.hitEntityIds !== undefined && proj.hitEntityIds.includes(target.id)) return;
 
           // PENETRATION FALLOFF: the SECOND body a bolt passes through takes
           // less than the first, the third less again — and it is measured,
@@ -4017,15 +3935,14 @@ export class PhysicsSystem {
           // nothing bites exactly its authored damage and one that has
           // spent half its energy bites half.
           //
-          // EVERY WEAPON IS AFFECTED EQUALLY (user call).  The falloff is
-          // not direct-damage-only: the Cannon's AoE splash and the
-          // Lightning chain are applied in GameEngine, from a callback that
-          // fires LATER in this function — by which point the grain bore
-          // may already have advanced `pierceHits` past this hit's ordinal.
-          // So the factor actually used here is STASHED on the projectile
-          // and those consumers read it, rather than re-deriving an ordinal
-          // that no longer means the same thing.  One number, one hit, three
-          // damage paths.
+          // EVERY WEAPON WAS AFFECTED EQUALLY (user call): the Cannon's AoE
+          // splash and the Lightning chain, applied in GameEngine from a
+          // callback that fires LATER in this function, read the factor
+          // STASHED here (`hitFalloff`) rather than re-deriving an ordinal
+          // the grain bore may already have advanced.  Neither reads it
+          // now — the blast became PAYLOAD (sized at spawn from the shell's
+          // mass; see `applyExplosionAoE`) and the chain went with the energy
+          // modules — so the stash is written and unread.
           const projMass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
           let projDmg = PhysicsSystem.projectileBiteOn(proj, target);
           // `hitFalloff` keeps its meaning — this hit's size RELATIVE to the
@@ -4037,6 +3954,16 @@ export class PhysicsSystem {
           // whittled down below (a shield eats part of it, a plate scales it)
           // while the energy the bolt is charged for is the whole of it.
           const biteFull = projDmg;
+          // HEAT LOWERS THE THRESHOLD (energy modules): a hot body takes more
+          // from the same mechanical bite — metal or rock heated first is
+          // then broken far more easily.  Scales what the BODY takes, never
+          // what the bolt is charged (`biteFull` above), so a hot target
+          // costs a round no extra energy.  1 on a cold body.
+          const heatScale = mechanicalScale(materialOf(target), target.heat);
+          if (heatScale !== 1) projDmg *= heatScale;
+          // The break takes the character of what broke it: a mechanical
+          // profile for this material (read at first decomposition + shatter).
+          stampFractureProfile(target, 'mechanical', projDmg);
           // Set by the two reductions below.  A plate or armour that turns a
           // shot aside has STOPPED it, so such a hit is never refunded — see
           // the overkill rule at the spend site.
@@ -4171,13 +4098,19 @@ export class PhysicsSystem {
               // and metal share the policy).  A Cannon shot at damage=5
               // costs the target 1 HP and runs one dent step, not five.
               // Hardness scales via the entity's health alone.
+              // ONLY on the fallback below, where applyBoundaryDamage
+              // declines — a body not running the grain model, i.e. the
+              // DBG 'legacy' fracture A/B.  Under voronoi every dent
+              // variant runs the model and spends damage on boundaries.
               const isDentEntity = target.shardVariant !== undefined
                   && SHARD_VARIANTS[target.shardVariant].dent !== undefined;
               // Rock tiles / asteroids / rock-shards also count "hits, not
-              // damage": their maxHealth is a hit ceiling (ROCK_BREAK), so
-              // every shot costs exactly 1 HP regardless of weapon power and
-              // the probabilistic break rolls per hit.  (rock-tile is already
-              // a dent entity; rock-shard has no dent policy, so name it.)
+              // damage" on that same fallback: their authored maxHealth is a
+              // hit ceiling (ROCK_BREAK), so every shot costs exactly 1 HP
+              // regardless of weapon power and the probabilistic break
+              // (maybeRockEarlyBreak, legacy mode only) rolls per hit.
+              // (rock-tile is already a dent entity; rock-shard has no dent
+              // policy, so name it.)
               const isHitCounted = isDentEntity
                   || target.shardVariant === 'rock-shard';
               if (!isIndestructibleTile) {
@@ -4193,8 +4126,10 @@ export class PhysicsSystem {
                   // material's price per GRAIN and slowing by exactly what
                   // it deposited — instead of spending the whole shot on
                   // the entry cell.  It returns 0 for everything else
-                  // (nebula, metal-shard composites, enemies), which is the
-                  // single-spend path this always was.
+                  // (enemies, and every body under the DBG legacy fracture
+                  // A/B), which is the single-spend path this always was.
+                  // A gas never gets here: a round crossing nebula returns in
+                  // the passThrough block above.
                   if (!alreadyHit) boredSteps = this.borePierceTrack(proj, target, projDmg);
                   if (boredSteps === 0) {
                       stampLocalImpact(target, proj.position);
@@ -4284,7 +4219,7 @@ export class PhysicsSystem {
                   // new hit.
                   if (target.thirdParty && proj.ownerId) stampBubbleAggro(target, proj.ownerId);
                   // A shot to a LATCHED bubble shakes it loose (→ sick) — read by
-                  // GameEngine.updateBubbles.
+                  // updateBubbles (roamers/bubbles.ts).
                   if (target.attachedToId !== undefined) target.bubbleKnockFree = true;
               }
           }
@@ -4443,7 +4378,13 @@ export class PhysicsSystem {
               // LATER IN THIS SAME SUBSTEP (updatePhysics then
               // updateGameLogic, over the entity index built at the top of
               // the step), so the round is still in the list it walks.
-              if (proj.explosionRadius && proj.explosionRadius > 0 && !proj.detonated) {
+              if (proj.detonateOn === 'fuse' && proj.explosionRadius && proj.explosionRadius > 0
+                  && !proj.detonated) {
+                  // A FUSE SHELL does not go off because it stopped: it
+                  // comes to rest where it is and waits for its fuse (user
+                  // call — the bare Cannon explodes after a set time).
+                  proj.velocity.x = 0; proj.velocity.y = 0;
+              } else if (proj.explosionRadius && proj.explosionRadius > 0 && !proj.detonated) {
                   // ARMED, AND DELIBERATELY LEFT ALIVE for the rest of this
                   // substep.  The entity-compaction pass at the end of
                   // `updatePhysics` releases an INACTIVE projectile straight
@@ -4815,19 +4756,12 @@ export class PhysicsSystem {
       // at drift speed and a small shard at high speed can both crash,
       // while cruising shards stay harmlessly bouncing.
       //
-      // This path deliberately does NOT call onDeath — unlike the player
-      // crash above, asteroids destroy tiles permanently (no shard debris,
-      // no regeneration queue, no flow-field BFS patch).  Omitting
-      // onDeath avoids:
-      //   - spawning 4–11 glass-shard asteroids per crashed tile
-      //     (runaway entity count when a cluster plows a row of tiles),
-      //   - `flowField.onTileDestroyed` and its patch BFS, which on a
-      //     toroidal map propagates through every unblocked cell of the
-      //     pursuit field within range and dominates the frame.
-      // Enemies continue treating the destroyed cell as blocked until
-      // the next natural full field rebuild (when the player changes
-      // grid cells); that's a ~1 s staleness in the worst case, which
-      // is cheaper than patching on every crash.
+      // A tile this crash kills goes through `killStructureByImpact`, i.e.
+      // the full `onDeath` fan-out a shot tile gets (shatter debris,
+      // drops, sound, and the pursuit field's `onTileDestroyed` patch).
+      // This path used to skip onDeath to dodge the debris count and the
+      // patch BFS, which made a crushed tile simply blink out — see
+      // killStructureByImpact.
       // Mobile shards (rock-shard / glass-shard) live on
       // EntityType.STRUCTURE with finite mass; static tiles share
       // the EntityType but are mass=Infinity.  The crash interaction
@@ -4884,11 +4818,11 @@ export class PhysicsSystem {
           // debounces multi-substep re-hits from one bounce event so a
           // single glancing collision counts as one pressure event
           // rather than two or three.  Once the accumulator reaches
-          // TILE_PRESSURE_HITS within the TILE_PRESSURE_WINDOW,
-          // the tile takes a damage tier the same way a single above-
-          // threshold crash would (glass dies in one; tiered tiles step
-          // down one tier per trigger).  Indestructible tiles accumulate
-          // nothing — they're inert under pressure.
+          // TILE_PRESSURE_HITS within the TILE_PRESSURE_WINDOW, the
+          // tile is charged the whole accumulator's crash energy on its
+          // boundaries (below; a body with no grain model loses 1 HP).
+          // Indestructible tiles accumulate nothing — they're inert
+          // under pressure.
           if (!isIndestructible
               && asteroid.mass >= STRUCTURE_CONSTANTS.TILE_PRESSURE_MIN_MASS
               && !(structure.tilePressureCooldown ?? 0)) {
@@ -4900,7 +4834,8 @@ export class PhysicsSystem {
                   // The SLOW kill spends on boundaries too: a tile ground
                   // down by repeated nudges should crack where it is being
                   // nudged, not lose an abstract point of health.  Glass
-                  // still "dies in one" pressure trigger (V9).
+                  // has no special case here either (the V9 whole-pane
+                  // rule is gone — see crashBoundaryDamage).
                   const crashAt = PhysicsSystem.crashContactOn(structure, nx, ny, structure === a);
                   // PRESSURE SPENDS WHAT THE WHOLE ACCUMULATOR BROUGHT, not
                   // what its last nudge did.  The trigger IS the sum of
@@ -4938,8 +4873,7 @@ export class PhysicsSystem {
 
       // Mobile-shard vs Player — speed-gated environmental damage
       // (bypasses shield).  Stage 5: mobile shards now live on
-      // STRUCTURE+finite mass; the legacy ROCK_SHARD type is still
-      // accepted for any not-yet-migrated spawn site.
+      // STRUCTURE+finite mass.
       const aIsPlayerLike = a.type === EntityType.PLAYER;
       const bIsPlayerLike = b.type === EntityType.PLAYER;
       if ((aIsPlayerLike && bIsMobileShard) || (bIsPlayerLike && aIsMobileShard)) {
