@@ -233,7 +233,7 @@ function fireRivalShot(g: GameEngine, inst: RivalInstance, target: GameEntity) {
     if (!g.currentMap) return;
     const W = RIVAL_CONSTANTS.WEAPON;
     const cfg = {
-        type: WeaponType.BLASTER, name: 'Rival Blaster', cooldown: W.cooldown,
+        delivery: 'projectile', name: 'Rival Blaster', cooldown: W.cooldown,
         speed: W.speed, damage: W.damage, lifetime: W.lifetime,
         color: inst.ship.color || W.color, size: W.size,
         count: 1, spread: 0, recoil: 0,

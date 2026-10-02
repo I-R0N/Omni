@@ -1099,25 +1099,23 @@ test.describe('payload', () => {
     const watch = await boot(page);
     await startRun(page);
 
-    // The weapon catalog used to ride EVERY paused frame, panel or not.
+    // The module catalog is built only while the panel is open.
     await engine(page, e => e.pauseGame());
     await waitForStats(page, s => s.gameState === 'PAUSED', 'the pause menu');
     let s = await stats(page);
-    expect(s.weaponCatalog, 'no catalog while the panel is shut').toBeUndefined();
+    expect(s.weaponModuleCatalog, 'no module catalog while the panel is shut').toBeUndefined();
     expect(s.debugSlotLock).toBeUndefined();
 
     await openPanel(page);
-    s = await waitForStats(page, s2 => Array.isArray(s2.weaponCatalog), 'the catalog while open');
-    expect(s.weaponCatalog!.length).toBeGreaterThan(0);
+    s = await waitForStats(page, s2 => Array.isArray(s2.weaponModuleCatalog), 'the module catalog while open');
+    expect(s.weaponModuleCatalog!.length).toBe(8);
     expect(s.debugSlotLock).toMatch(/^\d+\/\d+$/);
-    // Rendered, one row per weapon.
-    await expand(page, 'weapons', 'weapons');
-    for (const w of s.weaponCatalog!) {
-      await expect(page.locator(`[data-debug-row="${w.name}"]`)).toHaveCount(1);
-    }
+    // Rendered: an Equip row per delivery.
+    await expand(page, 'weapons', 'wmods');
+    await expect(page.locator('[data-debug-row="Equip cannon"]')).toHaveCount(1);
 
     await closePanel(page);
-    s = await waitForStats(page, s2 => s2.weaponCatalog === undefined, 'the catalog to stop');
+    s = await waitForStats(page, s2 => s2.weaponModuleCatalog === undefined, 'the catalog to stop');
     expect(s.debugSlotLock).toBeUndefined();
 
     // What IS always sent is four scalars.

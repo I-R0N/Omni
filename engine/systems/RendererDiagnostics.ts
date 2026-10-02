@@ -69,6 +69,8 @@ export interface RendererDiagnostics {
   autoPingRadius: number;
   autoPingMax: number;
   simClock: number;
+  /** Energy-module feedback view (render/energyFx.ts). */
+  energyFx: import('./render/energyFx').EnergyFxView | null;
   /** The last completed ping's WHEN / HOW FAR / WHERE — UNREAD by the
    *  renderer since `GameEngine.discoverStructures` replaced the radius
    *  reveal; still pushed by GameEngine.draw. */

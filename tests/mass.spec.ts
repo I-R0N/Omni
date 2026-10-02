@@ -305,8 +305,8 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
       // fails if anyone "fixes" the scale by cancelling it again.
       expect(r.C, 'the conversion does not carry the factor').toBe(32);
       // Each worth is its PRE-SCALE value times the scale: a 100-mass hull
-      // against a 32 conversion gave 3.125, a 36px rock shard 0.729, a
-      // Blaster bolt 0.03125.  Every one of them is now ten times that.
+      // against a 32 conversion gave 3.125 and a 36px rock shard 0.729, and
+      // both are now ten times that.
       expect(r.hullWorth, 'a hull carries 10x the energy')
         .toBeCloseTo(3.125 * r.scale, 5);
       expect(r.rockWorth, 'and so does a rock shard')
@@ -316,8 +316,12 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
       // (what three Gunnery Mk III grant, over the 0.6 feel trim), so even a
       // fully-gunned round carries only 0.6 of the 10x.  Read live, because
       // this is a relationship between two constants rather than a number.
+      // (Energy modules: the base bolt is the unmodified PROJECTOR now, whose
+      // authored bank is 0.75 — one bite of its 3 at speed 16, a pre-scale
+      // worth of 0.0234 — against the retired Blaster's 1.0 and 0.03125; the
+      // relationship pinned here is unchanged.)
       expect(r.boltWorth, 'a BASE bolt carries 10x over the base-bank divisor')
-        .toBeCloseTo(0.03125 * r.scale / r.divisor, 5);
+        .toBeCloseTo((0.75 / 32) * r.scale / r.divisor, 5);
 
       watch.assertClean();
     });
@@ -385,9 +389,10 @@ test.describe('the mass scale makes impacts harder — that is what it is for', 
         let n = 0;
         while (t.active && n < 200) {
           // Each ram meets the tile ALONE.  A ram that holds chips grains off
-          // it, and that debris drifts into the corridor: the next approach
-          // could stop on a loose grain instead of the tile, and a ram that
-          // never lands still counts (measured: 2 runs in 12 read 4).
+          // it, and that debris drifts back across the lane: the next approach
+          // can stop on a loose grain instead of the tile, spending nothing on
+          // it, and a ram that never lands still counts (measured: 2 runs in
+          // 12 took a phantom extra go).
           for (const x of e.currentMap.entities) if (x !== t) x.active = false;
           p.position.x = 0; p.position.y = 0;
           p.velocity.x = 6; p.velocity.y = 0;      // the audit's own ram speed

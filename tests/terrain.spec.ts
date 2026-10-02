@@ -558,18 +558,30 @@ test.describe('a fast ship cannot fly through terrain', () => {
       const hp0: any = {};
       for (const t of wall) hp0[t.id] = t.health;
       const wallEnd = wall[wall.length - 1].position.x + w;
+      // Where the ship is is read UNWRAPPED.  A hull that bounces off the wall
+      // flies back the way it came and, on a torus, comes round the seam at a
+      // large positive x — which read as "beyond every tile" and counted the
+      // whole standing wall as flown through (measured: ~1 run in 40, on main
+      // as well).  Summing each step's wrapped displacement keeps a bounce a
+      // bounce.
+      const W = e.currentMap.width;
+      let ux = p.position.x, lastX = p.position.x;
       for (let i = 0; i < 2000; i++) {
         e.prepareFrameEntities();
         e.updatePhysics(DT);
         p.velocity.y = 0;               // hold the heading; friction is not the subject
+        let d = p.position.x - lastX;
+        if (d > W / 2) d -= W; else if (d < -W / 2) d += W;
+        ux += d; lastX = p.position.x;
         if (Math.abs(p.velocity.x) < 0.05) break;
-        if (p.position.x > wallEnd + 100) break;
+        if (ux > wallEnd + 100) break;
+        if (ux < -200) break;           // bounced clear back out of the wall
       }
       P.sweepRewind = realSweep;
-      const past = (t: any) => p.position.x > t.position.x + w * 0.5;
+      const past = (t: any) => ux > t.position.x + w * 0.5;
       return {
         endSpeed: Math.abs(p.velocity.x),
-        escaped: p.position.x > wallEnd,
+        escaped: ux > wallEnd,
         destroyed: wall.filter((t: any) => !t.active).length,
         // A tile the ship is BEYOND that is still whole and never lost a
         // point of health: it was flown through.

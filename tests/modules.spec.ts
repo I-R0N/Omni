@@ -101,7 +101,7 @@ function fireOne(page: any) {
 
 /** Install a module of `family` at `mk` and return whether it came out
  *  ACTIVE.  `debugGrantModule` drops it in the first free hex of its group,
- *  which on a lean outfit touches the Base Hull / the starter Blaster — so
+ *  which on a lean outfit touches the Base Hull / the starter Projector — so
  *  the default placement is a CONNECTED one. */
 function grant(page: any, id: string) {
   return engine(page, (e, mid: string) => {
@@ -189,12 +189,13 @@ test.describe('Gunnery buys a heavier round', () => {
     const watch = await boot(page);
     await quietField(page);
 
-    // BASELINE — the starter Blaster: authored 4 damage, in a round authored
-    // as one bite over BASE_BANK_DIVISOR (the original solve), which
-    // MASS_SCALE then multiplies.
+    // BASELINE — the starter Projector (energy modules: the unmodified
+    // delivery): authored 3 damage, in a round authored as one bite over
+    // BASE_BANK_DIVISOR (the original solve), which MASS_SCALE then
+    // multiplies.
     const bare = await fireOne(page);
     expect(bare.count, 'one bolt').toBe(1);
-    expect(bare.damage, 'the authored bite').toBeCloseTo(4, 6);
+    expect(bare.damage, 'the authored bite').toBeCloseTo(3, 6);
     // The bank is the authored ONE bite, times MASS_SCALE, over the base-bank
     // divisor — a BASE round is deliberately a fraction of a fully-gunned
     // one, which is the whole point of the re-base.  Read live rather than
@@ -231,7 +232,7 @@ test.describe('Gunnery buys a heavier round', () => {
     const watch = await boot(page);
     await quietField(page);
 
-    /** Fire ONE real Blaster bolt down a line of 1-HP gnats through the REAL
+    /** Fire ONE real Projector bolt down a line of 1-HP gnats through the REAL
      *  collision resolver and count how many it kills before it is spent.
      *
      *  This is the emergent-penetration property in its plainest form: a body
@@ -241,9 +242,9 @@ test.describe('Gunnery buys a heavier round', () => {
       const ctx = e.waveContext();
       const foes: any[] = [];
       // 40 deep: at the shipped bank (MASS_SCALE / BASE_BANK_DIVISOR ≈ 2.9
-      // bites) a bare bolt punches ~9 one-HP gnats and one Mk III ~13, so a
-      // shallower flock would saturate first and measure the flock instead
-      // of the round.
+      // bites) a bare Projector bolt punches 6 one-HP gnats and one Mk III 9,
+      // so a shallower flock would saturate first and measure the flock
+      // instead of the round.
       for (let i = 0; i < 40; i++) {
         const f = e.waves.spawnAt('SWARM',
           { x: e.player.position.x + 400 + i * 30, y: e.player.position.y }, ctx, false);
@@ -272,16 +273,16 @@ test.describe('Gunnery buys a heavier round', () => {
     });
 
     const bare = await punch();
-    // A bare bolt punches ~9: its bank is ~2.9 bites of 4, each gnat charges
-    // it 1, and it kills while its bite (4·E/E0) stays ≥ 1.  The claim is
-    // unchanged — a body is charged only what it could absorb and the bolt
-    // flies on with the rest — only the count it reaches moves with the
-    // bank.  A floor rather than an exact figure, because the Gunnery arm
-    // below has to out-reach it and a flock deep enough for that cannot also
-    // pin this to the gnat.  It is 9 at the shipped bank, so the floor has
-    // one gnat of margin: a retune of the base bank is meant to land here.
-    expect(bare, 'a 4-damage bolt is charged 1 a gnat, so its bank buys several')
-      .toBeGreaterThan(8);
+    // A bare Projector bolt punches 6: its bank is ~2.9 bites of 3, each gnat
+    // charges it 1, and it kills while its bite (3·E/E0) stays ≥ 1.  The
+    // claim is unchanged — a body is charged only what it could absorb and
+    // the bolt flies on with the rest — only the count it reaches moves
+    // with the bank.  A floor rather than an exact figure, because the
+    // Gunnery arm below has to out-reach it and a flock deep enough for
+    // that cannot also pin this to the gnat.  The floor sits one gnat under
+    // the shipped 6, so a retune of the base bank is meant to land here.
+    expect(bare, 'a 3-damage bolt is charged 1 a gnat, so its bank buys several')
+      .toBeGreaterThan(5);
 
     await grant(page, 'gunnery_mk3');
     const heavy = await punch();
@@ -303,7 +304,7 @@ test.describe('Gunnery buys a heavier round', () => {
       await grant(page, 'gunnery_mk3');
       expect(await engine(page, e => e.player.damageMult), 'connected: Mk III').toBeCloseTo(1.36, 6);
 
-      const iso = await isolate(page, 'weapon', 'wpn_blaster', 'gunnery_mk3');
+      const iso = await isolate(page, 'weapon', 'dlv_projectile', 'gunnery_mk3');
       expect(iso.rootActive, 'the gun is a root — always active').toBe(true);
       expect(iso.modActive, 'the mod is not touching it').toBe(false);
       expect(await engine(page, e => e.player.damageMult),

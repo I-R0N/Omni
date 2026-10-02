@@ -9,6 +9,7 @@
 // No callbacks; behavioural axes are named fields.
 
 import { EntityType } from '../../types';
+import type { MaterialId } from './energy';
 
 // ── Variant ids ─────────────────────────────────────────────────────
 // Every shard-family entity (tile or shard, glass or rock or nebula)
@@ -545,6 +546,10 @@ export interface ShardDensityPolicy {
 
 export interface ShardVariantDef {
   id: ShardVariantId;
+  /** What this row is MADE OF — the central material table's key
+   *  (MATERIALS, engine/systems/energy.ts).  `materialOf` reads it; every
+   *  energy rule then reads that material's properties. */
+  material?: MaterialId;
   carrier: ShardCarrier;
   spawn: ShardSpawnShape;
   regen: ShardRegenPolicy;
