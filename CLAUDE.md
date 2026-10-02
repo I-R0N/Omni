@@ -10,6 +10,16 @@ what is currently implemented. File paths are relative to the repo root.
 > states described there were never shipped, or were shipped differently.
 > Use this file (and the source) as the source of truth.
 
+> **About `docs/ENGINE_CORE_PLAN.md`** — this one IS maintained and IS
+> live.  It is the working agreement for the current phase of work: a
+> deterministic, platform-free sim core with content as data, a mobile
+> release on top of it, and Steam deferred.  It carries the open GAMEPLAY
+> DECISIONS each work session must put to the user, an append-only decision
+> log, and the amendment protocol work sessions follow.  **If you are a
+> work session with a session ID (`S1`–`S4`), read its §0 and your own §4
+> section before touching anything.**  It is a PLAN, not a description of
+> what exists — this file stays the source of truth for what is shipped.
+
 ---
 
 ## 1. What Omni is
@@ -355,7 +365,13 @@ docs/                     Planning docs — out of date; see banner above
                           and docs/MATERIAL_GRAIN_SPEC.md, which is a
                           PROPOSED design (explicitly not implemented) —
                           the generalisation of V15's grain model into a
-                          material system with unified bonding
+                          material system with unified bonding,
+                          and docs/ENGINE_CORE_PLAN.md, the LIVE plan for
+                          the current phase (portable deterministic sim
+                          core → mobile release; Steam deferred) — the
+                          open gameplay decisions per work session, the
+                          append-only decision log, and the branch/CI
+                          conventions that phase runs under
 .github/workflows/        pr-checks (the merge gate: typecheck + build +
                           Playwright on every PR), pr-preview,
                           publish-standalone
