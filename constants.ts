@@ -6519,11 +6519,11 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
   // The splash is what makes hiding behind cover (or hugging the hull) stop
   // working.
   // OPEN (energy modules): this spreads the BARE `WEAPONS.cannon`, and
-  // nothing below restates `detonateOn`, `boreCostScale` or `color`, so the
-  // shell inherits the bare Cannon's fuse-only detonation, narrow bore and
-  // white colour — it no longer splashes on contact the way this battery was
-  // written to.  Restating the three (or spreading 'cannon+kinetic', the old
-  // shell's successor) is the fix.
+  // nothing below restates `detonateOn`, `boreCostScale`, `color` or `size`,
+  // so the shell inherits the bare Cannon's fuse-only detonation, narrow bore
+  // and small white look — it no longer splashes on contact the way this
+  // battery was written to.  Parked, with the fix, in docs/PARKING_LOT.md
+  // ("Bastion siege shell inherits the bare Cannon's fuse").
   SIEGE: {
     ...WEAPONS.cannon,
     name: 'Bastion Siege Battery',

@@ -1554,8 +1554,9 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   salvos from a LONG stand-off.  It spreads the BARE `WEAPONS.cannon` and
   restates damage, speed, mass and an AUTHORED splash but not `detonateOn`,
   `boreCostScale` or `color`, so since the energy modules it inherits the
-  bare Cannon's fuse-only detonation, narrow bore and white shell — at
-  odds with its own "splashes on impact" comment, and open.  It is the
+  bare Cannon's fuse-only detonation, narrow bore and small white shell —
+  it no longer splashes on contact, which its own comment says it should.
+  That regression is parked in docs/PARKING_LOT.md.  It is the
   only archetype that
   overrides the shared skirmisher stand-off, via the ENEMY_VARIANTS
   `preferredDistance` field — that is what gives it its own RANGE BAND.

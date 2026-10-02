@@ -5,6 +5,59 @@ Add entries freely; revisit during planning.
 
 ---
 
+## Bastion siege shell inherits the bare Cannon's fuse (parked 2026-10-02)
+
+Found while re-checking the tests and docs cleanup (I-R0N/Omni#106) against
+the energy modules (I-R0N/Omni#104).  It was out of scope there, so it is
+parked here.  `BOSS_WEAPONS.SIEGE` in `constants.ts` spreads the BARE
+`WEAPONS.cannon` and restates damage, speed, lifetime, mass and an authored
+splash.  It does not restate `detonateOn`, `boreCostScale`, `color` or `size`.
+#104 made the bare Cannon a small, white, time-fused penetrator, and the
+Bastion's shells inherited all of that:
+
+- **No splash on contact.**  Under `detonateOn: 'fuse'`, nothing the shell
+  touches trips the charge (`GameEngine.handleProjectileHit`).  A shell that
+  hits the player lands only its 9 direct damage.  The splash is what stops
+  "hug the hull" working, and it now comes only from the fuse.  A shell that
+  stops in terrain sits there waiting for its fuse instead of going off.
+- **A narrow bore.**  At `boreCostScale` 0.25, each shell bores four times as
+  deep through cover as the old one.
+- **The wrong look.**  The shells are white (`BARE_CANNON_COLOR`) at size 12.
+  The old battery fired purple shells (`CANNON_COLOR`) at size 16.
+
+**Fix.**  Either restate the fields on `SIEGE` (`detonateOn: 'enemy'`,
+`boreCostScale: 1`, `color: CANNON_COLOR`, `size: 16`), or spread
+`WEAPONS['cannon+kinetic']`, the old shell's successor.  `SIEGE` already
+restates its own `mass` and `explosionDamage`, so neither needs re-solving.
+
+**An older limit to settle in the same pass.**  At speed 11, the 0.42 s fuse
+ends a shell about 277 units out (11 × 60 × 0.42).  The Bastion's
+`preferredDistance` is 620, so a shell that misses goes off harmlessly in
+mid-flight.  The old Plasma Cannon shell had the same limit.  The comment
+beside `SIEGE` and CLAUDE.md §5 both point here.
+
+## A lit beam outlives the ship (parked 2026-10-02)
+
+This is cosmetic, and was found in the same re-check as the entry above.  If
+the player dies with a beam lit, the beam stays drawn, frozen in place,
+through the whole death beat.  It was confirmed headless: the beam was still
+lit one second after death.
+
+**Cause.**  `tickEnergy` runs in step 7 of `updateGameLogic`, after the step
+that returns early while `player.isExploding` (CLAUDE.md §3).  So the
+`isExploding` clear at the top of `tickBeam` in `engine/energyEffects.ts`
+never runs.  Meanwhile `GameEngine.pushEnergyFx` keeps handing the stale
+`energy.beam` to the renderer every frame.  The electric spread ring
+(`tickRing`) and in-flight kinetic pulses (`tickPulses`) stop the same way,
+so they also freeze on screen.
+
+**Fix.**  Clear the beam, the ring and the pulse burst when the player starts
+exploding.  Do it from the death path itself, or in the `isExploding` branch
+before it returns.  Decide in the same change whether pulses already in
+flight should finish their flight or vanish.  Don't move `tickEnergy` above
+the early return.  The energy layer is meant to stop while dead: CLAUDE.md §3
+says heat neither cools nor burns until the respawn.
+
 ## Holding a beam on TOUCH — fold into a hold-to-shoot design (parked 2026-09-29)
 
 The beam is now a held blade (PR #104): it extends from the muzzle, stays out
