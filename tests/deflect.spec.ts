@@ -302,47 +302,8 @@ test.describe('one deflection primitive, two callers', () => {
 
     watch.assertClean();
   });
-
-  test('a bouncer still reflects off a tile face and spends a bounce', async ({ page }) => {
-    const watch = await boot(page);
-    await shieldedPlayer(page);
-
-    /*  The second caller.  Its normal is an axis-aligned tile face, for which
-     *  the helper's mirror reduces to negating one component — which is
-     *  exactly the arithmetic this path did by hand before the fold.  Driven
-     *  against a REAL static tile off the glass field so the variant gate
-     *  (`nebula-tile` passes through) is the shipped one. */
-    const r = await engine(page, e => {
-      const t = e.currentMap.entities.find((x: any) =>
-        x.active && x.type === 'STRUCTURE' && x.mass === Infinity);
-      if (!t) throw new Error('no static tile on the glass field');
-      const proj: any = {
-        id: 'defl_bounce', type: 'PROJECTILE', isBouncer: true, bouncesRemaining: 3,
-        position: { x: t.position.x + t.size.x * 0.25, y: t.position.y },
-        velocity: { x: -12, y: 0 }, rotation: Math.PI,
-        size: { x: 6, y: 6 }, mass: 1, active: true, color: '#fff',
-        damage: 5, ownerType: 'PLAYER', ownerId: 'player', hitEntityIds: [],
-      };
-      const before = { vx: proj.velocity.x, bounces: proj.bouncesRemaining, tileHp: t.health };
-      e.physics.resolveCollision(proj, t, { x: -4, y: 0 });
-      return {
-        before,
-        vx: proj.velocity.x,
-        bounces: proj.bouncesRemaining,
-        active: proj.active === true,
-        tileHp: t.health,
-        outsideFace: proj.position.x > t.position.x + t.size.x * 0.5,
-      };
-    });
-
-    expect(r.vx, 'the entry face flipped its travel').toBeCloseTo(-r.before.vx, 5);
-    expect(r.active, 'and the round lives on').toBe(true);
-    expect(r.bounces, 'one bounce spent').toBe(r.before.bounces - 1);
-    expect(r.outsideFace, 'snapped clear of the face it hit').toBe(true);
-    expect(r.tileHp, 'a bounce is not a hit — the tile is unharmed').toBe(r.before.tileHp);
-
-    watch.assertClean();
-  });
+  // (The bouncer tile-face caller was retired with the ricochet primitive —
+  //  energy modules; the shield ring is now the helper's one caller.)
 });
 
 test.describe('the real fight, not a synthetic pair', () => {

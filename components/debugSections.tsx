@@ -532,17 +532,46 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
     ],
   },
   {
-    id: 'weapons', label: 'Weapons', group: 'weapons',
+    // The shop-free path for the energy-module items: add / remove each one,
+    // equip any delivery x energy combination in one click, and lift the
+    // drydock rule so the pause menu's flowers can be edited in the field.
+    id: 'wmods', label: 'Weapon Modules', group: 'weapons',
     rows: [
-      // With commerce station-only, this is the wave-map test path for getting
-      // a weapon in hand: click = unlock (if needed) + equip.  S1/S2 = the gun
-      // hex it went on.  The catalog is a PANEL-ONLY payload, so these rows
-      // exist only while the panel is open, and are expanded per render.
-      each('Weapons', c => (c.s.weaponCatalog ?? []).map(w =>
-        ctrl(w.name, dbg(e => e.debugGrantWeapon(w.id)),
-          () => w.slot !== null ? `S${w.slot + 1}` : w.owned ? 'owned' : '—',
-          `Grant and equip the ${w.name}; the readout is the gun hex it sits on (S1 / S2).`,
-          `Grant + equip ${w.name} (DBG). Unlocks it if not owned, then mounts it on a gun hex (first empty, else the inactive one). S1/S2 = gun hex.`))),
+      ctrl('Outfit anywhere', dbg(e => e.debugToggleOutfitAnywhere()),
+        c => c.s.outfitAnywhere ? 'On' : 'Off',
+        'Lets the pause menu\'s ship and weapon flowers be edited anywhere on the map.',
+        'DBG: drag, install and unmount work in the pause menu without a drydock. Off restores the station-only rule.'),
+      // The catalog is a PANEL-ONLY payload, expanded per render like the
+      // weapon rows above.
+      each('Weapon module', c => (c.s.weaponModuleCatalog ?? []).map((m): DebugRow => {
+        const where = [m.installed > 0 ? `on ${m.installed}` : '', m.stored > 0 ? `cargo ${m.stored}` : '']
+          .filter(Boolean).join(' · ');
+        return {
+          kind: 'buttons',
+          label: `${m.kind === 'delivery' ? '◆' : '⚡'} ${m.name}${where ? `  ${where}` : ''}`,
+          summary: `Add or remove a ${m.name} module (DBG).`,
+          detail: `+ mounts it on the first free weapon hex${m.kind === 'delivery' ? ' (while under the 2-gun cap)' : ''}, else puts it in cargo. − removes the installed copy first, else one from cargo.`,
+          buttons: [
+            { label: '+', act: dbg(e => e.debugAddWeaponModule(m.id)) },
+            { label: '−', act: dbg(e => e.debugRemoveWeaponModule(m.id)) },
+          ],
+        };
+      })),
+      // Combination grid: one click lays out delivery + energy on the flower
+      // (debugGrantWeapon's deterministic layout).
+      ...(['projectile', 'beam', 'spread', 'homing', 'cannon'] as const).map((d): DebugRow => ({
+        kind: 'buttons',
+        label: `Equip ${d}`,
+        summary: `Equip the ${d} delivery bare (—) or with a Kinetic / Electric / Thermal modifier (DBG).`,
+        detail: 'Mounts the delivery with the chosen energy modifier touching it; the other gun and its modifier are kept.',
+        buttons: ([['', '—'], ['kinetic', 'K'], ['electric', 'E'], ['thermal', 'T']] as const).map(([en, lbl]) => ({
+          label: lbl,
+          act: dbg(e => e.debugGrantWeapon(en ? `${d}+${en}` : d)),
+        })),
+      })),
+      ctrl('Clear', dbg(e => e.debugClearWeaponModules()),
+        c => 'All',
+        'Removes every delivery and energy module from the flowers and cargo (DBG). Gunnery, Autoloader and Overcharge stay.'),
     ],
   },
   {
@@ -567,7 +596,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         'Outfit a full Mk III loadout in a canonical layout that satisfies every adjacency requirement, spare guns in the inventory (DBG).'),
       ctrl('Reset', dbg(e => e.resetOutfit()),
         c => 'Lean',
-        'Reset to the lean run start: bare hexes, empty inventory, Blaster on gun hex W1.'),
+        'Reset to the lean run start: bare hexes, empty inventory, Projector on gun hex W1.'),
     ],
   },
   {

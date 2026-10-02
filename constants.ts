@@ -12,6 +12,10 @@ import { ASSETS } from './assets';
 // game config — so it lives with the transport.  Safe direction: DualSenseHID
 // imports nothing, so this cannot cycle.
 import { TriggerProfile } from './engine/systems/DualSenseHID';
+import {
+  type Delivery, type EnergyModifier, DELIVERIES, ENERGY_MODIFIERS, weaponKey, resolveWeaponKey,
+  MATERIALS, registerVariantMaterials,
+} from './engine/systems/energy';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -1522,10 +1526,12 @@ export const IMPACT_DENSITY = {
   // The MATERIAL reference, and the reason the scale has a unit at all: the
   // four shard spawn ladders ARE these numbers, so glass : rock : metal
   // stays 1 : 1.8 : 3 and every other class can be read against it.
-  GLASS:   0.10,
-  PLASTIC: 0.13,
-  ROCK:    0.18,
-  METAL:   0.30,
+  // Read from the central material table (MATERIALS, energy.ts): a
+  // material's density is part of what it IS.
+  GLASS:   MATERIALS.glass.density!,
+  PLASTIC: MATERIALS.plastic.density!,
+  ROCK:    MATERIALS.rock.density!,
+  METAL:   MATERIALS.metal.density!,
   // The player's hull.  25x glass and 8x rock, on purpose — see above.
   HULL:    2.50,
 } as const;
@@ -5357,22 +5363,10 @@ export const CHARGE_CONSTANTS = {
   RING_COLOR_FULL:    '#ffffff', // white — held to full (charged shot armed)
 };
 
-// ── Lightning chain tuning ───────────────────────────────────────────────────
-export const LIGHTNING_CHAIN_RANGE = 280;           // hop range for subsequent chains
-export const LIGHTNING_CHAIN_COUNT = 3;             // additional chain hops (depth) after projectile impact — depth 0 is the direct hit
-export const LIGHTNING_CHAIN_BRANCHES = 2;          // simultaneous jumps per chain node — turns the chain into a branching tree (saturated tree: 1+2+4+8 = 15 entities)
-// Mobile shard variants the lightning chain refuses to hop to.  Conductive
-// targets (enemies, glass-shards, nebula-shards) still chain freely — only
-// inert/dielectric materials sit this dance out.  Static tiles are already
-// excluded structurally (entityIndex.shardCandidates holds mobile shards only).
-//
-// NOTE for future material work (Phase 1 g2 — plastic-shard / metal-shard):
-//   - 'plastic-shard' SHOULD be added here (plastic is an insulator).
-//   - 'metal-shard'   should NOT be added (metal conducts — let it chain).
-// Update this set when those variants are introduced.
-export const LIGHTNING_CHAIN_EXCLUDED_VARIANTS: ReadonlySet<ShardVariantId> = new Set<ShardVariantId>([
-  'rock-shard',
-]);
+// ── Lightning (the charged bolt's arc visual + curve) ────────────────────────
+// The CHAIN itself is the energy layer's bounded, conductivity-aware discharge
+// (engine/systems/energy.ts ENERGY_CONSTANTS.CHAIN_*); what used to be an
+// excluded-variant list is now each material's conductivity.
 export const LIGHTNING_ARC_LIFETIME = 0.5;          // seconds the visual arc persists
 export const LIGHTNING_GRAVITY_STRENGTH = 400;      // acceleration toward nearest target (gravity-like pull)
 export const LIGHTNING_GRAVITY_RANGE = 300;         // max range for gravity attraction
@@ -6111,240 +6105,257 @@ export const GUNNERY_MK3_TRIPLE_MULT = 1 + 3 * GUNNERY_MK3_DAMAGE_FRAC;   // = 2
 export const BASE_BANK_TRIM = 0.6;
 export const BASE_BANK_DIVISOR = GUNNERY_MK3_TRIPLE_MULT / BASE_BANK_TRIM;   // ≈ 3.467
 
-// ── Rainbow weapon order: Red → Orange → Yellow → Green → Cyan → Blue → Purple ──
+// ── WEAPONS ARE MODULES: a DELIVERY plus an optional ENERGY MODIFIER ─────────
 //
-// Stat budgeting (d2 weapon overhaul):
-//   Each weapon owns a distinct tactical niche.  ROF spans ~10× across the
-//   lineup (Blaster 7/s vs Cannon ~0.7/s); damage trades inversely with ROF
-//   so per-shot damage spans ~5× (Blaster 4 vs Cannon 18).  Each weapon
-//   composes existing primitives (homing / mass / bounce / lightning /
-//   spread / burst) plus the new `explosionRadius` AoE primitive on the
-//   Cannon.  Charged-shot variants (held mouse for the full INPUT_CONSTANTS
-//   .CHARGE_FULL window then released) cost only the charge time — ammo was
-//   deleted as a system (pivot 1b); weapon pressure = cooldown + the 2-slot
-//   loadout commitment.  Bouncer/Lightning cooldowns were raised in the same
-//   change to replace the ammo tax they leaned on.
-export const WEAPONS: Record<WeaponType, WeaponConfig> = {
-  [WeaponType.BLASTER]: {
-    type: WeaponType.BLASTER,
-    name: 'Blaster',
-    cooldown: 0.14,    // 7 shots/s — all-rounder cadence
-    speed: 16,
-    damage: 4,
-    lifetime: 1.5,
-    color: '#ef4444', // Red — the starter all-rounder
-    size: 6,
-    count: 1,
-    spread: 2,
-    recoil: 0.5,
-    // BANK = one bite: the starter round spends itself on the first thing it
-    // can hurt.  Depth is still not zero — overkill carries through, so a
-    // bolt worth 4 punches four one-HP gnats (measured) and is stopped dead
-    // by one rock tile, which charges 5.6 a grain.
-    mass: 1 / BASE_BANK_DIVISOR,
+// A gun module IS a delivery (projectile / beam / spread / homing / cannon):
+// it decides HOW energy arrives — cadence, count, speed, mass, spread, range,
+// duration, the cannon's blast.  An energy MODIFIER module touching that gun
+// in the weapon flower decides WHAT KIND of energy it is (kinetic / electric /
+// thermal) and gives the pair its behaviour.  The weapon that fires is
+// `weaponConfig(key)` for `key = 'delivery+energy'`, precomputed for all 20
+// keys below so the hot path is a lookup.  (Magnetic and explosive energies
+// were removed — user call; the blast belongs to the CANNON delivery, which
+// replaced the Pulse.)
+//
+// UNMODIFIED DELIVERIES ARE THE WEAK BASE (§9): plain kinetic at ~60% of the
+// retired Blaster's delivered damage per second.  The Blaster landed a 4 bite
+// every 0.14 s = 28.6/s; every entry in DELIVERY_BASE sits at 16-17/s
+// (`nominalDps`, pinned by tests/energy.spec.ts) — except the CANNON, whose
+// direct bite is 12.9/s because its blast carries the rest.  The MODIFIERS are what make
+// a weapon strong, which is why every combination that an OLD gun maps onto
+// inherits that gun's own tuning — the old roster survives as seven named
+// points in the new space (see LEGACY_WEAPON_MAP in engine/systems/energy.ts).
+//
+// ENERGY UNITS on the payload fields are DAMAGE-EQUIVALENT (one unit =
+// IMPACT_ENERGY_PER_DAMAGE of energy), so a `heat: 4` round carries the same
+// energy as a 4-damage bite, delivered as heat instead.
+export { type Delivery, type EnergyModifier, DELIVERIES, ENERGY_MODIFIERS, weaponKey, parseWeaponKey,
+         resolveWeaponKey, LEGACY_WEAPON_MAP } from './engine/systems/energy';
+
+/** The retired Blaster, recorded so the base can be tuned against it and the
+ *  test can pin "weaker than the old base" to a number rather than a memory. */
+export const LEGACY_BASE_WEAPON = { damage: 4, cooldown: 0.14, dps: 4 / 0.14 } as const;
+
+/** Colour per energy, so a combination reads its energy at a glance; the
+ *  unmodified base is slate.  Legacy-tuned combos keep their old gun's colour
+ *  where it already said the same thing. */
+export const ENERGY_COLORS: Record<EnergyModifier | 'none', string> = {
+  none: '#94a3b8', kinetic: '#f97316', electric: '#22d3ee', thermal: '#ef4444',
+};
+/** The Cannon's modified shells keep the old Plasma Cannon purple family;
+ *  the BARE cannon is white (user call), like the other bare deliveries are
+ *  neutral. */
+export const CANNON_COLOR = '#a855f7';
+export const BARE_CANNON_COLOR = '#f1f5f9';
+
+const DELIVERY_LABEL: Record<Delivery, string> = {
+  projectile: 'Projector', beam: 'Beam', spread: 'Scatter', homing: 'Seeker', cannon: 'Cannon',
+};
+const ENERGY_LABEL: Record<EnergyModifier, string> = {
+  kinetic: 'Kinetic', electric: 'Arc', thermal: 'Thermal',
+};
+
+/** The five UNMODIFIED deliveries — plain kinetic, deliberately weak. */
+const DELIVERY_BASE: Record<Delivery, WeaponConfig> = {
+  // 3 per 0.18 s = 16.7/s.  Bank = one bite at speed 16.
+  projectile: { delivery: 'projectile', name: 'Projector', cooldown: 0.18, speed: 16, damage: 3,
+    lifetime: 1.5, color: ENERGY_COLORS.none, size: 5, count: 1, spread: 2, recoil: 0.4,
+    mass: 0.75 / BASE_BANK_DIVISOR },
+  // A pulse of 6 ticks × 1.25 over 0.3 s, every 0.45 s = 16.7/s.
+  beam: { delivery: 'beam', name: 'Beam', cooldown: 0.45, speed: 0, damage: 1.25, lifetime: 0,
+    color: ENERGY_COLORS.none, size: 3, count: 1, spread: 0, recoil: 0,
+    beamDuration: 0.3, beamRange: 260, beamWidth: 3, beamTick: 0.05 },
+  // 5 pellets × 2 per 0.6 s = 16.7/s at point blank, less with range.
+  spread: { delivery: 'spread', name: 'Scatter', cooldown: 0.6, speed: 18, damage: 2,
+    lifetime: 0.7, color: ENERGY_COLORS.none, size: 4, count: 5, spread: 22, recoil: 1.5,
+    mass: 0.5 / BASE_BANK_DIVISOR, speedRetain: 0.35 },
+  // 5 per 0.3 s = 16.7/s, tracking.
+  homing: { delivery: 'homing', name: 'Seeker', cooldown: 0.3, speed: 11, damage: 5,
+    lifetime: 2.5, color: ENERGY_COLORS.none, size: 6, count: 1, spread: 8, recoil: 0.3,
+    mass: 2.6 / BASE_BANK_DIVISOR, homing: true, homingStrength: 0.8 },
+  // THE BARE CANNON (user call): a white, deliberately weak TIME-FUSED
+  // shell.  Nothing trips it — not an enemy, not terrain, not stopping — so
+  // it goes off exactly when its fuse runs out, wherever it has got to.  The
+  // shell itself is a NARROW PENETRATOR: a tiny bite (3), a big bank (three
+  // times the old shell's) and `boreCostScale` 0.25, so it slides deep into
+  // terrain leaving little on each grain boundary instead of stopping and
+  // blasting at the first tile.  The blast is still the weapon's main damage
+  // but weaker than the old Plasma Cannon's (~12.5 peak against 20.8):
+  // `blastScale` keeps the charge light even though the heavy shell's
+  // derived blast would otherwise have grown with its bank.
+  cannon: { delivery: 'cannon', name: 'Cannon', cooldown: 1.40, speed: 18, damage: 3, lifetime: 2.5,
+    color: BARE_CANNON_COLOR, size: 12, count: 1, spread: 0, recoil: 3.0,
+    mass: 10.6667 / BASE_BANK_DIVISOR, explosionRadius: 95, explosionKnockback: 5,
+    detonateOn: 'fuse', fuseSeconds: 0.42, blastScale: 0.2, boreCostScale: 0.25 },
+};
+
+/** What each MODIFIER does to each DELIVERY (§10).  Every entry is a real
+ *  behaviour, not a multiplier: the payload fields are read by different
+ *  paths (heat by the thermal state, `electric` by the bounded chain,
+ *  `explosionRadius` / `blastHeat` by the blast). */
+const COMBOS: Record<Delivery, Record<EnergyModifier, Partial<WeaponConfig>>> = {
+  projectile: {
+    // DENSE SLUG (was BURST).  A heavy 7-damage round with a three-bite bank:
+    // it punches through brittle material and keeps going.
+    kinetic: { name: 'Slug', damage: 7, speed: 24, cooldown: 0.22, size: 6, recoil: 0.8,
+      mass: 2.3333 / BASE_BANK_DIVISOR },   // solve: exactly 3 bites at 7 / 24
+    // CHARGED BOLT (was LIGHTNING) — the old Lightning's numbers; the chain is
+    // now the bounded, conductivity-aware discharge.
+    electric: { name: 'Arc Bolt', damage: 9, speed: 26, cooldown: 0.65, lifetime: 15, size: 6,
+      spread: 3, recoil: 0.3, color: ENERGY_COLORS.electric, mass: 0.8521 / BASE_BANK_DIVISOR,
+      electric: { magnitude: 9, hops: 3, targets: 10, hopRange: 200, branches: 2 } },
+    // INCENDIARY — a light round that leaves heat and a short burn.
+    thermal: { name: 'Incendiary', damage: 2, cooldown: 0.24, color: ENERGY_COLORS.thermal,
+      heat: 8, burnSeconds: 1.5, burnRate: 5 },
   },
-  [WeaponType.BURST]: {
-    type: WeaponType.BURST,
-    name: 'Burst Rifle',
-    cooldown: 0.45,    // ~2.2 bursts/s
-    speed: 20,
-    damage: 5,
-    lifetime: 3.0,
-    color: '#f97316', // Orange
-    size: 5,
-    count: 1,
-    spread: 1,
-    recoil: 0.3,
-    mass: 2.4 / BASE_BANK_DIVISOR,         // solve: 3 bites (decay 0.67/hit) before the
-                                           // divisor above and MASS_SCALE below it
-    burstCount: 3,
-    burstDelay: 0.04,
+  beam: {
+    // A BURST OF SHORT BEAMS THAT FLY (user call), each reflecting,
+    // splitting and passing through by the material optics.  Six pulses of
+    // 4.5 per 1.0 s ≈ 27/s — the old Ram Beam's 25.5 — with a smaller shove,
+    // since a burst lands it six times.
+    // A STREAM of short beams with a line TRAIL behind each (user call).
+    // 40 pulses a second (one every third sim step), 13 units long at
+    // 1500 u/s, so they fly ~37 apart and the trail joins them into a line.
+    // It was 120 a second, which read as far too many beams once glass split
+    // them.  A pull fires at least `pulseCount` (0.2 s); holding keeps the
+    // stream flowing.  Each carries 0.675, so a held stream still lands the
+    // same 27 dmg/s.
+    kinetic: { name: 'Pulse Beam', damage: 0.675, cooldown: 1.0, beamRange: 420,
+      beamWidth: 3, push: 0.375, color: ENERGY_COLORS.kinetic,
+      pulseCount: 8, pulseInterval: 1 / 40, pulseSpeed: 1500, pulseLength: 13, pulseSpread: 1.8 },
+    // An ARC from the ship to the nearest conductor in range, then a bounded
+    // chain.  Nothing conductive in range → a fizzle and nothing else.
+    electric: { name: 'Arc Beam', damage: 0, cooldown: 0.8, beamDuration: 0.4, beamRange: 320,
+      beamWidth: 2, beamTick: 0.1, color: ENERGY_COLORS.electric,
+      electric: { magnitude: 5, hops: 2, targets: 6, hopRange: 150, branches: 2 } },
+    // A steady, finite beam that HEATS what it touches (was BOUNCER, "Laser").
+    // Almost no kinetic bite: its work is done by accumulation.
+    thermal: { name: 'Heat Lance', damage: 0.3, cooldown: 0.55, beamDuration: 0.5, beamRange: 360,
+      beamWidth: 4, beamTick: 0.05, heat: 2.2, color: ENERGY_COLORS.thermal },
   },
-  [WeaponType.SHOTGUN]: {
-    type: WeaponType.SHOTGUN,
-    name: 'Shotgun',
-    cooldown: 0.65,    // 1.5 shots/s — close-range slug, commits per shot
-    speed: 20,
-    damage: 3,
-    lifetime: 0.8,     // doubled — pellets reach further before fading
-    color: '#facc15', // Yellow
-    size: 5,
-    count: 6,
-    spread: 17.5,      // halved — tighter cone, more focused damage
-    recoil: 3.0,
-    mass: 0.96 / BASE_BANK_DIVISOR,        // solve: 2 bites, decay 0.50/hit — a pellet gave up half
+  spread: {
+    // SHOTGUN (was SHOTGUN) — the old pellet cone, now losing speed (and so
+    // damage) with range: strong close, weak far.
+    kinetic: { name: 'Shotgun', cooldown: 0.65, speed: 20, damage: 3, lifetime: 0.8,
+      color: '#facc15', size: 5, count: 6, spread: 17.5, recoil: 3.0,
+      mass: 0.96 / BASE_BANK_DIVISOR, speedRetain: 0.3 },
+    // A cone of short FORKED arcs, each with a tiny bounded chain.
+    electric: { name: 'Fork', damage: 0, cooldown: 0.55, count: 5, pulseRadius: 220, coneHalfDeg: 25,
+      color: ENERGY_COLORS.electric,
+      electric: { magnitude: 4, hops: 1, targets: 2, hopRange: 90, branches: 1 } },
+    // FLAME CONE — brief, slow heat particles.
+    thermal: { name: 'Flamer', damage: 0.4, cooldown: 0.15, speed: 9, lifetime: 0.35, count: 6,
+      spread: 36, size: 5, recoil: 0.2, color: ENERGY_COLORS.thermal, heat: 2.5,
+      mass: 0.12 / BASE_BANK_DIVISOR, speedRetain: 0.2,
+      // Each pellet CURLS (user call): its own bend up to 4 rad/s either way,
+      // with a weave on top, so the spray reads as licking flame.
+      curve: 4, wobble: 5, wobbleHz: 3 },
   },
-  [WeaponType.BOUNCER]: {
-    type: WeaponType.BOUNCER,
-    name: 'Laser',
-    cooldown: 0.55,    // 0.40 → 0.55 (pivot 1b): the 15-ammo/s tax was its real
-                       // downside; with ammo gone the crowd-rake needs a brake.
-                       // Cooldown (not per-beam damage) so each volley keeps its
-                       // line-deleting punch — same lever as Lightning.
-    speed: 30,         // fast straight beam — stays the quickest projectile
-    damage: 5,
-    lifetime: 4,       // bounded; in a dense field the bounceCount cap ends the
-                       // beam first, in open space this does
-    color: '#22c55e',  // Green — beam that bores a few bodies deep and bounces off tiles
-    size: 6,
-    count: 3,          // 3-beam forward fan
-    spread: 30,        // ±15° cone
-    recoil: 0.5,
-    // THE DENSEST ROUND IN THE ROSTER for its speed: 25 of energy against a
-    // 5 bite, so it rakes a line giving up only 0.80 a body.  This is the
-    // "effectively infinite pierce" the Laser used to carry, repriced — an
-    // unbounded budget made it the answer to every line of targets, and an
-    // energy bank spends down instead.
-    mass: 1.7778 / BASE_BANK_DIVISOR,      // solve: 5 bites, decay 0.80/hit
-    bounceCount: 15,   // 3 -> 15 (user call): reflects up to 15 times off tiles
-                       // before dissipating.  Bounces buy COVERAGE, never extra
-                       // damage — the energy above is a LIFETIME bank that a
-                       // reflection does not refill — so a beam that ricochets
-                       // this much still lands what it can afford, each bite
-                       // further down the curve its own mass sets.
+  homing: {
+    // SEEKER (was HOMING) — the old Seeker Missiles verbatim.
+    kinetic: { name: 'Seeker', cooldown: 0.65, speed: 12, damage: 8, lifetime: 3.0,
+      color: '#3b82f6', size: 8, spread: 10, recoil: 0.5, mass: 3.5556 / BASE_BANK_DIVISOR,
+      homingStrength: 1 },
+    // Locks the nearest ENEMY (every seeker does) and discharges a chain on arrival.
+    electric: { name: 'Arc Seeker', damage: 3, cooldown: 0.6, color: ENERGY_COLORS.electric,
+      electric: { magnitude: 6, hops: 2, targets: 6, hopRange: 160, branches: 2 } },
+    // LATCHES ON and heats its target over a short duration.
+    thermal: { name: 'Leech', damage: 2, cooldown: 0.6, color: ENERGY_COLORS.thermal,
+      heat: 4, burnSeconds: 2.5, burnRate: 8 },
   },
-  [WeaponType.LIGHTNING]: {
-    type: WeaponType.LIGHTNING,
-    name: 'Lightning',
-    cooldown: 0.65,    // 0.50 → 0.65 (pivot 1b): compensates for free ammo —
-                       // chain falloff already limits single-target value
-    speed: 26,         // gravity pull curves the projectile toward targets
-    damage: 9,         // direct hit; chain hops scale down by 1/(totalHops-1) per hop
-    lifetime: 15,      // bounded — prevents unbounded accumulation in target-poor areas
-    color: '#22d3ee',  // Cyan — projectile that chains on impact
-    size: 6,
-    count: 1,
-    spread: 3,
-    recoil: 0.3,
-    mass: 0.8521 / BASE_BANK_DIVISOR,      // solve: one bite — it stopped on first hit, then chains
-  },
-  [WeaponType.HOMING]: {
-    type: WeaponType.HOMING,
-    name: 'Seeker Missiles',
-    cooldown: 0.65,    // 1.5 shots/s — slow ROF in exchange for guaranteed hits
-    speed: 12,
-    damage: 8,         // 6 → 8 (pivot 1d): "can't miss" shouldn't be "can't kill" —
-                       // the designated anti-evasive answer once traits expand
-    lifetime: 3.0,
-    color: '#3b82f6', // Blue
-    size: 8,
-    count: 1,
-    spread: 10,
-    recoil: 0.5,
-    mass: 3.5556 / BASE_BANK_DIVISOR,      // one bite, but a HEAVY one: a slow 8-damage round is
-                       // dense, so a Seeker shoves a shard hard on contact
-    homing: true,
-  },
-  [WeaponType.CANNON]: {
-    type: WeaponType.CANNON,
-    name: 'Plasma Cannon',
-    cooldown: 1.40,    // ~0.7 shots/s — heavy artillery
-    speed: 18,
-    damage: 18,
-    lifetime: 2.5,
-    color: '#a855f7', // Purple
-    size: 16,
-    count: 1,
-    spread: 0,
-    recoil: 4.0,       // halved from 8.0 — a slower ROF + AoE makes huge recoil punitive
-    mass: 3.5556 / BASE_BANK_DIVISOR,      // the heaviest round in the game alongside the Seeker,
-                       // and with 18 of energy behind it: against rock (5.6 a
-                       // grain) the shell bores three grains deep rather than
-                       // being spent by the chip it clipped
-    explosionRadius: 110,   // world units of radial AoE on impact
-    // explosionDamage is DERIVED — see `blastDamageFor`.  Absent means "work
-    // it out from the shell's own energy"; a value here is an authored
-    // override, which is what BOSS_WEAPONS.SIEGE still carries so a designed
-    // encounter keeps the splash someone chose for it.
-    explosionKnockback: 6,  // velocity impulse magnitude at the impact point (falls off with distance)
-    // A HEAVY SHELL IS NOT A CONTACT MINE (user call).  The Cannon was always
-    // meant to be a heavy round with ONE blast at the end of it, and the
-    // penetration system quietly made it something else: `applyExplosionAoE`
-    // fires on EVERY hit, so a shell carrying N pierce detonated N+1 times.
-    // Universal penetration (step 5) would have made that far worse — a full
-    // blast on every pebble it passed through.
-    //
-    // So only an ACTOR trips the charge.  Against STRUCTURES the shell stays a
-    // projectile and spends its energy boring, which is exactly what its mass
-    // is for: it should cross small and medium shards rather than being
-    // stopped and wasted by the first chip of gravel it clips.
-    detonateOn: 'enemy',
-    // ~0.42 s at muzzle speed is a little over 900 units of flight — well
-    // beyond the AoE radius, so a shell that meets nothing still ends in a
-    // blast instead of expiring silently, without becoming a delayed mine.
-    fuseSeconds: 0.42,
+  // CANNON combinations — PLACEHOLDERS (user call: delivery and combination
+  // feedback is still to come).  Each reuses an existing effect.
+  cannon: {
+    // A heavier, slower shell with a bigger blast.
+    // They keep the OLD Plasma Cannon's shell (tripped by an actor, by the
+    // fuse, or by running out of travel energy in terrain; full derived
+    // blast) — the bare cannon's fuse-only penetrator is its own thing.
+    kinetic: { name: 'Heavy Shell', damage: 24, speed: 16, cooldown: 1.7, size: 18, recoil: 5.0,
+      mass: 5.3333 / BASE_BANK_DIVISOR, explosionRadius: 130, explosionKnockback: 8,
+      detonateOn: 'enemy', blastScale: 1, boreCostScale: 1 },
+    // The blast point starts a bounded arc chain (`queueElectric`).
+    electric: { name: 'Arc Shell', damage: 14, color: ENERGY_COLORS.electric, size: 16, recoil: 4.0,
+      mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
+      detonateOn: 'enemy', blastScale: 1, boreCostScale: 1,
+      electric: { magnitude: 8, hops: 3, targets: 10, hopRange: 180, branches: 2 } },
+    // An incendiary shell: the blast also heats everything it reaches.
+    thermal: { name: 'Incendiary Shell', damage: 14, color: ENERGY_COLORS.thermal, size: 16, recoil: 4.0,
+      mass: 3.5556 / BASE_BANK_DIVISOR, explosionRadius: 110, explosionKnockback: 6,
+      detonateOn: 'enemy', blastScale: 1, boreCostScale: 1, blastHeat: 1.0 },
   },
 };
 
-// Full rainbow order — canonical weapon ordering (Drydock catalog, DBG).
-// In-game cycling/selection runs over the player's 2-slot loadout, not this.
-export const WEAPON_LIST = [
-  WeaponType.BLASTER,
-  WeaponType.BURST,
-  WeaponType.SHOTGUN,
-  WeaponType.BOUNCER,
-  WeaponType.LIGHTNING,
-  WeaponType.HOMING,
-  WeaponType.CANNON,
-];
+function composeWeapon(d: Delivery, e: EnergyModifier | null): WeaponConfig {
+  const base = DELIVERY_BASE[d];
+  if (!e) return base;
+  const over = COMBOS[d][e];
+  return {
+    ...base,
+    color: ENERGY_COLORS[e],
+    ...over,
+    delivery: d,
+    energy: e,
+    name: over.name ?? `${ENERGY_LABEL[e]} ${DELIVERY_LABEL[d]}`,
+  };
+}
+
+/** Every weapon key (5 bare deliveries + 15 combinations) → its config. */
+export const WEAPONS: Readonly<Record<string, WeaponConfig>> = (() => {
+  const out: Record<string, WeaponConfig> = {};
+  for (const d of DELIVERIES) {
+    out[weaponKey(d, null)] = composeWeapon(d, null);
+    for (const e of ENERGY_MODIFIERS) out[weaponKey(d, e)] = composeWeapon(d, e);
+  }
+  return out;
+})();
+
+/** Resolve ANY weapon id — a key, an old enum name, an old catalog id — to its
+ *  config.  Unknown ids fail SAFE to the bare projectile rather than throwing,
+ *  because a loadout field set to garbage should still fire something. */
+export function weaponConfig(id: string | null | undefined): WeaponConfig {
+  const key = resolveWeaponKey(id);
+  return (key && WEAPONS[key]) || WEAPONS.projectile;
+}
+
+/** Nominal delivered damage per second against one body (the §9 yardstick).
+ *  Direct bite only — heat, arcs and blasts are the modifier's extra and
+ *  are deliberately not folded in, so the BASE comparison is like for like. */
+export function nominalDps(c: WeaponConfig): number {
+  const cd = Math.max(1e-3, c.cooldown);
+  if (c.delivery === 'beam') {
+    const ticks = Math.max(1, Math.round((c.beamDuration ?? 0) / Math.max(1e-3, c.beamTick ?? 1)));
+    return (c.damage * ticks) / cd;
+  }
+  return (c.damage * Math.max(1, c.count)) / cd;
+}
+
+// Canonical order (DBG, catalog): the deliveries.
+export const WEAPON_LIST: readonly string[] = DELIVERIES;
 
 // (WEAPON_SLOT_LABELS deleted with the 8-cell ammo strip — the 2-slot
 // loadout HUD is wide enough to render full weapon names.)
 
 // ── Adaptive-trigger profiles (DualSense, WebHID) ─────────────────────────
-// What the RIGHT trigger feels like per equipped weapon.  This is the one
-// piece of hardware feedback the Gamepad API cannot express at all — rumble
-// says "something happened", a trigger clutch says "this is what you are
-// holding" — so the table is written to make the guns distinguishable BY
-// FEEL rather than to make each one maximally dramatic.
+// What the RIGHT trigger feels like per equipped DELIVERY.  Rumble says
+// "something happened", a trigger clutch says "this is what you are holding",
+// and what you are holding is the delivery: a beam is leaned on, a projector
+// rattles, a pulse is a heavy commit.  Keyed on the delivery because the
+// modifier does not change the gesture.
 //
 // Units are NORMALISED, not wire values: `start`/`end` are fractions of the
-// trigger's travel and `strength` is 0..1.  The two competing wire encodings
-// disagree about ranges (raw 0–255 bytes vs ten 0–9 travel zones with a 0–8
-// force), and the design intent — "the Cannon is the deepest pull in the
-// game" — is true in both.  engine/systems/DualSenseHID.ts converts.
-//
-// Six shapes are available (see TriggerKind); these seven use five of them.
-// The rule followed here: a gun's trigger should say what the gun IS before
-// it says anything else, so cadence picks the shape and the numbers only
-// separate guns that already share one.
-export const WEAPON_TRIGGERS: Record<WeaponType, TriggerProfile> = {
-  // 7 shots/s.  A CLICK 7x/s is not feedback, it is fatigue — and it is also
-  // a lie, because the gun is not asking you to commit to each shot.  A
-  // low-frequency RATTLE is what an automatic weapon feels like.
-  [WeaponType.BLASTER]: {
-    kind: 'vibration', start: 0.30, end: 0, strength: 0.45, frequency: 0.30,
-  },
-  // Three-round burst: a click, but a TEXTURED one — three notches on the
-  // way down, so the trigger says how many rounds are coming.
-  [WeaponType.BURST]: {
-    kind: 'texture', start: 0.30, end: 0.70, strength: 0.6,
-    zones: [0, 0, 0.7, 0, 0.7, 0, 0.7],
-  },
-  // 1.5 shots/s slug.  Commits per shot, and the trigger should say so: a
-  // firm break with nothing before it, so the whole pull is the commitment.
-  [WeaponType.SHOTGUN]: {
-    kind: 'weapon', start: 0.42, end: 0.62, strength: 0.80,
-  },
-  // Held beam — a smooth wall.  No break, because there is no per-shot
-  // moment to mark; you are leaning on it.
-  [WeaponType.BOUNCER]: {
-    kind: 'resistance', start: 0.30, end: 0, strength: 0.45,
-  },
-  // Held chain.  A fast, fine BUZZ over the wall — electricity, not recoil.
-  [WeaponType.LIGHTNING]: {
-    kind: 'vibration', start: 0.35, end: 0, strength: 0.60, frequency: 0.85,
-  },
-  // Lock-and-release.  The pull gets HARDER as it goes (the lock winding up)
-  // and then the shot leaves at the top.
-  [WeaponType.HOMING]: {
-    kind: 'slope', start: 0.30, end: 0.65, strength: 0.25, endStrength: 0.85,
-  },
-  // Artillery.  The deepest, heaviest pull in the game, ramping the whole
-  // way — the one gun where reaching the shot is work.
-  [WeaponType.CANNON]: {
-    kind: 'slope', start: 0.25, end: 0.75, strength: 0.35, endStrength: 1.0,
-  },
+// trigger's travel and `strength` is 0..1.  engine/systems/DualSenseHID.ts
+// converts.
+export const WEAPON_TRIGGERS: Record<Delivery, TriggerProfile> = {
+  // Fast cadence: a low-frequency RATTLE, not a click 6x/s.
+  projectile: { kind: 'vibration', start: 0.30, end: 0, strength: 0.45, frequency: 0.30 },
+  // Held pulse — a smooth wall; there is no per-shot moment to mark.
+  beam: { kind: 'resistance', start: 0.30, end: 0, strength: 0.45 },
+  // Commits per shot: a firm break.
+  spread: { kind: 'weapon', start: 0.42, end: 0.62, strength: 0.80 },
+  // Lock-and-release: the pull hardens as it goes.
+  homing: { kind: 'slope', start: 0.30, end: 0.65, strength: 0.25, endStrength: 0.85 },
+  // The deepest pull: a heavy shell, one commit per shot.
+  cannon: { kind: 'slope', start: 0.25, end: 0.75, strength: 0.35, endStrength: 1.0 },
 };
 
 // LEFT trigger under the trigger-thrust scheme.  A SLOPE that stiffens with
@@ -6393,7 +6404,7 @@ export function chargeTrigger(t: number): TriggerProfile {
 // Pattern: BURST_SIZE rapid shots (BURST_GAP apart), then BURST_RELOAD reload.
 // Simple enemy blaster (separate so we can tune independently of player weapons)
 export const ENEMY_WEAPON: WeaponConfig = {
-  type: WeaponType.BLASTER,
+  delivery: 'projectile',
   name: 'Enemy Blaster',
   cooldown: 1.2,
   speed: 9,
@@ -6427,7 +6438,7 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
   // a readable boss beat and given per-pellet bite, so a full cone at brawling
   // range really hurts while a single clipped pellet does not.
   SCATTER: {
-    ...WEAPONS[WeaponType.SHOTGUN],
+    ...WEAPONS['spread+kinetic'],
     name: 'Reaver Scattergun',
     cooldown: 1.5,     // vs the player's 0.65 — a boss beat you can read
     damage: 5,         // per pellet (player: 3); 7 pellets = 35 on a full cone
@@ -6449,7 +6460,7 @@ export const BOSS_WEAPONS: Record<'SCATTER' | 'SIEGE', Partial<WeaponConfig>> = 
   // cadence would be unsurvivable.  The splash is what makes hiding behind
   // cover (or hugging the hull) stop working.
   SIEGE: {
-    ...WEAPONS[WeaponType.CANNON],
+    ...WEAPONS.cannon,
     name: 'Bastion Siege Battery',
     cooldown: 3.2,          // vs the player's 1.40 — a slow, readable lob
     damage: 9,              // direct hit (player: 18)
@@ -6571,7 +6582,7 @@ export type ModuleKind = 'weapon' | 'weapon-mod' | 'ship' | 'ship-part';
 export type ModuleGroup = 'ship' | 'weapon';
 export type ModuleFamily =
   | 'hull' | 'plating' | 'capacitor' | 'engine' | 'thrusters' | 'shield'
-  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge'
+  | 'gun' | 'gunnery' | 'autoloader' | 'overcharge' | 'energy'
   | 'utility' | 'scanner';
 
 /** Fixed effect payload of one module VARIETY (summed over ACTIVE modules).
@@ -6592,10 +6603,11 @@ export interface ModuleEffect {
   shieldCore?: boolean;     // the Shield module itself (enables maxShield base)
   overcharge?: boolean;     // enables hold-to-charge shots
   flashlight?: boolean;     // Flashlight Kit — enables the ship-tap light tool
+  energy?: EnergyModifier;  // energy modifier — applies to the gun(s) it touches
 }
 
 export interface ModuleDef {
-  id: string;              // variety id: 'hull_mk2', 'wpn_shotgun', …
+  id: string;              // variety id: 'hull_mk2', 'dlv_spread', …
   family: ModuleFamily;
   mark: number;            // 1..3 (1 for single-variety families)
   group: ModuleGroup;
@@ -6603,7 +6615,7 @@ export interface ModuleDef {
   label: string;
   desc: string;
   cost: number;
-  weapon?: WeaponType;     // family 'gun' only
+  weapon?: Delivery;       // family 'gun' only — the delivery it fires
   // Module mass.  Adds to the SHIP's total weight, which drags acceleration
   // via the SHIP_WEIGHT curve — no gun mounted = a slight accel boost.  Only
   // guns set it today; the fold reads it off any module.
@@ -6709,6 +6721,7 @@ export const MODULE_REQUIREMENTS: Partial<Record<ModuleFamily, ModuleFamily[]>> 
   gunnery:    ['gun'],
   autoloader: ['gun'],
   overcharge: ['gun'],
+  energy:     ['gun'],
   utility:    ['hull'],
   scanner:    ['hull'],
 };
@@ -6944,15 +6957,22 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
   ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk }), 0.4),
   // ── Weapon group: guns (gun hexes only) ──
-  { id: 'wpn_blaster',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BLASTER,   label: 'Blaster',   desc: 'Starter sidearm',   cost: 0, weight: 1.0 },
-  { id: 'wpn_burst',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BURST,     label: 'Burst',     desc: '3-shot burst',      cost: 25000, weight: 1.3 },
-  { id: 'wpn_shotgun',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.SHOTGUN,   label: 'Shotgun',   desc: 'Pellet cone',       cost: 32500, weight: 1.5 },
-  // Player-facing name unified to "Laser" (pivot 1d, user decision); code
-  // identifiers (WeaponType.BOUNCER, isBouncer, …) unchanged.
-  { id: 'wpn_bouncer',   family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.BOUNCER,   label: 'Laser',     desc: 'Piercing beams',    cost: 40000, weight: 1.6 },
-  { id: 'wpn_lightning', family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.LIGHTNING, label: 'Lightning', desc: 'Chain lightning',   cost: 45000, weight: 1.8 },
-  { id: 'wpn_homing',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.HOMING,    label: 'Homing',    desc: 'Tracking missiles', cost: 50000, weight: 2.0 },
-  { id: 'wpn_cannon',    family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: WeaponType.CANNON,    label: 'Cannon',    desc: 'AoE plasma',        cost: 60000, weight: 2.5 },
+  // DELIVERY modules (the guns).  Each fires plain, weak kinetic energy on its
+  // own; an ENERGY MODIFIER touching it (below) decides what it really is.
+  // The starter is the projector, free, on gun hex W1.  The retired guns
+  // (wpn_blaster … wpn_cannon) map onto combinations via LEGACY_WEAPON_MAP.
+  { id: 'dlv_projectile', family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'projectile', label: 'Projector', desc: 'Fires rounds — starter delivery', cost: 0, weight: 1.0 },
+  { id: 'dlv_spread',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'spread',     label: 'Scatter',   desc: 'Fires a cone',        cost: 25000, weight: 1.4 },
+  { id: 'dlv_homing',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'homing',     label: 'Seeker',    desc: 'Fires tracking rounds', cost: 32500, weight: 1.6 },
+  { id: 'dlv_beam',       family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'beam',       label: 'Beam',      desc: 'Fires a timed beam',  cost: 40000, weight: 1.8 },
+  { id: 'dlv_cannon',     family: 'gun', mark: 1, group: 'weapon', kind: 'weapon', weapon: 'cannon',     label: 'Cannon',    desc: 'Fires a heavy shell that bursts', cost: 45000, weight: 2.2 },
+  // ── Weapon group: ENERGY MODIFIERS (must touch a gun; modify the guns they
+  // touch).  A modifier is per-GUN, unlike Gunnery/Autoloader: it decides what
+  // KIND of energy the adjacent delivery carries.  A gun touching several takes
+  // the first in hex order (`energyForGunSlot`).
+  { id: 'nrg_kinetic',   family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Kinetic',   desc: 'Dense, heavy impacts',        cost: 20000, effect: { energy: 'kinetic' },   weight: 0.6 },
+  { id: 'nrg_electric',  family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Electric',  desc: 'Arcs that chain through conductors', cost: 30000, effect: { energy: 'electric' },  weight: 0.4 },
+  { id: 'nrg_thermal',   family: 'energy', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Thermal',   desc: 'Heat that weakens and melts', cost: 30000, effect: { energy: 'thermal' },   weight: 0.4 },
   // ── Weapon group: performance mods (non-gun hexes; must touch a gun) ──
   // GUNNERY IS THE HEAVIER ROUND, and that is what absorbed the deleted
   // Penetration module (step 5).  `damageFrac` scales the bite AND the bank
@@ -10124,25 +10144,9 @@ export function cycleNebulaDrain(): number {
 // flat 2-3 the old power-law budget produced.  `radialSpeed` is the
 // lowest of any material: cloud drifts apart, it does not spall.
 const NEBULA_GRAIN: GrainSpec = {
-  grainCountMin: 3,
-  grainCountMax: 14,
-  // 20, not the 14 this shipped at, and the number is MEASURED (user call).
-  // The voronoi shatter cost frame time through sheer entity count, and the
-  // cost is superlinear: on the `nebula-storm` perf scene sim/stp99 ran 3.60
-  // at 14 against 2.00 with the legacy shatter, for +25% entities.
-  //
-  // grainSize is the lever, NOT grainCountMax — the cap rarely binds, and
-  // dropping it 14 -> 8 recovered almost nothing.  At 20 the scene lands
-  // exactly on the legacy floor (2.00, 1358 ents) while keeping most of what
-  // the voronoi change bought: 3.95 children per tile and a 3.07x size
-  // spread, against 7.7 / 4.02x at 14 and ~2-3 children with no
-  // parent-related size variety at all on legacy.  26 buys nothing further,
-  // so 20 is the knee.  Size VARIETY — the thing actually asked for — lives
-  // in `sizeSpread` and `regularity` below and is untouched.
-  grainSize: 20,
-  impactBias: 0.5,        // crowd toward the striker that punched through
-  regularity: 0.15,       // the raggedest material in the game
-  sizeSpread: 0.6,        // a wide mix of coarse and fine puffs in one body
+  // The material's grain lives in MATERIALS.nebula (energy.ts); the numbers
+  // and their reasons are the notes above.
+  ...MATERIALS.nebula.grain!,
   radialSpeed: 0.5,       // drifts apart; every other material is 0.8..1.5
 };
 
@@ -10151,6 +10155,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'glass-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'glass-tile',
+    material: 'glass',
     // Re-emits half the light it receives (DBG "Emissive").  Glass is
     // translucent and scatters what passes into it; a pane that simply
     // absorbed every photon reaching it would read as slate.
@@ -10200,25 +10205,21 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // which is the radial look.  The legacy fan survives as the DBG
     // 'legacy' path until V7.
     grain: {
-      grainCountMin: 6,
-      grainCountMax: 10,
-      grainSize: 15,
-      impactBias: 0.75,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.glass.grain!,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.2,
       // V10 (user call): glass takes ROCK'S breaking behaviour — the
       // pattern is applied once and pieces break off as their
       // boundaries complete, instead of the pane surviving whole until
       // one final full break.
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // V15: glass is the brittler material — 0.16 against rock's 0.27,
       // so a 36px pane is ~20 damage (5 Blaster hits, its V9 HP).
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10233,6 +10234,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'plastic-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'plastic-tile',
+    material: 'plastic',
     // TRANSLUCENT, but the DULL end of it.  Plastic is the cloudy material of
     // the three: it passes light and re-emits its own colour like glass does,
     // at roughly half glass's strength, which is what "more opaque" means in
@@ -10274,32 +10276,24 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // override shatterVoronoiStyle reads from `dent`.  breakShards
     // stays as the DBG 'legacy' path until V7.
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.plastic.grain!,
       // LARGE grains (user call): a panel comes apart into a few big
       // irregular pieces, not gravel.  grainSize 5 -> 11 takes a 36px
       // tile from ~7 grains to ~3.
-      grainCountMin: 8,
-      grainCountMax: 16,
-      grainSize: 6,
-      impactBias: 0.5,
       // A3: PLASTIC — large grains, only loosely regular, with a wide
       // size mix, so a panel breaks into a few big irregular pieces
       // rather than gravel.  Tough per boundary but it DEFORMS first:
       // grainDent is what makes it read as plastic rather than as a
       // softer rock.
-      regularity: 0.55,
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.10,
       // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
       // springs slowly back to the shape its grain was cut at.  Metal
       // deliberately has no recovery — its dent is permanent.
-      dentRecoverSeconds: 2.5,
-      progressive: true,
       // 2.3x rock, but far FEWER boundaries than metal because the
       // grains are large — so plastic is tough per seam and moderate
       // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
       // the old 8.
-      bondStrength: 1.8,
       radialSpeed: 1.5,
     },
     shatter: {
@@ -10331,6 +10325,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'metal-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'metal-tile',
+    material: 'metal',
     // Re-emits half the light it receives (DBG "Emissive").  Metal is the
     // specular case: it does not scatter light so much as throw it back,
     // and a matte plate is the one thing it should never look like.
@@ -10367,21 +10362,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // break: a pale tier-0 plate is coarse and comes apart, a bright
     // dense one is fine-grained and very hard.
     grain: {
-      grainCountMin: 8,
-      grainCountMax: 22,
-      grainSize: 8,
-      impactBias: 0.35,     // metal cracks less radially than glass
-      regularity: 0.95,     // near-honeycomb: the look the lattice had
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.05,      // it deforms, but barely
-      progressive: true,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.metal.grain!,
       // The hardest boundaries in the game — 3.1x rock, 5.3x glass —
       // on top of having the most boundary per body.  Solved from a
       // measured 143px of boundary at tier 2: ~173 damage, or 43 base
       // Blaster hits, against the 48 the old flat HP gave.  A tier-5
       // plate reaches ~314 (78 hits), so density is felt.
-      bondStrength: 1.8,
       radialSpeed: 1.1,
     },
     shatter: {
@@ -10411,6 +10399,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'indestructible-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'indestructible-tile',
+    material: 'generic',
     // Glass-like: the deep violet reads as a solid crystal, and a crystal
     // that stopped every photon would be indistinguishable from rock.  A
     // shade under glass on both counts, because it is the denser-looking
@@ -10436,6 +10425,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   'rock-tile': {
     ...STRUCTURE_TILE_BASE,
     id: 'rock-tile',
+    material: 'rock',
     // No rim line: the brittle dent silhouette reads cleaner against the
     // slate fill when nothing traces every notch.  (Was a hardcoded
     // `!== 'rock-tile'` in the draw branch; it is variant policy now, so
@@ -10479,21 +10469,18 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // creation goes away with the cells).  breakShards stays as the DBG
     // 'legacy' A/B config until V7.
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.rock.grain!,
       // V9: the glass-like radial pattern (user call) — more cells,
       // crowded toward the impact.
-      grainCountMin: 3,
-      grainCountMax: 16,
-      grainSize: 14,
-      impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.4,
       // V8: hits highlight the tile's cell boundaries; each piece whose
       // boundary completes breaks off, and the hit ceiling breaks the
       // remainder.  The gentle dent pull is skipped under voronoi (the
       // pattern must stay stable; the highlight is the damage read).
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
@@ -10501,7 +10488,6 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // material, tile and shard alike; a bigger body has more boundary
       // and is tougher for free.  0.27 puts a 36px tile at ~36 damage
       // (9 Blaster hits, its old hit ceiling) and a 15px chip at ~6.
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10544,6 +10530,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-tile': {
     id: 'nebula-tile',
+    material: 'nebula',
     // Re-emits half the light it receives (DBG "Emissive"), in its OWN
     // colour — a nebula is a glowing cloud, and the one material in the game
     // whose colour is per-BODY rather than per-variant (`nebulaBlendedHex`,
@@ -10607,6 +10594,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'rock-shard': {
     id: 'rock-shard',
+    material: 'rock',
     carrier: EntityType.STRUCTURE,
     spawn: SHARD_SPAWN_SHAPE_ROCK,
     regen: { kind: 'none' },
@@ -10620,6 +10608,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // cell decomposition becomes the fragments.  The powerlaw fields
     // below STAY — they are the DBG 'legacy' A/B path until V7 calls it.
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.rock.grain!,
       // Site count ≈ the legacy rock count mapping (max(2, size/40),
       // cap 30), raised to mergeCount for composed boulders — so the
       // fragment-count REBALANCE at V2 is zero for rock-shard.
@@ -10627,24 +10618,17 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // voronoi look, not big angular chunks): denser sites, crowded
       // toward the impact.  grainSize 40 → 22 also gives mid-size
       // rocks enough edges for the progressive chip-off to read.
-      grainCountMin: 3,
-      grainCountMax: 16,
-      grainSize: 14,
-      impactBias: 0.75,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.0,
       // V8: the pattern is applied once at first damage; boundaries
       // highlight with each hit and a fully-highlighted piece breaks
       // off.  See GrainSpec.progressive.
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // The same rock: strength is a material property, not a per-entity
       // HP.  ~6 damage on a 15px chip, rising with size and merge history.
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10684,6 +10668,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'glass-shard': {
     id: 'glass-shard',
+    material: 'glass',
     carrier: EntityType.STRUCTURE,
     emits: 0.5,                               // as the tile it broke off
     // Same translucency as the tile it broke off — see 'glass-tile'.
@@ -10702,20 +10687,16 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // defect this gauntlet exists to remove.  Powerlaw fields stay as
     // the DBG legacy path.
     grain: {
-      grainCountMin: 6,
-      grainCountMax: 10,
-      grainSize: 15,
-      impactBias: 0.75,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.glass.grain!,
       // A1: 0.5 is exactly the old global default (2 Lloyd rounds,
       // 0.45 separation).  Per-material values are A3's tuning pass.
-      regularity: 0.5,
       radialSpeed: 1.0,
-      progressive: true,
       // V15 grain boundaries: damage to break a boundary as long as
       // the body is wide.  The entity's HP is DERIVED from this over
       // its own pattern — see GrainSpec.bondStrength.
       // The same glass; a small chip is ~2 damage, i.e. one bolt.
-      bondStrength: 0.4,
     },
     shatter: {
       kind: 'voronoi',
@@ -10748,6 +10729,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'plastic-shard': {
     id: 'plastic-shard',
+    material: 'plastic',
     // Same as the tile it broke off — see plastic-tile.
     transmit: 0.28,
     emits: 0.25,
@@ -10836,6 +10818,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // recursion terminates the same way (children below the spawn
     // floor die clean via the mobile-parent guard).
     grain: {
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.plastic.grain!,
       // Shards were dying to almost nothing (user report).  A shard's
       // derived HP is the total length of its INTERNAL boundary, and at
       // grainSize 16 a 20px shard decomposed into ~2 grains with one
@@ -10843,25 +10828,14 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
       // a shard real internal structure to break through, without
       // touching the material's bondStrength (which must stay one number
       // per material, tile and shard alike).
-      grainCountMin: 8,
-      grainCountMax: 16,
-      grainSize: 6,
-      impactBias: 0.5,
       // The same plastic, at shard scale.
-      regularity: 0.55,
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.10,
       // PLASTIC IS ELASTIC (user call): a piece that breaks off dented
       // springs slowly back to the shape its grain was cut at.  Metal
       // deliberately has no recovery — its dent is permanent.
-      dentRecoverSeconds: 2.5,
-      progressive: true,
       // 2.3x rock, but far FEWER boundaries than metal because the
       // grains are large — so plastic is tough per seam and moderate
       // overall.  ~45 damage on a 36px panel, 11 Blaster hits against
       // the old 8.
-      bondStrength: 1.8,
       radialSpeed: 0.8,
     },
     shatter: {
@@ -10917,6 +10891,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'metal-shard': {
     id: 'metal-shard',
+    material: 'metal',
     carrier: EntityType.STRUCTURE,
     emits: 0.5,                               // as the tile it broke off
     spawn: SHARD_SPAWN_SHAPE_METAL,
@@ -10948,16 +10923,9 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     // boundary and therefore almost no derived HP, which is what made
     // metal chips die instantly.
     grain: {
-      grainCountMin: 8,
-      grainCountMax: 22,
-      grainSize: 8,
-      impactBias: 0.35,
-      regularity: 0.95,
-      sizeSpread: 0,     // parked — see PARKING_LOT
-      bondSpread: 0,     // parked — see PARKING_LOT
-      grainDent: 0.05,
-      progressive: true,
-      bondStrength: 1.8,
+      // The material's grain — shared by its tile and its shard (MATERIALS,
+      // engine/systems/energy.ts).  Only the scatter speed is this row's own.
+      ...MATERIALS.metal.grain!,
       radialSpeed: 1.0,
     },
     shatter: {
@@ -11014,6 +10982,7 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
   },
   'nebula-shard': {
     id: 'nebula-shard',
+    material: 'nebula',
     // Same as the tile it broke off, and for the same reason: a shard of a
     // glowing cloud is still glowing cloud.
     emits: 0.5,
@@ -11093,6 +11062,8 @@ export const SHARD_VARIANTS: Readonly<Record<ShardVariantId, ShardVariantDef>> =
     },
   },
 };
+// Every row says what it is made of; `materialOf` reads that, never the name.
+registerVariantMaterials(SHARD_VARIANTS);
 
 // ── WHAT A BREAK LEAVES BEHIND ──────────────────────────────────────
 //

@@ -213,7 +213,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   const dockedSvc = stats.dock?.docked ? stats.dock.services : undefined;
   // Installed hexes are drydock-only; the inventory is the player's cargo
   // hold — reorderable (and scrappable) from anywhere on the map.
-  const canEditInstalled = dockedSvc?.drydock === true;
+  // DBG "Outfit anywhere" lifts the drydock rule for the pause-menu flowers.
+  const canEditInstalled = dockedSvc?.drydock === true || stats.outfitAnywhere === true;
   /* HEX SIZING IS RESPONSIVE (5d, U2 — audit finding A2).
    *
    * The flowers used to be a fixed 200px-wide box in a `grid-cols-2` column
@@ -1132,6 +1133,27 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   </span>
                 </div>
               );})}
+              {/* ENERGY DAMAGE (user call): a FLAME while the ship is burning
+                  and a BOLT while it is being shocked — lit for as long as the
+                  damage is landing, fading out after the last of it. */}
+              {(stats.hazards?.burn ?? 0) > 0 && (
+                <div
+                  data-testid="hud-burn"
+                  className={`pointer-events-none ${HUD_CHIP} border-orange-500/60 animate-pulse`}
+                  style={{ opacity: Math.max(0.45, stats.hazards!.burn) }}
+                >
+                  <span aria-label="burning" className={`${T_ROW} leading-none`}>🔥</span>
+                </div>
+              )}
+              {(stats.hazards?.shock ?? 0) > 0 && (
+                <div
+                  data-testid="hud-shock"
+                  className={`pointer-events-none ${HUD_CHIP} border-sky-400/60 animate-pulse`}
+                  style={{ opacity: Math.max(0.45, stats.hazards!.shock) }}
+                >
+                  <span aria-label="shocked" className={`${T_ROW} leading-none`}>⚡</span>
+                </div>
+              )}
               {stats.wavesEnabled !== false && (
               <div
                 onClick={isGrace ? onSkipWave : undefined}
@@ -1866,11 +1888,13 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {stats.outfitting && (
               <div className={`${PANEL} flex flex-col gap-2`}>
                 <div className="grid grid-cols-2 gap-2 justify-items-center">
-                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', false)}
-                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', false)}
+                  {renderHexGroup('ship', 'Ship Systems', 'text-sky-300', '#0284c7', stats.outfitAnywhere === true)}
+                  {renderHexGroup('weapon', 'Weapon Systems', 'text-violet-300', '#7c3aed', stats.outfitAnywhere === true)}
                 </div>
                 {renderInventoryHex(false)}
-                {renderModuleDetail('pause')}
+                {/* DBG "Outfit anywhere": the pause panel behaves like a
+                    drydock — drag, install and unmount all work here. */}
+                {renderModuleDetail(stats.outfitAnywhere === true ? 'station' : 'pause')}
               </div>
             )}
 

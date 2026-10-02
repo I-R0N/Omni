@@ -52,6 +52,7 @@ export class ParticleSystem {
     e.ownerType = undefined;
     e.hitEntityIds = undefined;
     e.validHitIds = undefined;
+    e.validHitEntities = undefined;
     this._pool.push(e);
   }
 

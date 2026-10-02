@@ -24,12 +24,14 @@
  */
 import type { GameEngine } from './GameEngine';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
-import { GameEntity, EntityType, Vector2, WeaponType } from '../types';
+import { GameEntity, EntityType, Vector2 } from '../types';
 import {
     EXPLOSION_CONSTANTS, PHYSICS_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS,
     noteTraitDamage, hitReactStrength, WEAPONS, markDamaged, markShieldDamaged,
     stampBubbleAggro, breakYieldsNothing } from '../constants';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
+import { materialOf, mechanicalScale, stampFractureProfile } from './systems/energy';
+import { depositHeat, queueElectric } from './energyEffects';
 import { nextId } from './systems/IdAllocator';
 
 /** Shared empty snapshot for COSMETIC explosion rings (damage 0 +
@@ -39,6 +41,8 @@ import { nextId } from './systems/IdAllocator';
  *  allocates no Sets at all.  Never mutated; the damaging path builds its
  *  own real Set. */
 const EMPTY_HIT_IDS: Set<string> = new Set<string>();
+/** Bodies one damaging ring may reach at most. */
+const BLAST_MAX_TARGETS = 64;
 
 // ─── Reusable expanding shockwave ──────────────────────────────────────
 //
@@ -57,6 +61,9 @@ export interface ShockwaveOpts {
     ownerType?: GameEntity['ownerType'];
     ownerId?: string;
     excludeIds?: string[];
+    /** Fraction of the ring's damage that ALSO lands as heat on every body
+     *  it reaches (the incendiary shell).  Absent → no heat. */
+    heatFrac?: number;
 }
 
 export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts) {
@@ -79,8 +86,10 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
     // An ordinary enemy death spawns TWO cosmetic rings, so on a
     // kill-heavy frame this was two dead Sets per kill.
     let validHitIds = EMPTY_HIT_IDS;
+    let validHitEntities: GameEntity[] | undefined = undefined;
     if (!cosmeticRing) {
         validHitIds = new Set<string>();
+        validHitEntities = [];
         for (let i = 0; i < ents.length; i++) {
             const e = ents[i];
             if (!e.active || e.isExploding) continue;
@@ -89,7 +98,13 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
             if (e.type === EntityType.INTERACTABLE) continue;
             const dx = wrapDeltaX(pos.x, e.position.x);
             const dy = wrapDeltaY(pos.y, e.position.y);
-            if (dx * dx + dy * dy <= radiusSq) validHitIds.add(e.id);
+            if (dx * dx + dy * dy <= radiusSq) {
+                // HARD CAP on what one blast may reach (energy modules §6):
+                // a shell into a dense debris field touches at most this many.
+                if (validHitIds.size >= BLAST_MAX_TARGETS) break;
+                validHitIds.add(e.id);
+                validHitEntities.push(e);
+            }
         }
     }
 
@@ -112,10 +127,12 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
         explosionRadius: radius,
         explosionDamage: opts.damage,
         explosionKnockback: opts.knockback,
+        energyBlastHeat: opts.heatFrac,
         ownerType: opts.ownerType,
         ownerId: opts.ownerId,
         hitEntityIds: opts.excludeIds ? [...opts.excludeIds] : [],
         validHitIds,
+        validHitEntities,
     });
 }
 
@@ -124,10 +141,11 @@ export function spawnShockwave(g: GameEngine, pos: Vector2, opts: ShockwaveOpts)
 // Walks isExplosionRing particles each fixed step.  For each, computes
 // currentRadius via the same `1 − lifetime/maxLifetime` formula the
 // renderer uses (so the damage front is always pixel-aligned with the
-// visible ring).  Then walks the master entity list once, damaging /
-// knocking back any entity whose current toroidal distance falls
-// within currentRadius and that hasn't been hit yet.  hitEntityIds
-// grows monotonically to prevent double-hits as the wave widens.
+// visible ring).  Then walks the ring's own spawn-time snapshot of
+// bodies (capped), damaging / knocking back any whose current toroidal
+// distance falls within currentRadius and that hasn't been hit yet.
+// hitEntityIds grows monotonically to prevent double-hits as the wave
+// widens.
 export function updateExplosionRings(g: GameEngine) {
     if (!g.currentMap) return;
     const entities = g.currentMap.entities;
@@ -153,11 +171,19 @@ export function updateExplosionRings(g: GameEngine) {
         // Only candidates that were in range AT SPAWN are eligible —
         // entities born during the sweep (e.g. glass-shards from tiles
         // the wave just shattered) are excluded.
+        //
+        // The tick walks that SNAPSHOT (≤ BLAST_MAX_TARGETS bodies), not the
+        // master list: a ring used to scan every entity on the map on every
+        // step it lived, which is a global per-frame pass, and the energy
+        // modules' pulsed/radial blasts spawn rings far more often than the
+        // Cannon did.  Same bodies, same order (the snapshot was filled in
+        // master-list order), same one-hit-each rule.
         const valid = ring.validHitIds;
-        if (!valid || valid.size === 0) continue;
+        const cands = ring.validHitEntities;
+        if (!valid || valid.size === 0 || !cands) continue;
 
-        for (let i = 0; i < entities.length; i++) {
-            const e = entities[i];
+        for (let i = 0; i < cands.length; i++) {
+            const e = cands[i];
             if (!e.active || e.isExploding) continue;
             if (!valid.has(e.id)) continue;
             if (hits.includes(e.id)) continue;
@@ -195,8 +221,22 @@ export function updateExplosionRings(g: GameEngine) {
             const noBreak = e.type === EntityType.STRUCTURE
                 && breakYieldsNothing(e.shardVariant);
 
-            if (dmg > 0 && !noBreak) {
+            // AN INCENDIARY SHELL (cannon + thermal): the ring also lands
+            // HEAT on everything it reaches — a gas included, which answers
+            // by agitating rather than breaking.  Only a ring that says so.
+            if (dmg > 0 && ring.energyBlastHeat && ring.energyBlastHeat > 0) {
+                depositHeat(g, e, dmg * falloff * ring.energyBlastHeat,
+                            ring.position, ring.ownerType === EntityType.PLAYER);
+            }
+
+            if (dmg > 0 && !noBreak && e.active) {
                 let applied = dmg * falloff;
+                // Heat lowers the threshold; the break is a RADIAL mechanical
+                // one (the profile reads the blast's own magnitude).
+                if (e.type === EntityType.STRUCTURE) {
+                    applied *= mechanicalScale(materialOf(e), e.heat);
+                    stampFractureProfile(e, 'mechanical', applied);
+                }
                 // Player shield soaks the blast first (kamikaze AoE and any
                 // future enemy-owned explosion) so an AoE hit isn't a raw
                 // shield-bypass — mirrors the projectile / ram absorption.
@@ -324,11 +364,17 @@ g.audio.play('impact.explosion.aoe', { x: impactPos.x, y: impactPos.y });
         radius: proj.explosionRadius!,
         damage: proj.explosionDamage ?? 0,
         knockback: proj.explosionKnockback ?? 0,
-        color: WEAPONS[WeaponType.CANNON].color,
+        color: proj.color || WEAPONS.cannon.color,
         ownerType: proj.ownerType,
         ownerId: proj.ownerId, // a caught bubble blames the shooter (Stage 5)
         excludeIds: directTarget ? [directTarget.id, 'player'] : ['player'],
+        heatFrac: proj.energyBlastHeat,
     });
+    // A CHARGED SHELL (cannon + electric) starts its bounded chain at the
+    // blast, wherever it went off — an actor, the fuse, or a stop in terrain.
+    if (proj.energyElectric) {
+        queueElectric(g, impactPos, proj.energyElectric, proj.color || '#22d3ee');
+    }
 
     // An ENEMY-owned explosive shell ((h) Bastion wields the player's own
     // Plasma Cannon, splash and all) must actually threaten the player —

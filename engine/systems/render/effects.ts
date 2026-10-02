@@ -33,17 +33,28 @@ export function renderTrails(
             if (r.trailShape === TrailShape.NONE) return;
             drawPlayerTrail(r, ctx, entity.trail, camera);
         } else if ((entity.type === EntityType.PROJECTILE || entity.isSnitch) && entity.trail.length >= 2) {
+            // A player SEEKER draws a dot trail instead (render/energyFx.ts).
+            if (entity.homing && entity.ownerType === EntityType.PLAYER) return;
             // Snitch comet tail reuses the projectile strip — entity.color
             // is the snitch's gold core colour.
-            drawTrailStrip(r, ctx, entity.trail, 'projectile', camera, entity.color, entity.isBouncer);
+            drawTrailStrip(r, ctx, entity.trail, 'projectile', camera, entity.color);
         }
     });
 }
+
+/** Alpha steps the player trail fades through.  A stroke (or fill) is issued
+ *  per change of step, never per point, and 64 steps are each under 1% of
+ *  peak alpha — too fine to see as a staircase. */
+const FADE_STEPS = 64;
 
 // Player trail: each TrailPoint renders as a stroked shape that grows from
 // START_RADIUS to END_RADIUS over its lifetime while alpha fades to zero.
 // Shape is selected from the debug panel (CIRCLE / SQUARE / TRIANGLE / LINE
 // / PATH); NONE is filtered out earlier so we never enter this method for it.
+// BATCHED: points are stored in emission order, so neighbours share an alpha
+// step; every shape at one step goes into ONE path and is drawn with ONE
+// stroke (or fill), with the colour set once and the fade on globalAlpha —
+// no per-point path, draw call or rgba() string.
 export function drawPlayerTrail(
     r: RenderSystem,
     ctx: CanvasRenderingContext2D,
@@ -55,39 +66,50 @@ export function drawPlayerTrail(
     const startR = PLAYER_TRAIL_CONSTANTS.START_RADIUS;
     const endR   = PLAYER_TRAIL_CONSTANTS.END_RADIUS;
     const peak   = PLAYER_TRAIL_CONSTANTS.PEAK_ALPHA;
-    const color  = PLAYER_TRAIL_CONSTANTS.COLOR;
+    const color  = `rgb(${PLAYER_TRAIL_CONSTANTS.COLOR})`;
     const shape  = r.trailShape;
 
+    ctx.save();
     ctx.lineWidth = PLAYER_TRAIL_CONSTANTS.LINE_WIDTH;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
 
     // PATH: single polyline through every emitted point — a continuous
     // breadcrumb of the player's recent path rather than per-point shapes.
     if (shape === TrailShape.PATH) {
-        drawPlayerTrailPath(ctx, t, camX, camY, color, peak);
+        drawPlayerTrailPath(ctx, t, camX, camY, peak);
+        ctx.restore();
         return;
     }
+    const fill = shape === TrailShape.DOTS;
+    let step = -1;
+    let open = false;
     for (let i = 0; i < t.length; i++) {
         const p = t[i];
         if (p.maxLifetime <= 0 || p.lifetime <= 0) continue;
         const ratio = p.lifetime / p.maxLifetime; // 1 at birth → 0 at death
         const age = 1 - ratio;
         const radius = startR + (endR - startR) * age;
-        const alpha = peak * ratio;
+        const q = Math.min(FADE_STEPS, Math.max(1, Math.round(ratio * FADE_STEPS)));
+        if (q !== step) {
+            if (open) { if (fill) ctx.fill(); else ctx.stroke(); }
+            step = q;
+            ctx.globalAlpha = peak * (q / FADE_STEPS);
+            ctx.beginPath(); open = true;
+        }
         const sx = shiftX(camX, p.x);
         const sy = shiftY(camY, p.y);
-        ctx.strokeStyle = `rgba(${color}, ${alpha})`;
 
         switch (shape) {
             case TrailShape.CIRCLE: {
-                ctx.beginPath();
+                ctx.moveTo(sx + radius, sy);
                 ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-                ctx.stroke();
                 break;
             }
             case TrailShape.SQUARE: {
                 // Axis-aligned square inscribed in the same radius envelope
                 const d = radius * 2;
-                ctx.strokeRect(sx - radius, sy - radius, d, d);
+                ctx.rect(sx - radius, sy - radius, d, d);
                 break;
             }
             case TrailShape.TRIANGLE: {
@@ -105,12 +127,10 @@ export function drawPlayerTrail(
                 const blY = sy + sin * back + cos * side;
                 const brX = sx + cos * back + sin * side;
                 const brY = sy + sin * back - cos * side;
-                ctx.beginPath();
                 ctx.moveTo(tipX, tipY);
                 ctx.lineTo(blX, blY);
                 ctx.lineTo(brX, brY);
                 ctx.closePath();
-                ctx.stroke();
                 break;
             }
             case TrailShape.LINE: {
@@ -120,32 +140,32 @@ export function drawPlayerTrail(
                 const ang = (p.angle ?? 0) + Math.PI / 2;
                 const cos = Math.cos(ang);
                 const sin = Math.sin(ang);
-                ctx.beginPath();
                 ctx.moveTo(sx - cos * radius, sy - sin * radius);
                 ctx.lineTo(sx + cos * radius, sy + sin * radius);
-                ctx.stroke();
                 break;
             }
             case TrailShape.DOTS: {
                 // Filled dot at fixed START_RADIUS — does not expand;
                 // only alpha fades over lifetime.
-                ctx.fillStyle = `rgba(${color}, ${alpha})`;
-                ctx.beginPath();
+                ctx.moveTo(sx + startR, sy);
                 ctx.arc(sx, sy, startR, 0, Math.PI * 2);
-                ctx.fill();
                 break;
             }
         }
     }
+    if (open) { if (fill) ctx.fill(); else ctx.stroke(); }
+    ctx.restore();
 }
 
-// Continuous polyline through every active trail point.  Each segment is
-// stroked individually with alpha driven by the *older* endpoint's own
-// lifetime ratio so the tail segment fades to zero just before its
-// source point is culled (otherwise the path would lose whole segments
-// at full opacity every EMIT_INTERVAL and read as choppy).  The ratio
-// is squared so the fade is visible mid-trail during continuous thrust,
-// not just near the disappearing tail.  Segments are skipped when:
+// Continuous polyline through every active trail point.  Each segment's
+// alpha is driven by the *older* endpoint's own lifetime ratio so the tail
+// segment fades to zero just before its source point is culled (otherwise
+// the path would lose whole segments at full opacity every EMIT_INTERVAL and
+// read as choppy).  The ratio is squared so the fade is visible mid-trail
+// during continuous thrust, not just near the disappearing tail.  BATCHED:
+// consecutive segments in the same alpha step are one polyline and one
+// stroke, so a long trail costs a few dozen strokes, not one per segment,
+// and joins without overlap at its joints.  Segments are skipped when:
 //   • the newer point is flagged chainStart (thrust restart — old chain
 //     should keep fading on its own, no bridge to the new chain), or
 //   • consecutive shifted points straddle a wrap seam.
@@ -160,20 +180,27 @@ function drawPlayerTrailPath(
     t: TrailPoint[],
     camX: number,
     camY: number,
-    color: string,
     peak: number,
 ) {
     if (t.length < 2) return;
 
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'round';
     const SEAM_BREAK_SQ = (HALF_MAP_WIDTH * 0.5) * (HALF_MAP_WIDTH * 0.5);
     let prevX = shiftX(camX, t[0].x);
     let prevY = shiftY(camY, t[0].y);
+    let step = -1;
+    let open = false;
+    // Whether the path's pen currently sits at (prevX, prevY), so the next
+    // segment continues the polyline instead of starting a new one.
+    let joined = false;
     for (let i = 1; i < t.length; i++) {
         const cx = shiftX(camX, t[i].x);
         const cy = shiftY(camY, t[i].y);
         const dx = cx - prevX;
         const dy = cy - prevY;
         const seamSpan = dx * dx + dy * dy > SEAM_BREAK_SQ;
+        let drew = false;
         if (!seamSpan && !t[i].chainStart) {
             const p0 = t[i - 1];
             const r0 = p0.maxLifetime > 0 ? Math.max(0, Math.min(1, p0.lifetime / p0.maxLifetime)) : 0;
@@ -181,16 +208,23 @@ function drawPlayerTrailPath(
                 // Squared ratio biases more of the fade toward the head
                 // half of the trail so the gradient reads even while
                 // new points are constantly being emitted.
-                ctx.strokeStyle = `rgba(${color}, ${peak * r0 * r0})`;
-                ctx.beginPath();
-                ctx.moveTo(prevX, prevY);
+                const q = Math.max(1, Math.round(r0 * r0 * FADE_STEPS));
+                if (q !== step) {
+                    if (open) ctx.stroke();
+                    step = q;
+                    ctx.globalAlpha = peak * (q / FADE_STEPS);
+                    ctx.beginPath(); open = true; joined = false;
+                }
+                if (!joined) ctx.moveTo(prevX, prevY);
                 ctx.lineTo(cx, cy);
-                ctx.stroke();
+                drew = true;
             }
         }
+        joined = drew;
         prevX = cx;
         prevY = cy;
     }
+    if (open) ctx.stroke();
 }
 
 function ensureTrailScratch(r: RenderSystem, n: number) {
@@ -210,7 +244,6 @@ export function drawTrailStrip(
     mode: 'projectile',
     camera: CameraState,
     entityColor?: string,
-    isBouncer?: boolean
 ) {
     // Pre-shift every trail point into the camera's wrap zone so a trail
     // that spans a seam (emitter just wrapped) renders as one continuous
@@ -280,13 +313,7 @@ export function drawTrailStrip(
     // so the trail dims uniformly as its newest point ages out.
     const head = t[t.length - 1];
     const headRatio = Math.max(0, Math.min(1, head.lifetime / head.maxLifetime));
-    if (isBouncer) {
-        // Bouncer beam: solid pure-green line with no fade along the trail.
-        // The short lifetime already makes the beam self-limiting; we want
-        // it sharp while it's visible.
-        const [r, g, b] = hexToRgb(entityColor || '#22c55e');
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 1)`;
-    } else {
+    {
         const grad = ctx.createLinearGradient(sx[0], sy[0], sx[t.length - 1], sy[t.length - 1]);
         const [r, g, b] = hexToRgb(entityColor || '#facc15');
         grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
