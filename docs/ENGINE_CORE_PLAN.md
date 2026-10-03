@@ -302,6 +302,26 @@ the station return and the installed-only wipe (`GameEngine.returnToStation`
 D11 ratifies the build and S2's job there is to PERSIST it.  The only genuinely
 new behaviour the death policy still owes is **D10's wreck**.
 
+**SCOPE — CHARACTER AND SETTINGS ONLY** (user call D14, 2026-10-03).  `S2`
+persists the things `S6`'s world redesign (D13) cannot move, and defers the
+rest: **IN** — settings, credits, cargo contents, purchased hex-slot counts,
+and the outstanding wreck record; **OUT** — per-arena world state (which
+nodes keep destroyed tiles and `found` flags).  Deferring that is not a gap:
+D8 already made arenas regenerate per entry, so today's behaviour IS the
+design, and `S6` owns world persistence when it owns the world.  Two
+consequences worth stating because each is easy to get wrong:
+- **The HUB is the one world item `S2` cannot skip**, since D8 made it
+  persistent while arenas are not.  The cheap path is a FIXED hub seed —
+  the hub then regenerates identically every launch for zero bytes of save
+  file — rather than serializing a world.  Whether destroyed hub terrain
+  should also survive a relaunch is a separate question, and a real one to
+  put to the user: it is the difference between a stable backdrop and a hub
+  the player can permanently strip.
+- **The WRECK record is character state, not world state**, which is what
+  keeps D10 inside this scope: `{arena id, seed, position, modules, expiry}`
+  pins one seed, and S1's seeded generation reproduces that arena's terrain
+  from it.  No arena needs to be serialized for a wreck to be recoverable.
+
 **OPEN DECISIONS — for the user, inside S2.**
 
 - **D-S2-a — What is in the save file BEYOND the settled floor?**  The floor
@@ -481,6 +501,62 @@ nothing in `S1`–`S4` should be shaped around it.
 
 ---
 
+### S6 — "The world"  (connected arena graph + arena families + world persistence)
+
+Added by user call **D13** (2026-10-03), which gave D9's hand-up a home: it
+runs **after `S4`**, i.e. after the mobile release.  The numbering skips 5
+because `S5` was already logged as Steam — see §6.
+
+**Why it is last, and what that costs.**  Running it last means the mobile
+release ships on today's arena model.  That is coherent, because D8 already
+made arenas regenerate per entry, so "arenas do not persist" is the design
+rather than a defect to fix before a store release.  The cost accepted is
+that `S6` lands a connected map graph AFTER players have save files, so
+D-S2-e's save-version policy is what absorbs it.
+
+**The ask, in the user's own framing (D9).**  Today's maps are mostly test
+terrain.  Arenas should be REDESIGNED and purpose-built, and connected as a
+TREE with interconnectivity, so the player TRAVELS through arenas to get
+home instead of a portal depositing them at their station — the universe
+gains physical extent (cf. No Man's Sky).  Arena families the user named:
+- **LABYRINTH** — maze maps of indestructible tiles leading to rare items
+  or salvage.
+- **DENSE** — maps fully enclosed in tile structure that the player DIGS
+  through.
+- **WAVE ARENAS** — a graded difficulty range using the whole enemy
+  catalog in its deeper varieties.
+
+**Engine payload.**  Graph edges on the `MAP_DESCRIPTORS` registry, which
+carries none today.  Per-node world persistence (which nodes keep destroyed
+tiles and `found` flags) — deferred here from `S2` by D14, so this session
+owns it.  Arena layouts as DATA, which `S3` will have made the pattern for.
+The descent machinery (`openDescentPortal`, `GameEntity.isDescent`,
+`transitionToMap(id, {descend:true})`, depth / `waveOffset` / the stage
+stride) is still present, uncalled and tested — D5 and D9 left it switched
+off for exactly this session, so this is where it is either wired or
+deleted.
+
+**OPEN DECISIONS — for the user, inside `S6`.**  Not to be pre-answered
+here; stated so the session knows what to ask.
+- What is the graph's SHAPE: a tree, a tree with shortcuts, or a general
+  graph?  The user said "tree with interconnectivity", which is a graph —
+  the question is whether edges are one-way, and whether the route home is
+  ever the route you came.
+- Is the graph FIXED or GENERATED per character?  This interacts with D8
+  (arenas are seeded per entry) and with D14 (the hub is persistent).
+- Does travel cost anything — time, fuel, risk — or is it purely spatial?
+  D10 made a death's cost the trip home, so this prices deaths too.
+- Which nodes PERSIST their terrain and which regenerate?  The inherited
+  constraint from D8/D14 is that the hub persists and arenas do not; a
+  connected world has to decide where each new node sits on that line.
+- Do the three named families need different generators, or one generator
+  with different parameters?
+
+**Must not touch.**  The sim's determinism contract from `S1`.  The ports
+from `S2`.
+
+---
+
 ## 5. Branch and CI conventions
 
 **One integration branch off `main`** holds all of `S1`–`S4`:
@@ -506,8 +582,23 @@ instead of two.  And it means the plan doc has lived on this branch from the
 start, which is why `main` does not carry it yet (PR #108): a work session
 must take the plan from the integration branch, not from the default one.
 
-**This plan doc must reach `main` early**, because fresh work sessions
-clone the default branch and would otherwise not see it.
+~~**This plan doc must reach `main` early**, because fresh work sessions
+clone the default branch and would otherwise not see it.~~  **OVERTAKEN by
+user call D15** (2026-10-03): the phase PR (#108) ACCUMULATES `S1`–`S4` and
+promotes once, so the plan will NOT reach `main` early and this requirement
+is withdrawn rather than left standing as an unmet one.
+
+What replaces it is **brief hygiene, and it is the PM session's
+responsibility, not a work session's**.  The hazard is real and has already
+fired once: the `S1` brief said `git checkout -B <branch> origin/main`, and
+because the plan lived only on this branch that command would have DELETED
+`docs/ENGINE_CORE_PLAN.md` from the working tree of a session whose first
+instruction was to read it.  It was caught before the session ran it.  So
+every brief the PM session writes MUST carry the two commands above
+verbatim, naming the integration branch, and must never name `main` as a
+branch point.  That is entirely within the PM session's control, which is
+why accumulating is safe — the mitigation does not depend on a work session
+noticing anything.
 
 **CI maps onto the existing two-scope design** (CLAUDE.md §7) with no new
 machinery, and it is already WIRED: `claude/steam-game-publishing-xhnui2`
@@ -542,7 +633,11 @@ playing the preview link on a phone.
 
 ## 6. Session ordering
 
-Current order: **S1 → S2 → S3 → S4**, S5 deferred.
+Current order: **S1 → S2 → S3 → S4 → S6**, S5 (Steam) still deferred
+(user call D13, 2026-10-03).  `S6` is the world-design session and sits at
+the END, after the mobile release.  The numbering SKIPS 5 on purpose: `S5`
+was already logged as Steam and renumbering a decided plan is churn, so the
+gap is deliberate rather than a mistake.
 
 Rationale, so a later session can argue with it: `S1` first because it is
 the only item that decays (new `Math.random()` sites accrue) and because
@@ -550,6 +645,15 @@ its harness makes later refactors verifiable; `S2` second because
 D-S2-c's cheap implementation depends on `S1`; `S3` and `S4` may swap
 freely.  Flipping `S1` and `S2` is defensible if persistence is wanted
 sooner — `S2` is the larger product win and does not decay.
+
+`S6` last (D13) means the mobile release ships on today's arena model, and
+that is COHERENT rather than a compromise: D8 already made arenas
+regenerate per entry, so "no arena persistence" is the designed behaviour
+and not a gap a store release has to close.  What makes it work is D14 —
+`S2` persists the CHARACTER and defers world state — so nothing in `S2`
+is built against a map model `S6` will replace.  The cost accepted is that
+`S6`'s connected map graph arrives after players already have save files,
+so D-S2-e's save-version policy is load-bearing: see `S2`.
 
 ---
 
@@ -576,6 +680,9 @@ who made it, and the consequences for other sessions.
 | D10 | PM | 2026-10-03 | **The incentive inversion in D4+D6 is resolved by a RECOVERABLE WRECK** (user call).  The problem put to the user, with the numbers: D4 wipes equipment and D6 removed the credit penalty, so a credit in the bank became 100% safe while a credit spent on a module became 100% at risk — the exact reverse of CLAUDE.md §3's stated intent, *"the penalty taxes hoarding, not investment."*  Measured from `MODULE_DEFS`: a full outfit is ≈413,500 credits (ship flower ≈144,000, weapon flower ≈269,500) against combat income of ~8–10k a wave / ~50–60k a six-wave stage — so a FULL wipe would have cost seven to eight stages of play, where D6's deleted penalty cost ~1.5–2 waves and never touched money already spent.  **CORRECTION (PM, same day, after reading the merged code):** that full-wipe figure is NOT what a death costs in the shipped build, and the framing put to the user overstated it.  `GameEngine.returnToStation` calls `resetOutfit(true)`, so CARGO AND PURCHASED HEX SLOTS ALREADY SURVIVE — see D11.  The real exposure is only the value of what was MOUNTED and not also held in cargo.  The inversion is therefore real but SMALLER than measured: what it penalises is MOUNTING a module rather than owning one.  Options weighed: station locker (PM's recommendation — gear left at a station survives) / permanent-vs-consumable split (credits buy death-proof capability through the already-no-op `purchaseSlot` and `SHIP_WEIGHT.HULL_BASE` seams) / **recoverable wreck** / insurance.  **Call: the recoverable wreck** — death leaves the fitted loadout at the site and the player flies back for it. | SUPERSEDES the "ELIMINATES ALL OF THEIR EQUIPMENT" half of D4: equipment is SUSPENDED, not destroyed, and the cost of a death is the trip plus the risk of the trip rather than the gear.  Pairs with D9 — a connected world with physical extent is what makes the trip meaningful.  TWO sub-decisions S2 must put to the user before building the save file: (1) WHERE the wreck sits, which collides with D8 (an arena is seeded per ENTRY and does not persist) — PM's recommendation is to PIN that arena's seed until the wreck is recovered or lost, because S1's seeded generation makes the terrain reproduce exactly, so the wreck's position stays valid and the persisted record is only `{arena id, seed, position, modules, expiry}`; the cheap alternative is surfacing the wreck at the arena's RETURN RIFT, which persists arena identity only; (2) HOW a wreck is LOST — PM's recommendation is **on a second death before recovery, never a wall-clock timer**: this is a mobile game played in short sessions, so a decaying timer punishes putting the phone down.  `moveModule`'s drydock-only guard is now LOAD-BEARING and must stay: with cargo safe (D11) and the fitted loadout at risk, a player able to uninstall mid-arena would strip the ship whenever threatened. |
 | D11 | PM | 2026-10-03 | **A death wipes INSTALLED modules only; CARGO survives** (user call).  Options weighed: installed + cargo (PM's recommendation under the locker option) / **installed only, cargo survives** / installed + cargo minus one designated keep.  **This RATIFIES WHAT S1 ALREADY BUILT rather than changing it** — D4's row left it open as *"(installed and cargo — to be confirmed in PR 2)"*, and PR 2 resolved it to cargo-survives without logging the resolution: `returnToStation` calls `resetOutfit(true)`, which keeps the inventory AND the purchased hex-slot counts.  So this row closes D4's open parenthesis; S2 must PERSIST this behaviour, not implement it. | This, not D10, is what actually closes the inversion: the 12 cargo tiles are a safe bench carried aboard, so converting credits into modules is no longer strictly worse than leaving them idle, and D10 then makes even the fitted loss temporary.  The bench is bounded by `INVENTORY_CAPACITY` 12 — and the two flowers hold 14 hexes of which 2 carry the free Base Hull and Projector, so there are exactly **12 purchasable mounted slots against 12 cargo tiles**.  That coincidence matters: a player who buys a DUPLICATE of everything mounted is fully hedged and loses nothing to a death, at double the outfit cost.  So the remaining perverse incentive is not "fly bare" but "buy two of everything", and that ratio is the balance lever for the economy pass — not a number to change here.  The wreck (D10) therefore holds only what was MOUNTED.  S2's save scope from D4/D6/D8/D10/D11: credits, cargo contents, the hub world, an outstanding wreck record, and nothing for an arena beyond its seed.  The run summary needs re-thinking again — D6 deleted its "lost to the wreck" credit line and D10 restores a wreck that holds modules, so the summary should name what the wreck holds and where it is. |
 | D12 | PM | 2026-10-03 | **The integration branch is `claude/steam-game-publishing-xhnui2`, not `claude/engine-core`** (user call): *"I would prefer to work off of claude/steam-game-publishing-xhnui2 as the primary branch for this work. Then merge all of that into main."*  The two branches were the SAME commit (`af3c8ba`) when the switch was made, so this moved no code. | §5 rewritten; `claude/engine-core` abandoned at that commit and never pushed to again.  `.github/workflows/pr-checks.yml` lists the new name in `push.branches`, so a push to it runs the FULL suite — verified end to end on `6305ab7` (19m00s, green) alongside the PR-push smoke run (1m23s, green).  Four CLAUDE.md passages describing the full-CI branch list were corrected in the same commit.  PR #109 was retargeted in place rather than reopened. |
+| D13 | PM | 2026-10-03 | **D9's world-design workstream becomes its own session, `S6`, placed AFTER `S4`** (user call).  Options weighed: own session next, after `S2` (PM's recommendation — keeps the ports and headless sim moving while the game design is open) / own session BEFORE `S2` (cleanest schema, delays the infrastructure) / fold into `S3` as its first content table / **after `S4`, at the end**. | §4 gains an `S6` brief carrying D9's three named arena families (labyrinth, dig-through, graded wave arenas), the `MAP_DESCRIPTORS` graph-edge work, and five open decisions for the user inside that session.  §6's order becomes `S1 → S2 → S3 → S4 → S6`, SKIPPING 5 because `S5` was already logged as Steam — the gap is deliberate, not an error.  CONSEQUENCE ACCEPTED: the mobile release ships on today's arena model, which is coherent only because D8 already made arenas regenerate per entry, so "arenas do not persist" is the design rather than a gap a store release must close; and `S6`'s map graph arrives AFTER players hold save files, which makes D-S2-e's save-version policy load-bearing.  The descent machinery D5/D9 left switched off is now explicitly `S6`'s to wire or delete. |
+| D14 | PM | 2026-10-03 | **`S2` persists the CHARACTER and SETTINGS only; world state is deferred to `S6`** (user call).  Options weighed: **character + settings only** (PM's recommendation) / everything including per-arena world state, migrating later / settings only, deferring all game state. | IN: settings, credits, cargo contents, purchased hex-slot counts, the outstanding wreck record.  OUT: per-arena world state (which nodes keep destroyed tiles and `found` flags) — deferred into `S6` by D13, so nothing in `S2` is built against a map model `S6` replaces.  TWO refinements written into §4 because each is easy to get wrong: the HUB is the one world item `S2` cannot skip (D8 made it persistent while arenas are not), and the cheap path is a FIXED hub seed — identical regeneration for zero save bytes — rather than serializing a world, with "does destroyed hub terrain survive a relaunch" a real question for the user inside `S2`; and the WRECK record is CHARACTER state, not world state, which is what keeps D10 inside this scope, since pinning `{arena id, seed, position, modules, expiry}` lets S1's seeded generation reproduce that arena without serializing it. |
+| D15 | PM | 2026-10-03 | **The phase PR (#108) ACCUMULATES `S1`–`S4` and promotes to `main` once** (user call).  Options weighed: merge once CI is green, then open a fresh phase PR (PM's recommendation — removes a standing footgun) / **accumulate the whole phase**. | WITHDRAWS §5's standing requirement that "this plan doc must reach `main` early", which is struck there rather than left as an unmet requirement.  The hazard it existed for is real and has already fired once — the `S1` brief's `git checkout -B <branch> origin/main` would have deleted the plan from the working tree of a session told to read it, caught before it ran — so the mitigation is now BRIEF HYGIENE and it is the PM session's responsibility: every brief carries the integration-branch checkout commands verbatim and never names `main` as a branch point.  That is wholly within the PM session's control, which is what makes accumulating safe.  #108 stays open and its githack preview keeps tracking the integration tip, which is also how the phase stays play-testable on a phone throughout. |
 
 ---
 
@@ -636,7 +743,7 @@ history stays readable.
   (PR #108) when S1 began, so `git checkout -B claude/engine-core origin/main`
   would have dropped it.  S1 branched from the plan branch instead.
   *(S1, 2026-10-02)*
-- **S1 → PM (world design, D9).**  The descent rift is closed as S1's item and
+- ~~**S1 → PM (world design, D9).**  The descent rift is closed as S1's item and
   handed up: the user wants a redesigned, connected tree of purpose-built
   arenas (labyrinth, dig-through, graded wave arenas) with physical travel
   between them in place of direct portals to the station.  This is a
@@ -645,4 +752,8 @@ history stays readable.
   `found` flags, today lost on re-entry), S3 (arena layouts as DATA — the
   natural first content table to extract) and the `MAP_DESCRIPTORS` registry,
   which today carries no graph edges.  Needs a home in §4 / §6 and a decision
-  on whether it is a fifth session.  *(S1, 2026-10-03)*
+  on whether it is a fifth session.~~  *(S1, 2026-10-03; RESOLVED by D13, PM
+  2026-10-03 — it is its own session `S6`, placed AFTER `S4`, and §4 now
+  carries its brief.  The per-node persistence it asked about was deferred
+  out of `S2` into `S6` by D14, so `S6` owns both the world and its save
+  format.)*
