@@ -1,7 +1,20 @@
 # The adaptive score
 
-Omni's music is one original piece — D minor, 128 BPM, 32 bars (exactly
-60 s) — rendered as six synchronised stems that the game fades in and out by
+Omni's music is three original songs, each rendered as six synchronised stems.
+This page describes **Omni** (D minor, 128 BPM, 32 bars = 60 s, `compose.py`);
+**Event Horizon** (E minor, 160 BPM, 32 bars = 48 s, `song2.py`) is the
+heavier one — a thrash skank beat with 16th palm mutes in groove, a
+syncopated 3+3+2 riff with double kick and chinas in heavy, twin leads in
+thirds throughout in apex, and an E-against-F Phrygian chug for the boss.
+Its pulse layer is a crunchy picked guitar arpeggio rather than a synth.
+**Critical Mass** (C minor, drop-C guitars, 150 BPM with half-time drums,
+51.2 s, `song3.py`) is built on the overamped rig (`guitar.amp_hi`): a sludge
+riff walking G–G♭–F–E♭ on two hard-panned guitars plus a distorted bass in
+groove, two more takes on different amp voicings in heavy (quad-tracked),
+a screaming lead with pinch-harmonic squeals in apex, ♭2/tritone doom chords
+for the boss, and distant amp-feedback swells in the exploration bed.
+Guitars sit ~3 dB above the drums (the first two songs measure ~4 dB below).
+Both are faded in and out by
 intensity (`engine/systems/AdaptiveMusic.ts`). Everything is synthesized by
 these scripts; there are no samples, so nothing here needs attribution.
 
@@ -32,13 +45,21 @@ key (kicks settle on A1, snare body on F3, ride bell D7/A7, taiko A1/D2).
   asymmetric high-gain amp and a 4x12 cabinet (scooped mids, presence bump).
   A track is rendered clean, then amped as a whole, so chords distort
   together. Lead guitar is a bent, vibrato'd oscillator into the same amp.
+  `amp_hi` is the overamped rig: overdrive pedal → three cold-clipping
+  preamp stages → sagging power amp → 4x12 cab voiced for weight (bite to
+  body ~5.7:1 vs ~12:1 for `amp`), four voicings for quad-tracking; plus a
+  distorted bass rig and pinch-harmonic squeals.
 - `compose.py` — the score itself (chord chart, melody, every pattern) and the
   stem renderers. Each stem is rendered as three passes of the loop and the
   steady-state middle pass is cut out, so reverb/delay tails wrap and the file
   is exactly periodic. `python compose.py groove` renders one stem.
-- `mix.py` — per-stem loudness targets, soft clip, a report of every
+- `song2.py` — Event Horizon, same structure and contract (writes `out/b-*`).
+- `song3.py` — Critical Mass (writes `out/c-*`; its groove stays stereo).
+- `mix.py` — (`python mix.py` Omni, `b-` Event Horizon, `c-` Critical Mass) per-stem loudness targets, soft clip, a report of every
   intensity stack's loudness and peak, one global trim.
-- `build.py` — all of the above, then encodes into `public/assets/audio/`.
+- `stingers.py` — the three victory stingers (tonic chord resolving major, on each song's rig).
+- `build.py` — every song end to end, encoded into `public/assets/audio/`
+  (`score-*` Omni, `score2-*` Event Horizon, `score3-*` Critical Mass).
 
 ## Changing the music
 

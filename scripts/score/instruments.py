@@ -5,10 +5,10 @@ from synth import (SR, mtof, rng_for, saw, square, sine, svf, adsr, expdecay,
 
 # ── drums ───────────────────────────────────────────────────────────────────
 
-def kick(vel=1.0, key=0):
+def kick(vel=1.0, key=0, f_end=55.0):
     n = int(0.55 * SR)
     t = np.arange(n) / SR
-    f = 55.0 + 120 * np.exp(-t / 0.032)   # settles on A1, the key's fifth
+    f = f_end + 120 * np.exp(-t / 0.032)   # settles on the key's fifth (A1 for D minor)
     body = sine(f, n) * np.exp(-t / 0.30)
     r = rng_for('kick', key)
     click = svf(r.standard_normal(n).astype(np.float32) * np.exp(-t / 0.004), 3500, 0.7, 'bp')
@@ -330,11 +330,11 @@ def impact(length=4.0):
     return (np.stack([body, body]) + cr * 0.8).astype(np.float32)
 
 
-def metal_kick(vel=1.0, key=0):
+def metal_kick(vel=1.0, key=0, f_end=55.0):
     """Tighter, clickier kick for double-kick work: less boom, more beater."""
     n = int(0.32 * SR)
     t = np.arange(n) / SR
-    f = 55.0 + 150 * np.exp(-t / 0.018)
+    f = f_end + 150 * np.exp(-t / 0.018)
     body = sine(f, n) * np.exp(-t / 0.17)
     r = rng_for('mkick', key)
     click = svf(r.standard_normal(n).astype(np.float32) * np.exp(-t / 0.0025), 4500, 0.9, 'bp')

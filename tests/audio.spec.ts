@@ -413,6 +413,55 @@ test('a new arena opens a new phrase', async ({ page }) => {
   watch.assertClean();
 });
 
+// THE MUSIC DIRECTOR (MUSIC_PLAN in AdaptiveMusic).  Each area owns a theme —
+// the hub and field_* maps Omni, arena_* maps Event Horizon — a boss brings
+// in the boss theme (Critical Mass) with an impact, and its death plays the
+// victory stinger and hands back to the area's theme.  A pin overrides all.
+test('the director: area themes, a boss theme, a victory hand-back, and pins', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page, 'POCKET');
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
+  const song = () => engine(page, e => e.audio.music.song.id);
+  await expect.poll(song, { timeout: 20000 }).toBe('event-horizon');      // arena_pocket → battle theme
+  expect(await engine(page, e => e.audio.music.area)).toBe('arena_pocket');
+
+  await engine(page, e => e.transitionToMap('overworld'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');               // home sounds like home
+
+  await engine(page, e => e.debugSpawnBoss());
+  await expect.poll(song, { timeout: 20000 }).toBe('critical-mass');      // the boss theme takes over
+  expect(await engine(page, e => e.audio.music.lastStinger)).toBe('impact');
+  await page.waitForFunction(() => window.__omniEngine.audio.music.isLayerOn('boss'), null, { timeout: 20000 });
+
+  // The last boss dies: victory stinger, drums down, back to the area theme.
+  await engine(page, e => {
+    for (const x of e.entityIndex.enemies) if ((x as { isBoss?: boolean }).isBoss) (x as { active: boolean }).active = false;
+    e.audio.musicBossDefeated();
+  });
+  expect(await engine(page, e => e.audio.music.lastStinger)).toBe('victory');
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');
+  await expect.poll(() => engine(page, e => e.audio.music.battleActive), { timeout: 20000 }).toBeFalsy();
+
+  // A pin overrides the plan, through a portal, and AUTO restores it.
+  await engine(page, e => e.audio.music.setSongMode(1));
+  await expect.poll(song, { timeout: 20000 }).toBe('event-horizon');
+  await engine(page, e => e.transitionToMap('arena_pocket'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'back in the arena');
+  expect(await song()).toBe('event-horizon');
+  await engine(page, e => e.audio.music.setSongMode(0));
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');
+  await engine(page, e => e.audio.music.setSongMode('auto'));
+  await expect.poll(song, { timeout: 20000 }).toBe('event-horizon');      // back to the plan for this arena
+  // Two songs are resident only for the length of a decode.
+  expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(110 * 1024 * 1024);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
 test('a lull inside one arena still holds the combat layers up', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);

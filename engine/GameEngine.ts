@@ -1535,7 +1535,7 @@ export class GameEngine {
    *  alongside them) is deliberately NOT touched — resetAndLoadSelectedMap
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
-  private loadMapFresh(type: MapType) {
+  private loadMapFresh(type: MapType, viaPortal = false) {
       this.shards.reset();
       this.energy.reset();
       this.perfController.reset();
@@ -1593,7 +1593,11 @@ export class GameEngine {
       // ORDER STILL MATTERS: combat went down on the lines above, so the
       // combat layers are already leaving when the phrase restarts, and the
       // destination's own first engagement brings them back on a downbeat.
-      this.audio.cueEncounter('map');
+      // The area picks its theme (the music director's plan — see MUSIC_PLAN
+      // in AdaptiveMusic); a different song comes in seamlessly on a bar line.
+      const area = descriptorForMapType(type);
+      this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
+      this.audio.cueEncounter(viaPortal ? 'portal' : 'map');
       this.loadMapSeeded(type);
   }
 
@@ -1819,7 +1823,7 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
 
-      this.loadMapFresh(dest.mapType);
+      this.loadMapFresh(dest.mapType, true);
       // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
       // back at the map just left — which is exactly the hub's per-arena
       // portal — surface beside that rift rather than at the map's declared
@@ -2923,6 +2927,9 @@ export class GameEngine {
           forced: this.audio.music.forcedIntensity,
           layers: this.audio.music.activeLayers,
           bar: this.audio.music.bar,
+          song: this.audio.music.song.title,
+          songPinned: this.audio.music.songMode !== 'auto',
+          pending: this.audio.music.pendingSong?.title ?? null,
         } : null,
       },
     });

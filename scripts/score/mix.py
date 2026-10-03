@@ -1,4 +1,4 @@
-"""Balance the stems, verify every intensity stack, and encode.
+"""Balance one song's stems (`python mix.py` for song A, `python mix.py b-` for B), verify every intensity stack, and encode.
 
 Loudness targets are per STEM ALONE (integrated LUFS).  The game plays every
 stem at layer gain 1.0 when it is on, so the balance between layers lives
@@ -12,6 +12,8 @@ from synth import SR
 
 TARGET = {'atmos': -20.0, 'pulse': -25.0, 'groove': -19.5, 'heavy': -21.0, 'apex': -21.5, 'boss': -21.0}
 MONO = {'groove', 'boss'}
+# Critical Mass keeps its groove stereo: the riff IS two hard-panned guitars.
+MONO_BY_SONG = {'c-': {'boss'}}
 # soft-clip knee per stem (as a fraction of the stem's own peak): tames lone
 # transients so stems can sit louder without the stack clipping
 KNEE = {'atmos': 1.0, 'pulse': 0.8, 'groove': 0.55, 'heavy': 0.6, 'apex': 0.75, 'boss': 0.55}
@@ -31,10 +33,14 @@ def softclip(x, knee):
     return y.astype(np.float32)
 
 
+PREFIX = sys.argv[1] if len(sys.argv) > 1 else ''   # '' = Omni, 'b-' = Event Horizon, 'c-' = Critical Mass
+MONO = MONO_BY_SONG.get(PREFIX, MONO)
+
+
 def load():
     st = {}
     for n in TARGET:
-        x = np.load(f'out/{n}.npy')
+        x = np.load(f'out/{PREFIX}{n}.npy')
         if n in MONO:
             m = (x[0] + x[1]) * 0.5
             x = np.stack([m, m])
@@ -65,5 +71,5 @@ if __name__ == '__main__':
     os.makedirs('final', exist_ok=True)
     for n, x in st.items():
         x = x * g
-        sf.write(f'final/{n}.wav', (x[0] if n in MONO else x.T), SR, subtype='FLOAT')
-    np.save('final/_trim.npy', np.array([g]))
+        sf.write(f'final/{PREFIX}{n}.wav', (x[0] if n in MONO else x.T), SR, subtype='FLOAT')
+    np.save(f'final/_{PREFIX}trim.npy', np.array([g]))

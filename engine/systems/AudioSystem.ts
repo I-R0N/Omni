@@ -1,6 +1,6 @@
 import { fxRng } from './rng';
 import CINEMATIC_BANKS from './CinematicBank.json';
-import { AdaptiveMusic, type MusicThreat } from './AdaptiveMusic';
+import { AdaptiveMusic, SONGS, type MusicThreat } from './AdaptiveMusic';
 import { finishVoice } from './SfxVoicing';
 import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
 import SFX_MANIFEST from 'virtual:sfx-manifest';
@@ -192,6 +192,7 @@ export class AudioSystem {
   private _musicVolume = 1;
   private _combat = false;
   private _threat: MusicThreat | null = null;
+  private _area: { id: string; kind: 'hub' | 'arena' } | null = null;
   private live = new Set<LiveVoice>();
   private synthesized = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
   private _prepared = false;
@@ -407,6 +408,11 @@ export class AudioSystem {
     }
 
     this.music = new AdaptiveMusic(this.ctx, this.buses.get('music')!);
+    if (this._area) {
+      // Start on the area's own theme rather than swapping to it after.
+      this.music.setArea(this._area.id, this._area.kind);
+      this.music.cueEncounter('map');
+    }
     this.music.setEnabled(!this._muted && this._musicVolume > 0);
     this.music.setActive(this._active);
     this.music.setCombat(this._combat);
@@ -667,9 +673,25 @@ export class AudioSystem {
    *  field: the score returns to bar 1 at the next bar line (a boss also
    *  lands an impact).  A no-op before the first gesture creates the score:
    *  there is no phrase to cut yet, and the score starts at bar 1 anyway. */
-  public cueEncounter(kind: 'map' | 'boss') { this.music?.cueEncounter(kind); }
+  public cueEncounter(kind: 'map' | 'portal' | 'boss') { this.music?.cueEncounter(kind); }
+  /** The area a map load is entering — the director picks its theme.  Kept
+   *  so a score created later (first gesture) starts on the right song. */
+  public setMusicArea(id: string, kind: 'hub' | 'arena') {
+    this._area = { id, kind };
+    this.music?.setArea(id, kind);
+  }
+  /** The last live boss died: victory stinger, then the area theme. */
+  public musicBossDefeated() { this.music?.bossDefeated(); }
   /** Debug: pin the score's intensity (null = follow the game). */
   public setMusicDebugIntensity(v: number | null) { this.music?.setDebugIntensity(v); }
+  /** Debug: AUTO (rotate songs on each map change) → pin each song in turn. */
+  public cycleMusicSong() {
+    const m = this.music;
+    if (!m) return;
+    const modes: ('auto' | number)[] = ['auto', ...SONGS.map((_, i) => i)];
+    const i = modes.findIndex(v => v === m.songMode);
+    m.setSongMode(modes[(i + 1) % modes.length]);
+  }
   /** Debug: step the pinned intensity through the layer thresholds. */
   public cycleMusicDebugIntensity() {
     const steps: (number | null)[] = [null, 0, 0.25, 0.45, 0.7, 0.9, 1];

@@ -118,17 +118,15 @@ def stem_atmos():
                 place(low, np.stack([I.drone(m, 8 * BAR + 1.5, v, key=(seg, m))] * 2), T(seg * 8, 0, k) - 1.0)
         for seg in range(8):
             place(low, I.shimmer(4 * BAR, 0.18, key=seg), T(seg * 4, 0, k))
-        # bells: sparse chord tones in half A and the last quarter; the theme,
-        # slowed, in bars 17-24
-        motif = [(16, 0, 81), (16, 8, 86), (17, 0, 88), (17, 8, 89),
-                 (18, 0, 88), (18, 8, 86), (19, 0, 84), (19, 8, 79),
-                 (20, 0, 81), (20, 8, 84), (21, 0, 89), (21, 8, 88),
-                 (22, 0, 86), (22, 12, 81), (23, 8, 74)]
+        # bells: a RARE accent (trimmed on feedback — they were too present):
+        # four anchor notes of the theme, slowed, across bars 17-24, and a
+        # chord tone in roughly one bar in ten elsewhere
+        motif = [(16, 0, 81), (18, 0, 88), (20, 0, 81), (22, 0, 86)]
         for bar, step, m in motif:
             place(bells, I.bell(m, 0.5, key=(bar, step)), T(bar, step, k))
         for bar in list(range(0, 16)) + list(range(24, 32)):
             r = rng_for('bellpos', bar)
-            if r.random() < 0.7:
+            if r.random() < 0.1:
                 tones = VOICE[chord_at_bar(bar)][1:]
                 m = tones[r.integers(len(tones))] + 12 * (1 + (r.random() < 0.35))
                 step = int(r.choice([0, 4, 6, 8, 10, 12]))
@@ -137,7 +135,7 @@ def stem_atmos():
     bells = pingpong(bells, 0.75 * BEAT, 0.5, 0.35)
     bells = reverb(bells, 4.5, 3.6, 0.6, 'pad', 7000)
     low = reverb(low, 3.0, 2.0, 0.25, 'room')
-    return pad + bells * 0.8 + low * 0.9
+    return pad + bells * 0.5 + low * 0.9
 
 
 ARP = [0, 2, 4, 2, 1, 3, 4, 3, 0, 2, 4, 2, 3, 1, 2, 3]

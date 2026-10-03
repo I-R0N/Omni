@@ -171,6 +171,11 @@ if (index > 0) g.audio.play('boss.phase', { x: boss.position.x, y: boss.position
  */
 export function payBossBounty(g: GameEngine, boss: GameEntity) {
 g.audio.play('boss.death');
+    // The music director's victory beat — only when this was the LAST live
+    // boss; with another still up, the boss theme carries on.
+    if (!g.entityIndex.enemies.some(e => e !== boss && e.isBoss === true && !e.isExploding)) {
+        g.audio.musicBossDefeated();
+    }
     g.bossesKilled++;
     g.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
     // The money is PHYSICAL — the same salvage drops every other source pays,
