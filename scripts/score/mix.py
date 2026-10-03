@@ -12,6 +12,8 @@ from synth import SR
 
 TARGET = {'atmos': -20.0, 'pulse': -25.0, 'groove': -19.5, 'heavy': -21.0, 'apex': -21.5, 'boss': -21.0}
 MONO = {'groove', 'boss'}
+# Critical Mass keeps its groove stereo: the riff IS two hard-panned guitars.
+MONO_BY_SONG = {'c-': {'boss'}}
 # soft-clip knee per stem (as a fraction of the stem's own peak): tames lone
 # transients so stems can sit louder without the stack clipping
 KNEE = {'atmos': 1.0, 'pulse': 0.8, 'groove': 0.55, 'heavy': 0.6, 'apex': 0.75, 'boss': 0.55}
@@ -31,7 +33,8 @@ def softclip(x, knee):
     return y.astype(np.float32)
 
 
-PREFIX = sys.argv[1] if len(sys.argv) > 1 else ''   # '' = song A, 'b-' = song B
+PREFIX = sys.argv[1] if len(sys.argv) > 1 else ''   # '' = Omni, 'b-' = Event Horizon, 'c-' = Critical Mass
+MONO = MONO_BY_SONG.get(PREFIX, MONO)
 
 
 def load():

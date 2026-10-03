@@ -110,3 +110,78 @@ def lead_note(midi, dur, vel=1.0, key=0, bend=False):
     g = int(dur * SR)
     env[g:] *= np.exp(-np.arange(n - g) / (0.03 * SR))
     return ((src + pick * 0.5) * env * vel).astype(np.float32)
+
+
+# ── "Overamped": a cranked, cascaded high-gain rig ──────────────────────────
+
+@nb.njit(cache=True)
+def _env(x, a, r):
+    out = np.empty_like(x)
+    e = 0.0
+    for i in range(x.shape[0]):
+        v = x[i]
+        c = a if v > e else r
+        e = c * e + (1 - c) * v
+        out[i] = e
+    return out
+
+
+def amp_hi(di, gain=1.0, voice=0):
+    """Pedal boost → three cold-clipping preamp stages → saggy power amp →
+    4x12 V30-style cab.  `voice` (0..3) nudges the EQ so stacked takes do not
+    phase into one: real quad-tracking uses different amps for this reason."""
+    mid = (720, 800, 650, 900)[voice % 4]
+    x = svf(di, 140, 0.7, 'hp')
+    # overdrive pedal in front: cut lows, push mids, mild clip — the classic
+    # way to make a high-gain amp tight instead of flubby
+    x = svf(x, 600, 0.6, 'hp') * 0.6 + svf(x, mid, 0.8, 'bp') * 1.6
+    x = np.tanh(x * 6.0).astype(np.float32)
+    # preamp: three gain stages, each coupled through a high-pass (so the low
+    # end never swamps the next stage) and a little top cut between
+    for g, hp, lp, bias in ((28 * gain, 120, 9000, 0.18), (9 * gain, 90, 7000, -0.1), (4 * gain, 70, 6500, 0.05)):
+        x = np.tanh(x * g + bias) - np.tanh(bias)
+        x = svf(svf(x.astype(np.float32), hp, 0.7, 'hp'), lp, 0.7)
+    # power amp with sag: loud passages pull the gain down a touch
+    sag = _env(np.abs(x).astype(np.float32), np.exp(-1 / (0.004 * SR)), np.exp(-1 / (0.12 * SR)))
+    x = np.tanh(x * 2.2 / (1.0 + 0.6 * sag)).astype(np.float32)
+    # cab: WEIGHT first.  Measured against the first rig, the thing missing
+    # from a "heavy" tone was not more clipping (both are pinned) but body:
+    # 1-5 kHz bite outweighed 80-500 Hz body ~12:1, which reads as fizz.
+    # Two low resonances (the 4x12's thump ~120 Hz and the chug ~220 Hz), a
+    # mid scoop, a modest presence peak and a steep roll-off bring that to
+    # ~4.5:1 — chest-thump chugs with the bite still on top.
+    c = svf(x, 75, 0.7, 'hp')
+    c = c + svf(c, 120, 1.0, 'bp') * 1.8 + svf(c, 220, 0.9, 'bp') * 0.9
+    c = c - svf(c, 450, 1.2, 'bp') * 0.5
+    c = c + svf(c, (2800, 2500, 3100, 2650)[voice % 4], 1.4, 'bp') * 0.3
+    for _ in range(3):
+        c = svf(c, 4800, 0.75)
+    return (c / max(1e-6, np.percentile(np.abs(c), 99.9))).astype(np.float32)
+
+
+def bass_di(midi, dur, vel=1.0, key=0, mute=False):
+    """Picked bass: a string one octave down, brighter pluck, longer sustain."""
+    return string(midi, dur, vel, ('bass', key), mute) * 1.0
+
+
+def bass_amp(di):
+    """Bass rig: clean sub + driven mid band, blended (the standard metal bass
+    trick: lows stay solid, the grind lives above them)."""
+    lo = svf(di, 180, 0.7)
+    hi = svf(di, 250, 0.7, 'hp')
+    hi = np.tanh(hi * 18.0).astype(np.float32)
+    hi = svf(svf(hi, 2800, 0.7), 2800, 0.7)
+    out = lo * 1.0 + hi * 0.45
+    return (out / max(1e-6, np.percentile(np.abs(out), 99.9))).astype(np.float32)
+
+
+def pinch(midi, dur, vel=1.0):
+    """Pinch-harmonic squeal: the note's 3rd/4th harmonic, briefly dominant,
+    for the lead to scream on accents."""
+    n = int((dur + 0.1) * SR)
+    t = np.arange(n) / SR
+    f = mtof(midi) * 2 ** (0.3 * np.clip((t - 0.15) / 0.3, 0, 1) * np.sin(2 * np.pi * 6.2 * t) / 12)
+    ph = np.cumsum(f) / SR
+    sq = np.sin(2 * np.pi * 3 * ph) * 0.9 + np.sin(2 * np.pi * 4 * ph) * 0.5 + np.sin(2 * np.pi * ph) * 0.3
+    env = np.minimum(t / 0.005, 1) * np.exp(-t / max(0.2, dur))
+    return (sq * env * vel).astype(np.float32)

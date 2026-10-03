@@ -432,12 +432,18 @@ test('a portal rotates the song; restarts keep it; a pin holds', async ({ page }
   await page.waitForFunction(() => window.__omniEngine.audio.music.playing, null, { timeout: 20000 });
   expect(await engine(page, e => e.audio.music.bar), 'a new song starts at the top').toBeLessThanOrEqual(4);
 
-  // Pin the first song: it switches now and survives the next portal.
-  await engine(page, e => e.audio.music.setSongMode(0));
-  expect(await engine(page, e => e.audio.music.song.id)).toBe('omni');
+  // …and the next portal rotates again, to the third song.
   await engine(page, e => e.transitionToMap('arena_pocket'));
   await waitForTransit(page);
   await waitForStats(page, s => s.currentMapType === 'POCKET', 'back in the arena');
+  expect(await engine(page, e => e.audio.music.song.id), 'rotation continues').toBe('critical-mass');
+
+  // Pin the first song: it switches now and survives the next portal.
+  await engine(page, e => e.audio.music.setSongMode(0));
+  expect(await engine(page, e => e.audio.music.song.id)).toBe('omni');
+  await engine(page, e => e.transitionToMap('overworld'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub again');
   expect(await engine(page, e => e.audio.music.song.id), 'a pin holds through a portal').toBe('omni');
   await engine(page, e => e.audio.music.setSongMode('auto'));
   expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(96 * 1024 * 1024);

@@ -1177,7 +1177,7 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('Music song', dbg(e => e.audio.cycleMusicSong()),
         c => { const m = c.s.audio?.music; return m ? `${m.song}${m.songPinned ? ' (pinned)' : ''}` : '—'; },
         'Which song is playing; press to pin one.',
-        'AUTO rotates to the next song on every map change (Omni, then Event Horizon, and round). Pressing pins Omni, then Event Horizon, switching immediately, then returns to AUTO. Only one song is held in memory; a switch fades out, swaps, and restarts at bar 1.'),
+        'AUTO rotates to the next song on every portal transit (Omni → Event Horizon → Critical Mass → round). Pressing pins each song in turn, switching immediately, then returns to AUTO. Only one song is held in memory; a switch fades out, swaps, and restarts at bar 1.'),
       stat('Music bar', c => c.s.audio?.music?.bar ?? '—', 'Bar 1–32 of the 60-second score loop.'),
       ctrl('Music force', dbg(e => e.audio.cycleMusicDebugIntensity()),
         c => { const f = c.s.audio?.music?.forced; return f === null || f === undefined ? 'game' : f.toFixed(2); },

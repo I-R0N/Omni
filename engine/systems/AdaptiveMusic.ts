@@ -2,7 +2,8 @@
  * THE ADAPTIVE SCORE — vertical layering on one musical clock.
  *
  * Each SONG is one piece of music split into six synchronised stems — "Omni"
- * (D minor, 128 BPM, 60 s) and "Event Horizon" (E minor, 160 BPM, 48 s);
+ * (D minor, 128 BPM, 60 s), "Event Horizon" (E minor, 160 BPM, 48 s) and
+ * "Critical Mass" (C minor, 150 BPM half-time, 51.2 s, the guitar-forward one);
  * one is resident at a time and a map change rotates to the next (SONGS,
  * `switchSong`).  Every stem loops forever from the
  * moment the score starts, sample-locked to the same AudioContext clock, and
@@ -71,6 +72,7 @@ export interface SongSpec { id: string; title: string; bpm: number; bars: number
 export const SONGS: readonly SongSpec[] = [
   { id: 'omni', title: 'Omni', bpm: 128, bars: 32, prefix: 'score-' },
   { id: 'event-horizon', title: 'Event Horizon', bpm: 160, bars: 32, prefix: 'score2-' },
+  { id: 'critical-mass', title: 'Critical Mass', bpm: 150, bars: 32, prefix: 'score3-' },
 ];
 
 export const SCORE = {

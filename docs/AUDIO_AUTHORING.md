@@ -34,8 +34,10 @@ by the source.
 
 ## The adaptive score
 
-The music is two SONGS — "Omni" (D minor, 128 BPM, 60 s) and "Event Horizon"
-(E minor, 160 BPM, 48 s, the heavier one) — each split into six stems that loop
+The music is three SONGS — "Omni" (D minor, 128 BPM, 60 s), "Event Horizon"
+(E minor, 160 BPM, 48 s, thrash) and "Critical Mass" (C minor, 150 BPM with
+half-time drums, 51.2 s, the guitar-forward one on the overamped rig) — each
+split into six stems that loop
 forever on one AudioContext clock (`engine/systems/AdaptiveMusic.ts`).
 Intensity never changes where the music is — only how loud each stem is.
 `scripts/score/README.md` describes the stems and the composition; this
@@ -79,19 +81,19 @@ song; a run start, restart or menu map pick (`cueEncounter('map')`) keeps the
 current one.  A switch fades the output, stops every source, DROPS the old
 song's buffers, fetches the new one and starts it at bar 1 (a generation
 counter discards any old-song decode that lands late).  Debug ▸ Adaptive
-Music ▸ *Music song* pins a song (AUTO → Omni → Event Horizon → AUTO).
+Music ▸ *Music song* pins a song (AUTO → Omni → Event Horizon → Critical Mass → AUTO).
 Adding a third song: render it with its own script and file prefix, add it to
 `build.py`, and append a `SONGS` entry.
 
 **Loading and memory.**  The title screen fetches `score-atmos.mp3` only; the
 combat set and one-shots are fetched when a run starts (`setActive(true)`),
 the boss stem on the first boss sighting.  Stems decode at 32 kHz through an
-OfflineAudioContext (≈ 77 MB decoded for Omni's six, ≈ 62 MB for Event Horizon's) and resample on playback.
+OfflineAudioContext (≈ 77 MB decoded for Omni's six, ≈ 62 MB for Event Horizon's, ≈ 73 MB for Critical Mass's) and resample on playback.
 Each file is the loop with 0.5 s lead-in and 1.5 s run-out and is exactly
 periodic, so the loop window is immune to MP3 encoder/decoder delay.
 
 **Changing the music.**  Edit `scripts/score/compose.py` (Omni),
-`song2.py` (Event Horizon), `instruments.py` or `guitar.py`, run `python scripts/score/build.py`, then `npm run build`
+`song2.py` (Event Horizon), `song3.py` (Critical Mass), `instruments.py` or `guitar.py`, run `python scripts/score/build.py`, then `npm run build`
 and `node scripts/inline-build.mjs` (which embeds every MP3 in
 `public/assets/audio/`).  Keep `SCORE` in `AdaptiveMusic.ts` in step with
 `BPM`/`BARS`/`PRE` in `compose.py`.  Layer balance lives in the files
