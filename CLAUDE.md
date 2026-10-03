@@ -2686,9 +2686,11 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     the boot/loop canary suites (~1.5 minutes end to end, measured
     2026-09-22).  A type error, a broken bundle, or a broken core loop
     still blocks every merge.
-  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
-    `claude/plan-completion` (immediately after a merge lands), on any PR
-    carrying the **`full-tests` label** (the opt-in for pre-merge full
+  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main`,
+    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` (the
+    engine-core + mobile phase's integration branch,
+    docs/ENGINE_CORE_PLAN.md §5) — immediately after a merge lands — on any
+    PR carrying the **`full-tests` label** (the opt-in for pre-merge full
     validation), and on manual dispatch.  Full CI runs took 18–22 minutes
     in late September 2026.
   A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs whose
@@ -2738,9 +2740,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
     on fork PRs.  Keep it that way — a merge gate that silently skips for
     outside contributors is not a gate.
-  - It also runs on pushes to `main` AND to `claude/plan-completion`, so a
-    bad merge into either long-lived branch is visible immediately instead
-    of at the next PR opened against it (plan-completion: merged, PR #93).
+  - It also runs on pushes to the long-lived branches themselves — `main`,
+    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` — so a
+    bad merge into one is visible immediately instead of at the next PR
+    opened against it (plan-completion: merged, PR #93).  Listing a branch
+    there is the ONLY way a push reaches full scope, since a PR's base no
+    longer picks it.
   - On failure the Playwright HTML report uploads as a run artifact
     (`playwright-report-<run id>`, 7-day retention) — read that before
     re-running, since the suites are timing-sensitive and the report
@@ -6096,8 +6101,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 - Default branch: `main`.
 - Feature work lives on `claude/<feature>-<suffix>` (or `codex/*`) branches.
 - Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
-  build + Playwright on every PR and on pushes to `main` and
-  `claude/plan-completion`, which PR #93 merged into `main`),
+  build + Playwright on every PR and on pushes to `main`,
+  `claude/plan-completion` (merged into `main`, PR #93) and
+  `claude/steam-game-publishing-xhnui2` (the current phase's integration
+  branch — docs/ENGINE_CORE_PLAN.md §5)),
   `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
   on every push of a same-repo PR and publishes it to the
   `i-r0n/omni-standalone` mirror, linked from a PR comment as a
@@ -6108,8 +6115,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
   a merge.**  Per PR push it runs the SMOKE scope, whatever the base; the
-  FULL suite runs on pushes to `main` / `claude/plan-completion` (once a
-  merge lands), on the `full-tests` label and on manual dispatch (§7).
+  FULL suite runs on pushes to `main` / `claude/plan-completion` /
+  `claude/steam-game-publishing-xhnui2` (once a merge lands), on the
+  `full-tests` label and on manual dispatch (§7).
   Locally: typecheck + build + the touched suites per commit AND per push
   to a working branch; the FULL `npm run test:full` when the USER gives
   notice they are ready to merge the PR into its parent branch, not on the
