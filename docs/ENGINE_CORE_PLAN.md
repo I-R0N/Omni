@@ -285,17 +285,35 @@ phone-driven workflow.
 keyboard `Escape` binding that does not currently exist anywhere.  Stand up
 the headless Node harness.
 
+**ALREADY SETTLED before S2 starts — read these first.**  D4 / D6 / D8
+(S1) and **D10 / D11** (PM) have already fixed the death and persistence
+policy, so three of the decisions below are narrower than they look.  The
+settled position: progression is the PERSISTENT CHARACTER, not a run; a
+death returns the player to their station, wipes INSTALLED modules only,
+leaves CARGO and credits intact, and leaves the wiped loadout RECOVERABLE
+from a wreck at the death site; the hub is persistent and only ARENAS carry
+a seed.  S2's save floor therefore is: credits, cargo contents, the hub
+world, an outstanding wreck record, and nothing for an arena beyond its
+seed.
+
 **OPEN DECISIONS — for the user, inside S2.**
 
-- **D-S2-a — What is in the save file?**  Settings only / settings +
-  records (high scores, bests) / + a meta-currency / + a full
-  run-in-progress.  Consequence: each step up is a migration surface
-  forever.
-- **D-S2-b — Is there meta-progression at all?**  Pure arcade, nothing
-  carries / unlocks earned by achievement / persistent currency between
-  runs / a profile with levels.  Consequence: this is the largest open
-  design question in the game and it reaches the economy, the module
-  catalog and the run summary.
+- **D-S2-a — What is in the save file BEYOND the settled floor?**  The floor
+  above is fixed.  What is still open is whether records (bests, high
+  scores) and a full run-in-progress join it — the latter being D-S2-c's
+  question too.  Consequence: each step up is a migration surface forever.
+- **D-S2-b — What SHAPE does the meta-progression take?**  D4 already
+  answered *whether* (the user's words: "this is becoming more of an rpg"),
+  so "pure arcade, nothing carries" is off the table and a persistent
+  character is in.  What is open is the shape: records and unlocks earned by
+  achievement, a profile with levels, and/or **death-proof ship capability**
+  — the permanent-vs-consumable split PM raised while settling D10, where
+  credits buy things a death cannot touch through the two seams already
+  shipped as deliberate no-ops (`purchaseSlot` / `MODULE_SLOT_UNLOCK.START`
+  for hex slots, `SHIP_WEIGHT.HULL_BASE` for hull classes).  Consequence:
+  reaches the economy, the module catalog and the run summary.  The
+  permanent/consumable option is the one with existing machinery behind it,
+  but tuning its prices is the economy pass's job, not S2's.
 - **D-S2-c — Can a run be suspended and resumed?**  This is a
   **mobile-specific expectation** — a phone call or an app switch must not
   cost a run.  Two implementations, and the choice is a real trade:
@@ -304,8 +322,24 @@ the headless Node harness.
   replay time grows with run length).  Consequence: the replay option is
   only available because `S1` happened, and it is a strong argument for
   `S1`-before-`S2`.
-- **D-S2-d — Does death take anything permanent?**  Interacts with
-  D-S1-f; the two must not be decided independently.
+- ~~**D-S2-d — Does death take anything permanent?**  Interacts with
+  D-S1-f; the two must not be decided independently.~~  **SETTLED** by
+  D4 / D6 / D10 / D11: nothing permanent — credits and cargo survive, and
+  the installed loadout is suspended in a recoverable wreck rather than
+  destroyed.  TWO sub-decisions remain and S2 must put both to the user
+  before writing the save format (PM's recommendation for each is in D10):
+  - **D-S2-d1 — WHERE does the wreck sit?**  This collides with D8, since an
+    arena is seeded per ENTRY and does not persist.  Either PIN that arena's
+    seed until the wreck is recovered or lost — S1's seeded generation then
+    reproduces the terrain exactly, so the death position stays valid and the
+    persisted record is only `{arena id, seed, position, modules, expiry}`
+    (**recommended**: the seed is what makes this cheap, which is a direct
+    dividend of S1) — or surface the wreck at the arena's RETURN RIFT and
+    persist arena identity only (cheaper, loses "fly back to where you fell").
+  - **D-S2-d2 — HOW is a wreck LOST?**  On a second death before recovery
+    (**recommended**) / after a wall-clock timer / never, it waits forever.
+    A timer is actively wrong for a mobile game played in short sessions: it
+    punishes putting the phone down, which is not a gameplay decision.
 - **D-S2-e — Save-version policy.**  Discard on mismatch / migrate /
   refuse to load.  Consequence: "discard" is cheapest now and the most
   expensive to walk back once players have profiles.
@@ -533,6 +567,9 @@ who made it, and the consequences for other sessions.
 | D7 | S1 | 2026-10-02 | **D-S1-g — player-facing replay** (user call).  Options: dev-only / share a run / ghost.  **Call: dev-only.** | The replay format is NOT a compatibility surface; it may change freely.  `__omniReplay` stays a debug handle. |
 | D8 | S1 | 2026-10-02 | **Seed scope clarified** (user call): *"the seeds should only be for the mini game arenas, not the overall universe. This shouldn't change based on 'run'."*  Options put: one seed per run / a new seed every life.  **Call (as the PM/S1 reads it — to be confirmed in PR 2): the Overworld hub and the wider universe are PERSISTENT and are not re-seeded per run or per life; only the ARENAS (the mini-game maps reached through portals) carry a seed, and that seed is what the summary shows.** | CHANGES PR 1's shape: `GameEngine.seedRun()` currently reseeds every stream (hub included) at each new run.  PR 2 must move seeding to arena ENTRY and give the hub a fixed or persisted world.  Replay then records (arena seed, inputs) per arena visit.  S2 must persist the hub's generation separately from any arena seed. |
 | D9 | S1 | 2026-10-03 | **D-S1-e resolved — the descent rift is NOT S1's; it belongs to a WORLD-DESIGN effort** (user call).  Options put: dive chain to a random deeper arena / choice of deeper-or-home rift (judged the same as the first, since every arena already has a return rift) / leave it off.  **Call: none of them as framed.**  The user wants arenas REDESIGNED rather than random ones, and wants them as a TREE with interconnectivity: the player TRAVELS through arenas to get home rather than a portal dropping them at their station, so the universe has physical extent (cf. No Man's Sky).  Redesigning arenas is not S1's work but is definitely part of the overall plan.  Today's map types are mostly test terrain.  Planned arena families named by the user: LABYRINTH / maze maps of indestructible tiles leading to rare items or salvage; DENSE maps, fully enclosed in tile structure, that the player digs through; and a range of wave-battle arenas of graded difficulty using the whole enemy catalog in its deeper varieties. | `openDescentPortal` and the `descend` / depth / `waveOffset` machinery stay uncalled and untouched; S1 does NOT wire it.  The arena return rift and hub-portal travel (§3 of CLAUDE.md) are today's placeholder and will be superseded by a connected map graph.  No session in this plan owns the world-design work yet: the PM session must decide whether it is a fifth session or sits after S4 (§8).  Constraint it inherits from S1: arenas are seeded per entry (D8) and the hub is persistent, so a connected world must decide which nodes persist and which regenerate; and from D4, death returns to the home station, so a long physical route home raises what a death costs in time, not just equipment. |
+| D10 | PM | 2026-10-03 | **The incentive inversion in D4+D6 is resolved by a RECOVERABLE WRECK** (user call).  The problem put to the user, with the numbers: D4 wipes equipment and D6 removed the credit penalty, so a credit in the bank became 100% safe while a credit spent on a module became 100% at risk — the exact reverse of CLAUDE.md §3's stated intent, *"the penalty taxes hoarding, not investment."*  Measured from `MODULE_DEFS`: a full outfit is ≈413,500 credits (ship flower ≈144,000, weapon flower ≈269,500) against combat income of ~8–10k a wave / ~50–60k a six-wave stage, so a full wipe cost **seven to eight stages of play**, where D6's deleted penalty cost ~1.5–2 waves and never touched money already spent.  Options weighed: station locker (PM's recommendation — gear left at a station survives) / permanent-vs-consumable split (credits buy death-proof capability through the already-no-op `purchaseSlot` and `SHIP_WEIGHT.HULL_BASE` seams) / **recoverable wreck** / insurance.  **Call: the recoverable wreck** — death leaves the fitted loadout at the site and the player flies back for it. | SUPERSEDES the "ELIMINATES ALL OF THEIR EQUIPMENT" half of D4: equipment is SUSPENDED, not destroyed, and the cost of a death is the trip plus the risk of the trip rather than the gear.  Pairs with D9 — a connected world with physical extent is what makes the trip meaningful.  TWO sub-decisions S2 must put to the user before building the save file: (1) WHERE the wreck sits, which collides with D8 (an arena is seeded per ENTRY and does not persist) — PM's recommendation is to PIN that arena's seed until the wreck is recovered or lost, because S1's seeded generation makes the terrain reproduce exactly, so the wreck's position stays valid and the persisted record is only `{arena id, seed, position, modules, expiry}`; the cheap alternative is surfacing the wreck at the arena's RETURN RIFT, which persists arena identity only; (2) HOW a wreck is LOST — PM's recommendation is **on a second death before recovery, never a wall-clock timer**: this is a mobile game played in short sessions, so a decaying timer punishes putting the phone down.  `moveModule`'s drydock-only guard is now LOAD-BEARING and must stay: with cargo safe (D11) and the fitted loadout at risk, a player able to uninstall mid-arena would strip the ship whenever threatened. |
+| D11 | PM | 2026-10-03 | **A death wipes INSTALLED modules only; CARGO survives** (user call).  Options weighed: installed + cargo (PM's recommendation under the locker option) / **installed only, cargo survives** / installed + cargo minus one designated keep. | This, not D10, is what actually closes the inversion: the 12 cargo tiles are a safe bench carried aboard, so converting credits into modules is no longer strictly worse than leaving them idle, and D10 then makes even the fitted loss temporary.  The bench is BOUNDED by `INVENTORY_CAPACITY` 12 against 14 hex slots across the two flowers, so a full outfit cannot be sheltered in cargo — that ratio is the balance lever for the economy pass, not a number to change here.  The wreck (D10) therefore holds only what was MOUNTED.  S2's save scope from D4/D6/D8/D10/D11: credits, cargo contents, the hub world, an outstanding wreck record, and nothing for an arena beyond its seed.  The run summary needs re-thinking again — D6 deleted its "lost to the wreck" credit line and D10 restores a wreck that holds modules, so the summary should name what the wreck holds and where it is. |
+| D12 | PM | 2026-10-03 | **The integration branch is `claude/steam-game-publishing-xhnui2`, not `claude/engine-core`** (user call): *"I would prefer to work off of claude/steam-game-publishing-xhnui2 as the primary branch for this work. Then merge all of that into main."*  The two branches were the SAME commit (`af3c8ba`) when the switch was made, so this moved no code. | §5 rewritten; `claude/engine-core` abandoned at that commit and never pushed to again.  `.github/workflows/pr-checks.yml` lists the new name in `push.branches`, so a push to it runs the FULL suite — verified end to end on `6305ab7` (19m00s, green) alongside the PR-push smoke run (1m23s, green).  Four CLAUDE.md passages describing the full-CI branch list were corrected in the same commit.  PR #109 was retargeted in place rather than reopened. |
 
 ---
 
@@ -563,11 +600,29 @@ history stays readable.
   (`randomRockShade` / the plastic shades are cosmetic; the wave-mix roll in
   `buildWaveSpawnList` is sim) — they stay as functions, not data.
   *(S1, 2026-10-02)*
-- **S1 → S2 (save scope, from D4/D6/D8).**  What a death keeps is credits only;
+- ~~**S1 → S2 (save scope, from D4/D6/D8).**  What a death keeps is credits only;
   equipment is wiped and the player is returned to the station.  The hub is
   persistent while arenas carry their own seed, so S2's persistence splits
   into (1) the character: credits (and whatever equipment policy PR 2 settles),
-  (2) the hub world, and (3) nothing for an arena beyond its seed.  *(S1, 2026-10-02)*
+  (2) the hub world, and (3) nothing for an arena beyond its seed.~~
+  *(S1, 2026-10-02; RESOLVED by D10/D11, PM 2026-10-03 — the equipment policy
+  is settled and the save scope grew a wreck record.  See the PM item below.)*
+- **PM → S2 (save scope, settled — D10/D11).**  A death wipes INSTALLED modules
+  only; CARGO survives; and the wiped loadout is RECOVERABLE from a wreck at the
+  death site, so equipment is suspended rather than destroyed.  S2 persists:
+  (1) the character — credits and cargo contents, (2) the hub world, (3) an
+  outstanding wreck record, and (4) nothing for an arena beyond its seed.
+  TWO sub-decisions S2 must put to the user before writing the format, both
+  stated with PM's recommendation in D10: **where the wreck sits** (pin the
+  arena's seed so S1's generation reproduces the terrain and the position stays
+  valid — recommended — or surface it at the return rift and persist arena
+  identity only), and **how a wreck is lost** (on a second death before
+  recovery — recommended — never a wall-clock timer, which punishes putting a
+  phone down).  Also for S2: the run summary needs re-thinking a second time,
+  since D6 deleted its credit-loss line and D10 restores a wreck holding
+  modules.  And `moveModule`'s drydock-only guard is now load-bearing — do not
+  relax it, or a threatened player strips the ship into safe cargo.
+  *(PM, 2026-10-03)*
 - **Process.**  The plan lived only on `claude/steam-game-publishing-xhnui2`
   (PR #108) when S1 began, so `git checkout -B claude/engine-core origin/main`
   would have dropped it.  S1 branched from the plan branch instead.
