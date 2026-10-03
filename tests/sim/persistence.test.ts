@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHeadlessEngine } from './harness';
 import { MemoryStorage } from '../../engine/ports';
-import { noteBossDefeated } from '../../engine/wreck';
+import { clearArenaWave, stampArenaWave } from '../../engine/arenaWaves';
 import {
   SAVE_KEY, SAVE_BACKUP_KEY, SAVE_VERSION, parseSave, serializeSave, emptySave, validateSave,
 } from '../../engine/save';
@@ -412,36 +412,6 @@ test('Erase save is a brand-new start, settings kept', () => {
   assert.equal(b.platform.audio.volume, 0.2);
 });
 
-test('the wreck\'s arena resumes the wave script where the ship fell; a second death or the boss dying resets it', () => {
-  const storage = new MemoryStorage();
-  const a = launch(storage);
-  a.g.debugGrantModule('hull_mk2');
-  a.g.transitionToMap('arena_pocket');
-  a.g.stepSim(5);
-  a.g.waves.waveIndex = 3;
-  die(a.g);
-  assert.equal(a.g.wreck.wave, 3, 'the record carries the wave');
-
-  const b = launch(storage, { entropySeed: 9 });
-  b.g.transitionToMap('arena_pocket');
-  assert.equal(b.g.waves.waveIndex, 3, 'the arena resumes at the death wave');
-  b.g.transitionToMap('arena_ring');
-  assert.equal(b.g.waves.waveIndex, 0, 'another arena starts fresh');
-
-  // The boss falling before the wreck is collected resets the script (the wreck stays).
-  b.g.transitionToMap('arena_pocket');
-  b.g.waves.halted = true;                       // a boss on the field halts the ladder
-  noteBossDefeated(b.g);
-  assert.equal(b.g.wreck.wave, 0);
-  b.g.transitionToMap('arena_pocket');
-  assert.equal(b.g.waves.waveIndex, 0);
-
-  // A second death replaces the record with the new wave.
-  b.g.waves.waveIndex = 1;
-  die(b.g);
-  assert.ok(b.g.lostWreckOnDeath, 'the death screen is told the older wreck is lost');
-});
-
 test('the way back to the wreck is lit: the wreck itself, else the rift toward it', () => {
   const a = launch(new MemoryStorage());
   a.g.debugGrantModule('hull_mk2');
@@ -462,47 +432,71 @@ test('the way back to the wreck is lit: the wreck itself, else the rift toward i
   assert.equal(a.g.portals.filter((p: any) => p.wreckGuide).length, 1);
 });
 
-test('the held wave decays with real time away: whole for 5 minutes, then one wave an hour', () => {
-  const storage = new MemoryStorage();
-  const a = launch(storage);
-  a.g.debugGrantModule('hull_mk2');
+test('an arena holds its wave EXACTLY for 5 minutes after you leave it — wave and kills', () => {
+  const a = launch(new MemoryStorage());
   a.g.transitionToMap('arena_pocket');
   a.g.stepSim(5);
-  a.g.player.position = { x: a.g.player.position.x + 900, y: a.g.player.position.y + 900 };
+  a.g.waves.waveIndex = 2;
+  a.g.waves.nextSpawnIdx = 3;                    // three of its enemies already spawned and dead
+  a.g.transitionToMap('overworld');
+  a.platform.clock.advance(4 * 60_000);
+  a.g.transitionToMap('arena_pocket');
+  assert.equal(a.g.waves.waveIndex, 2, 'the same wave');
+  assert.equal(a.g.waves.nextSpawnIdx, 3, 'with the same kills already scored');
+  a.g.transitionToMap('arena_ring');
+  assert.equal(a.g.waves.waveIndex, 0, 'another arena has its own, fresh');
+});
+
+test('after 5 minutes the wave starts over from its top, and an earlier wave for every hour away', () => {
+  const storage = new MemoryStorage();
+  const a = launch(storage);
+  a.g.transitionToMap('arena_pocket');
+  a.g.stepSim(5);
   a.g.waves.waveIndex = 3;
-  die(a.g);
-  a.g.respawnFromDeath();
-  const waveAfter = (ms: number) => {
+  a.g.waves.nextSpawnIdx = 2;
+  a.g.transitionToMap('overworld');
+  a.g.saveNow();
+  const MIN = 60_000, HOUR = 60 * MIN;
+  const enter = (ms: number) => {
     const b = launch(storage, { entropySeed: 5 });
     b.platform.clock.advance(ms);
     b.g.transitionToMap('arena_pocket');
-    return b.g.waves.waveIndex;
+    return { wave: b.g.waves.waveIndex, kills: b.g.waves.nextSpawnIdx };
   };
-  const MIN = 60_000, HOUR = 60 * MIN;
-  assert.equal(waveAfter(4 * MIN), 3, 'an accidental exit and a quick return find the same wave');
-  assert.equal(waveAfter(30 * MIN), 3, 'held until the first hour is up');
-  assert.equal(waveAfter(HOUR + MIN), 2, 'one wave off after an hour');
-  assert.equal(waveAfter(2 * HOUR + MIN), 1, 'two off after two hours');
-  assert.equal(waveAfter(9 * HOUR), 0, 'and a fresh start once it has run out');
+  assert.deepEqual(enter(4 * MIN), { wave: 3, kills: 2 }, 'held exactly');
+  assert.deepEqual(enter(6 * MIN), { wave: 3, kills: 0 }, 'the same wave, from its top');
+  assert.deepEqual(enter(59 * MIN), { wave: 3, kills: 0 });
+  assert.deepEqual(enter(HOUR + MIN), { wave: 2, kills: 0 }, 'a wave earlier after an hour');
+  assert.deepEqual(enter(2 * HOUR + MIN), { wave: 1, kills: 0 });
+  assert.deepEqual(enter(9 * HOUR), { wave: 0, kills: 0 }, 'and a fresh start once it has run out');
 });
 
-test('leaving the wreck\'s arena by portal stamps the wave and the time, so a quick return resumes there', () => {
+test('quitting the app mid-wave counts as leaving: the save carries the wave and when you were last there', () => {
   const storage = new MemoryStorage();
   const a = launch(storage);
-  a.g.debugGrantModule('hull_mk2');
   a.g.transitionToMap('arena_pocket');
   a.g.stepSim(5);
-  a.g.player.position = { x: a.g.player.position.x + 900, y: a.g.player.position.y + 900 };
-  die(a.g);
-  a.g.respawnFromDeath();
-  a.g.transitionToMap('arena_pocket');           // back, wave 0, wreck not yet reached
-  a.g.waves.waveIndex = 2;
-  a.platform.clock.advance(30 * 60_000);
-  a.g.stepSim(1);
-  a.g.saveNow();                                  // autosave while present
-  assert.equal(a.g.wreck.wave, 2);
-  a.g.transitionToMap('overworld');
-  a.platform.clock.advance(2 * 60_000);
+  a.g.waves.waveIndex = 1;
+  a.g.waves.nextSpawnIdx = 2;
+  a.g.saveNow();                                  // an autosave / backgrounding, still in the arena
+  const b = launch(storage, { entropySeed: 6 });
+  b.platform.clock.advance(60_000);
+  b.g.transitionToMap('arena_pocket');
+  assert.equal(b.g.waves.waveIndex, 1);
+  assert.equal(b.g.waves.nextSpawnIdx, 2);
+});
+
+test('a finished ladder is forgotten: the boss dying clears the held wave', () => {
+  const a = launch(new MemoryStorage());
   a.g.transitionToMap('arena_pocket');
-  assert.equal(a.g.waves.waveIndex, 2, 'two minutes later it is the same wave');
+  a.g.stepSim(5);
+  a.g.waves.waveIndex = 2;
+  stampArenaWave(a.g);
+  assert.ok(a.g.arenaWaves.arena_pocket, 'a wave is held while the player is in it');
+  clearArenaWave(a.g);
+  assert.equal(a.g.arenaWaves.arena_pocket, undefined);
+  a.g.waves.halted = true;                       // a ladder halted with no boss alive is over
+  a.g.waves.waveIndex = 4;
+  stampArenaWave(a.g);
+  assert.equal(a.g.arenaWaves.arena_pocket, undefined);
 });

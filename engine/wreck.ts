@@ -30,7 +30,6 @@ import { EntityType, type GameEntity } from '../types';
 import { MODULE_RESALE, moduleDef, WRECK_CONSTANTS } from '../constants';
 import { descriptorForMapType, mapDescriptor } from './maps/MapDescriptors';
 import { nextId } from './systems/IdAllocator';
-import { clock } from './ports';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
 import { modulePrice } from './outfitting';
 import type { WreckRecord } from './save';
@@ -40,51 +39,6 @@ import type { WreckRecord } from './save';
  *  holding a second copy would be a duplication. */
 function leftBehind(slots: (string | null)[]): (string | null)[] {
   return slots.map((id) => (id !== null && (moduleDef(id)?.cost ?? 0) > 0 ? id : null));
-}
-
-/** Which wave an arena resumes at when the player flies back for this wreck
- *  (user call): where they died.  0 in the hub (no waves), and 0 once this
- *  arena's boss is dead — the ladder is finished, so there is nothing to resume. */
-function waveToResume(g: GameEngine): number {
-  if (!g.wavesEnabled) return 0;
-  const bossAlive = g.currentMap.entities.some((e) => e.isBoss === true && e.active);
-  if (g.waves.halted && !bossAlive) return 0;
-  return Math.max(0, g.waves.waveIndex);
-}
-
-/** The boss of the wreck's arena fell before the wreck was recovered: the
- *  wave script starts over on the next visit (user call). */
-export function noteBossDefeated(g: GameEngine): void {
-  const w = g.wreck;
-  if (!w || w.wave === 0) return;
-  if (descriptorForMapType(g.currentMap?.type)?.id !== w.arenaId) return;
-  w.wave = 0;
-  g.saveNow();
-}
-
-/** The wave an arena load must resume at: the wreck's, when it lies in `mapId`,
- *  HELD for `WAVE_GRACE_SEC` of real time since the player left and then
- *  decaying one wave per `WAVE_DECAY_SEC` (user call).  A clock set backwards
- *  reads as no time away, so it can only ever be generous. */
-export function wreckWaveFor(g: GameEngine, mapId: string | undefined): number {
-  const w = g.wreck;
-  if (w === null || mapId === undefined || w.arenaId !== mapId) return 0;
-  const away = Math.max(0, (clock().wallMs() - w.leftAt) / 1000);
-  if (away <= WRECK_CONSTANTS.WAVE_GRACE_SEC) return w.wave;
-  return Math.max(0, w.wave - Math.floor(away / WRECK_CONSTANTS.WAVE_DECAY_SEC));
-}
-
-/** While the player is IN the wreck's arena, keep the record's wave and
- *  "last present" time current.  Called from every save and just before any map
- *  is left, so "leaving" is whenever the player was last there — a portal, a
- *  respawn, quitting the app or an OS kill all read the same. */
-export function stampWreckPresence(g: GameEngine): void {
-  const w = g.wreck;
-  const type = g.currentMap?.type;
-  if (!w || type === undefined || descriptorForMapType(type)?.id !== w.arenaId) return;
-  if (!g.wavesEnabled || g.player.isExploding) return;
-  w.wave = waveToResume(g);
-  w.leftAt = clock().wallMs();
 }
 
 /** Build the record for a ship that has just fallen, or null when nothing
@@ -102,8 +56,6 @@ export function makeWreckRecord(g: GameEngine): WreckRecord | null {
     x: g.player.position.x,
     y: g.player.position.y,
     ship, weapon,
-    wave: waveToResume(g),
-    leftAt: clock().wallMs(),
   };
 }
 

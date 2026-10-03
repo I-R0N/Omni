@@ -43,13 +43,6 @@ export interface WreckRecord {
    *  ship restarts with.  No expiry: a wreck is lost on a second death (D10). */
   ship: (string | null)[];
   weapon: (string | null)[];
-  /** The wave the arena resumes at when the player returns for this wreck
-   *  (0-based, as `WaveSystem.waveIndex`; 0 = from the start).  Optional in the
-   *  file — a save written before the field reads as 0, so no migration. */
-  wave: number;
-  /** Wall-clock ms (epoch) when the player last left the wreck's arena — the
-   *  wave decays from it (`WRECK_CONSTANTS`).  0 = unknown, which decays fully. */
-  leftAt: number;
 }
 
 export interface Records {
@@ -79,10 +72,17 @@ export interface CharacterSave {
   weaponSlotsUnlocked: number;
 }
 
+/** What an ARENA remembers of its wave script after the player leaves it
+ *  (engine/arenaWaves.ts): the wave (0-based), how many of its enemies were
+ *  already down, and the wall-clock time the player was last there. */
+export interface ArenaWaveMemory { wave: number; progress: number; leftAt: number; }
+
 export interface SaveFile {
   version: number;
   character: CharacterSave;
   wreck: WreckRecord | null;
+  /** Held wave state per arena id.  Optional in the file (absent = none). */
+  arenaWaves: Record<string, ArenaWaveMemory>;
   records: Records;
   settings: Settings;
 }
@@ -114,7 +114,7 @@ export function emptyCharacter(): CharacterSave {
 }
 
 export function emptySave(): SaveFile {
-  return { version: SAVE_VERSION, character: emptyCharacter(), wreck: null, records: emptyRecords(), settings: emptySettings() };
+  return { version: SAVE_VERSION, character: emptyCharacter(), wreck: null, arenaWaves: {}, records: emptyRecords(), settings: emptySettings() };
 }
 
 // ── migrations ──────────────────────────────────────────────────────────
@@ -168,9 +168,19 @@ function validWreck(raw: unknown): WreckRecord | null {
     seed: raw.seed === null || raw.seed === undefined ? null : (num(raw.seed, 0, 0, 0xffffffff) >>> 0),
     x: num(raw.x, 0), y: num(raw.y, 0),
     ship, weapon,
-    wave: int(raw.wave, 0, 0, 1e4),
-    leftAt: num(raw.leftAt, 0, 0, 1e15),
   };
+}
+
+function validArenaWaves(raw: unknown): Record<string, ArenaWaveMemory> {
+  const out: Record<string, ArenaWaveMemory> = {};
+  if (!isObj(raw)) return out;
+  let n = 0;
+  for (const [id, v] of Object.entries(raw)) {
+    if (n >= 32 || !isObj(v) || id.length === 0 || id.length > 64) continue;
+    out[id] = { wave: int(v.wave, 0, 0, 1e4), progress: int(v.progress, 0, 0, 1e4), leftAt: num(v.leftAt, 0, 0, 1e15) };
+    n++;
+  }
+  return out;
 }
 
 function validRecords(raw: unknown): Records {
@@ -207,6 +217,7 @@ export function validateSave(doc: Json, version = SAVE_VERSION): SaveFile {
     version,
     character: validCharacter(doc.character),
     wreck: validWreck(doc.wreck),
+    arenaWaves: validArenaWaves(doc.arenaWaves),
     records: validRecords(doc.records),
     settings: validSettings(doc.settings),
   };

@@ -7901,13 +7901,17 @@ export const WRECK_CONSTANTS = {
   RECOVER_RANGE: 70,
   SIZE: 44,
   COLOR: '#f59e0b',
-  /** The wave the wreck's arena resumes at is HELD, in real time, for this long
-   *  after the player leaves it (an accidental exit and a quick return find the
-   *  arena as it was)… */
-  WAVE_GRACE_SEC: 5 * 60,
-  /** …and then falls one wave per this much real time away (3 → 2 after an
-   *  hour, → 1 after two), down to a fresh start. */
-  WAVE_DECAY_SEC: 60 * 60,
+} as const;
+
+/** What an arena remembers of its wave script when the player leaves it
+ *  (`engine/arenaWaves.ts`, user call).  For `GRACE_SEC` of real time the wave
+ *  comes back EXACTLY as it was — same wave, same kills already scored.  After
+ *  that it starts over from the top of the wave, and it starts over a wave
+ *  EARLIER for every `DECAY_SEC` away (wave 3 → fresh 3 at 5 min → fresh 2 at
+ *  1 h → fresh 1 at 2 h). */
+export const ARENA_WAVE_MEMORY = {
+  GRACE_SEC: 5 * 60,
+  DECAY_SEC: 60 * 60,
 } as const;
 
 export const STATION_CONSTANTS = {

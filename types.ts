@@ -1969,7 +1969,9 @@ export interface EngineStats {
     progress: boolean;
     credits: number;
     modules: number;
-    wreck: { mapName: string; modules: number; wave: number } | null;
+    wreck: { mapName: string; modules: number } | null;
+    /** Waves held per arena: where, which wave (0-based), kills already scored, seconds away. */
+    arenaWaves: { mapName: string; wave: number; progress: number; awaySec: number }[];
     records: { highScore: number; bestWave: number; bestCombo: number; bossesKilled: number; dragonsKilled: number; deaths: number };
   };
   runSummary?: {

@@ -610,7 +610,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       stat('Best wave', c => String(c.s.savedGame?.records.bestWave ?? '—'), 'The deepest wave ever reached.'),
       stat('Best combo', c => String(c.s.savedGame?.records.bestCombo ?? '—'), 'The best kill combo multiplier ever reached.'),
       stat('Bosses / dragons', c => c.s.savedGame ? `${c.s.savedGame.records.bossesKilled} / ${c.s.savedGame.records.dragonsKilled}` : '—', 'Lifetime bosses and dragons killed.'),
-      stat('Wreck', c => c.s.savedGame?.wreck ? `${c.s.savedGame.wreck.modules} in ${c.s.savedGame.wreck.mapName}, resumes wave ${c.s.savedGame.wreck.wave + 1}` : 'none', 'The outstanding death wreck: what is in it, where, and the wave its arena resumes at.'),
+      stat('Wreck', c => c.s.savedGame?.wreck ? `${c.s.savedGame.wreck.modules} in ${c.s.savedGame.wreck.mapName}` : 'none', 'The outstanding death wreck: what is in it and where.'),
+      stat('Held waves', c => (c.s.savedGame?.arenaWaves.length ?? 0) === 0 ? 'none' : c.s.savedGame!.arenaWaves.map(w => `${w.mapName} W${w.wave + 1}+${w.progress} (${Math.round(w.awaySec / 60)}m)`).join(' · '), 'The wave each arena will come back at: held exactly for 5 minutes after you leave, then restarted from the top, one wave earlier per hour away.'),
     ],
   },
   {

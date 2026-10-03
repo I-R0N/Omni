@@ -103,7 +103,7 @@ export class WaveSystem {
    *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no
    *  wave 1 banner, no grace-period cycling, no enemies. */
-  public init(ctx: WaveSpawnContext, enabled: boolean = true, startIndex: number = 0) {
+  public init(ctx: WaveSpawnContext, enabled: boolean = true, startIndex: number = 0, progress: number = 0) {
     this.halted = false;
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
@@ -118,6 +118,27 @@ export class WaveSystem {
     this.lastSpawnAtSec = -Infinity;
     if (!enabled || ctx.enemyScale <= 0) return;
     this.startWave(startIndex, ctx);
+    this.fastForward(progress);
+  }
+
+  /** Enemies of the ACTIVE wave already spawned and killed — the fidelity an
+   *  arena keeps for a few minutes after the player leaves (arenaWaves.ts).
+   *  0 for a capstone: its boss is the fight, and it starts over. */
+  public progressDone(entities: GameEntity[]): number {
+    if (this.waveState !== 'active' || this.capstoneWave) return 0;
+    return Math.max(0, this.nextSpawnIdx - this.countLiveTracked(entities));
+  }
+
+  /** Resume a wave `done` kills in: the stream carries on from the next slot
+   *  as if those enemies had come and died.  Never skips the whole budget, so
+   *  a resumed wave still has something to clear. */
+  private fastForward(done: number) {
+    if (done <= 0 || this.waveState !== 'active' || this.capstoneWave) return;
+    const n = Math.min(Math.floor(done), Math.max(0, this.spawnList.length - 1));
+    if (n <= 0) return;
+    this.nextSpawnIdx = n;
+    this.elapsedSec = this.spawnTimesSec[n - 1] ?? 0;
+    this.lastSpawnAtSec = this.elapsedSec;
   }
 
   /**

@@ -26,8 +26,9 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot
 import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
-import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type Records, type CharacterSave, type SaveStatus } from './save';
-import { leaveWreck, spawnWreckEntity, updateWreck, updateWreckGuide, stampWreckPresence, wreckWaveFor, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
+import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
+import { stampArenaWave, arenaWaveFor } from './arenaWaves';
+import { leaveWreck, spawnWreckEntity, updateWreck, updateWreckGuide, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
@@ -1134,6 +1135,7 @@ export class GameEngine {
     const save = parsed.save;
     this.records = save.records;
     this.wreck = save.wreck;
+    this.arenaWaves = save.arenaWaves;
     this.applyCharacter(save.character);
     const st = save.settings;
     this.audio.setVolume(st.volume);
@@ -1181,6 +1183,7 @@ export class GameEngine {
         weaponSlotsUnlocked: this.weaponSlotsUnlocked,
       },
       wreck: this.wreck,
+      arenaWaves: this.arenaWaves,
       records: this.records,
       settings: {
         volume: this.audio.volume,
@@ -1196,7 +1199,7 @@ export class GameEngine {
   /** Write the save if it changed.  Cheap to call: one small JSON string
    *  compared with the last one written. */
   public saveNow(): void {
-    stampWreckPresence(this);
+    stampArenaWave(this);
     // Lifetime bests are max()es of live counters — fold them in at write time.
     if (this.score > this.records.highScore) this.records.highScore = Math.floor(this.score);
     if (this.runHighestWave > this.records.bestWave) this.records.bestWave = this.runHighestWave;
@@ -1219,6 +1222,7 @@ export class GameEngine {
   /** Erase the save and start a new character (DBG ▸ Economy ▸ Erase save). */
   public eraseSave(): void {
     this.wreck = null;
+    this.arenaWaves = {};
     if (this.wreckEntity) { this.wreckEntity.active = false; this.wreckEntity = null; }
     this.records = emptyRecords();
     this.resetCharacter();
@@ -1380,6 +1384,8 @@ export class GameEngine {
   /** The outstanding death wreck, or null (D10).  A record, so it can be saved;
    *  `wreckEntity` is its view in the loaded map (engine/wreck.ts). */
   public wreck: WreckRecord | null = null;
+  /** Held wave state per arena (engine/arenaWaves.ts). */
+  public arenaWaves: Record<string, ArenaWaveMemory> = {};
   public wreckEntity: GameEntity | null = null;
   /** The contact currently carrying `wreckGuide` (engine/wreck.ts). */
   public wreckGuideEntity: GameEntity | null = null;
@@ -1404,6 +1410,7 @@ export class GameEngine {
     this.selectedMapType = mapType;
     // A replay must not depend on a save: a fresh character, no wreck.
     this.wreck = null;
+    this.arenaWaves = {};
     this.resetCharacter();
     this.deathPending = false;
     this.deathDelay = 0;
@@ -1729,9 +1736,9 @@ export class GameEngine {
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
   private loadMapFresh(type: MapType) {
-      // Leaving the wreck's arena (portal, respawn, quit): stamp the wave it was
-      // at and when, before the map is torn down — the wave decays from here.
-      stampWreckPresence(this);
+      // Leaving an arena (portal, respawn, quit): stamp the wave it was at and
+      // when, before the map is torn down — the held wave decays from here.
+      stampArenaWave(this);
       this.shards.reset();
       this.energy.reset();
       this.perfController.reset();
@@ -5482,7 +5489,8 @@ export class GameEngine {
       progress: this.hasSavedProgress(),
       credits: this.credits,
       modules,
-      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck), wave: this.wreck.wave } : null,
+      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
+      arenaWaves: Object.entries(this.arenaWaves).map(([id, m]) => ({ mapName: mapDescriptor(id)?.name ?? id, wave: m.wave, progress: m.progress, awaySec: Math.max(0, Math.round((clock().wallMs() - m.leftAt) / 1000)) })),
       records: { ...this.records, highScore: Math.max(this.records.highScore, Math.floor(this.score)) },
     };
   }
@@ -7748,10 +7756,11 @@ export class GameEngine {
     // Depth carries the difficulty curve and the boss rotation forward; the
     // arena's own wave counter still restarts at 1 for the HUD.
     this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
-    // A wreck pins where this arena's wave script stood when the ship fell:
-    // flying back for it resumes there (user call), not from wave 1.
-    this.waves.init(ctx, this.wavesEnabled,
-      wreckWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id));
+    // An arena remembers where its wave script stood (engine/arenaWaves.ts):
+    // exactly, for a few minutes after the player left, then from the top of
+    // an ever earlier wave.
+    const held = arenaWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id);
+    this.waves.init(ctx, this.wavesEnabled, held.wave, held.progress);
     if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
 

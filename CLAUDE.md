@@ -681,9 +681,18 @@ state on the way).
   `loadMapFresh` clears it, so a restart or second hop mid-drain means
   the wormhole kept the stragglers.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
-  Wave progress is FRESH per entry — `WaveSystem.init` zeroes
-  `waveIndex`, so leaving an arena abandons the ladder; there is NO
-  per-map run state.
+  Wave progress is REMEMBERED per arena for a while (`engine/arenaWaves.ts`,
+  user call): `g.arenaWaves[arenaId]` = wave + enemies already down + the
+  wall-clock time the player was last there (`Clock.wallMs()`, the one epoch
+  read; stamped by every save while in the arena and just before any map
+  unloads).  Within `ARENA_WAVE_MEMORY.GRACE_SEC` (5 min) the wave comes back
+  EXACTLY (`WaveSystem.init(…, startIndex, progress)` fast-forwards the spawn
+  stream past the kills already scored; live enemies are not restored); after
+  that it restarts from the top of the same wave, and from a wave EARLIER for
+  every `DECAY_SEC` (1 h) away, down to wave 1.  A finished ladder (boss dead)
+  is forgotten.  It is saved (`SaveFile.arenaWaves`, optional) but is only the
+  WAVE SCRIPT — an arena's world still regenerates per entry, except that a wreck
+  pins its arena's seed (§8).  That is the whole per-map state there is.
 
 Death (user calls D4/D6/D10/D11, engine-core S1 + S2): THE MOMENT THE SHIP
 FALLS (`onPlayerFell`, from `handleEntityDeath`) the engine counts the death,
@@ -2970,15 +2979,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   (6) **Recovery is flying into it** (`WRECK_CONSTANTS.RECOVER_RANGE`) and gives
   the modules back TO CARGO ONLY (user call) — nothing is re-installed, the player
   refits at a station; a module that finds the hold full pays resale, so a recovery
-  never destroys one.  The record also carries `wave`: the wave the arena's script
-  stood at and `leftAt`, the wall-clock time the player was last in that arena
-  (`Clock.wallMs()`, the one epoch read — stamped by every save while there and
-  just before any map is left, `stampWreckPresence`).  `initWaveSystem` resumes at
-  `wreckWaveFor`: the saved wave HELD for `WRECK_CONSTANTS.WAVE_GRACE_SEC` (5 min)
-  of real time away, then one wave off per `WAVE_DECAY_SEC` (1 h), to a fresh
-  start.  It resets with a second death (a new record) or when that arena's boss
-  dies before recovery (`noteBossDefeated`), and is 0 for the hub or an
-  already-beaten ladder.  A save without the fields reads as 0.
+  never destroys one.
   (7) **The wreck is drawn by the generic POI path** (a disc in `WRECK_CONSTANTS
   .COLOR` and the word WRECK), `found` from birth (`isRetainedContact`).  Finding
   it again is guided: `updateWreckGuide` stamps `wreckGuide` on the wreck, or from
