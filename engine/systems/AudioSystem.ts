@@ -692,6 +692,9 @@ export class AudioSystem {
     const i = modes.findIndex(v => v === m.songMode);
     m.setSongMode(modes[(i + 1) % modes.length]);
   }
+  /** Debug: AUTO follows the music plan; a SONGS index pins that song (the
+   *  change lands on the next bar line).  The picker row calls this directly. */
+  public setMusicSong(mode: 'auto' | number) { this.music?.setSongMode(mode); }
   /** Debug: step the pinned intensity through the layer thresholds. */
   public cycleMusicDebugIntensity() {
     const steps: (number | null)[] = [null, 0, 0.25, 0.45, 0.7, 0.9, 1];

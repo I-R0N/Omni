@@ -30,6 +30,7 @@
 import React from 'react';
 import type { GameEngine } from '../engine/GameEngine';
 import { EngineStats, MapType, EnemySubtype, TrailShape, TrailEmitMode } from '../types';
+import { SONGS } from '../engine/systems/AdaptiveMusic';
 import { T_MICRO, T_NOTE, DEBUG_BTN, DEBUG_CHIP, DEBUG_OFF, DEBUG_ON } from './uiClasses';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -1178,6 +1179,25 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         c => { const m = c.s.audio?.music; return m ? `${m.song}${m.pending ? ` → ${m.pending}` : ''}${m.songPinned ? ' (pinned)' : ''}` : '—'; },
         'Which song is playing (and the one a change is loading toward); press to pin one.',
         'AUTO follows the music plan: the hub and field_* maps play Omni, arena_* maps Event Horizon, and any boss Critical Mass, with a victory stinger handing back when it dies. Pressing pins each song in turn (the change lands on the next bar line), then returns to AUTO.'),
+      chips('Play song', c => {
+        const mode = c.s.audio?.music?.songMode;
+        return [
+          {
+            key: 'auto', label: 'Auto',
+            summary: 'Let the music plan choose the song.',
+            detail: 'The hub and field_* maps play Omni, arena_* maps Event Horizon, and any boss Critical Mass, with a victory stinger handing back when it dies.',
+            act: dbg(e => e.audio.setMusicSong('auto')),
+            active: mode === 'auto', on: DEBUG_ON.indigo, hover: 'hover:border-indigo-400',
+          },
+          ...SONGS.map((s, i) => ({
+            key: s.id, label: s.title,
+            summary: `Pin ${s.title} (${s.bpm} BPM) until you pick Auto.`,
+            detail: 'The pin overrides the plan, through portals and boss fights too. The change lands on the next bar line: the new song loads alongside the old one, then they crossfade.',
+            act: dbg(e => e.audio.setMusicSong(i)),
+            active: mode === i, on: DEBUG_ON.indigo, hover: 'hover:border-indigo-400',
+          })),
+        ];
+      }),
       stat('Music bar', c => c.s.audio?.music?.bar ?? '—', 'Bar 1–32 of the 60-second score loop.'),
       ctrl('Music force', dbg(e => e.audio.cycleMusicDebugIntensity()),
         c => { const f = c.s.audio?.music?.forced; return f === null || f === undefined ? 'game' : f.toFixed(2); },

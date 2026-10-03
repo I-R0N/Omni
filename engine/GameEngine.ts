@@ -2940,6 +2940,7 @@ export class GameEngine {
           bar: this.audio.music.bar,
           song: this.audio.music.song.title,
           songPinned: this.audio.music.songMode !== 'auto',
+          songMode: this.audio.music.songMode,
           pending: this.audio.music.pendingSong?.title ?? null,
         } : null,
       },

@@ -462,6 +462,34 @@ test('the director: area themes, a boss theme, a victory hand-back, and pins', a
   watch.assertClean();
 });
 
+// The debug panel's song picker: AUTO plus one chip per song, the active one lit.
+test('the debug panel picks a song directly, and AUTO hands it back to the plan', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.playing);
+  await page.getByTestId('debug-launcher').click();
+  await waitForStats(page, s => s.debugPanel?.open === true, 'the debug panel');
+  await page.locator('[data-debug-group="perf"]').click();
+  await page.locator('[data-debug-section="music"]').click();
+  const row = page.locator('[data-debug-row="Play song"]');
+  await row.scrollIntoViewIfNeeded();
+  await expect(row.locator('button')).toHaveText(['Auto', 'Omni', 'Event Horizon', 'Critical Mass']);
+  const song = () => engine(page, e => e.audio.music.song.id);
+  expect(await engine(page, e => e.audio.music.songMode), 'starts on the plan').toBe('auto');
+
+  for (const [label, id, idx] of [['Critical Mass', 'critical-mass', 2], ['Event Horizon', 'event-horizon', 1]] as const) {
+    await row.locator('button', { hasText: label }).click();
+    await expect.poll(song, { timeout: 20000 }).toBe(id);
+    expect(await engine(page, e => e.audio.music.songMode), `${label} is pinned`).toBe(idx);
+    await page.waitForFunction(i => window.__omniStats?.audio?.music?.songMode === i, idx);   // the panel's own readout
+  }
+  await row.locator('button', { hasText: 'Auto' }).click();
+  expect(await engine(page, e => e.audio.music.songMode)).toBe('auto');
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');            // the hub's plan
+  watch.assertClean();
+});
+
 test('a lull inside one arena still holds the combat layers up', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);

@@ -93,7 +93,8 @@ next beat, drops the combat layers, keeps the combat floor off until the
 proximity gate lets go, and hands back to the area theme at the first bar line
 1.6 s after the stinger.  Debug ▸ Adaptive Music ▸ *Music song* shows
 "current → pending" and pins a song (AUTO → Omni → Event Horizon → Critical
-Mass → AUTO).  Adding a song: render it with its own script and file prefix,
+Mass → AUTO), and *Play song* beside it picks one directly (Auto, or a
+chip per `SONGS` entry; the active one is lit).  Adding a song: render it with its own script and file prefix,
 add it to `build.py`, append a `SONGS` entry, and give it a place in
 `MUSIC_PLAN`.
 

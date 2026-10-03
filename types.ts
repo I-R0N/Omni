@@ -2474,6 +2474,8 @@ export interface EngineStats {
       layers: string[]; bar: number;
       /** Resident song's title, and whether it is pinned (vs rotating). */
       song: string; songPinned: boolean; pending: string | null;
+      /** 'auto' follows the music plan; a number pins that SONGS index. */
+      songMode: 'auto' | number;
     } | null;
   };
 }
