@@ -47,6 +47,9 @@ export interface WreckRecord {
    *  (0-based, as `WaveSystem.waveIndex`; 0 = from the start).  Optional in the
    *  file — a save written before the field reads as 0, so no migration. */
   wave: number;
+  /** Wall-clock ms (epoch) when the player last left the wreck's arena — the
+   *  wave decays from it (`WRECK_CONSTANTS`).  0 = unknown, which decays fully. */
+  leftAt: number;
 }
 
 export interface Records {
@@ -166,6 +169,7 @@ function validWreck(raw: unknown): WreckRecord | null {
     x: num(raw.x, 0), y: num(raw.y, 0),
     ship, weapon,
     wave: int(raw.wave, 0, 0, 1e4),
+    leftAt: num(raw.leftAt, 0, 0, 1e15),
   };
 }
 

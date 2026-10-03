@@ -430,6 +430,7 @@ test('the wreck\'s arena resumes the wave script where the ship fell; a second d
 
   // The boss falling before the wreck is collected resets the script (the wreck stays).
   b.g.transitionToMap('arena_pocket');
+  b.g.waves.halted = true;                       // a boss on the field halts the ladder
   noteBossDefeated(b.g);
   assert.equal(b.g.wreck.wave, 0);
   b.g.transitionToMap('arena_pocket');
@@ -459,4 +460,49 @@ test('the way back to the wreck is lit: the wreck itself, else the rift toward i
   a.g.transitionToMap('arena_ring');           // elsewhere: the way home
   a.g.stepSim(2);
   assert.equal(a.g.portals.filter((p: any) => p.wreckGuide).length, 1);
+});
+
+test('the held wave decays with real time away: whole for 5 minutes, then one wave an hour', () => {
+  const storage = new MemoryStorage();
+  const a = launch(storage);
+  a.g.debugGrantModule('hull_mk2');
+  a.g.transitionToMap('arena_pocket');
+  a.g.stepSim(5);
+  a.g.player.position = { x: a.g.player.position.x + 900, y: a.g.player.position.y + 900 };
+  a.g.waves.waveIndex = 3;
+  die(a.g);
+  a.g.respawnFromDeath();
+  const waveAfter = (ms: number) => {
+    const b = launch(storage, { entropySeed: 5 });
+    b.platform.clock.advance(ms);
+    b.g.transitionToMap('arena_pocket');
+    return b.g.waves.waveIndex;
+  };
+  const MIN = 60_000, HOUR = 60 * MIN;
+  assert.equal(waveAfter(4 * MIN), 3, 'an accidental exit and a quick return find the same wave');
+  assert.equal(waveAfter(30 * MIN), 3, 'held until the first hour is up');
+  assert.equal(waveAfter(HOUR + MIN), 2, 'one wave off after an hour');
+  assert.equal(waveAfter(2 * HOUR + MIN), 1, 'two off after two hours');
+  assert.equal(waveAfter(9 * HOUR), 0, 'and a fresh start once it has run out');
+});
+
+test('leaving the wreck\'s arena by portal stamps the wave and the time, so a quick return resumes there', () => {
+  const storage = new MemoryStorage();
+  const a = launch(storage);
+  a.g.debugGrantModule('hull_mk2');
+  a.g.transitionToMap('arena_pocket');
+  a.g.stepSim(5);
+  a.g.player.position = { x: a.g.player.position.x + 900, y: a.g.player.position.y + 900 };
+  die(a.g);
+  a.g.respawnFromDeath();
+  a.g.transitionToMap('arena_pocket');           // back, wave 0, wreck not yet reached
+  a.g.waves.waveIndex = 2;
+  a.platform.clock.advance(30 * 60_000);
+  a.g.stepSim(1);
+  a.g.saveNow();                                  // autosave while present
+  assert.equal(a.g.wreck.wave, 2);
+  a.g.transitionToMap('overworld');
+  a.platform.clock.advance(2 * 60_000);
+  a.g.transitionToMap('arena_pocket');
+  assert.equal(a.g.waves.waveIndex, 2, 'two minutes later it is the same wave');
 });

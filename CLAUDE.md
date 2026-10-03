@@ -2971,15 +2971,20 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   the modules back TO CARGO ONLY (user call) — nothing is re-installed, the player
   refits at a station; a module that finds the hold full pays resale, so a recovery
   never destroys one.  The record also carries `wave`: the wave the arena's script
-  stood at when the ship fell, which `initWaveSystem` resumes at on re-entry
-  (`WaveSystem.init(…, startIndex)`).  It resets with a second death (a new record)
-  or when that arena's boss dies before recovery (`noteBossDefeated`), and is 0
-  for the hub or an already-beaten ladder.  A save without the field reads as 0.
+  stood at and `leftAt`, the wall-clock time the player was last in that arena
+  (`Clock.wallMs()`, the one epoch read — stamped by every save while there and
+  just before any map is left, `stampWreckPresence`).  `initWaveSystem` resumes at
+  `wreckWaveFor`: the saved wave HELD for `WRECK_CONSTANTS.WAVE_GRACE_SEC` (5 min)
+  of real time away, then one wave off per `WAVE_DECAY_SEC` (1 h), to a fresh
+  start.  It resets with a second death (a new record) or when that arena's boss
+  dies before recovery (`noteBossDefeated`), and is 0 for the hub or an
+  already-beaten ladder.  A save without the fields reads as 0.
   (7) **The wreck is drawn by the generic POI path** (a disc in `WRECK_CONSTANTS
   .COLOR` and the word WRECK), `found` from birth (`isRetainedContact`).  Finding
   it again is guided: `updateWreckGuide` stamps `wreckGuide` on the wreck, or from
   another map on the rift toward it, which draws a permanent amber edge arrow
-  (budget-exempt) and a clamped, pulsing minimap beacon, no scan needed.  The
+  (budget-exempt), a clamped, pulsing minimap beacon and, on that rift in the
+  world, an amber ring + "WRECK THIS WAY" tag — no scan needed.  The
   death screen names a wreck the death destroyed (`runSummary.lostWreck`), and
   the main menu says CONTINUE with the saved credits / modules / wreck when the
   save holds progress (`EngineStats.savedGame`, menu and debug panel only).
