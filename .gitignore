@@ -40,3 +40,6 @@ perf/out/
 # rebuild it from source, so a committed copy only ever went stale.
 omniverse-standalone.html
 scripts/score/.work/
+
+# Python bytecode / numba caches (scripts/score)
+__pycache__/
