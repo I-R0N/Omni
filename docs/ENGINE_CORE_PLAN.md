@@ -442,19 +442,34 @@ nothing in `S1`–`S4` should be shaped around it.
 ## 5. Branch and CI conventions
 
 **One integration branch off `main`** holds all of `S1`–`S4`:
-**`claude/engine-core`** (user call, confirmed).  Work sessions branch from
-it and PR back into it; it merges to `main` when the PM session judges a
-phase coherent.  A work session that finds the branch missing creates it
-from `main` (`git fetch origin main && git checkout -B claude/engine-core
-origin/main`) — it is not pre-created here, because an empty long-lived
-branch is just a name.
+**`claude/steam-game-publishing-xhnui2`** (user call, 2026-10-03, replacing
+`claude/engine-core`).  Work sessions branch from it and PR back into it; it
+merges to `main` when the PM session judges a phase coherent.
+
+The two branches were the SAME COMMIT when this was decided (`af3c8ba`), so
+the switch moved no code — `claude/engine-core` is simply abandoned at that
+commit rather than deleted, and PR #109 was re-based onto the new name.  A
+work session branches from the integration branch, never from `main`:
+
+```
+git fetch origin claude/steam-game-publishing-xhnui2
+git checkout -B <my-work-branch> origin/claude/steam-game-publishing-xhnui2
+```
+
+Two things about the NAME, so nobody reads meaning into it.  It is the
+planning session's own branch, named for the Steam question that opened that
+conversation before D0 settled on mobile — so it describes this phase
+BADLY, and that was accepted deliberately as the price of keeping one branch
+instead of two.  And it means the plan doc has lived on this branch from the
+start, which is why `main` does not carry it yet (PR #108): a work session
+must take the plan from the integration branch, not from the default one.
 
 **This plan doc must reach `main` early**, because fresh work sessions
 clone the default branch and would otherwise not see it.
 
 **CI maps onto the existing two-scope design** (CLAUDE.md §7) with no new
-machinery, and it is already WIRED: `claude/engine-core` is in
-`pr-checks.yml`'s `push.branches`, which is the whole mechanism — the scope
+machinery, and it is already WIRED: `claude/steam-game-publishing-xhnui2`
+is in `pr-checks.yml`'s `push.branches`, which is the whole mechanism — the scope
 step sends every non-`pull_request` event to `test:full`, so a merge into
 the integration branch runs the whole net while PRs INTO it get the cheap
 per-push smoke.  Nothing further to configure.
