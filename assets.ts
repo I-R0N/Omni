@@ -37,6 +37,7 @@ const PLACEHOLDER = '/assets/placeholder.png';
 // nebula-manifest plugin, which scans public/assets/ for every file matching
 // Nebula##.png.  Dropping a new file into that folder picks it up on the
 // next dev reload / build — no code changes required.
+import { fxRng } from './engine/systems/rng';
 import NEBULA_MANIFEST from 'virtual:nebula-manifest';
 
 // All discovered nebula image URLs, sorted by filename.
@@ -189,6 +190,6 @@ export const SHIP_SHEETS: Record<string, ShipSpriteSheet> = {
  */
 export function randomNebulaSprite(): string {
   return NEBULA_IMAGES.length > 0
-    ? NEBULA_IMAGES[Math.floor(Math.random() * NEBULA_IMAGES.length)]
+    ? NEBULA_IMAGES[Math.floor(fxRng.sprites() * NEBULA_IMAGES.length)]
     : ASSETS.NEBULA_PUFF;
 }

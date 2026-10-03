@@ -10,6 +10,7 @@
  *  the rival's do.  That asymmetry is deliberate and is why this file has no
  *  `SnitchInstance`.
  */
+import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType } from '../../types';
 import {
@@ -72,7 +73,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
       g.audio.play('snitch.dart', { x: s.position.x, y: s.position.y });
       g.snitchAiState = 'dart';
       g.snitchAiTimer = SNITCH_CONSTANTS.DART_DURATION_MIN
-          + Math.random() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
+          + sim.roamers() * (SNITCH_CONSTANTS.DART_DURATION_MAX - SNITCH_CONSTANTS.DART_DURATION_MIN);
       g.snitchDartAway = false;
       if (panic) {
         g.snitchPanicCooldown = SNITCH_CONSTANTS.PANIC_COOLDOWN;
@@ -88,7 +89,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
     g.snitchAiState = 'coast';
     g.snitchDartAway = false;
     g.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
-        + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
+        + sim.roamers() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
   }
   // Speed eases toward the state target — near-instant on the way up
   // (the burst), visibly slower on the way back down (the catch window
@@ -158,7 +159,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
     });
   }
   const sparkColors = SNITCH_CONSTANTS.SPARKLE_COLORS;
-  g.spawnParticles(s.position, 1, sparkColors[(Math.random() * sparkColors.length) | 0], {
+  g.spawnParticles(s.position, 1, sparkColors[(fxRng.particles() * sparkColors.length) | 0], {
     speedMin: 0, speedMax: 1.5,
     sizeMin: 0.5, sizeMax: 1.6,
     lifetimeMin: 0.15, lifetimeMax: 0.4,
@@ -196,7 +197,7 @@ function spawnSnitch(g: GameEngine) {
   if (!g.currentMap) return;
   const zoom = g.camera.zoom || 1;
   const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-  const angle = Math.random() * Math.PI * 2;
+  const angle = sim.roamers() * Math.PI * 2;
   const dist = halfDiag + SNITCH_CONSTANTS.SPAWN_MARGIN;
   const pos = {
     x: g.player.position.x + Math.cos(angle) * dist,
@@ -207,7 +208,7 @@ function spawnSnitch(g: GameEngine) {
     id: nextId('snitch'),
     type: EntityType.INTERACTABLE,
     isSnitch: true,
-    snitchWanderPhase: Math.random() * Math.PI * 2,
+    snitchWanderPhase: sim.roamers() * Math.PI * 2,
     position: pos,
     velocity: { x: 0, y: 0 },
     size: { x: SNITCH_CONSTANTS.SIZE, y: SNITCH_CONSTANTS.SIZE },
@@ -225,7 +226,7 @@ function spawnSnitch(g: GameEngine) {
   // window so the spawn reads as a wandering glint, not an escape.
   g.snitchAiState = 'coast';
   g.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
-      + Math.random() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
+      + sim.roamers() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
   g.snitchPanicCooldown = 0;
   const waveBase = Math.min(
     SNITCH_CONSTANTS.WAVE_SPEED_MAX,

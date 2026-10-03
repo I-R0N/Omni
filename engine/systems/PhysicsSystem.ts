@@ -1,5 +1,6 @@
 
 
+import { sim } from './rng';
 import { mechanicalScale, materialOf, stampFractureProfile } from './energy';
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
@@ -367,6 +368,9 @@ export class PhysicsSystem {
 
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
+    // Per-map phase of the shard-pair catch-up cadence: a run's pairs must
+    // not depend on how many steps the previous map ran (engine-core S1).
+    this.shardPairCallCount = 0;
       this.staticGrid.clear();
       // Map load: drop the per-substep bucket pools too.  Their free lists are
       // sized to the OUTGOING map, and holding a 6k-shard map's worth of empty
@@ -1026,7 +1030,7 @@ export class PhysicsSystem {
                     entity.velocity.x = vx * out;
                     entity.velocity.y = vy * out;
                     entity.rotationSpeed = (entity.rotationSpeed ?? 0)
-                        + (Math.random() - 0.5) * E.SPIN;
+                        + (sim.combat() - 0.5) * E.SPIN;
                     // The same immunity the transit debris gets, and for the
                     // same reason: without it the well it just cleared would
                     // haul it straight back down.
@@ -1389,7 +1393,7 @@ export class PhysicsSystem {
       if (isProgressiveFracture(target.shardVariant)) return;
       const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
       const hitsTaken = ceiling - target.health;
-      if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
+      if (sim.combat() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
   }
 
   // ── PENETRATION: THE BORE TRACK ─────────────────────────────────────
@@ -1672,7 +1676,7 @@ export class PhysicsSystem {
 
       const spread = opts?.spread;
       if (spread !== undefined && spread > 0) {
-          const ang = (Math.random() - 0.5) * spread;
+          const ang = (sim.combat() - 0.5) * spread;
           const c = Math.cos(ang), sn = Math.sin(ang);
           const tx = rx * c - ry * sn;
           ry = rx * sn + ry * c;
@@ -2020,7 +2024,7 @@ export class PhysicsSystem {
           let available = pullCount - 1;
           for (let i = 0; i < pullCount && remaining > 0; i++) {
               if (i === half) continue;
-              if (Math.random() * available < remaining) {
+              if (sim.combat() * available < remaining) {
                   deepMask |= 1 << i;
                   remaining--;
               }
@@ -2033,7 +2037,7 @@ export class PhysicsSystem {
           const idx = ((bestIdx + offset) % N + N) % N;
           const isDeep = (deepMask & (1 << i)) !== 0;
           const jitterMag = dent.vertexJitter * (isDeep ? centerMul : 1);
-          const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
+          const k = Math.max(K_MIN, 1 - sim.combat() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;
       }

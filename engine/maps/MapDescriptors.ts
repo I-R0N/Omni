@@ -93,3 +93,8 @@ export function descriptorForMapType(type: MapType | undefined): MapDescriptor |
  *  leads.  Resolved from `kind` so the id isn't hardcoded twice. */
 export const HUB_DESCRIPTOR: MapDescriptor =
   MAP_DESCRIPTORS.find(d => d.kind === 'hub') ?? MAP_DESCRIPTORS[0];
+
+/** The hub is a PERSISTENT world (user call D8): its terrain is generated from
+ *  this one fixed seed, so it is the same place on every visit and every run.
+ *  Only arenas carry a per-visit seed. */
+export const HUB_WORLD_SEED = 0x0b5e1a11;

@@ -30,6 +30,8 @@ import { installMenuNav, pickNext } from './components/menuNav';
 import {
   enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
 } from './engine/systems/render/shipSprites';
+import { runReplay, endReplay, hashSimState, firstDivergence } from './engine/replay';
+import * as rngStreams from './engine/systems/rng';
 import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
 import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
@@ -239,6 +241,14 @@ const App: React.FC = () => {
     (window as any).__omniBlend = {
       buildFilletPath, blendAttachRadius, coatMargin, roundedPolyPath,
     };
+    // The REPLAY harness (engine-core S1): record (seed, inputs), replay by
+    // stepping the real engine by hand, compare sim-state hashes.  Wrong in a
+    // way nothing reports — a stream that leaks into the sim still plays
+    // perfectly — so a suite pins it through here.  Nothing in the game reads
+    // this handle.
+    (window as any).__omniReplay = {
+      runReplay, endReplay, hashSimState, firstDivergence, rng: rngStreams,
+    };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -320,10 +330,6 @@ const App: React.FC = () => {
   // Death / run-summary screen actions (Phase 3 Pair A).
   const handleRespawn = () => {
       if (engineRef.current) engineRef.current.respawnFromDeath();
-  };
-
-  const handleRestartRun = () => {
-      if (engineRef.current) engineRef.current.restartRun();
   };
 
   const handleQuitToMenu = () => {
@@ -488,7 +494,6 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onRespawn={handleRespawn}
-        onRestartRun={handleRestartRun}
         onQuitToMenu={handleQuitToMenu}
         onDismissStageClear={handleDismissStageClear}
         onAudioCue={id => engineRef.current?.audio.play(id)}

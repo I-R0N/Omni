@@ -1,4 +1,5 @@
 
+import { sim } from '../systems/rng';
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { STRUCTURE_VARIANTS, StructureVariant, ASSETS, NEBULA_CONSTANTS, randomPlasticShade, randomRockShade, rockHitCeiling } from '../../constants';
 import { ShardVariantId } from '../systems/ShardSystem.types';
@@ -71,16 +72,16 @@ export class TileGenerator {
     const maxRow = Math.ceil((mapHeight / 2) / vDist);
 
     for (let i = 0; i < clusterCount; i++) {
-      let startCol = Math.floor((Math.random() * 2 - 1) * maxCol);
-      let startRow = Math.floor((Math.random() * 2 - 1) * maxRow);
+      let startCol = Math.floor((sim.terrain() * 2 - 1) * maxCol);
+      let startRow = Math.floor((sim.terrain() * 2 - 1) * maxRow);
 
-      const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
+      const targetSize = Math.floor(minClusterSize + sim.terrain() * (maxClusterSize - minClusterSize));
 
       const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];
       let createdInCluster = 0;
 
       while (openSet.length > 0 && createdInCluster < targetSize) {
-        const idx = Math.floor(Math.random() * openSet.length);
+        const idx = Math.floor(sim.terrain() * openSet.length);
         const current = openSet[idx];
         openSet.splice(idx, 1);
 
@@ -96,7 +97,7 @@ export class TileGenerator {
         for (const n of neighbors) {
           const nKey = `${n.c},${n.r}`;
           if (!usedCoords.has(nKey)) {
-             if (Math.random() > 0.1) {
+             if (sim.terrain() > 0.1) {
                  openSet.push(n);
              }
           }
@@ -149,8 +150,8 @@ export class TileGenerator {
       // tiles read as a single continuous cloud of one colour.
       const composition: NebulaColorStop[] = randomNebulaComposition();
 
-      let startCol = Math.floor((Math.random() * 2 - 1) * maxCol);
-      let startRow = Math.floor((Math.random() * 2 - 1) * maxRow);
+      let startCol = Math.floor((sim.terrain() * 2 - 1) * maxCol);
+      let startRow = Math.floor((sim.terrain() * 2 - 1) * maxRow);
 
       // Record this cluster's world-space start position for the
       // background-nebula layer to consume as a puff seed.
@@ -162,12 +163,12 @@ export class TileGenerator {
           });
       }
 
-      const targetSize = Math.floor(minClusterSize + Math.random() * (maxClusterSize - minClusterSize));
+      const targetSize = Math.floor(minClusterSize + sim.terrain() * (maxClusterSize - minClusterSize));
       const openSet: { c: number, r: number }[] = [{ c: startCol, r: startRow }];
       let createdInCluster = 0;
 
       while (openSet.length > 0 && createdInCluster < targetSize) {
-        const idx = Math.floor(Math.random() * openSet.length);
+        const idx = Math.floor(sim.terrain() * openSet.length);
         const current = openSet[idx];
         openSet.splice(idx, 1);
 
@@ -183,7 +184,7 @@ export class TileGenerator {
         for (const n of neighbors) {
           const nKey = `${n.c},${n.r}`;
           if (!occupiedCoords.has(nKey)) {
-             if (Math.random() > 0.1) {
+             if (sim.terrain() > 0.1) {
                  openSet.push(n);
              }
           }

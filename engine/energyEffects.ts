@@ -19,6 +19,7 @@
  *    payload, a shell's blast chain) are QUEUED and resolved after physics: the dynamic
  *    grid is only safe to read between substeps (CLAUDE.md §8).
  */
+import { sim, fxRng } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../types';
 import {
@@ -561,7 +562,7 @@ function agitateGas(g: GameEngine, e: GameEntity, heat: number, dt: number,
     if (e.mass !== Infinity) {
         if (!(agitation > 0)) return;
         const k = agitation * Math.min(heat, 1.5) * dt * 60;
-        const a = Math.random() * Math.PI * 2;
+        const a = sim.energy() * Math.PI * 2;
         e.velocity.x += Math.cos(a) * k;
         e.velocity.y += Math.sin(a) * k;
         if (heat > 0.2) e.nebulaMergeCooldown = Math.max(e.nebulaMergeCooldown ?? 0, 0.5);
@@ -1658,7 +1659,7 @@ function tickPulses(g: GameEngine, dt: number): void {
                 const lane = c.pulseSpread ?? 0;
                 let off = 0;
                 if (lane > 0) {
-                    off = (Math.random() * 2 - 1) * lane;
+                    off = (sim.energy() * 2 - 1) * lane;
                     if (bu.lastOff !== undefined && Math.abs(off - bu.lastOff) < lane * 0.5) {
                         off = bu.lastOff > 0 ? off - lane : off + lane;
                         off = Math.max(-lane, Math.min(lane, off));
@@ -1737,7 +1738,7 @@ function tickHazards(g: GameEngine, dt: number): void {
                 s.emberAcc -= 1;
                 const r = Math.max(p.size.x, p.size.y) * 0.45;
                 g.spawnParticles(p.position, 1,
-                    Math.random() < 0.5 ? '#ffb347' : '#ff6a2b', {
+                    fxRng.particles() < 0.5 ? '#ffb347' : '#ff6a2b', {
                         speedMin: 0.4, speedMax: 1.6, sizeMin: 1.2, sizeMax: 2.6,
                         lifetimeMin: 0.25, lifetimeMax: 0.55, positionJitter: r,
                         baseVelocity: { x: p.velocity.x * 0.6, y: p.velocity.y * 0.6 },

@@ -17,6 +17,7 @@
  *  on the head entity, so the entity stays lean.  Any number can be alive at
  *  once; `GameEngine.dragons` holds them.
  */
+import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WeaponType, WeaponConfig } from '../../types';
 import {
@@ -161,7 +162,7 @@ export function updateDragons(g: GameEngine, dt: number) {
         if (inst.state === 'roam' && d.provoked) {
             inst.gnatTimer -= dt;
             if (inst.gnatTimer <= 0) {
-                inst.gnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
+                inst.gnatTimer = D.GNAT_INTERVAL + sim.roamers() * D.GNAT_INTERVAL * 0.5;
                 const ctx = g.waveContext();
                 if (ctx) {
                     g.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
@@ -204,7 +205,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
     if (!g.currentMap) return;
     const zoom = g.camera.zoom || 1;
     const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-    const angle = Math.random() * Math.PI * 2;
+    const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
     const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };
     wrapPosition(pos);
@@ -240,7 +241,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
         consume: v.consume ? { ...v.consume } : undefined,
         aiState: 'chase',
-        glowPhase: Math.random() * Math.PI * 2,
+        glowPhase: fxRng.sprites() * Math.PI * 2,
     };
     // Seed a trailing path (outward, away from the head's inward heading) so the
     // starting body lays out behind it immediately instead of stacking.
@@ -375,7 +376,7 @@ function detachDragonSegment(seg: GameEntity) {
     seg.dragonSegment = false;
     seg.phasesTerrain = false; // a loose shard collides normally again
     seg.shardVariant = tileToShardVariant(seg.shardVariant);
-    const a = Math.random() * Math.PI * 2;
+    const a = sim.roamers() * Math.PI * 2;
     seg.velocity.x = Math.cos(a) * 3.5;
     seg.velocity.y = Math.sin(a) * 3.5;
 }

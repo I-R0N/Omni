@@ -1,4 +1,5 @@
 
+import { fxRng } from './rng';
 import { MapType, Vector2, GameEntity } from '../../types';
 import {
   COLORS, effectiveDpr,
@@ -306,17 +307,17 @@ public setMapType(type: MapType) {
         if (!ctx) continue;
         const cx = size / 2;
         const cy = size / 2;
-        const lobes = 15 + Math.floor(Math.random() * 10);
+        const lobes = 15 + Math.floor(fxRng.sky() * 10);
         const spread = size * 0.15;
-        const stretchX = 0.8 + Math.random() * 0.4;
-        const stretchY = 0.8 + Math.random() * 0.4;
+        const stretchX = 0.8 + fxRng.sky() * 0.4;
+        const stretchY = 0.8 + fxRng.sky() * 0.4;
 
         for (let i = 0; i < lobes; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * spread; 
+            const angle = fxRng.sky() * Math.PI * 2;
+            const dist = fxRng.sky() * spread; 
             const x = cx + (Math.cos(angle) * dist) * stretchX;
             const y = cy + (Math.sin(angle) * dist) * stretchY;
-            const r = (size * 0.015) + Math.random() * (size * 0.015);
+            const r = (size * 0.015) + fxRng.sky() * (size * 0.015);
             const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
             grad.addColorStop(0, 'rgba(255, 255, 255, 0.4)'); 
             grad.addColorStop(0.4, 'rgba(255, 255, 255, 0.1)');
@@ -396,8 +397,8 @@ public setMapType(type: MapType) {
     // showcase maps visually honest.
     if (this.nebulaClusterCenters) {
         for (const seed of this.nebulaClusterCenters) {
-            const size = 150 + Math.random() * 250; // 150–400px
-            const depth = 0.2 + Math.random() * 0.8; // 0.2–1.0 parallax
+            const size = 150 + fxRng.sky() * 250; // 150–400px
+            const depth = 0.2 + fxRng.sky() * 0.8; // 0.2–1.0 parallax
             const hue = randomPaletteHueDeg();
             const color = `hsla(${hue}, 100%, 60%,`;
             this.nebulaPuffs.push({
@@ -405,13 +406,13 @@ public setMapType(type: MapType) {
                 y: seed.y,
                 size: size,
                 depth: depth,
-                opacity: 0.1 + Math.random() * 0.55, // 0.10–0.65
+                opacity: 0.1 + fxRng.sky() * 0.55, // 0.10–0.65
                 color: color,
                 hue: hue,
-                rotation: Math.random() * Math.PI * 2,
-                rotationSpeed: (Math.random() - 0.5) * 0.001,
-                aspect: 0.8 + Math.random() * 0.4,
-                textureIndex: Math.floor(Math.random() * this.puffTextures.length)
+                rotation: fxRng.sky() * Math.PI * 2,
+                rotationSpeed: (fxRng.sky() - 0.5) * 0.001,
+                aspect: 0.8 + fxRng.sky() * 0.4,
+                textureIndex: Math.floor(fxRng.sky() * this.puffTextures.length)
             });
         }
     }

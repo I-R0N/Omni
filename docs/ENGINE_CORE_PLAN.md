@@ -186,6 +186,25 @@ every session landing before it adds new `Math.random()` sites to convert —
 and the replay harness it produces makes every later refactor verifiable
 rather than hoped-at.
 
+**Status (S1, 2026-10-03): BUILT, play-tested, in PR #109 (both halves).**
+Every `Math.random()` site in the game code draws from a named seeded stream
+(`engine/systems/rng.ts`), the replay harness exists (`engine/replay.ts`,
+`tests/replay.spec.ts`), and all of D-S1-a to g are decided (§7 D1–D8).  The
+gameplay half is in too, and the user has play-tested it on the phone
+preview: death returns the player to the hub's HOME STATION with installed
+modules stripped and salvage / cargo / slots / score kept (D4), no credit
+penalty (D6), the death screen offers only "Respawn at Home Station" and Main
+Menu (Restart Run was removed by user call), seeding is per ARENA entry with
+a persistent hub (D8), and the summary shows the arena's seed (D2).
+**Closed as S1's item and handed up:** the descent rift (D5 → D9): the user wants
+a redesigned, connected tree of arenas rather than random descent, which is
+world-design work for the PM to place (§8).  The one `weapons.spec.ts`
+bore-test flake is RESOLVED: the test could pick an already-damaged tile
+(not a product bug, not a seed-dependent grain pattern — 2400 pinned-seed bores
+on pristine tiles all absorbed exactly 14.4/grain); it now selects a pristine
+tile.  The full
+suite waits for the user's merge notice (CLAUDE.md §7).
+
 **Near-term payoff** (the discipline rule): bug reports become a seed plus
 an input log; the existing 430 tests get far stronger; deterministic
 lockstep becomes the cheapest netcode path if multiplayer is ever wanted.
@@ -505,6 +524,15 @@ who made it, and the consequences for other sessions.
 | D0 | PM | 2026-10-02 | **Mobile first, Steam deferred, console accepted as possibly a different game** (user call).  Weighed against a Steam-first release; rejected because the game is already shaped for a 390×844 phone and Steam's real cost is a desktop HUD and input pass, while mobile's cost is store paperwork. | Sets the whole plan's order.  `S5` is not scheduled and nothing in `S1`–`S4` is shaped around it. |
 | D0b | PM | 2026-10-02 | **The portable-core goal is a deterministic, platform-free sim with content as data — not a reusable engine, and not shared code with a console port** (user call, sharpened in planning).  A port is a verified translation checked by replaying inputs against state hashes. | Makes `S1`'s determinism work the keystone.  Imposes the discipline rule in §1. |
 | D0c | PM | 2026-10-02 | **Sessions are organised around gameplay decisions, not around refactors** (user call).  Each session pairs invisible plumbing with the gameplay feature it unlocks, and ships two PRs. | Collapses an earlier seven-package plan into four sessions. |
+| D1 | S1 | 2026-10-02 | **D-S1-c — the sim/cosmetic split of the random streams** (user call).  Options weighed: AI jitter as SIM / as COSMETIC / split by effect.  **Call: AI jitter is SIM; the rest of the proposed split confirmed as written.**  SIM = terrain / map gen, wave composition + spawn placement, drop rolls + scatter, fracture velocities and seeds, nebula condense rolls, chip dust, boss / rival / dragon / snitch / bubble rolls, projectile spread and curl, the energy layer's lanes, and enemy jitter / flock / timers.  COSMETIC = particles, sprite / palette / shade picks, nebula twinkle, camera shake, damage-text jitter, audio variation, the star field and background nebula, render-time wobble.  Rationale for jitter: it moves bodies, so a replay that did not reproduce it would be silently false. | Streams are one per SUBSYSTEM (`engine/systems/rng.ts`), so a draw added to one cannot shift another.  Anything that mixes both kinds in one function was split site by site (e.g. a death's particle COUNT is cosmetic, the debris it throws is sim).  Entity ids are sim state (they seed fracture patterns), so cosmetic prefixes count on their own id sequence.  AI draw order must stay stable per entity — a later session that reorders enemy iteration reshuffles every replay. |
+| D2 | S1 | 2026-10-02 | **D-S1-a — seed visibility** (user call).  Options: hidden / shown on the run summary / enterable at run start / daily seed.  **Call: shown on the run summary** (see D8 for WHICH seed). | The seed becomes a small UI surface on the death/run summary.  Not enterable, so no input validation; no daily seed, so no `Clock` dependency for S2. |
+| D3 | S1 | 2026-10-02 | **D-S1-b — what the seed covers** (user call).  Options: everything / terrain + waves / terrain only.  **Call: everything.** | Matches what PR 1 built: a seed plus an input log reproduces the whole arena, drops and AI included. |
+| D4 | S1 | 2026-10-02 | **D-S1-d — does a run end** (user call, in the user's words: "this is becoming more of an rpg").  Options: death ends the run / descent chain ends at a boss / timed / endless with soft reset.  **Call: none of the four as written — death RESETS THE PLAYER TO THEIR SPACE STATION and ELIMINATES ALL OF THEIR EQUIPMENT, but KEEPS salvage / currency.**  Progression is the persistent character, not a run. | The central input to S2's save scope: what survives a death is credits only; modules (installed and cargo — to be confirmed in PR 2) do not.  Reverses the old respawn-in-place behaviour (CLAUDE.md §3 Death).  There is no "run terminator" in the roguelike sense, so the run-scoped counters on the summary need a re-think in PR 2. |
+| D5 | S1 | 2026-10-02 | **D-S1-e — descent rift** (user call).  Options: switch on / not yet / switch on after a rework.  **Call: switch it on, but rework the flow first**; then, asked what the rework is, **deferred — PR 2 is the death reset only.** | `openDescentPortal` stays uncalled for now.  The rework itself is unspecified and is NOT in PR 2; a later session must put it to the user before wiring it. |
+| D6 | S1 | 2026-10-02 | **D-S1-f — death cost** (user call).  Options: keep / tune / replace / remove.  **Call: the credit penalty is REMOVED; equipment loss (D4) is the whole cost.** | Deletes `DEATH_PENALTY_FRACTION` / `DEATH_PENALTY_MIN` charging, `lastDeathCreditsLost` / `runCreditsLost` and the summary's "lost to the wreck" line.  The economy pass loses its provisional penalty to retune. |
+| D7 | S1 | 2026-10-02 | **D-S1-g — player-facing replay** (user call).  Options: dev-only / share a run / ghost.  **Call: dev-only.** | The replay format is NOT a compatibility surface; it may change freely.  `__omniReplay` stays a debug handle. |
+| D8 | S1 | 2026-10-02 | **Seed scope clarified** (user call): *"the seeds should only be for the mini game arenas, not the overall universe. This shouldn't change based on 'run'."*  Options put: one seed per run / a new seed every life.  **Call (as the PM/S1 reads it — to be confirmed in PR 2): the Overworld hub and the wider universe are PERSISTENT and are not re-seeded per run or per life; only the ARENAS (the mini-game maps reached through portals) carry a seed, and that seed is what the summary shows.** | CHANGES PR 1's shape: `GameEngine.seedRun()` currently reseeds every stream (hub included) at each new run.  PR 2 must move seeding to arena ENTRY and give the hub a fixed or persisted world.  Replay then records (arena seed, inputs) per arena visit.  S2 must persist the hub's generation separately from any arena seed. |
+| D9 | S1 | 2026-10-03 | **D-S1-e resolved — the descent rift is NOT S1's; it belongs to a WORLD-DESIGN effort** (user call).  Options put: dive chain to a random deeper arena / choice of deeper-or-home rift (judged the same as the first, since every arena already has a return rift) / leave it off.  **Call: none of them as framed.**  The user wants arenas REDESIGNED rather than random ones, and wants them as a TREE with interconnectivity: the player TRAVELS through arenas to get home rather than a portal dropping them at their station, so the universe has physical extent (cf. No Man's Sky).  Redesigning arenas is not S1's work but is definitely part of the overall plan.  Today's map types are mostly test terrain.  Planned arena families named by the user: LABYRINTH / maze maps of indestructible tiles leading to rare items or salvage; DENSE maps, fully enclosed in tile structure, that the player digs through; and a range of wave-battle arenas of graded difficulty using the whole enemy catalog in its deeper varieties. | `openDescentPortal` and the `descend` / depth / `waveOffset` machinery stay uncalled and untouched; S1 does NOT wire it.  The arena return rift and hub-portal travel (§3 of CLAUDE.md) are today's placeholder and will be superseded by a connected map graph.  No session in this plan owns the world-design work yet: the PM session must decide whether it is a fifth session or sits after S4 (§8).  Constraint it inherits from S1: arenas are seeded per entry (D8) and the hub is persistent, so a connected world must decide which nodes persist and which regenerate; and from D4, death returns to the home station, so a long physical route home raises what a death costs in time, not just equipment. |
 
 ---
 
@@ -515,4 +543,42 @@ should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
 
-*(empty — nothing flagged yet)*
+- **S1 → S2 (Clock port).**  Four wall-clock reads still sit in or beside the
+  sim and a replay works around, not through, them: (1) `PerfController`'s load
+  signal has a wall-clock sim-time term — a held replay feeds it 0, so skip
+  tiers in a REAL recorded run are not reproduced; a bug-report replay of a
+  heavy scene needs the tier recorded, or the controller pinned; (2) a charged
+  shot's hold time reads `performance.now` in `InputSystem` and is not in the
+  replay input format; (3) the replay's aim is a screen position from the
+  viewport centre, so it only matches at the recorded viewport; (4) the
+  per-run seed is read from `crypto` / `Date.now` in `freshRunSeed` — a daily
+  seed (D-S1-a) would route through the `Clock` port.  *(S1, 2026-10-02)*
+- **S1 → S2 (save scope).**  `GameEngine.runSeed` is the one number a saved
+  run needs to regenerate terrain; the streams' STATES are not saved, so a
+  mid-run save restores the world from entities but cannot resume the random
+  sequence unless `simStates()` is persisted too.  *(S1, 2026-10-02)*
+- **S1 → S3 (content as data).**  Nothing in the content tables may read
+  `Math.random` any more; a content row that wants a random roll names its
+  stream.  `constants.ts` still owns three roll helpers
+  (`randomRockShade` / the plastic shades are cosmetic; the wave-mix roll in
+  `buildWaveSpawnList` is sim) — they stay as functions, not data.
+  *(S1, 2026-10-02)*
+- **S1 → S2 (save scope, from D4/D6/D8).**  What a death keeps is credits only;
+  equipment is wiped and the player is returned to the station.  The hub is
+  persistent while arenas carry their own seed, so S2's persistence splits
+  into (1) the character: credits (and whatever equipment policy PR 2 settles),
+  (2) the hub world, and (3) nothing for an arena beyond its seed.  *(S1, 2026-10-02)*
+- **Process.**  The plan lived only on `claude/steam-game-publishing-xhnui2`
+  (PR #108) when S1 began, so `git checkout -B claude/engine-core origin/main`
+  would have dropped it.  S1 branched from the plan branch instead.
+  *(S1, 2026-10-02)*
+- **S1 → PM (world design, D9).**  The descent rift is closed as S1's item and
+  handed up: the user wants a redesigned, connected tree of purpose-built
+  arenas (labyrinth, dig-through, graded wave arenas) with physical travel
+  between them in place of direct portals to the station.  This is a
+  gameplay-and-content workstream the four sessions do not cover.  It
+  touches S2 (per-node persistence: which arenas keep destroyed tiles and
+  `found` flags, today lost on re-entry), S3 (arena layouts as DATA — the
+  natural first content table to extract) and the `MAP_DESCRIPTORS` registry,
+  which today carries no graph edges.  Needs a home in §4 / §6 and a decision
+  on whether it is a fifth session.  *(S1, 2026-10-03)*

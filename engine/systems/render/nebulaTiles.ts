@@ -22,6 +22,7 @@
  *  NAMING: the renderer parameter is `rs`, not the `r` the other `render/`
  *  modules use, because the moved bodies bind `r` as a radius.
  */
+import { fxRng } from '../rng';
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity } from '../../../types';
 import { NEBULA_CONSTANTS, getActiveNebulaStretchK, nebulaSpriteSize, getNebulaSpriteGen } from '../../../constants';
@@ -470,9 +471,9 @@ export function drawNebulaEntity(
             // across the [MIN, MAX] interval so a freshly-spawned
             // cluster doesn't all twinkle in unison.
             entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
-                + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
-            entity.nebulaTwinkleX = (Math.random() * 2 - 1);
-            entity.nebulaTwinkleY = (Math.random() * 2 - 1);
+                + fxRng.render() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
+            entity.nebulaTwinkleX = (fxRng.render() * 2 - 1);
+            entity.nebulaTwinkleY = (fxRng.render() * 2 - 1);
         }
         const elapsed = now - entity.nebulaTwinkleNextAt;
         if (elapsed >= 0) {
@@ -501,9 +502,9 @@ export function drawNebulaEntity(
                 // Cycle complete — schedule the next one with a fresh
                 // random delay and reroll the in-sprite position.
                 entity.nebulaTwinkleNextAt = now + NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN
-                    + Math.random() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
-                entity.nebulaTwinkleX = (Math.random() * 2 - 1);
-                entity.nebulaTwinkleY = (Math.random() * 2 - 1);
+                    + fxRng.render() * (NEBULA_CONSTANTS.TWINKLE_INTERVAL_MAX - NEBULA_CONSTANTS.TWINKLE_INTERVAL_MIN);
+                entity.nebulaTwinkleX = (fxRng.render() * 2 - 1);
+                entity.nebulaTwinkleY = (fxRng.render() * 2 - 1);
             }
         }
     }

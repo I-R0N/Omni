@@ -12,6 +12,7 @@
  *  `RenderSystem` is a TYPE import, so it is erased at compile time and there
  *  is no runtime cycle.
  */
+import { fxRng } from '../rng';
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, CameraState, TrailPoint, TrailShape, Vector2 } from '../../../types';
 import {
@@ -437,7 +438,7 @@ export function renderLightningArc(ctx: CanvasRenderingContext2D, particle: Game
             const mx = a.x + dx * t;
             const my = a.y + dy * t;
             // Random perpendicular offset (scales with segment length)
-            const offset = (Math.random() - 0.5) * len * 0.25;
+            const offset = (fxRng.render() - 0.5) * len * 0.25;
             zigzag.push({ x: mx + nx * offset, y: my + ny * offset });
         }
         zigzag.push({ x: b.x, y: b.y });
