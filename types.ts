@@ -2475,7 +2475,7 @@ export interface EngineStats {
       intensity: number; target: number; forced: number | null;
       layers: string[]; bar: number;
       /** Resident song's title, and whether it is pinned (vs rotating). */
-      song: string; songPinned: boolean;
+      song: string; songPinned: boolean; pending: string | null;
     } | null;
   };
 }

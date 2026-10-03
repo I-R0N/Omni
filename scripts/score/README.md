@@ -57,7 +57,8 @@ key (kicks settle on A1, snare body on F3, ride bell D7/A7, taiko A1/D2).
 - `song3.py` — Critical Mass (writes `out/c-*`; its groove stays stereo).
 - `mix.py` — (`python mix.py` Omni, `b-` Event Horizon, `c-` Critical Mass) per-stem loudness targets, soft clip, a report of every
   intensity stack's loudness and peak, one global trim.
-- `build.py` — both songs end to end, encoded into `public/assets/audio/`
+- `stingers.py` — the three victory stingers (tonic chord resolving major, on each song's rig).
+- `build.py` — every song end to end, encoded into `public/assets/audio/`
   (`score-*` Omni, `score2-*` Event Horizon, `score3-*` Critical Mass).
 
 ## Changing the music

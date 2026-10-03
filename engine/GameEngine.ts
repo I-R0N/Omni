@@ -1554,8 +1554,10 @@ export class GameEngine {
       // ORDER STILL MATTERS: combat went down on the lines above, so the
       // combat layers are already leaving when the phrase restarts, and the
       // destination's own first engagement brings them back on a downbeat.
-      // Travelling through a PORTAL also rotates the score to its next song;
-      // a run start, a restart or a menu map pick keeps the current one.
+      // The area picks its theme (the music director's plan — see MUSIC_PLAN
+      // in AdaptiveMusic); a different song comes in seamlessly on a bar line.
+      const area = descriptorForMapType(type);
+      this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
       this.audio.cueEncounter(viaPortal ? 'portal' : 'map');
       this.loadMap(this.buildMap(type));
   }
@@ -2794,6 +2796,7 @@ export class GameEngine {
           bar: this.audio.music.bar,
           song: this.audio.music.song.title,
           songPinned: this.audio.music.songMode !== 'auto',
+          pending: this.audio.music.pendingSong?.title ?? null,
         } : null,
       },
     });

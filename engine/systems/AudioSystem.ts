@@ -191,6 +191,7 @@ export class AudioSystem {
   private _musicVolume = 1;
   private _combat = false;
   private _threat: MusicThreat | null = null;
+  private _area: { id: string; kind: 'hub' | 'arena' } | null = null;
   private live = new Set<LiveVoice>();
   private synthesized = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
   private _prepared = false;
@@ -406,6 +407,11 @@ export class AudioSystem {
     }
 
     this.music = new AdaptiveMusic(this.ctx, this.buses.get('music')!);
+    if (this._area) {
+      // Start on the area's own theme rather than swapping to it after.
+      this.music.setArea(this._area.id, this._area.kind);
+      this.music.cueEncounter('map');
+    }
     this.music.setEnabled(!this._muted && this._musicVolume > 0);
     this.music.setActive(this._active);
     this.music.setCombat(this._combat);
@@ -667,6 +673,14 @@ export class AudioSystem {
    *  lands an impact).  A no-op before the first gesture creates the score:
    *  there is no phrase to cut yet, and the score starts at bar 1 anyway. */
   public cueEncounter(kind: 'map' | 'portal' | 'boss') { this.music?.cueEncounter(kind); }
+  /** The area a map load is entering — the director picks its theme.  Kept
+   *  so a score created later (first gesture) starts on the right song. */
+  public setMusicArea(id: string, kind: 'hub' | 'arena') {
+    this._area = { id, kind };
+    this.music?.setArea(id, kind);
+  }
+  /** The last live boss died: victory stinger, then the area theme. */
+  public musicBossDefeated() { this.music?.bossDefeated(); }
   /** Debug: pin the score's intensity (null = follow the game). */
   public setMusicDebugIntensity(v: number | null) { this.music?.setDebugIntensity(v); }
   /** Debug: AUTO (rotate songs on each map change) → pin each song in turn. */

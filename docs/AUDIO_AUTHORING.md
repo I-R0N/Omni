@@ -74,16 +74,28 @@ carries a stack through a wave clear would carry the drums into the hub (the
 old "battle music followed me through the portal" report).  Inside an arena
 nothing ever jumps; a lull only lowers intensity.
 
-**Songs.**  `SONGS` in `AdaptiveMusic.ts` lists them (title, BPM, bars, file
-prefix).  Exactly one is resident.  A PORTAL transit (`transitionToMap` →
-`loadMapFresh(…, viaPortal)` → `cueEncounter('portal')`) rotates to the next
-song; a run start, restart or menu map pick (`cueEncounter('map')`) keeps the
-current one.  A switch fades the output, stops every source, DROPS the old
-song's buffers, fetches the new one and starts it at bar 1 (a generation
-counter discards any old-song decode that lands late).  Debug ▸ Adaptive
-Music ▸ *Music song* pins a song (AUTO → Omni → Event Horizon → Critical Mass → AUTO).
-Adding a third song: render it with its own script and file prefix, add it to
-`build.py`, and append a `SONGS` entry.
+**The director (which song plays).**  `MUSIC_PLAN` in `AdaptiveMusic.ts`
+assigns cues the way AAA scores do: each AREA owns a theme — the hub and
+`field_*` maps play Omni, `arena_*` maps Event Horizon — and any BOSS brings
+in its own theme, Critical Mass.  `loadMapFresh` reports the area
+(`audio.setMusicArea`) before its `cueEncounter`; `handleBossSpawn` cues
+'boss'; `payBossBounty` calls `audio.musicBossDefeated()` when the LAST live
+boss dies.  If the wanted song is already playing, a cue just returns to bar
+1; otherwise the change is SEAMLESS: the new song's needed stems (bed, the
+layers currently in, and in a boss fight pulse/groove/heavy/boss) load into a
+side buffer while the old song plays on, then the change commits on the old
+song's next bar line — 0.3 s crossfade, new song at bar 1, the impact on the
+seam for a boss.  The rest of the new song loads after and joins in phase.
+Two songs are resident only for that decode.  While the score is stopped
+(mute, volume 0) the change is immediate instead.  A boss death plays the
+current song's VICTORY STINGER (tonic chord resolving major, per song) on the
+next beat, drops the combat layers, keeps the combat floor off until the
+proximity gate lets go, and hands back to the area theme at the first bar line
+1.6 s after the stinger.  Debug ▸ Adaptive Music ▸ *Music song* shows
+"current → pending" and pins a song (AUTO → Omni → Event Horizon → Critical
+Mass → AUTO).  Adding a song: render it with its own script and file prefix,
+add it to `build.py`, append a `SONGS` entry, and give it a place in
+`MUSIC_PLAN`.
 
 **Loading and memory.**  The title screen fetches `score-atmos.mp3` only; the
 combat set and one-shots are fetched when a run starts (`setActive(true)`),

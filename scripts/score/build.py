@@ -69,5 +69,13 @@ for song, prefix, mono in (('', 'score-', ('groove', 'boss')), ('b-', 'score2-',
             enc(song + n, prefix + n, 1, 80)
         else:
             enc(song + n, prefix + n, 2, 128)
-enc('impact', 'score-impact', 2, 128)    # shared by both songs
+enc('impact', 'score-impact', 2, 128)    # shared by every song
+
+# Victory stingers (one per song, its key, its rig) — the director plays the
+# current song's when a boss dies.
+run('stingers.py')
+for song, prefix in (('', 'score-'), ('b-', 'score2-'), ('c-', 'score3-')):
+    v = np.load(f'out/{song}victory.npy')
+    sf.write(f'final/{song}victory.wav', v.T, SR, subtype='FLOAT')
+    enc(song + 'victory', prefix + 'victory', 2, 128)
 print('wrote', OUT)
