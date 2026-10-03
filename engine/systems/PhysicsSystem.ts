@@ -12,6 +12,7 @@ import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, w
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 import { CellBuckets } from './CellBuckets';
+import { nowMs } from '../ports';
 
 /**
  * How a projectile should come off a surface — see
@@ -446,7 +447,7 @@ export class PhysicsSystem {
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
     onPortalEject?: (entity: GameEntity, portal: GameEntity) => void
   ) {
-    const t0 = performance.now();
+    const t0 = nowMs();
 
     // Determine Friction based on Environment (MapType) from Config
     const config = PLAYER_MOVEMENT_CONFIG[mapType];
@@ -466,21 +467,21 @@ export class PhysicsSystem {
     // Apply Planetary/Stellar Gravity (Scaled by time).
     // DBG-toggleable: when attractorGravityEnabled is false the scan
     // is skipped entirely and lastGravityMs reads zero.
-    const tGrav = performance.now();
+    const tGrav = nowMs();
     if (this.attractorGravityEnabled) {
       this.applyGravity(entities, timeScale, onDamage, onPortalEject);
     }
-    this.lastGravityMs = performance.now() - tGrav;
+    this.lastGravityMs = nowMs() - tGrav;
 
     // Apply Player-Asteroid Mutual Gravity (Scaled by time).
     // DBG-toggleable: when localGravityEnabled is false, the scan is
     // skipped entirely and lastLocalGravityMs reads zero — letting the
     // perf overlay show the cost dropping to baseline in real time.
-    const tLocal = performance.now();
+    const tLocal = nowMs();
     if (this.localGravityEnabled) {
       this.applyLocalGravity(asteroids, player, timeScale);
     }
-    this.lastLocalGravityMs = performance.now() - tLocal;
+    this.lastLocalGravityMs = nowMs() - tLocal;
 
     // Player → nebula-shard pull (independent of local gravity toggle
     // — this is the only interaction the player gets with nebula
@@ -736,7 +737,7 @@ export class PhysicsSystem {
     // off-frames is what makes the slider visibly move `coll` ms.
     // Both passes share the same `tCol` window so the perf timer
     // reports total collision cost (main + shard-pair).
-    const tCol = performance.now();
+    const tCol = nowMs();
     if (this.collisionsEnabled) {
       this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
       if (this.shouldRunShardPairsThisStep()) {
@@ -765,9 +766,9 @@ export class PhysicsSystem {
       // same helper inline.
       this.resolvePassthroughShatterPairs(asteroids, onDamage, onDeath, onShake, onHit);
     }
-    this.lastCollisionsMs = performance.now() - tCol;
+    this.lastCollisionsMs = nowMs() - tCol;
 
-    this.lastUpdateMs = performance.now() - t0;
+    this.lastUpdateMs = nowMs() - t0;
   }
 
   /**

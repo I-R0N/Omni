@@ -21,6 +21,7 @@ import {
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
+import { viewport } from '../ports';
 
 /** A rival ship and its engine-managed lifecycle/AI state.  The ship itself is
  *  a plain EntityType.ENEMY carrying `isRival`; everything else lives here so
@@ -192,7 +193,7 @@ export function spawnRival(g: GameEngine, forced?: RivalDisposition) {
     if (!g.currentMap) return;
     const R = RIVAL_CONSTANTS;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
     const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + R.SPAWN_MARGIN;
     const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };

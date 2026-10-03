@@ -28,6 +28,7 @@ import {
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from '../maps/TileGenerator';
+import { viewport } from '../ports';
 
 /** One live dragon mini-boss (Stage 6): its head entity + Snake body + per-
  *  dragon lifecycle/attack timers.  Multiple can be alive at once. */
@@ -204,7 +205,7 @@ export function updateDragons(g: GameEngine, dt: number) {
 export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'mixed') {
     if (!g.currentMap) return;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
     const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
     const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };

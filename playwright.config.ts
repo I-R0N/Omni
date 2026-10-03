@@ -19,6 +19,12 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests',
+  // `tests/sim` holds the HEADLESS Node suites (`npm run test:sim`, run by
+  // node:test).  Their `*.test.ts` names match Playwright's default pattern,
+  // and loading one pulls the engine in under Playwright's TS loader, which
+  // cannot resolve the `virtual:` manifests — it would fail the whole run at
+  // collection.  Only the browser suites are Playwright's.
+  testIgnore: ['**/sim/**'],
   // The sim runs on a fixed timestep and this container renders canvas in
   // software, so sim-seconds elapse slower than wall-clock seconds.  Tests
   // that advance the world need real room.

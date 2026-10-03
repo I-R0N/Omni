@@ -17,6 +17,7 @@ import {
   type Delivery, type EnergyModifier, DELIVERIES, ENERGY_MODIFIERS, weaponKey, resolveWeaponKey,
   MATERIALS, registerVariantMaterials,
 } from './engine/systems/energy';
+import { viewport } from './engine/ports';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -1274,8 +1275,10 @@ export const INPUT_CONSTANTS = {
    *  is a physical POSITION (left of 1, under Esc) rather than a character,
    *  and survives keyboard layouts that put something other than ` there.
    *  The classic dev-console key, and unbound: flight is WASD/arrows, the
-   *  mouse aims and shoots, E interacts and Q scans.  Escape also CLOSES the
-   *  panel (never opens it).  The pad's twin is `GAMEPAD.BUTTONS.DEBUG`. */
+   *  mouse aims and shoots, E interacts and Q scans.  Escape CLOSES the panel
+   *  (never opens it) — and with the panel shut it is the pause key
+   *  (`GameEngine.escapePressed`).  The pad's twin is
+   *  `GAMEPAD.BUTTONS.DEBUG`. */
   DEBUG_KEY: 'Backquote',
 
   // ── Gamepad rumble ─────────────────────────────────────────────────────
@@ -1730,7 +1733,7 @@ let activeRenderScaleIndex = 0;
 export function getActiveRenderScaleCap(): number { return RENDER_SCALE_CYCLE[activeRenderScaleIndex]; }
 export function getActiveRenderScaleName(): string {
   const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const dpr = viewport().dpr || 1;
   return dpr <= cap ? `${cap}x (native)` : `${cap}x`;
 }
 /** The device pixel ratio ACTUALLY in use, after the cap.  Every site that
@@ -1738,7 +1741,7 @@ export function getActiveRenderScaleName(): string {
  *  `window.devicePixelRatio` — mixing the two makes the renderer compute a
  *  logical viewport that does not match the canvas it is drawing into. */
 export function effectiveDpr(): number {
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const dpr = viewport().dpr || 1;
   const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
   return dpr < cap ? dpr : cap;
 }

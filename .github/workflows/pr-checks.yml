@@ -85,6 +85,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Gate 2b — the HEADLESS SIM suites (tests/sim, engine-core S2): the real
+      # GameEngine in Node on the stand-in ports, no browser.  Seconds, not
+      # minutes, and it carries the platform guard (no `window` / `document` /
+      # `navigator` / `performance` in the sim) and the replay claims, so a
+      # sim regression fails here before the browser suites even start.
+      - name: Headless sim tests
+        run: npm run test:sim
+
       # The browser download is the one step worth caching: `npm ci` costs ~2s
       # behind setup-node's lockfile-keyed npm cache, while fetching Chromium
       # costs ~25s every run.  Key on the RESOLVED Playwright version (read

@@ -6,6 +6,7 @@ import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioM
 import SFX_MANIFEST from 'virtual:sfx-manifest';
 import { AUDIO_CONSTANTS, getActiveCollapseMode } from '../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+import type { AudioPort } from '../ports';
 
 /** Event-based Web Audio mixer. Registry IDs are the call-site contract.
  * Cinematic bank takes, discovered WAVs and cached production recipes share
@@ -174,7 +175,7 @@ function peakOf(buf: AudioBuffer): number {
   return peak;
 }
 
-export class AudioSystem {
+export class AudioSystem implements AudioPort {
   // ── Registry ──
   private defs = new Map<string, SfxDef>();
   private loopDefs = new Map<string, SfxLoopDef>();

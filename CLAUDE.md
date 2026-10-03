@@ -28,7 +28,10 @@ the HUD, Vite bundler, TypeScript throughout. Single-page app — no server, no
 backend, no persistence beyond in-memory run state.
 
 - Entry: `index.tsx` → `App.tsx` mounts a `<canvas>` + `UIOverlay` and owns a
-  single `GameEngine` instance.
+  single `GameEngine` instance, built over `createBrowserPlatform()` — the
+  clock, viewport, storage, lifecycle, entropy, audio, input and renderer
+  arrive through PORTS (`engine/ports.ts`, §8), so the same engine also runs
+  headless in Node (`platform/headless.ts`, `npm run test:sim`).
 - The engine runs its own `requestAnimationFrame` loop. Sim is fixed-timestep
   via an accumulator stepping `getSimDt()` (120 Hz = `FIXED_DT`, or 60 via
   DBG "Sim rate"); render cadence is decoupled from physics cadence.
@@ -53,14 +56,29 @@ vite.config.ts            React + Tailwind + the nebula- and sfx-manifest
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
                           (= test:smoke — boot + loop, the DEFAULT), plus
-                          test:smoke / test:full / test:audio.  The smoke
-                          set is defined HERE and nowhere else; CI runs
-                          these same scripts (no lint script)
+                          test:smoke / test:full / test:audio, and
+                          `test:sim` — the HEADLESS Node sim suites
+                          (tests/sim), a separate gate, not a Playwright
+                          scope.  The smoke set is defined HERE and nowhere
+                          else; CI runs these same scripts (no lint script)
 playwright.config.ts      Test harness: one 390×844 project (the DESIGN
                           TARGET; viewports.spec.ts overrides it per
                           describe block), a webServer
                           that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
+platform/                 THE PORTS' ADAPTERS (§8).  browser.ts builds the
+                          real Platform (performance clock, window viewport,
+                          localStorage + memory fallback, page visibility,
+                          crypto entropy, InputSystem attached to window,
+                          AudioSystem, RenderSystem); headless.ts builds the
+                          Node one (manual clock, 390×844, memory storage,
+                          silent audio, null renderer, the REAL InputSystem
+                          driven by hand)
+scripts/sim-test.mjs      `npm run test:sim` — esbuilds tests/sim/*.test.ts
+                          (resolving the two virtual manifests) and runs
+                          them under `node --test`; `bundle()` is shared by
+                          sim-hash.mjs, which prints the Node hash series
+                          the browser parity test compares against
 scripts/inline-build.mjs  Bundles dist/ + audio into omniverse-standalone.html
 scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
                           authoring angle table, --placeholder renders
@@ -70,6 +88,15 @@ scripts/build-cinematic-audio.py
                           CinematicBank.json; master-audio.mjs and
                           prep-sfx.mjs are WAV-take tooling
 
+tests/sim/                HEADLESS SIM SUITES (node:test, engine-core S2):
+                          headless.test.ts (determinism, order-independence,
+                          the replay format's inputs), lifecycle.test.ts
+                          (Escape, backgrounding), guard.test.ts (no
+                          platform globals in the sim — an allow-list of
+                          ADAPTERS, so a new file is guarded by default),
+                          harness.ts + parityLog.ts (the shared kit and
+                          the canonical replay log).  Run by
+                          `npm run test:sim`, in CI before the browser
 tests/                    Playwright suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
                           plus input / help / minimap / maps (step 5),
@@ -103,6 +130,11 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           Cannon shell, now `'cannon+kinetic'` — and the
                           whole energy model — falloff, the grain bore,
                           overkill carry-through, the far side), audio,
+                          headless (the ports are faithful: a headless-platform
+                          engine and the live one replay to the same hashes,
+                          Node vs Chromium agree on the streams and the
+                          player but not the world — libm; Escape and the
+                          page-visibility pause),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 15
                           anti-flake rules — read 9, 12 and 13 before
@@ -115,7 +147,7 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           whatever happened next), replay (the REPLAY HARNESS: same seed + same
                           inputs ⇒ identical sim hashes across maps, the
                           cosmetic streams cannot reach the sim, and no
-                          `Math.random` survives in the game code).  522 tests.  All run at
+                          `Math.random` survives in the game code).  527 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts (six sizes plus
                           a mid-session resize) and two starfield tests
                           that resize mid-test
@@ -156,6 +188,12 @@ components/
                           a resting keyboard / pad focus (see §8)
 
 engine/
+  ports.ts                THE PLATFORM PORTS — Clock, Storage, Renderer,
+                          Audio, Input, plus Viewport / Lifecycle / Entropy
+                          and the `Platform` bundle the engine is given.
+                          Imports nothing but types.  Clock and viewport are
+                          read through module-level accessors (`nowMs()`,
+                          `viewport()`); see §8
   GameEngine.ts           Orchestrator (~7,700 lines).  Owns the player
                           entity, camera, map, drop cache and the rAF
                           loop.  What is LEFT here after the
@@ -512,7 +550,10 @@ docs/                     CURRENT: SFX_INVENTORY.md (each sound id's
 
 Construction:
 
-1. `new GameEngine(onStatsUpdate, difficulty)` wires every subsystem, builds
+1. `new GameEngine(platform, onStatsUpdate, difficulty)` — `platform` is the
+   PORTS bundle (§8; `createBrowserPlatform()` in the app,
+   `createHeadlessPlatform()` in Node) — installs its clock and viewport,
+   subscribes to its lifecycle, wires every subsystem, builds
    the player entity, and calls `loadMap(buildMap(selectedMapType))`.
    `selectedMapType` defaults to `HUB_DESCRIPTOR.mapType` — a run starts
    on the OVERWORLD hub (roadmap step (k)).
@@ -2675,6 +2716,15 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     NOT type-check** (esbuild strips types without checking them), which
     is how six type errors accumulated unseen before 5b; the build being
     green says nothing about the types.
+  - `npm run test:sim` — **the HEADLESS SIM suites** (`tests/sim`, ~25 s):
+    the real `GameEngine` in Node on the stand-in ports, no browser and no
+    dev server.  Not a Playwright scope and not part of `npm test`; CI runs
+    it right after the build, before the browser suites.  It is where a
+    sim-level assertion belongs from now on — the platform guard, replay
+    determinism, Escape / backgrounding — and `tests/headless.spec.ts` is the
+    one browser suite that proves the Node and browser sims agree (§8).  Run
+    it with the suites your change touches whenever the change touches the
+    sim, the ports or the input / lifecycle path.
   - `npm test` — **the SMOKE scope: `boot` + `loop`, ~1 minute.**  This is
     the DEFAULT on purpose (user call): the full suite is ~19 minutes, and
     a gate that expensive stops being run.  `npm run test:full` is the
@@ -2809,6 +2859,87 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   never collide; the sim clock (`simClock`) restarts with the map; the
   PerfController's load signal has a wall-clock term, which a held replay
   feeds as 0; and `PhysicsSystem.shardPairCallCount` restarts with the map.
+- **THE SIM TALKS TO THE PLATFORM THROUGH PORTS, AND ONLY THROUGH PORTS**
+  (`engine/ports.ts`; engine-core S2).  Five named ports — Clock, Storage,
+  Renderer, Audio, Input — plus Viewport, Lifecycle and Entropy, bundled as
+  the `Platform` the `GameEngine` constructor takes.  Nothing in the sim names
+  `window`, `document`, `navigator`, `performance`, `localStorage`,
+  `requestAnimationFrame` or `Date.now`: `tests/sim/guard.test.ts` greps for
+  them, and it is an ALLOW-LIST OF ADAPTERS (`InputSystem`, `DualSenseHID`,
+  `RenderSystem` + `render/`, `BackgroundManager`, `AudioSystem`,
+  `BackgroundMusic`, `PerfRecorder`) rather than a list of sim files — every
+  other file under `engine/` plus `constants.ts` / `types.ts` / `assets.ts` is
+  guarded by default, so a new file fails in the right direction.  Comments
+  and string literals are stripped first; only code can trip it.  Five rules
+  to know before touching it:
+  (1) **Clock and viewport are MODULE-LEVEL, on purpose** — `nowMs()` and
+  `viewport()` are read from a dozen constructed-without-wiring files (the
+  diagnostics timers in PhysicsSystem, the wake radius in four roamers,
+  `effectiveDpr`), and threading a handle through them would change every
+  signature for no gain.  The engine constructed LAST owns them; a process
+  holding two engines calls `engine.activatePlatform()` on the one it is about
+  to drive, and `runReplay` does.  `viewport()` returns ONE reused object in
+  the browser — never mutate it, never hold it across a frame.
+  (2) **`InputSystem` is the adapter and its constructor touches no platform
+  object.**  Listeners are attached by `attach(window)` (browser platform
+  only), so the very same class runs headless, driven by `applyReplayFrame`:
+  the scheme rules, joystick math and fire queues are the browser's own, not a
+  re-implementation.  Its `instanceof HTMLElement` / `HTMLCanvasElement`
+  checks answer "not a UI target / ignore" where those classes do not exist.
+  (3) **The headless platform is the real engine with the world swapped
+  out**: a `ManualClock` that only moves when told to (so every diagnostic
+  timer reads 0 ms, which is also what a held replay feeds the PerfController),
+  390×844 (the design target, and the Playwright project's size), memory
+  storage, a hand-driven lifecycle, `NullAudio` (records the ids it was asked
+  for) and `NullRenderer`.  It is NOT a second implementation: a headless
+  step is `GameEngine.stepSim`.
+  (4) **A SEED STILL COMES FROM THE OUTSIDE WORLD IN ONE PLACE** —
+  `Entropy.seed()` (crypto in a browser, a counter headless).  S1's
+  `freshRunSeed` was removed from `replay.ts` for it.
+  (5) **Both parity claims are tested, and they have DIFFERENT answers.**
+  `tests/headless.spec.ts`: (a) a headless-platform engine and the live
+  engine replay every parity map to the SAME HASHES, bit for bit, in one page
+  — the ports change nothing; (b) Node against Chromium reproduces the random
+  streams and the player exactly but NOT the world, because `Math.sin`,
+  `Math.cos` and `Math.pow` are not correctly rounded and differ between V8s
+  in the last place (Node 22's fdlibm trig against Chromium 141's glibc-derived
+  trig, which `--js-flags=--no-use-libm-trig-functions` turns off; `pow` differs
+  on ~10% of non-trivial inputs and has no flag).  One ULP in an asteroid's
+  velocity is amplified by collisions: measured, POCKET diverges by step 200 and
+  NEBULA_FIELD by step 600 while the player never does.  `atan2`, `hypot`,
+  `exp`, `log` and `sqrt` agree today.  So a replay is bit-exact WITHIN one JS
+  engine, and a console port or a cross-device replay needs a deterministic
+  math layer (own `sin` / `cos` / `pow`, ~150 call sites in the sim) — which
+  was deliberately NOT done in a behaviour-preserving PR, since it moves
+  every number at the last place.  The libm probe in the test says which
+  functions disagree on the machine running it; exact world equality is
+  required exactly where it reports none.
+- **ESCAPE PAUSES; BACKGROUNDING PAUSES** (engine-core S2).
+  `GameEngine.escapePressed()` (spent in `pollGamepad`, above every freeze, so
+  it works from inside the paused state): debug panel open → close it; docked
+  or paused → `menuBack()` (undock / resume); live play → `pauseGame()`;
+  nothing on the menu or on the death and stage-clear screens (decisions, not
+  dismissals).  `onLifecycle('background')` releases every held key (a hidden
+  page is never told a key came up) and pauses SILENTLY (`pauseGame(true)`: the
+  audio layer is already being suspended, and a "back" blip queued on a
+  suspended context would play on return); `'foreground'` NEVER resumes by
+  itself but always re-anchors `lastTime` and zeroes the accumulator, in every
+  state including the death screen, which keeps running — the accumulator
+  drain clamps a long frame to `MAX_FRAME_TIME`, so a stale `lastTime` was
+  bounded at five substeps rather than free, and the re-anchor makes it
+  nothing.  The lifecycle subscription is made in the constructor and dropped
+  by `stop()`.
+- **THE REPLAY FORMAT'S INPUTS** (`engine/replay.ts`; extends S1).  Keys,
+  pointer, one-step tap fires (`fire`), one-step CHARGED-shot releases
+  (`charge` — the outcome, not the wall-clock hold that earned it), the
+  PerfController's sim-time term (`simMs`, latched; 0 when absent, which is
+  the old behaviour), and the `viewport` the log was recorded at, which
+  `runReplay` CHECKS and refuses by name when the run's viewport differs
+  (aim is a screen position and the spawn ring is sized in screens, so a
+  replay at another size is a different run — measured).  `beginSeededRun` now
+  also zeroes the player's heading: map load re-places the ship but leaves
+  where it was pointing, so the step-0 hash used to depend on the previous
+  replay on the same engine.
 - **Torus math is non-optional.** Any new distance check, nearest-neighbor
   scan, or projectile targeting must go through `wrapDeltaX`/`wrapDeltaY`.
   Naïve `a.x - b.x` will silently break across seams.
@@ -5251,8 +5382,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   separate collapse keys, describing touch, keyboard/mouse, gamepad and the
   run's basics.  It is a collapsible SECTION rather than a sixth
   full-screen overlay on purpose.  Keep it accurate to what is BOUND: where
-  the game has no binding (there is no keyboard weapon-cycle or pause key),
-  the panel says nothing rather than inventing one.
+  the game has no binding (there is no keyboard weapon-cycle key), the panel
+  says nothing rather than inventing one.  (Escape IS bound — it pauses —
+  and the keyboard group lists it.)
 - **Sound goes through one id, and the id is the contract.**  Every
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
@@ -5467,7 +5599,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns thirteen, once, in its mount effect — except
+  them.**  `App.tsx` assigns fourteen, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5538,6 +5670,13 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     `hashSimState`, `firstDivergence`) and the `rng` stream module.  A
     stream that leaks into the sim still plays perfectly and throws nothing,
     so `tests/replay.spec.ts` pins it through this handle.
+  - `__omniHeadless` — `createEngine()`, a SECOND real `GameEngine` on the
+    headless platform, so `tests/headless.spec.ts` can replay one seed in the
+    live engine and in this one inside the SAME page (same JS engine, same
+    libm) and require every hash to match to the bit — the proof that the
+    ports change nothing about the sim.  It installs its own clock and
+    viewport (module-level, §8), so the caller `stop()`s the live engine
+    first.
   - `__omniBlend` — the bonded-pair blend geometry (`buildFilletPath`,
     `blendAttachRadius`, `coatMargin`, `roundedPolyPath`), every failure
     mode of which — a degenerate pair, NaN coordinates, a seam, a fillet

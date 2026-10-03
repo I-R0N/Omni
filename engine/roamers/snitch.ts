@@ -19,6 +19,7 @@ import {
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
+import { viewport } from '../ports';
 
 // ── Snitch — quidditch-style bonus target ───────────────────────────────
 //
@@ -196,7 +197,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
 function spawnSnitch(g: GameEngine) {
   if (!g.currentMap) return;
   const zoom = g.camera.zoom || 1;
-  const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+  const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
   const angle = sim.roamers() * Math.PI * 2;
   const dist = halfDiag + SNITCH_CONSTANTS.SPAWN_MARGIN;
   const pos = {

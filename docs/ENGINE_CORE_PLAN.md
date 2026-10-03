@@ -272,9 +272,24 @@ whatever D-S1-a requires.
 
 ### S2 — "What survives?"  (platform ports + persistence + meta-progression)
 
+**Status (S2, 2026-10-03): the INVISIBLE PR is built; the gameplay PR is not
+started.**  What landed (D16–D19): the five ports plus Viewport / Lifecycle /
+Entropy (`engine/ports.ts`), the browser and headless platforms (`platform/`),
+every platform reference stripped from the sim (guarded by
+`tests/sim/guard.test.ts`), `Escape` and the background-pause path, the
+replay format's four wall-clock reads closed, and the HEADLESS NODE HARNESS
+(`npm run test:sim` — 22 tests, ~25 s, in CI before the browser suites).
+Read D17 before the acceptance list below: the "same hash as the browser"
+criterion holds EXACTLY between a headless-platform engine and the live one in
+the same JS engine, and holds across JS engines for the random streams and the
+player but not the world, because V8 versions disagree on `sin` / `cos` /
+`pow` in the last place.  The persistence half (D-S2-a…f, the hub seed, the
+wreck) waits on the user's calls, taken inside the gameplay-PR half of the
+session.
+
 **Near-term payoff.**  Persistence is the single largest product gap and
 blocks every store release.  The port work additionally delivers a
-**headless sim in Node**, turning a 13-minute Playwright suite into
+**headless sim in Node**, turning a ~19-minute Playwright suite into
 sub-second sim tests — which matters disproportionately for a
 phone-driven workflow.
 
@@ -683,6 +698,10 @@ who made it, and the consequences for other sessions.
 | D13 | PM | 2026-10-03 | **D9's world-design workstream becomes its own session, `S6`, placed AFTER `S4`** (user call).  Options weighed: own session next, after `S2` (PM's recommendation — keeps the ports and headless sim moving while the game design is open) / own session BEFORE `S2` (cleanest schema, delays the infrastructure) / fold into `S3` as its first content table / **after `S4`, at the end**. | §4 gains an `S6` brief carrying D9's three named arena families (labyrinth, dig-through, graded wave arenas), the `MAP_DESCRIPTORS` graph-edge work, and five open decisions for the user inside that session.  §6's order becomes `S1 → S2 → S3 → S4 → S6`, SKIPPING 5 because `S5` was already logged as Steam — the gap is deliberate, not an error.  CONSEQUENCE ACCEPTED: the mobile release ships on today's arena model, which is coherent only because D8 already made arenas regenerate per entry, so "arenas do not persist" is the design rather than a gap a store release must close; and `S6`'s map graph arrives AFTER players hold save files, which makes D-S2-e's save-version policy load-bearing.  The descent machinery D5/D9 left switched off is now explicitly `S6`'s to wire or delete. |
 | D14 | PM | 2026-10-03 | **`S2` persists the CHARACTER and SETTINGS only; world state is deferred to `S6`** (user call).  Options weighed: **character + settings only** (PM's recommendation) / everything including per-arena world state, migrating later / settings only, deferring all game state. | IN: settings, credits, cargo contents, purchased hex-slot counts, the outstanding wreck record.  OUT: per-arena world state (which nodes keep destroyed tiles and `found` flags) — deferred into `S6` by D13, so nothing in `S2` is built against a map model `S6` replaces.  TWO refinements written into §4 because each is easy to get wrong: the HUB is the one world item `S2` cannot skip (D8 made it persistent while arenas are not), and the cheap path is a FIXED hub seed — identical regeneration for zero save bytes — rather than serializing a world, with "does destroyed hub terrain survive a relaunch" a real question for the user inside `S2`; and the WRECK record is CHARACTER state, not world state, which is what keeps D10 inside this scope, since pinning `{arena id, seed, position, modules, expiry}` lets S1's seeded generation reproduce that arena without serializing it. |
 | D15 | PM | 2026-10-03 | **The phase PR (#108) ACCUMULATES `S1`–`S4` and promotes to `main` once** (user call).  Options weighed: merge once CI is green, then open a fresh phase PR (PM's recommendation — removes a standing footgun) / **accumulate the whole phase**. | WITHDRAWS §5's standing requirement that "this plan doc must reach `main` early", which is struck there rather than left as an unmet requirement.  The hazard it existed for is real and has already fired once — the `S1` brief's `git checkout -B <branch> origin/main` would have deleted the plan from the working tree of a session told to read it, caught before it ran — so the mitigation is now BRIEF HYGIENE and it is the PM session's responsibility: every brief carries the integration-branch checkout commands verbatim and never names `main` as a branch point.  That is wholly within the PM session's control, which is what makes accumulating safe.  #108 stays open and its githack preview keeps tracking the integration tip, which is also how the phase stays play-testable on a phone throughout. |
+| D16 | S2 | 2026-10-03 | **Ports shape** (S2 engineering call, no gameplay content — recorded so it can be argued with).  Options weighed: thread a platform handle through every system / **module-level Clock and Viewport accessors + a `Platform` bundle the `GameEngine` constructor takes** / keep `window` in the sim behind `typeof` guards.  **Call: the bundle, with `nowMs()` and `viewport()` module-level** (the `rng.ts` shape).  Audio, Input and Renderer are plain interfaces the engine holds; `InputSystem`'s constructor no longer touches the DOM (`attach(window)` does), so the REAL class runs headless. | `engine/ports.ts`, `platform/browser.ts`, `platform/headless.ts`.  `GameEngine`'s signature is now `(platform, onStatsUpdate, difficulty)` — S3 / S4 must construct it that way.  The cost is that two engines in one process share a clock; `activatePlatform()` / `runReplay` re-install.  `tests/sim/guard.test.ts` enforces "no `window` / `document` / `navigator` / `performance` / storage / rAF / `Date.now` in the sim" as an ALLOW-LIST OF ADAPTERS, so new files are guarded by default.  Re-count from the brief: `GameEngine` 40 → 0, `PhysicsSystem` 10 → 0 (all diagnostics timers), `constants.ts` 8 → 0 (`devicePixelRatio`), `ProjectileSystem` 6 → 0, plus roamers / AI / shards / flow-field / debugControls / replay. |
+| D17 | S2 | 2026-10-03 | **Cross-engine parity is limited by libm, and the acceptance test is restated to say what is true** (S2 call — **needs PM / user ratification**, because the plan's acceptance wording, "the headless Node sim reaches the same state hash as the browser", is NOT met literally).  MEASURED: Node 22 (V8 12.4) and Chromium 141 (V8 14.1) reproduce the random streams and the player EXACTLY at every checkpoint on all four parity maps, but the WORLD diverges, because `Math.sin`, `Math.cos` and `Math.pow` are not correctly rounded and differ in the last place (Chromium ships glibc-derived trig, Node fdlibm; `--js-flags=--no-use-libm-trig-functions` aligns sin / cos but `pow` differs on ~10% of non-trivial inputs and has no flag).  A one-ULP asteroid velocity is amplified by collisions: POCKET diverges by step 200, NEBULA_FIELD by step 600, the player never.  Options weighed: (a) **a deterministic math layer** — own `sin` / `cos` / `pow` (~120 + ~30 call sites in the sim), the only route to cross-engine bit-exactness; (b) compare quantised hashes — rejected, collision chaos makes the first divergent step unpredictable, so it flakes; (c) the Chromium flag — partial, and it tests a configuration nobody ships; (d) **state it and test what is true**.  **Call: (d) for this PR.**  The ports' faithfulness is proven EXACTLY, in one page: a headless-platform engine and the live engine replay every parity map to identical hashes.  Node-vs-Chromium asserts streams + player exactly, step-0 terrain to 1e-9, and full world equality exactly where a libm probe reports no disagreement. | (a) was NOT done in an invisible PR because it moves every number at the last place (plan invariant 2) and invalidates every hash once; it is flagged to the PM in §8 with the consequences.  Those consequences reach further than the harness: **iOS runs JavaScriptCore (a third libm), so a replay recorded on one device will not reproduce on another, and a replay recorded before an OS update may not reproduce after it.**  That makes **D-S2-c's replay option unsafe as a save format** (a saved run replayed after a WebKit / Chromium update would diverge), and S2 puts that to the user as part of D-S2-c.  A console port's "replay the inputs and compare hashes" test needs (a) first. |
+| D18 | S2 | 2026-10-03 | **The replay format closes S1's four wall-clock reads** (S2 call; S1 handed them over in §8).  (1) PerfController's wall-clock load term is now an INPUT of the log (`ReplayInput.simMs`, latched; 0 when absent = the old behaviour), so skip tiers of a heavy real scene are reproducible once a recorder writes them — no recorder exists yet.  (2) A charged shot is recorded as the RELEASE it produced (`ReplayInput.charge`), not the wall-clock hold.  (3) A log carries its `viewport` and `runReplay` refuses a mismatch by name; MEASURED that the run really does depend on it.  (4) The run seed comes from the `Entropy` port.  Found on the way: `beginSeededRun` left the previous run's player heading in place, so the step-0 hash depended on what ran before it on the same engine; it now zeroes the heading (replay entry only). | Replay logs are still dev-only (D7), so the format change breaks nothing.  S1's determinism contract is NOT touched: no stream's draws or order moved. |
+| D19 | S2 | 2026-10-03 | **Escape and app-lifecycle semantics** (S2 call).  Escape: close the debug panel; else undock / resume via `menuBack()`; else pause live play; nothing on the menu or on the death / stage-clear screens (decisions, not dismissals).  Backgrounding: release held keys, pause SILENTLY (no audio blip on a suspending context).  Foreground: never resumes by itself — the player taps resume — but always re-anchors the frame clock, including on the death screen, which keeps running. | The help panel's keyboard group now lists Esc.  S4 maps Capacitor's `appStateChange` onto the `Lifecycle` port; nothing in the sim changes. |
 
 ---
 
@@ -757,3 +776,46 @@ history stays readable.
   carries its brief.  The per-node persistence it asked about was deferred
   out of `S2` into `S6` by D14, so `S6` owns both the world and its save
   format.)*
+- **S2 → PM (libm: cross-engine determinism needs a math layer — D17).**
+  `Math.sin` / `Math.cos` / `Math.pow` differ between JS engines in the last
+  place (measured: Node 22 vs Chromium 141, `pow` on ~10% of non-trivial
+  inputs), and `atan2` / `hypot` / `exp` / `log` / `sqrt` agree today only by
+  luck of two V8s sharing fdlibm.  Replay is therefore bit-exact within one
+  engine and not across engines.  Consequences, in order of how much they
+  matter: (1) **iOS is JavaScriptCore, a third libm** — a replay does not
+  reproduce across devices, nor across an OS update on one device, which makes
+  *replay-as-save-format* (D-S2-c's cheap option) unsafe; (2) a console port's
+  "replay the inputs and compare hashes" test (§1, D0b) cannot pass without a
+  deterministic math layer first; (3) the Node harness and the CI Chromium agree
+  on streams and player but not world.  The fix is a `dmath` module (own
+  `sin` / `cos` / `pow`, then `exp` / `log` / `atan2` to be safe against JSC):
+  ~150 sim call sites, a measurable per-call cost on hot paths (`pow` is in the
+  collision resolver), and it moves every number in the last place — so it is a
+  BEHAVIOUR change, belongs in a gameplay-tier PR or its own session, and
+  invalidates every existing hash once.  PM to place it (S3 is the natural home
+  since it already touches every constant); S2 did not do it.  *(S2,
+  2026-10-03)*
+- **S2 → S3 (ports in the sim).**  Content tables stay platform-free: the
+  guard fails on `window` / `performance` in `constants.ts`, so a data file that
+  needs the display size reads `viewport()` from `engine/ports.ts`, and one that
+  needs time reads `nowMs()`.  `GameEngine` is constructed with a `Platform`
+  now; a balance harness builds `createHeadlessEngine()` from
+  `tests/sim/harness.ts` and replays with `replaySeries`.  Throughput, measured
+  here for 1,200 steps INCLUDING the map build: POCKET ~2,500 steps/s, NEBULA_FIELD
+  ~1,200, OVERWORLD ~630, UNIVERSE ~500 — against the 120 steps/s a real run
+  consumes, so 4–20× real time on one core, and a many-runs balance sweep wants
+  a worker pool before it wants anything else.  *(S2,
+  2026-10-03)*
+- **S2 → S4 (Capacitor against the ports).**  Three seams are yours and none
+  needs a sim change: `Lifecycle` (map Capacitor's `appStateChange` to
+  `'background'` / `'foreground'`; the engine already pauses silently and
+  re-anchors the clock), `Storage` (synchronous by contract — Capacitor's
+  Preferences is async, so read it once at startup into a `MemoryStorage` and
+  write through), and haptics, which still ride `InputPort.rumble`.  Note the
+  iOS libm point in the item above: WKWebView is JavaScriptCore.  *(S2,
+  2026-10-03)*
+- **S2 → PM (replay format).**  `ReplayLog` gained `viewport`, `ReplayInput`
+  gained `charge` and `simMs` (D18); all optional, so existing logs replay as
+  before.  A recorder that writes `simMs` would make heavy-scene skip tiers
+  reproducible; none exists, and none is planned (D7: dev-only).  *(S2,
+  2026-10-03)*
