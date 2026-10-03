@@ -68,7 +68,7 @@ const ROW_LABELS = [
   'Sim rate', 'Substep cap', 'Render scale', 'HUD rate', 'Gnat move',
   'Corrode', 'Disable', 'Traits', 'Station', 'Roll feel', 'Hull',
   'Roll damp', 'Tilt mode', 'Lean dir', 'Tilt src', 'Vel gain', 'Salvage',
-  '+1M Salv', 'Shield', 'Overcharge', 'Light', 'Lock slots', 'Outfit all',
+  '+1M Salv', 'Erase save', 'Shield', 'Overcharge', 'Light', 'Lock slots', 'Outfit all',
   'Reset', 'Transit fx', 'Size', 'Gravity', '  ↳ range', 'Lens',
   '  ↳ radius', '  ↳ spin', '  ↳ live', 'Fracture', 'Frac relax',
   'Bnd strength', 'Dmg spread', 'Frac sep', 'Frac sites', 'Frac bias',

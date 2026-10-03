@@ -7894,6 +7894,15 @@ export const SALVAGE_CONSTANTS = {
 // avoids POIs — so the station is pure scenery + a dock zone with zero
 // collision/flow surprises.  Docking freezes the sim (cardChoicePending-
 // style loop short-circuit) and opens the station UI.
+/** The death WRECK (D10; `engine/wreck.ts`).  Flown into, it gives back what
+ *  was mounted when the ship fell. */
+export const WRECK_CONSTANTS = {
+  /** Distance at which the hull recovers it — a collect, like a drop, not a dock. */
+  RECOVER_RANGE: 70,
+  SIZE: 44,
+  COLOR: '#f59e0b',
+} as const;
+
 export const STATION_CONSTANTS = {
   SIZE: 180,             // world-unit diameter of the station body
   COLOR: '#38bdf8',      // sky — matches the Drydock UI headers; minimap dot + chevron colour
@@ -8520,7 +8529,7 @@ export function detectTierFor(e: GameEntity): number {
  *  Stations and portals are the fixed landmarks today.  Everything else —
  *  enemies, rivals, fauna, dragons, the snitch, materials — is transient. */
 export function isRetainedContact(e: GameEntity): boolean {
-  return e.isStation === true || e.isPortal === true;
+  return e.isStation === true || e.isPortal === true || e.isWreck === true;
 }
 
 /** The landmarks a run STARTS knowing, seeded as `found` at map load: the

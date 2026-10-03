@@ -1668,7 +1668,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'kept')}
                 {rs.arenaSeed !== null && row('Arena seed', rs.arenaSeed.toString(16).toUpperCase().padStart(8, '0'))}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
+                {row('Best score', rs.records.highScore.toLocaleString(),
+                     rs.records.newHighScore ? 'new best!' : undefined)}
+                {rs.wavesEnabled && rs.records.bestWave > 0 && row('Best wave', rs.records.bestWave)}
               </div>
+
+              {/* The wreck (D10): what was mounted is left where the ship fell. */}
+              {rs.wreck && (
+                <div className={`${panelAccent('border-amber-600/40')} text-center`} data-testid="death-wreck">
+                  <div className={`text-amber-300 ${HEADING}`}>Wreck</div>
+                  <div className={`text-slate-200 ${T_ROW}`}>
+                    {rs.wreck.modules} module{rs.wreck.modules === 1 ? '' : 's'} left in {rs.wreck.mapName}
+                  </div>
+                  <div className={`text-slate-500 ${T_NOTE} mt-0.5`}>
+                    Fly back and touch it to recover them. Dying again first loses them.
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <button
@@ -1679,7 +1695,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   Respawn at Home Station
                 </button>
                 <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
-                  You return to your station with the equipment you had installed stripped away. Salvage, cargo and score are kept.
+                  You return to your station. What you had installed stays with the wreck; salvage, cargo and score are kept.
                 </p>
                 <button
                   onClick={onQuitToMenu}

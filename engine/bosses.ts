@@ -172,6 +172,7 @@ if (index > 0) g.audio.play('boss.phase', { x: boss.position.x, y: boss.position
 export function payBossBounty(g: GameEngine, boss: GameEntity) {
 g.audio.play('boss.death');
     g.bossesKilled++;
+    g.records.bossesKilled++;
     g.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
     // The money is PHYSICAL — the same salvage drops every other source pays,
     // sprayed off the corpse so it converges and merges normally.

@@ -1060,6 +1060,10 @@ export interface GameEntity {
   // static grid and flow-field obstacle bake exclude INTERACTABLEs, so it's
   // pure scenery + a dock zone.  Docking logic lives in GameEngine; the
   // bespoke draw keys off this flag.
+  /** The player's DEATH WRECK (D10): a non-drop INTERACTABLE like the station
+   *  and the portal, which holds the loadout the death stripped.  Flying into it
+   *  recovers the modules (`engine/wreck.ts`). */
+  isWreck?: boolean;
   isStation?: boolean;
   // Which station variant this POI is ('home' | 'shipwright' | 'armory' |
   // 'tradehub' — see STATION_VARIANTS): drives its name/colour and the
@@ -1977,6 +1981,12 @@ export interface EngineStats {
     /** SIM seconds; time paused / docked / on this screen is excluded. */
     timeSec: number;
     mapName: string;
+    /** The wreck this death left (D10): where, and how many modules are in it;
+     *  null when nothing worth recovering was mounted. */
+    wreck: { mapName: string; modules: number } | null;
+    /** Lifetime bests from the save file (D-S2-a), as they stand AFTER this
+     *  death, with whether this life set one. */
+    records: { highScore: number; bestWave: number; newHighScore: boolean; deaths: number };
   };
   /** Stage-clear screen: present only while a boss capstone has just fallen
    *  and the summary is up.  The sim is FROZEN while set — the same freeze the
