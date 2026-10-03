@@ -1,5 +1,6 @@
 
 
+import { sim, fxRng } from './engine/systems/rng';
 import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig, ControlScheme } from './types';
 import {
   ShardVariantId,
@@ -100,7 +101,7 @@ export function cycleRockPalette(): number {
  *  free rock-shard spawn site; shards otherwise inherit their parent's. */
 export function randomRockShade(): string {
   const shades = ROCK_PALETTES[activeRockPaletteIndex].shades;
-  return shades[(Math.random() * shades.length) | 0];
+  return shades[(fxRng.sprites() * shades.length) | 0];
 }
 
 // ── Plastic palettes ───────────────────────────────────────────────
@@ -421,7 +422,7 @@ export function cycleNebulaPalette(): number {
  *  reads as "different shades" within the chosen family. */
 export function randomPlasticShade(): string {
   const palette = PLASTIC_PALETTES[activePlasticPaletteIndex].shades;
-  return palette[Math.floor(Math.random() * palette.length)];
+  return palette[Math.floor(fxRng.sprites() * palette.length)];
 }
 
 /** Pick a random shade from the ACTIVE plastic-SHARD palette.  Cycles
@@ -430,7 +431,7 @@ export function randomPlasticShade(): string {
  *  family without touching tiles, and vice-versa. */
 export function randomPlasticShardShade(): string {
   const palette = PLASTIC_PALETTES[activePlasticShardPaletteIndex].shades;
-  return palette[Math.floor(Math.random() * palette.length)];
+  return palette[Math.floor(fxRng.sprites() * palette.length)];
 }
 
 /** Constant base colour for the plastic-shard neighbour-brightness
@@ -7880,23 +7881,8 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
   CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
-  // Death penalty (interim, user call): dying forfeits this fraction of the
-  // player's UNSPENT Salvage, charged once when the run-summary screen is
-  // raised so the summary can report exactly what it cost.  0.25 is
-  // PROVISIONAL — big enough that a death stings, small enough that it never
-  // wipes a run — and is placeholder for the dynamic system the economy
-  // tuning pass (roadmap step 6) will design.  Money already SPENT on modules
-  // is untouched: the penalty taxes hoarding, not investment.
-  DEATH_PENALTY_FRACTION: 0.25,
-  // ...and a FLOOR, so death still costs something at a low balance where a
-  // percentage rounds to pocket change.  The charge is
-  //   min(balance, max(fraction × balance, MIN))
-  // — whichever of the two is higher, but never more than the player has, so
-  // it can bring them to zero and never below.  12 500 ≈ 12–13 salvage drops
-  // (CREDITS_PER_DROP 1000), i.e. roughly two waves of combat income, and it
-  // is the binding term below a 50 000 balance.  PROVISIONAL like the
-  // fraction: both are placeholders for the economy tuning pass (step 6).
-  DEATH_PENALTY_MIN: 12500,
+  // No death penalty on salvage (user call D6): dying strips the installed
+  // loadout instead (GameEngine.returnToStation).
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)
@@ -9745,7 +9731,7 @@ export function getWaveSpawnBudget(index: number): number {
 
 /** Roll a 0-based tier from a [w1, w2, w3] weight row. */
 function rollTier(weights: [number, number, number]): number {
-  const r = Math.random() * (weights[0] + weights[1] + weights[2]);
+  const r = sim.waves() * (weights[0] + weights[1] + weights[2]);
   if (r < weights[0]) return 0;
   if (r < weights[0] + weights[1]) return 1;
   return 2;
@@ -9780,7 +9766,7 @@ export function buildWaveSpawnList(index: number, budget: number, forced?: Enemy
   );
   const weights = WAVE_TIER_WEIGHTS[set];
   for (let i = 0; i < budget; i++) {
-    const role = Math.random() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
+    const role = sim.waves() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
     list.push(SUBTYPE_BY_ROLE_TIER[role][rollTier(weights)]);
   }
 
@@ -9788,7 +9774,7 @@ export function buildWaveSpawnList(index: number, budget: number, forced?: Enemy
     const hasRam   = list.some(s => ENEMY_ROLE[s] === EnemyRole.RAMMING);
     const hasShoot = list.some(s => ENEMY_ROLE[s] === EnemyRole.SHOOTING);
     if (!hasRam || !hasShoot) {
-      const k = Math.floor(Math.random() * budget);
+      const k = Math.floor(sim.waves() * budget);
       const tier = SUBTYPE_BY_ROLE_TIER[ENEMY_ROLE[list[k]]].indexOf(list[k]);
       list[k] = SUBTYPE_BY_ROLE_TIER[hasRam ? EnemyRole.SHOOTING : EnemyRole.RAMMING][tier];
     }

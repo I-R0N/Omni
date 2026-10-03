@@ -21,8 +21,6 @@ import { boot, engine, stats, startRun, waitForStats, dockAtStation } from './he
 // constant equals itself.  If a tuning pass moves these, THIS FILE should
 // have to change — that is the alarm working.
 const CREDITS_PER_DROP = 1000;
-const DEATH_PENALTY_FRACTION = 0.25;
-const DEATH_PENALTY_MIN = 12500;
 const SELL_FRACTION = 0.9;
 const SCRAP_FRACTION = 0.09;
 
@@ -289,107 +287,117 @@ test.describe('economy', () => {
     watch.assertClean();
   });
 
-  test('death charges the salvage penalty exactly once', async ({ page }) => {
+  test('death costs NO salvage, and nothing re-charges while the screen is up', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
 
-    // A balance large enough that the PERCENTAGE wins over the flat floor,
-    // so the assertion exercises the max() and not just the constant.
     await collectSalvage(page, 100);
     const balance = await engine(page, e => e.credits as number);
     expect(balance).toBe(100 * CREDITS_PER_DROP);
 
-    const expectedLoss = Math.min(
-      balance,
-      Math.max(Math.floor(balance * DEATH_PENALTY_FRACTION), DEATH_PENALTY_MIN),
-    );
-
     await engine(page, e => e.startExplosion(e.player));
     const dead = await waitForStats(page, s => !!s.runSummary, 'the run summary');
 
-    expect(dead.runSummary!.creditsLost).toBe(expectedLoss);
-    expect(dead.runSummary!.credits).toBe(balance - expectedLoss);
-    expect(dead.runSummary!.creditsLostRun).toBe(expectedLoss);
-    // The life ledger reports what THIS sortie brought back, before the loss.
+    // User call D6: the credit penalty is gone; the equipment is the cost.
+    expect(dead.runSummary!.credits).toBe(balance);
+    // The life ledger still reports what this sortie brought back.
     expect(dead.runSummary!.creditsEarnedLife).toBe(balance);
-    // The run gross keeps climbing and is deliberately not the headline.
     expect(dead.runSummary!.creditsEarned).toBe(balance);
 
-    // CHARGED ONCE.  The death screen leaves the sim RUNNING (it is the one
-    // full-screen overlay that does not freeze the world), so the guard that
-    // stops the explosion branch re-firing is load-bearing.  Let real sim
-    // time pass with the summary up and re-read.
-    const held = await engine(page, e => e.credits as number);
+    // The death screen leaves the sim running; the balance must not move.
     await page.waitForTimeout(1500);
-    const stillHeld = await engine(page, e => ({
-      credits: e.credits,
-      lost: e.lastDeathCreditsLost,
-      lostRun: e.runCreditsLost,
-    }));
-    expect(stillHeld.credits).toBe(held);
-    expect(stillHeld.lost).toBe(expectedLoss);
-    expect(stillHeld.lostRun).toBe(expectedLoss);
+    expect(await engine(page, e => e.credits as number)).toBe(balance);
 
-    // Nor does respawning charge it again.
     await engine(page, e => e.respawnFromDeath());
     await waitForStats(page, s => !s.runSummary, 'the summary to clear');
-    const afterRespawn = await engine(page, e => ({ credits: e.credits, lostRun: e.runCreditsLost }));
-    expect(afterRespawn.credits).toBe(balance - expectedLoss);
-    expect(afterRespawn.lostRun).toBe(expectedLoss);
+    expect(await engine(page, e => e.credits as number)).toBe(balance);
 
     watch.assertClean();
   });
 
-  test('a broke pilot is zeroed, never driven negative', async ({ page }) => {
+  test('a broke pilot loses nothing either', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
-
-    // Below the flat floor, so the floor wins the max() and the clamp to the
-    // balance is what stops it going negative.
     await collectSalvage(page, 3);
     const balance = await engine(page, e => e.credits as number);
-    expect(balance).toBeLessThan(DEATH_PENALTY_MIN);
 
     await engine(page, e => e.startExplosion(e.player));
     const dead = await waitForStats(page, s => !!s.runSummary, 'the run summary');
-
-    expect(dead.runSummary!.creditsLost).toBe(balance);
-    expect(dead.runSummary!.credits).toBe(0);
-    const c = await engine(page, e => e.credits as number);
-    expect(c).toBe(0);
+    expect(dead.runSummary!.credits).toBe(balance);
+    expect(await engine(page, e => e.credits as number)).toBe(balance);
 
     watch.assertClean();
   });
 
-  test('money already spent on modules is untouched by the penalty', async ({ page }) => {
+  test('death strips what is INSTALLED and keeps cargo, slots and money (user call D4)', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page);
     await dockAtStation(page);
 
     await engine(page, e => e.addDebugCredits(100_000));
-    const spent = await engine(page, e => {
-      const start = e.credits;
-      e.purchaseModule('hull_mk3');   // 18000
-      return { start, after: e.credits, cost: start - e.credits };
+    const setup = await engine(page, e => {
+      e.purchaseModule('hull_mk3');
+      e.purchaseModule('engine_mk1');
+      // Install the engine; leave the Mk III hull in cargo.
+      const i = e.inventory.indexOf('engine_mk1');
+      e.moveModule({ area: 'inventory', idx: i }, { area: 'ship', idx: 1 });
+      return {
+        installed: e.shipSlots.filter((x: string | null) => x === 'engine_mk1').length,
+        cargo: e.inventory.filter((x: string | null) => x === 'hull_mk3').length,
+        credits: e.credits as number,
+        slots: [e.shipSlotsUnlocked, e.weaponSlotsUnlocked],
+      };
     });
-    expect(spent.cost).toBeGreaterThan(0);
+    expect(setup.installed).toBe(1);
+    expect(setup.cargo).toBe(1);
 
     await engine(page, e => e.undock());
     await waitForStats(page, s => !s.station, 'undock');
+    await engine(page, e => e.startExplosion(e.player));
+    await waitForStats(page, s => !!s.runSummary, 'the run summary');
+    await engine(page, e => e.respawnFromDeath());
+    await waitForStats(page, s => !s.runSummary, 'the summary to clear');
+
+    const after = await engine(page, e => ({
+      engineInstalled: e.shipSlots.filter((x: string | null) => x === 'engine_mk1').length,
+      lean: [e.shipSlots[0], e.weaponSlots[0]],
+      cargo: e.inventory.filter((x: string | null) => x === 'hull_mk3').length,
+      credits: e.credits as number,
+      slots: [e.shipSlotsUnlocked, e.weaponSlotsUnlocked],
+      map: e.currentMap.type,
+    }));
+    expect(after.engineInstalled, 'the installed module is gone').toBe(0);
+    expect(after.lean, 'the ship is left with the free lean start').toEqual(['hull_base', 'dlv_projectile']);
+    expect(after.cargo, 'cargo survives').toBe(1);
+    expect(after.credits, 'salvage survives').toBe(setup.credits);
+    expect(after.slots, 'purchased slots survive').toEqual(setup.slots);
+    expect(after.map, 'and the player is home, in the hub').toBe('OVERWORLD');
+
+    watch.assertClean();
+  });
+
+  test('dying in an ARENA returns the player to the hub station', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page, 'POCKET');
+    await waitForStats(page, s => s.currentMapType === 'POCKET', 'the pocket arena');
+    const seed = await engine(page, e => e.arenaSeed as number | null);
+    expect(seed, 'an arena carries a seed').not.toBeNull();
 
     await engine(page, e => e.startExplosion(e.player));
     const dead = await waitForStats(page, s => !!s.runSummary, 'the run summary');
+    // The summary shows the seed of the arena the life ended in.
+    expect(dead.runSummary!.arenaSeed).toBe(seed);
 
-    // The penalty is a fraction of the UNSPENT balance — it taxes hoarding,
-    // not investment.  The module survives the death; only the cash is cut.
-    const expected = Math.min(
-      spent.after,
-      Math.max(Math.floor(spent.after * DEATH_PENALTY_FRACTION), DEATH_PENALTY_MIN),
-    );
-    expect(dead.runSummary!.creditsLost).toBe(expected);
-
-    const kept = await engine(page, e => e.inventory.filter((i: string | null) => i === 'hull_mk3').length);
-    expect(kept).toBe(1);
+    // Through the real button, not the engine call: the wiring is the claim.
+    await page.getByRole('button', { name: 'Respawn' }).click();
+    await waitForStats(page, s => !s.runSummary && s.currentMapType === 'OVERWORLD', 'the hub');
+    const home = await engine(page, e => ({
+      arenaSeed: e.arenaSeed as number | null,
+      health: e.player.health, maxHealth: e.player.maxHealth,
+      dockedNear: e.nearestStation !== null || e.dockInRange === true,
+    }));
+    expect(home.arenaSeed, 'the hub carries no seed').toBeNull();
+    expect(home.health).toBe(home.maxHealth);
 
     watch.assertClean();
   });

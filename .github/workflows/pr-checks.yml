@@ -9,9 +9,9 @@ name: PR checks
 #           merges without this green.
 #   FULL  — the entire Playwright suite, at the MAJOR SEAMS only:
 #           pushes to `main`, `claude/plan-completion` and
-#           `claude/engine-core` (i.e. immediately after a merge lands), any
-#           PR carrying the `full-tests` label (the opt-in for pre-merge full
-#           validation), and manual dispatch.
+#           `claude/steam-game-publishing-xhnui2` (i.e. immediately after a
+#           merge lands), any PR carrying the `full-tests` label (the opt-in
+#           for pre-merge full validation), and manual dispatch.
 #
 # A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs against
 # `main` used to run FULL — meant for the plan-completion → main promotion —
@@ -37,14 +37,15 @@ on:
   # immediately rather than at the next PR opened against them.  `main` is the
   # default branch; `claude/plan-completion` is the integration branch the
   # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md);
-  # `claude/engine-core` is the integration branch for the engine-core +
-  # mobile phase (docs/ENGINE_CORE_PLAN.md §5).  Listing a branch here is the
-  # WHOLE mechanism now that a PR's base no longer picks the scope: the step
-  # below sends every non-`pull_request` event to the full suite, so a merge
-  # into one runs the whole net while PRs INTO it get the cheap per-push
-  # smoke.
+  # `claude/steam-game-publishing-xhnui2` is the integration branch for the
+  # engine-core + mobile phase (docs/ENGINE_CORE_PLAN.md §5; it carries the
+  # phase's own name badly, and that is a known cosmetic cost of keeping one
+  # branch rather than two).  Listing a branch here is the WHOLE mechanism now
+  # that a PR's base no longer picks the scope: the step below sends every
+  # non-`pull_request` event to the full suite, so a merge into one runs the
+  # whole net while PRs INTO it get the cheap per-push smoke.
   push:
-    branches: [main, claude/plan-completion, claude/engine-core]
+    branches: [main, claude/plan-completion, claude/steam-game-publishing-xhnui2]
   workflow_dispatch:
 
 concurrency:

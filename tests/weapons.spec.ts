@@ -498,8 +498,16 @@ test.describe('how far a round gets is what it can afford', () => {
        *  map's material, from just outside its left face, straight along +x. */
       const bore = (bank: number, variant: string) => engine(page, (e, a: any) => {
         const ents = e.currentMap.entities;
+        // PRISTINE, not merely unbored: `dealt` below is maxHealth - health, so
+        // a tile a drifting shard has already crushed or pressured (which
+        // builds its boundary model and spends on it) reads that earlier
+        // damage as this bolt's, and "absorbed 15 a grain, not 14.4" follows.
+        // The map is reseeded every run (PR #109) so which tile that happens
+        // to is rare and run-dependent.  `fractureEdgeFill` appears with the
+        // first spend; heat scales what a bolt breaks.
         const t = ents.find((x: any) => x.active && x.shardVariant === a.variant
-          && x.mass === Infinity && !x.__bored);
+          && x.mass === Infinity && !x.__bored
+          && x.fractureEdgeFill === undefined && !(x.heat > 0));
         if (!t) throw new Error('no fresh ' + a.variant);
         t.__bored = true;
         const proj: any = {

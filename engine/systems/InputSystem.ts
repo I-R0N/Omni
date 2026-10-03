@@ -1510,6 +1510,19 @@ export class InputSystem {
     return this.keys.has(code);
   }
 
+  /** REPLAY: load one recorded input frame through the same fields a real
+   *  device writes — held keys, the pointer, and the tap queue — so nothing
+   *  downstream can tell it from a person (engine/replay.ts).  `fire` taps
+   *  are queued for this step only. */
+  public applyReplayFrame(keys: readonly string[], aimX: number, aimY: number,
+                          fire: ReadonlyArray<readonly [number, number]>): void {
+    this.keys.clear();
+    for (const k of keys) this.keys.add(k);
+    this.mousePosition.x = aimX;
+    this.mousePosition.y = aimY;
+    for (const f of fire) this.fireEvents.push({ x: f[0], y: f[1] });
+  }
+
   public getMovementVector(): Vector2 {
     // 1. Keyboard Input (Immediate override)
     const kDir = { x: 0, y: 0 };

@@ -1,3 +1,4 @@
+import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../../types';
 import {
   PROJECTILE_CONSTANTS,
@@ -192,7 +193,7 @@ export class ProjectileSystem {
         const step = (halfSpread * 2) / (config.count - 1);
         currentAngle = (angle - halfSpread) + (step * i);
       } else if (config.spread > 0) {
-        currentAngle += (Math.random() - 0.5) * (config.spread * (Math.PI / 180));
+        currentAngle += (sim.combat() - 0.5) * (config.spread * (Math.PI / 180));
       }
 
       const ax = Math.cos(currentAngle);
@@ -294,10 +295,10 @@ export class ProjectileSystem {
         pooled.detonateOn = config.detonateOn;
         pooled.boreCostScale = config.boreCostScale;
         // A curving pellet rolls its own bend (unconditional: pooled state).
-        pooled.curveRate = config.curve ? (Math.random() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * Math.random()) : undefined;
+        pooled.curveRate = config.curve ? (sim.combat() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * sim.combat()) : undefined;
         pooled.curveWobble = config.curve ? (config.wobble ?? 0) : undefined;
         pooled.curveHz = config.curve ? (config.wobbleHz ?? 0) : undefined;
-        pooled.curvePhase = config.curve ? Math.random() * Math.PI * 2 : undefined;
+        pooled.curvePhase = config.curve ? sim.combat() * Math.PI * 2 : undefined;
         pooled.fuseTimer = config.fuseSeconds;
         // Unconditional like the fuse beside it, and for a sharper reason: a
         // recycled shell that kept `detonated` from its last life would never
@@ -359,10 +360,10 @@ export class ProjectileSystem {
           explosionKnockback: config.explosionKnockback,
           detonateOn: config.detonateOn,
           boreCostScale: config.boreCostScale,
-          curveRate: config.curve ? (Math.random() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * Math.random()) : undefined,
+          curveRate: config.curve ? (sim.combat() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * sim.combat()) : undefined,
           curveWobble: config.curve ? (config.wobble ?? 0) : undefined,
           curveHz: config.curve ? (config.wobbleHz ?? 0) : undefined,
-          curvePhase: config.curve ? Math.random() * Math.PI * 2 : undefined,
+          curvePhase: config.curve ? sim.combat() * Math.PI * 2 : undefined,
           fuseTimer: config.fuseSeconds,
           blastPending: false,
           detonated: false,

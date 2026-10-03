@@ -1,3 +1,4 @@
+import { fxRng } from './rng';
 import CINEMATIC_BANKS from './CinematicBank.json';
 import { AdaptiveMusic, type MusicThreat } from './AdaptiveMusic';
 import { finishVoice } from './SfxVoicing';
@@ -416,7 +417,7 @@ export class AudioSystem {
     const len = Math.floor(this.ctx.sampleRate * AUDIO_CONSTANTS.NOISE_BUFFER_SEC);
     this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const data = this.noiseBuf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    for (let i = 0; i < len; i++) data[i] = fxRng.audio() * 2 - 1;
 
     if (this.ctx.state !== 'running') void this.ctx.resume();
     // Decode every declared sample NOW, once, off the critical path.  This
@@ -568,7 +569,7 @@ export class AudioSystem {
     const available = set.bufs.map((buf, i) => buf ? i : -1).filter(i => i >= 0);
     if (!available.length) return null;
     const choices = available.length > 1 ? available.filter(i => i !== set.next) : available;
-    const index = choices[Math.floor(Math.random() * choices.length)];
+    const index = choices[Math.floor(fxRng.audio() * choices.length)];
     set.next = index;
     return set.bufs[index];
   }
@@ -585,7 +586,7 @@ export class AudioSystem {
           const ctx = new OfflineAudioContext(1, 44100 * 4, 44100);
           const noiseBuf = ctx.createBuffer(1, 88200, 44100);
           const data = noiseBuf.getChannelData(0);
-          for (let j = 0; j < data.length; j++) data[j] = Math.random() * 2 - 1;
+          for (let j = 0; j < data.length; j++) data[j] = fxRng.audio() * 2 - 1;
           const duration = def.render({ ctx: ctx as unknown as AudioContext,
             dest: ctx.destination, t0: 0, pitch: 1 + (i - 1) * 0.012,
             param: 0, noise: noiseBuf });
@@ -713,7 +714,7 @@ export class AudioSystem {
     const now = this.ctx.currentTime;
     // 4. Static per-voice gain: mix level × caller trim × distance.
     let g = def.gain * Math.max(0, Number.isFinite(opts?.gain) ? opts!.gain! : 1);
-    g *= 1 + (Math.random() * 2 - 1) * AUDIO_MIX.gainVariation;
+    g *= 1 + (fxRng.audio() * 2 - 1) * AUDIO_MIX.gainVariation;
     let pan = 0;
     if (def.positional && opts?.x !== undefined && opts?.y !== undefined) {
       // NOTE the argument order: wrapDeltaX(from, to) returns `to - from`,
@@ -820,7 +821,7 @@ export class AudioSystem {
     s.ctx = this.ctx;
     s.dest = voiceGain;
     s.t0 = now;
-    s.pitch = Math.max(0.25, Math.min(4, Number.isFinite(opts?.pitch) ? opts!.pitch! : 1)) * (def.jitter ? 1 + (Math.random() * 2 - 1) * Math.min(def.jitter, this.cinematicIds.has(id) ? 0.035 : 1) : 1);
+    s.pitch = Math.max(0.25, Math.min(4, Number.isFinite(opts?.pitch) ? opts!.pitch! : 1)) * (def.jitter ? 1 + (fxRng.audio() * 2 - 1) * Math.min(def.jitter, this.cinematicIds.has(id) ? 0.035 : 1) : 1);
     s.param = opts?.param ?? 0;
     s.noise = this.noiseBuf;
     // A decoded take REPLACES the draft; otherwise the draft plays.  One
@@ -1203,7 +1204,7 @@ export function noise(s: SynthCtx, o: {
   env.gain.exponentialRampToValueAtTime(0.0001, t + o.attack + o.decay);
   src.connect(filt); filt.connect(env); env.connect(dest);
   const stopAt = t + o.attack + o.decay + 0.02;
-  src.start(t, Math.random() * (AUDIO_CONSTANTS.NOISE_BUFFER_SEC - 0.5));
+  src.start(t, fxRng.audio() * (AUDIO_CONSTANTS.NOISE_BUFFER_SEC - 0.5));
   src.stop(stopAt);
   return stopAt - s.t0;
 }

@@ -24,7 +24,6 @@ interface UIOverlayProps {
    *  from the current map's spawn (unchanged death semantics), RESTART RUN
    *  wipes and replays the same map, MAIN MENU wipes and exits to the menu. */
   onRespawn?: () => void;
-  onRestartRun?: () => void;
   onQuitToMenu?: () => void;
   /** Stage-clear screen: dismiss and resume the cleared arena.  There is no
    *  "descend" action here on purpose — the choice is made by flying to a
@@ -93,7 +92,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onRespawn,
-  onRestartRun,
   onQuitToMenu,
   onDismissStageClear,
   onAudioCue,
@@ -1666,18 +1664,8 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {row('Salvage earned',
                      `◈${rs.creditsEarnedLife.toLocaleString()}`,
                      'since last death')}
-                {rs.creditsLost > 0 && (
-                  <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
-                    <span className={`text-rose-400/90 ${T_BODY} uppercase tracking-widest`}>Salvage lost</span>
-                    <span className="text-right">
-                      <span className={`text-rose-300 font-bold tabular-nums ${T_ROW}`}>−◈{rs.creditsLost.toLocaleString()}</span>
-                      {rs.creditsLostRun > rs.creditsLost && (
-                        <span className={`text-slate-500 ${T_NOTE} ml-1.5`}>◈{rs.creditsLostRun.toLocaleString()} this run</span>
-                      )}
-                    </span>
-                  </div>
-                )}
-                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'after loss')}
+                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'kept')}
+                {rs.arenaSeed !== null && row('Arena seed', rs.arenaSeed.toString(16).toUpperCase().padStart(8, '0'))}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
               </div>
 
@@ -1687,30 +1675,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   data-testid="death-respawn"
                   className={BTN_PRIMARY}
                 >
-                  Respawn
+                  Respawn at Home Station
                 </button>
                 <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
-                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept
-                  {rs.creditsLost > 0
-                    ? `; the wreck cost you ◈${rs.creditsLost.toLocaleString()} of your unspent Salvage${rs.credits === 0 ? ' — all of it' : ''}.`
-                    : '.'}
+                  You return to your station with the equipment you had installed stripped away. Salvage, cargo and score are kept.
                 </p>
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <button
-                    onClick={onRestartRun}
-                    data-testid="death-restart"
-                    className={BTN_SECONDARY}
-                  >
-                    Restart Run
-                  </button>
-                  <button
-                    onClick={onQuitToMenu}
-                    data-testid="death-menu"
-                    className={BTN_SECONDARY}
-                  >
-                    Main Menu
-                  </button>
-                </div>
+                <button
+                  onClick={onQuitToMenu}
+                  data-testid="death-menu"
+                  className={`${BTN_SECONDARY} mt-1`}
+                >
+                  Main Menu
+                </button>
               </div>
 
             </div>

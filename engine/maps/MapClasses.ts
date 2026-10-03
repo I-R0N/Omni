@@ -1,4 +1,5 @@
 
+import { sim, fxRng } from '../systems/rng';
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
 import { COLORS, randomRockShade, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, HUB_TEST_PORTAL_SITES, RETURN_PORTAL_OFFSET } from '../../constants';
@@ -239,11 +240,11 @@ export abstract class BaseMapLayer {
         // of rocks in single file.
         const perpX = -flow.y;
         const perpY =  flow.x;
-        const j = (Math.random() - 0.5) * 2 * PATH_PERP_JITTER;
+        const j = (sim.terrain() - 0.5) * 2 * PATH_PERP_JITTER;
         const pos = { x: px + perpX * j, y: py + perpY * j };
         wrapPosition(pos);
 
-        const size = minSize + Math.random() * (maxSize - minSize);
+        const size = minSize + sim.terrain() * (maxSize - minSize);
         this.entities.push(this.createRockShard(pos.x, pos.y, size, speedMultiplier, allowedSprites));
     }
 
@@ -251,11 +252,11 @@ export abstract class BaseMapLayer {
     // the non-current regions of the map still have some asteroids to
     // bump into.
     for (let i = 0; i < scatterCount; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 500 + Math.random() * (radius - 500);
+        const angle = sim.terrain() * Math.PI * 2;
+        const dist = 500 + sim.terrain() * (radius - 500);
         const x = Math.cos(angle) * dist;
         const y = Math.sin(angle) * dist;
-        const size = minSize + Math.random() * (maxSize - minSize);
+        const size = minSize + sim.terrain() * (maxSize - minSize);
         this.entities.push(this.createRockShard(x, y, size, speedMultiplier, allowedSprites));
     }
   }
@@ -275,15 +276,15 @@ export abstract class BaseMapLayer {
     // polyVerticesOptions (when set) takes priority over Min/Max.
     const spawn = SHARD_VARIANTS['rock-shard'].spawn;
     const numPoints = spawn.polyVerticesOptions
-      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      ? spawn.polyVerticesOptions[Math.floor(sim.terrain() * spawn.polyVerticesOptions.length)]
       : spawn.polyVerticesMin
-        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+        + Math.floor(sim.terrain() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
     const baseR = (size / 2) * 0.82;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
         const baseAngle   = (i / numPoints) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
-        const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
+        const angleJitter = (sim.terrain() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
+        const radiusFrac  = spawn.radiusMin + sim.terrain() * spawn.radiusRange;
         rawPts.push({
             angle: baseAngle + angleJitter,
             r:     baseR * radiusFrac,
@@ -301,7 +302,7 @@ export abstract class BaseMapLayer {
         asteroidAssets = allowedSprites;
     }
 
-    const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
+    const randomSprite = asteroidAssets[Math.floor(fxRng.sprites() * asteroidAssets.length)];
     // maxHealth is the size-scaled hit ceiling for the probabilistic break
     // model (ROCK_BREAK): the asteroid cracks on hit 1 and from hit 2 on
     // rolls an early break that's guaranteed by the ceiling.  Bigger rocks
@@ -311,8 +312,8 @@ export abstract class BaseMapLayer {
     // Blend flow direction (70%) with random drift (30%) for the initial velocity.
     // This seeds the asteroid into the vortex streamlines from spawn.
     const flow = this.sampleFlow(x, y);
-    const randX = (Math.random() - 0.5) * 2;
-    const randY = (Math.random() - 0.5) * 2;
+    const randX = (sim.terrain() - 0.5) * 2;
+    const randY = (sim.terrain() - 0.5) * 2;
     const FLOW_BIAS = 0.7;
     const vx = (flow.x * FLOW_BIAS + randX * (1 - FLOW_BIAS)) * speedMultiplier;
     const vy = (flow.y * FLOW_BIAS + randY * (1 - FLOW_BIAS)) * speedMultiplier;
@@ -320,7 +321,7 @@ export abstract class BaseMapLayer {
     // Smaller rocks spin faster; scale is roughly 1.5 rad/s at size 20 down
     // to ~0.19 rad/s at size 160.  Random sign gives both CW and CCW tumble.
     const maxSpin = 1.5 / (size / 20);
-    const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
+    const rotationSpeed = (sim.terrain() - 0.5) * 2 * maxSpin;
 
     return {
         id: nextId('ast'),
@@ -331,7 +332,7 @@ export abstract class BaseMapLayer {
         position: { x, y },
         velocity: { x: vx, y: vy },
         size: { x: size, y: size },
-        rotation: Math.random() * Math.PI * 2,
+        rotation: sim.terrain() * Math.PI * 2,
         rotationSpeed,
         // Per-instance rock shade (G7): a free-spawned belt is the biggest
         // expanse of rock in the game and was one flat slate.

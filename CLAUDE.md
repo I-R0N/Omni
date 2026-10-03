@@ -112,7 +112,10 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           death — use `quietScene`),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  507 tests.  All run at
+                          whatever happened next), replay (the REPLAY HARNESS: same seed + same
+                          inputs ⇒ identical sim hashes across maps, the
+                          cosmetic streams cannot reach the sim, and no
+                          `Math.random` survives in the game code).  522 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts (six sizes plus
                           a mid-session resize) and two starfield tests
                           that resize mid-test
@@ -178,6 +181,13 @@ engine/
                           time snapshot of them (never the whole map), and
                           a ring that says so (`heatFrac`, the incendiary
                           shell) also deposits heat (see §8, energy)
+  replay.ts               THE REPLAY HARNESS (engine-core S1): a run is
+                          `(seed, input log)`; `runReplay` steps the real
+                          engine by hand (`GameEngine.stepSim`, no rAF, no
+                          wall clock) and hashes the SIM state every N steps
+                          so a divergence names its first step and section.
+                          Dev-only — no player-facing surface (D-S1-g).
+                          Published as `window.__omniReplay`
   energyEffects.ts        ENERGY MODULES, the side-effect half: the
                           bounded heated set (cooling, burn latch, glass
                           thermal failure, plastic bond release,
@@ -417,7 +427,12 @@ engine/
                           AREA at a target density, so every screen size
                           shows the same sky per unit area.  See §8 and
                           docs/GAUNTLET_STARFIELD_LOG.md
-    IdAllocator.ts        Monotonic nextId() for entity IDs
+    rng.ts                SEEDED RANDOM STREAMS (engine-core S1) — every
+                          draw in the game comes from a named mulberry32
+                          stream, `sim.*` (changes the world, must replay
+                          exactly) or `fxRng.*` (decoration only).  See §8
+    IdAllocator.ts        Monotonic nextId() for entity IDs (cosmetic
+                          prefixes count on their own sequence — §8)
     PerfController.ts     Load-driven frame-skip coordinator for every
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
@@ -617,23 +632,18 @@ state on the way).
   `waveIndex`, so leaving an arena abandons the ladder; there is NO
   per-map run state.
 
-Death: `respawnPlayer()` refills at the current map's spawn and the run
-continues.  There IS now an interim death PENALTY (user call): raising the
-summary charges `min(balance, max(DEATH_PENALTY_FRACTION × balance,
-DEATH_PENALTY_MIN))` of the player's UNSPENT credits — whichever of the
-percentage and the flat floor is HIGHER, clamped to what they hold, so a
-broke pilot is zeroed and never driven negative.  Charged ONCE, on the
-transition into `deathPending`, so neither respawning nor restarting can
-double-charge, and money already spent on modules is untouched (the
-penalty taxes hoarding, not investment).  `lastDeathCreditsLost` /
-`runCreditsLost` carry it to the summary, which reports salvage as a
-LEDGER FOR THIS LIFE: earned since the last death
-(`lifeCreditsEarned`, snapshotted + zeroed at each death), lost to the
-wreck, and held after the loss.  The run gross (`runCreditsEarned`)
-stays on `EngineStats` but is deliberately NOT the headline — it keeps
-climbing and isn't the question being asked at the wreck.  Both numbers are PROVISIONAL
-and the fuller dynamic system still belongs to the economy tuning pass
-(step 6).
+Death (user calls D4/D6, engine-core S1): the RESPAWN button runs
+`returnToStation()` — the player goes back to their STATION in the persistent
+hub (reloading it if they died in an arena, `stageIndex` back to 0), the hull
+and shield refill, and everything INSTALLED on the ship is stripped
+(`resetOutfit(true)`): the hex slots fall back to the free lean start (Base
+Hull + Projector), which keeps the ship flyable.  What SURVIVES is the
+character, not the loadout: salvage (there is NO credit penalty any more —
+the old `DEATH_PENALTY_*` charge, `lastDeathCreditsLost` and the summary's
+"salvage lost" line are gone), CARGO modules, purchased hex slots, score and
+every run counter.  A death in the hub just refills and relocates beside the
+home station.  There is still no run terminator: the run is the persistent
+character.
 The screen itself is PRESENTATION around the respawn behaviour — when
 the wreck's `explosionTimer` runs out the engine no longer respawns; it
 arms `deathDelay` (`UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC`), the boss
@@ -649,15 +659,16 @@ everything after step 4b stops: input / weapons / docking / drop
 collection / wave progress, the snitch / dragon / rival ticks, the
 projectile post-pass and the energy layer — heat neither cools nor burns
 until the respawn), the
-explosion-timer branch is guarded on `explosionTimer > 0` so the PENALTY
-cannot be re-charged every step, and the summary is a SNAPSHOT
+explosion-timer branch is guarded on `explosionTimer > 0` so the summary
+snapshot cannot be re-taken every step, and the summary is a SNAPSHOT
 (`deathSummary`, taken at the moment of death and republished verbatim)
 so nothing behind the screen can move the numbers on it.  `runTimeSec`
 likewise stops explicitly while `deathDelay > 0 || deathPending` — reading
-your own obituary is not play time.  Its three buttons are three existing
-paths: `respawnFromDeath()` (→ `respawnPlayer()`, the old auto-respawn),
-`restartRun()` (`resetAndLoadSelectedMap()` + `startGame()` — the menu
-START path without the menu), and `quitToMenu()` (→ `restartGame()`).
+your own obituary is not play time.  Its two buttons are
+`respawnFromDeath()` ("Respawn at Home Station" — `returnToStation()`: the
+hub, installed modules stripped) and `quitToMenu()` (→ `restartGame()`);
+there is deliberately no restart-in-place.  Stations exist only in the hub,
+so the home station is the one place a death can return to.
 The RUN-SUMMARY COUNTERS (`runKills` / `runCreditsEarned` / `runTimeSec`
 / `runWavesCleared` / `runHighestWave` / `runBestCombo`, alongside the
 existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
@@ -2686,9 +2697,11 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     the boot/loop canary suites (~1.5 minutes end to end, measured
     2026-09-22).  A type error, a broken bundle, or a broken core loop
     still blocks every merge.
-  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
-    `claude/plan-completion` (immediately after a merge lands), on any PR
-    carrying the **`full-tests` label** (the opt-in for pre-merge full
+  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main`,
+    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` (the
+    engine-core + mobile phase's integration branch,
+    docs/ENGINE_CORE_PLAN.md §5) — immediately after a merge lands — on any
+    PR carrying the **`full-tests` label** (the opt-in for pre-merge full
     validation), and on manual dispatch.  Full CI runs took 18–22 minutes
     in late September 2026.
   A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs whose
@@ -2738,9 +2751,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
     on fork PRs.  Keep it that way — a merge gate that silently skips for
     outside contributors is not a gate.
-  - It also runs on pushes to `main` AND to `claude/plan-completion`, so a
-    bad merge into either long-lived branch is visible immediately instead
-    of at the next PR opened against it (plan-completion: merged, PR #93).
+  - It also runs on pushes to the long-lived branches themselves — `main`,
+    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` — so a
+    bad merge into one is visible immediately instead of at the next PR
+    opened against it (plan-completion: merged, PR #93).  Listing a branch
+    there is the ONLY way a push reaches full scope, since a PR's base no
+    longer picks it.
   - On failure the Playwright HTML report uploads as a run artifact
     (`playwright-report-<run id>`, 7-day retention) — read that before
     re-running, since the suites are timing-sensitive and the report
@@ -2758,6 +2774,41 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 
 ## 8. Conventions and gotchas
 
+- **ALL RANDOMNESS IS A SEEDED STREAM, AND THE STREAMS ARE SPLIT BY WHAT
+  THEY CAN CHANGE** (engine-core plan S1, user call D1).  `Math.random` is
+  banned from the game code — `tests/replay.spec.ts` greps for it — and every
+  draw reads a named stream from `engine/systems/rng.ts`: `sim.terrain` /
+  `waves` / `drops` / `shards` / `nebula` / `ai` / `combat` / `roamers` /
+  `energy` / `engine` for anything that moves the WORLD, and `fxRng.particles`
+  / `sprites` / `render` / `audio` / `sky` for anything that only decorates
+  it.  The rule that matters: **nothing the sim reads may come from an `fxRng`
+  stream** (the render layer, audio, background and particle files may not
+  import `sim` at all — also grepped).  The streams are one per subsystem,
+  not one per kind, so a draw added to the drop code cannot shift what the AI
+  rolls next.  Generator: mulberry32, the repo's precedent
+  (`fracture.ts`), with its 32-bit state exposed so the replay hash folds it
+  in.  SEEDING IS PER MAP, NOT PER RUN (user call D8): every map load goes
+  through `GameEngine.loadMapSeeded`, which seeds the streams for the map's
+  KIND.  The HUB is a persistent world — its terrain is generated from the
+  one fixed `HUB_WORLD_SEED` (`MapDescriptors.ts`), so it is the same place
+  on every visit and every run, and it carries no seed (`arenaSeed` is null);
+  an ARENA is a fresh mini-game that carries its own — random
+  (`freshRunSeed`) unless `beginSeededRun(seed, map)` pinned one — and that
+  `arenaSeed` is what the death summary shows (D2).  After the hub's terrain
+  is built the streams are reseeded from a fresh (or pinned) seed, so ambient
+  fauna does not repeat every visit.  The call that made
+  AI jitter SIM: enemy wobble moves bodies, so a replay that did not reproduce
+  it would be silently false.  Five non-obvious things hold determinism up:
+  an entity id is SIM STATE (`seedFromEntityId` seeds the fracture pattern),
+  so cosmetic prefixes (`part`/`glit`/`score`/`dmg`/`hud`/`lightning`) count
+  on a separate sequence in `IdAllocator` or a particle count rolled on a
+  cosmetic stream would shift the next shard's break; the id counter restarts
+  with each MAP, so every id-keyed cache (`AISystem.reset`) must clear on map
+  load or a new map's enemy inherits the last one's memory of its id, and
+  debris carried through a portal is re-id'd `xfer_<id>` at capture so it can
+  never collide; the sim clock (`simClock`) restarts with the map; the
+  PerfController's load signal has a wall-clock term, which a held replay
+  feeds as 0; and `PhysicsSystem.shardPairCallCount` restarts with the map.
 - **Torus math is non-optional.** Any new distance check, nearest-neighbor
   scan, or projectile targeting must go through `wrapDeltaX`/`wrapDeltaY`.
   Naïve `a.x - b.x` will silently break across seams.
@@ -5418,7 +5469,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns twelve, once, in its mount effect — except
+  them.**  `App.tsx` assigns thirteen, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5485,6 +5536,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     suites (`tests/mass.spec.ts` first).  A projectile a twentieth the
     density of the hull that fires it plays perfectly well; only the
     tables side by side show it.
+  - `__omniReplay` — the replay harness (`runReplay`, `endReplay`,
+    `hashSimState`, `firstDivergence`) and the `rng` stream module.  A
+    stream that leaks into the sim still plays perfectly and throws nothing,
+    so `tests/replay.spec.ts` pins it through this handle.
   - `__omniBlend` — the bonded-pair blend geometry (`buildFilletPath`,
     `blendAttachRadius`, `coatMargin`, `roundedPolyPath`), every failure
     mode of which — a degenerate pair, NaN coordinates, a seam, a fillet
@@ -6098,8 +6153,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 - Default branch: `main`.
 - Feature work lives on `claude/<feature>-<suffix>` (or `codex/*`) branches.
 - Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
-  build + Playwright on every PR and on pushes to `main` and
-  `claude/plan-completion`, which PR #93 merged into `main`),
+  build + Playwright on every PR and on pushes to `main`,
+  `claude/plan-completion` (merged into `main`, PR #93) and
+  `claude/steam-game-publishing-xhnui2` (the current phase's integration
+  branch — docs/ENGINE_CORE_PLAN.md §5)),
   `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
   on every push of a same-repo PR and publishes it to the
   `i-r0n/omni-standalone` mirror, linked from a PR comment as a
@@ -6110,8 +6167,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
   a merge.**  Per PR push it runs the SMOKE scope, whatever the base; the
-  FULL suite runs on pushes to `main` / `claude/plan-completion` (once a
-  merge lands), on the `full-tests` label and on manual dispatch (§7).
+  FULL suite runs on pushes to `main` / `claude/plan-completion` /
+  `claude/steam-game-publishing-xhnui2` (once a merge lands), on the
+  `full-tests` label and on manual dispatch (§7).
   Locally: typecheck + build + the touched suites per commit AND per push
   to a working branch; the FULL `npm run test:full` when the USER gives
   notice they are ready to merge the PR into its parent branch, not on the

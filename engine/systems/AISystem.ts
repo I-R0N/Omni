@@ -1,5 +1,6 @@
 
 
+import { sim } from './rng';
 import { GameEntity, EnemySubtype, EnemyRole, EntityType, Vector2 } from '../../types';
 import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS, calmBubble } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
@@ -21,6 +22,18 @@ export class AISystem {
   // state for dead enemies.  Cleared and refilled in-place each sweep so we
   // don't allocate a fresh Set per call.
   private _liveIdScratch: Set<string> = new Set();
+
+  /** Drop every per-enemy memory.  Called when a map loads: these maps are
+   *  keyed by entity id, and ids restart with each run (engine-core S1 — the
+   *  id sequence is run state), so an entry left from the last run would be
+   *  read by the new run's enemy that happens to share its id. */
+  public reset(): void {
+    this.laggedTargets.clear();
+    this.reactionTimers.clear();
+    this.stuckTimers.clear();
+    this.lastPositions.clear();
+    this._liveIdScratch.clear();
+  }
 
   // Perf instrumentation — wall-time (ms) of the most recent update() call.
   // Written by update() and read by GameEngine for the dev perf overlay.
@@ -143,7 +156,7 @@ export class AISystem {
 
         // Snap idle timer down so this rammer joins the charge within PACK_SYNC_WINDOW
         if ((follower.aiTimer ?? 0) > AI_CONFIG.PACK_SYNC_WINDOW) {
-          follower.aiTimer = Math.random() * AI_CONFIG.PACK_SYNC_WINDOW;
+          follower.aiTimer = sim.ai() * AI_CONFIG.PACK_SYNC_WINDOW;
         }
       }
     }
@@ -151,7 +164,7 @@ export class AISystem {
     // Garbage Collection: Cleanup dead enemies from aim/reaction maps periodically.
     // `enemies` only contains live entities, so build the live set directly.
     // Scratch Set is reused across sweeps to avoid per-frame allocation.
-    if (Math.random() < 0.05) {
+    if (sim.ai() < 0.05) {
         const liveIds = this._liveIdScratch;
         liveIds.clear();
         for (let i = 0; i < enemies.length; i++) {
@@ -329,11 +342,11 @@ export class AISystem {
               for (let i = 0; i < id.length; i++) h += id.charCodeAt(i);
               enemy.orbitSpin = (h & 1) ? 1 : -1;
           }
-          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * S.VORTEX.DART_INTERVAL;
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = sim.ai() * S.VORTEX.DART_INTERVAL;
           enemy.swarmTimer -= dt;
           const darting = enemy.swarmTimer <= 0;
           if (enemy.swarmTimer <= -S.VORTEX.DART_DURATION) {
-              enemy.swarmTimer = S.VORTEX.DART_INTERVAL + Math.random() * S.VORTEX.DART_VAR;
+              enemy.swarmTimer = S.VORTEX.DART_INTERVAL + sim.ai() * S.VORTEX.DART_VAR;
           }
           const targetR = darting ? S.VORTEX.RADIUS * S.VORTEX.DART_RADIUS_FRAC : S.VORTEX.RADIUS;
           let radial = (dist - targetR) / S.VORTEX.DEADZONE;
@@ -344,7 +357,7 @@ export class AISystem {
           ay = toY * radial * accel * S.VORTEX.RADIAL_GAIN + toX * enemy.orbitSpin * accel * tang;
       } else if (mode === 'weave') {
           // Seek, but offset perpendicular by a sine so the approach serpentines.
-          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * Math.PI * 2;
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = sim.ai() * Math.PI * 2;
           enemy.swarmTimer += dt * S.WEAVE.FREQ;
           const amp = S.WEAVE.AMP * Math.min(1, dist / S.WEAVE.CLOSE_DAMP); // straighten out up close
           const w = Math.sin(enemy.swarmTimer) * amp;
@@ -355,11 +368,11 @@ export class AISystem {
           ay = (my / mmag) * accel;
       } else if (mode === 'burst') {
           // Coast slowly, then fire a quick telegraphed dash at the player.
-          if (enemy.swarmTimer === undefined) enemy.swarmTimer = Math.random() * S.BURST.COAST_INTERVAL;
+          if (enemy.swarmTimer === undefined) enemy.swarmTimer = sim.ai() * S.BURST.COAST_INTERVAL;
           enemy.swarmTimer -= dt;
           const dashing = enemy.swarmTimer <= 0 && enemy.swarmTimer > -S.BURST.DASH_DURATION;
           if (enemy.swarmTimer <= -S.BURST.DASH_DURATION) {
-              enemy.swarmTimer = S.BURST.COAST_INTERVAL + Math.random() * S.BURST.COAST_VAR;
+              enemy.swarmTimer = S.BURST.COAST_INTERVAL + sim.ai() * S.BURST.COAST_VAR;
           }
           if (dashing) {
               ax = toX * accel * S.BURST.DASH_ACCEL_MULT;
@@ -399,8 +412,8 @@ export class AISystem {
       ay += sy * accel * S.SEPARATION_STRENGTH;
 
       // A little jitter so the cloud shimmers (framerate-stable accel).
-      ax += (Math.random() - 0.5) * S.JITTER_ACCEL;
-      ay += (Math.random() - 0.5) * S.JITTER_ACCEL;
+      ax += (sim.ai() - 0.5) * S.JITTER_ACCEL;
+      ay += (sim.ai() - 0.5) * S.JITTER_ACCEL;
 
       if (!stunned) {
           enemy.velocity.x += ax * dt;
@@ -488,11 +501,11 @@ export class AISystem {
       // bubbles never burst, so they stay slow and easy to ignore until shot.
       let acc = accel, sBoost = 1;
       if (aggro) {
-          if (enemy.bubbleBurstTimer === undefined) enemy.bubbleBurstTimer = Math.random() * B.BURST_INTERVAL;
+          if (enemy.bubbleBurstTimer === undefined) enemy.bubbleBurstTimer = sim.ai() * B.BURST_INTERVAL;
           enemy.bubbleBurstTimer -= dt;
           const bursting = enemy.bubbleBurstTimer <= 0 && enemy.bubbleBurstTimer > -B.BURST_DURATION;
           if (enemy.bubbleBurstTimer <= -B.BURST_DURATION) {
-              enemy.bubbleBurstTimer = B.BURST_INTERVAL + Math.random() * B.BURST_VAR;
+              enemy.bubbleBurstTimer = B.BURST_INTERVAL + sim.ai() * B.BURST_VAR;
           }
           acc = accel * (bursting ? B.BURST_ACCEL_MULT : 1);
           sBoost = bursting ? B.BURST_SPEED_MULT : 1;
@@ -677,7 +690,7 @@ export class AISystem {
           const lt = this.laggedTargets.get(enemy.id)!;
           lt.x = player.position.x;
           lt.y = player.position.y;
-          reaction = AI_CONFIG.REACTION_TIME_BASE + Math.random() * AI_CONFIG.REACTION_TIME_VAR;
+          reaction = AI_CONFIG.REACTION_TIME_BASE + sim.ai() * AI_CONFIG.REACTION_TIME_VAR;
       }
       this.reactionTimers.set(enemy.id, reaction);
 
@@ -700,7 +713,7 @@ export class AISystem {
               enemy.aiState = 'idle';
               // Aggro shortens idle so enraged enemies press the attack faster.
               const idleMult = aggroed ? AI_CONFIG.AGGRO_IDLE_MULT : 1;
-              enemy.aiTimer = (timers.IDLE_TIME_BASE + Math.random() * timers.IDLE_TIME_VAR) * idleMult;
+              enemy.aiTimer = (timers.IDLE_TIME_BASE + sim.ai() * timers.IDLE_TIME_VAR) * idleMult;
 
               // Retreat arc: when the rammer has just overshot the player,
               // kick it laterally so it circles away instead of stopping dead.
@@ -709,14 +722,14 @@ export class AISystem {
                   if (spd > 0.1) {
                       const vx = enemy.velocity.x / spd;
                       const vy = enemy.velocity.y / spd;
-                      const sign = Math.random() < 0.5 ? 1 : -1;
+                      const sign = sim.ai() < 0.5 ? 1 : -1;
                       enemy.velocity.x += -vy * sign * maxSpeed * AI_CONFIG.RAMMER.RETREAT_IMPULSE;
                       enemy.velocity.y +=  vx * sign * maxSpeed * AI_CONFIG.RAMMER.RETREAT_IMPULSE;
                   }
               }
           } else {
               enemy.aiState = 'chase';
-              enemy.aiTimer = timers.CHASE_TIME_BASE + Math.random() * timers.CHASE_TIME_VAR;
+              enemy.aiTimer = timers.CHASE_TIME_BASE + sim.ai() * timers.CHASE_TIME_VAR;
           }
       }
 
@@ -773,8 +786,8 @@ export class AISystem {
       // enough not to derail the dive, suspended while staggered.
       if (enemy.enemySubtype === EnemySubtype.RAMMER_1 && !stunned) {
           const j = AI_CONFIG.DRONE_JITTER_ACCEL;
-          enemy.velocity.x += (Math.random() - 0.5) * j * dt;
-          enemy.velocity.y += (Math.random() - 0.5) * j * dt;
+          enemy.velocity.x += (sim.ai() - 0.5) * j * dt;
+          enemy.velocity.y += (sim.ai() - 0.5) * j * dt;
       }
 
       // Cap Speed — suspended while staggered so the hit knockback carries
@@ -797,7 +810,7 @@ export class AISystem {
               const sx = wrapDeltaX(last.x, enemy.position.x);
               const sy = wrapDeltaY(last.y, enemy.position.y);
               if (sx * sx + sy * sy < AI_CONFIG.STUCK_DIST_THRESHOLD * AI_CONFIG.STUCK_DIST_THRESHOLD) {
-                  const nudgeAngle = Math.random() * Math.PI * 2;
+                  const nudgeAngle = sim.ai() * Math.PI * 2;
                   enemy.velocity.x += Math.cos(nudgeAngle) * maxSpeed * 0.8;
                   enemy.velocity.y += Math.sin(nudgeAngle) * maxSpeed * 0.8;
               }
