@@ -198,9 +198,11 @@ Menu (Restart Run was removed by user call), seeding is per ARENA entry with
 a persistent hub (D8), and the summary shows the arena's seed (D2).
 **Closed as S1's item and handed up:** the descent rift (D5 → D9): the user wants
 a redesigned, connected tree of arenas rather than random descent, which is
-world-design work for the PM to place (§8).  Still open: one unreproduced
-`weapons.spec.ts` bore-test failure, diagnosed as a test that could pick an
-already-damaged tile (fix drafted, not yet on the PR).  The full
+world-design work for the PM to place (§8).  The one `weapons.spec.ts`
+bore-test flake is RESOLVED: the test could pick an already-damaged tile
+(not a product bug, not a seed-dependent grain pattern — 2400 pinned-seed bores
+on pristine tiles all absorbed exactly 14.4/grain); it now selects a pristine
+tile.  The full
 suite waits for the user's merge notice (CLAUDE.md §7).
 
 **Near-term payoff** (the discipline rule): bug reports become a seed plus
