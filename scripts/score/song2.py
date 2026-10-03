@@ -145,7 +145,7 @@ def stem_atmos():
             place(low, I.shimmer(4 * BAR, 0.15, key=('b', seg)), T(seg * 4, 0, k))
         for bar in range(BARS):
             r = rng_for('bellpos2', bar)
-            if r.random() < 0.6:
+            if r.random() < 0.1:    # a rare accent (trimmed on feedback)
                 tones = VOICE[chord_at_bar(bar)][1:]
                 m = tones[r.integers(len(tones))] + 12 * (1 + (r.random() < 0.3))
                 place(bells, I.bell(int(m), 0.3 + 0.15 * r.random(), key=('b', bar)), T(bar, int(r.choice([0, 4, 8, 10])), k))
@@ -153,7 +153,7 @@ def stem_atmos():
     bells = pingpong(bells, 0.75 * BEAT, 0.5, 0.35)
     bells = reverb(bells, 4.5, 3.6, 0.6, 'pad', 7000)
     low = reverb(low, 3.0, 2.0, 0.25, 'room')
-    return pad + bells * 0.8 + low * 0.9
+    return pad + bells * 0.5 + low * 0.9
 
 
 ARP = [0, 2, 3, 2, 1, 2, 3, 4, 0, 2, 3, 2, 1, 3, 2, 1]
