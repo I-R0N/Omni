@@ -332,10 +332,6 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.respawnFromDeath();
   };
 
-  const handleRestartRun = () => {
-      if (engineRef.current) engineRef.current.restartRun();
-  };
-
   const handleQuitToMenu = () => {
       if (engineRef.current) engineRef.current.quitToMenu();
   };
@@ -498,7 +494,6 @@ const App: React.FC = () => {
         onResume={handleResume}
         onRestart={handleRestart}
         onRespawn={handleRespawn}
-        onRestartRun={handleRestartRun}
         onQuitToMenu={handleQuitToMenu}
         onDismissStageClear={handleDismissStageClear}
         onAudioCue={id => engineRef.current?.audio.play(id)}

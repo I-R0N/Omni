@@ -1986,20 +1986,6 @@ export class GameEngine {
       this.simAccumulator = 0;
   }
 
-  /** Wipe the run and drop straight back into play on the same map — the
-   *  main menu's START path (resetAndLoadSelectedMap + startGame) without the
-   *  round trip through the menu. */
-  public restartRun() {
-      this.deathPending = false;
-      this.deathDelay = 0;
-      this.deathSummary = null;
-      this.resetAndLoadSelectedMap();
-      this.startGame();
-      this.lastTime = performance.now();
-      this.simAccumulator = 0;
-      this.prepareFrameEntities();
-  }
-
   /** Dismiss the stage-clear screen and resume the fight-cleared arena.  The
    *  way out is the arena's return rift (the descent rift is switched off),
    *  which the player flies to — why this needs no destination argument. */

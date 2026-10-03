@@ -24,7 +24,6 @@ interface UIOverlayProps {
    *  from the current map's spawn (unchanged death semantics), RESTART RUN
    *  wipes and replays the same map, MAIN MENU wipes and exits to the menu. */
   onRespawn?: () => void;
-  onRestartRun?: () => void;
   onQuitToMenu?: () => void;
   /** Stage-clear screen: dismiss and resume the cleared arena.  There is no
    *  "descend" action here on purpose — the choice is made by flying to a
@@ -93,7 +92,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onRespawn,
-  onRestartRun,
   onQuitToMenu,
   onDismissStageClear,
   onAudioCue,
@@ -1677,27 +1675,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   data-testid="death-respawn"
                   className={BTN_PRIMARY}
                 >
-                  Respawn
+                  Respawn at Home Station
                 </button>
                 <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
                   You return to your station with the equipment you had installed stripped away. Salvage, cargo and score are kept.
                 </p>
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <button
-                    onClick={onRestartRun}
-                    data-testid="death-restart"
-                    className={BTN_SECONDARY}
-                  >
-                    Restart Run
-                  </button>
-                  <button
-                    onClick={onQuitToMenu}
-                    data-testid="death-menu"
-                    className={BTN_SECONDARY}
-                  >
-                    Main Menu
-                  </button>
-                </div>
+                <button
+                  onClick={onQuitToMenu}
+                  data-testid="death-menu"
+                  className={`${BTN_SECONDARY} mt-1`}
+                >
+                  Main Menu
+                </button>
               </div>
 
             </div>

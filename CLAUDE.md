@@ -664,10 +664,11 @@ snapshot cannot be re-taken every step, and the summary is a SNAPSHOT
 (`deathSummary`, taken at the moment of death and republished verbatim)
 so nothing behind the screen can move the numbers on it.  `runTimeSec`
 likewise stops explicitly while `deathDelay > 0 || deathPending` — reading
-your own obituary is not play time.  Its three buttons are three existing
-paths: `respawnFromDeath()` (→ `respawnPlayer()`, the old auto-respawn),
-`restartRun()` (`resetAndLoadSelectedMap()` + `startGame()` — the menu
-START path without the menu), and `quitToMenu()` (→ `restartGame()`).
+your own obituary is not play time.  Its two buttons are
+`respawnFromDeath()` ("Respawn at Home Station" — `returnToStation()`: the
+hub, installed modules stripped) and `quitToMenu()` (→ `restartGame()`);
+there is deliberately no restart-in-place.  Stations exist only in the hub,
+so the home station is the one place a death can return to.
 The RUN-SUMMARY COUNTERS (`runKills` / `runCreditsEarned` / `runTimeSec`
 / `runWavesCleared` / `runHighestWave` / `runBestCombo`, alongside the
 existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
