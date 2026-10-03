@@ -196,10 +196,11 @@ modules stripped and salvage / cargo / slots / score kept (D4), no credit
 penalty (D6), the death screen offers only "Respawn at Home Station" and Main
 Menu (Restart Run was removed by user call), seeding is per ARENA entry with
 a persistent hub (D8), and the summary shows the arena's seed (D2).
-**Still open, and not S1's to close:** the descent rift (D5) — its rework is
-unspecified, so a later session must put it to the user before wiring it;
-and one unreproduced `weapons.spec.ts` bore-test failure (metal 15/grain vs
-14.4, seen once, 0 of 36 repeats) suspected to be seed-dependent.  The full
+**Closed as S1's item and handed up:** the descent rift (D5 → D9): the user wants
+a redesigned, connected tree of arenas rather than random descent, which is
+world-design work for the PM to place (§8).  Still open: one unreproduced
+`weapons.spec.ts` bore-test failure, diagnosed as a test that could pick an
+already-damaged tile (fix drafted, not yet on the PR).  The full
 suite waits for the user's merge notice (CLAUDE.md §7).
 
 **Near-term payoff** (the discipline rule): bug reports become a seed plus
@@ -514,6 +515,7 @@ who made it, and the consequences for other sessions.
 | D6 | S1 | 2026-10-02 | **D-S1-f — death cost** (user call).  Options: keep / tune / replace / remove.  **Call: the credit penalty is REMOVED; equipment loss (D4) is the whole cost.** | Deletes `DEATH_PENALTY_FRACTION` / `DEATH_PENALTY_MIN` charging, `lastDeathCreditsLost` / `runCreditsLost` and the summary's "lost to the wreck" line.  The economy pass loses its provisional penalty to retune. |
 | D7 | S1 | 2026-10-02 | **D-S1-g — player-facing replay** (user call).  Options: dev-only / share a run / ghost.  **Call: dev-only.** | The replay format is NOT a compatibility surface; it may change freely.  `__omniReplay` stays a debug handle. |
 | D8 | S1 | 2026-10-02 | **Seed scope clarified** (user call): *"the seeds should only be for the mini game arenas, not the overall universe. This shouldn't change based on 'run'."*  Options put: one seed per run / a new seed every life.  **Call (as the PM/S1 reads it — to be confirmed in PR 2): the Overworld hub and the wider universe are PERSISTENT and are not re-seeded per run or per life; only the ARENAS (the mini-game maps reached through portals) carry a seed, and that seed is what the summary shows.** | CHANGES PR 1's shape: `GameEngine.seedRun()` currently reseeds every stream (hub included) at each new run.  PR 2 must move seeding to arena ENTRY and give the hub a fixed or persisted world.  Replay then records (arena seed, inputs) per arena visit.  S2 must persist the hub's generation separately from any arena seed. |
+| D9 | S1 | 2026-10-03 | **D-S1-e resolved — the descent rift is NOT S1's; it belongs to a WORLD-DESIGN effort** (user call).  Options put: dive chain to a random deeper arena / choice of deeper-or-home rift (judged the same as the first, since every arena already has a return rift) / leave it off.  **Call: none of them as framed.**  The user wants arenas REDESIGNED rather than random ones, and wants them as a TREE with interconnectivity: the player TRAVELS through arenas to get home rather than a portal dropping them at their station, so the universe has physical extent (cf. No Man's Sky).  Redesigning arenas is not S1's work but is definitely part of the overall plan.  Today's map types are mostly test terrain.  Planned arena families named by the user: LABYRINTH / maze maps of indestructible tiles leading to rare items or salvage; DENSE maps, fully enclosed in tile structure, that the player digs through; and a range of wave-battle arenas of graded difficulty using the whole enemy catalog in its deeper varieties. | `openDescentPortal` and the `descend` / depth / `waveOffset` machinery stay uncalled and untouched; S1 does NOT wire it.  The arena return rift and hub-portal travel (§3 of CLAUDE.md) are today's placeholder and will be superseded by a connected map graph.  No session in this plan owns the world-design work yet: the PM session must decide whether it is a fifth session or sits after S4 (§8).  Constraint it inherits from S1: arenas are seeded per entry (D8) and the hub is persistent, so a connected world must decide which nodes persist and which regenerate; and from D4, death returns to the home station, so a long physical route home raises what a death costs in time, not just equipment. |
 
 ---
 
@@ -553,3 +555,13 @@ history stays readable.
   (PR #108) when S1 began, so `git checkout -B claude/engine-core origin/main`
   would have dropped it.  S1 branched from the plan branch instead.
   *(S1, 2026-10-02)*
+- **S1 → PM (world design, D9).**  The descent rift is closed as S1's item and
+  handed up: the user wants a redesigned, connected tree of purpose-built
+  arenas (labyrinth, dig-through, graded wave arenas) with physical travel
+  between them in place of direct portals to the station.  This is a
+  gameplay-and-content workstream the four sessions do not cover.  It
+  touches S2 (per-node persistence: which arenas keep destroyed tiles and
+  `found` flags, today lost on re-entry), S3 (arena layouts as DATA — the
+  natural first content table to extract) and the `MAP_DESCRIPTORS` registry,
+  which today carries no graph edges.  Needs a home in §4 / §6 and a decision
+  on whether it is a fifth session.  *(S1, 2026-10-03)*
