@@ -90,6 +90,25 @@ test('held keys are tracked through the real handler, with no DOM present', () =
   assert.equal(g.input.isKeyDown('KeyD'), false);
 });
 
+test('Space fires on press at the pointer, only in live play, and charges on a hold', () => {
+  const { g, target, advanceClock } = live();
+  g.input.applyReplayFrame([], 300, 200, []);
+  g.input.pollGamepad(false);            // a menu / dock: nothing banks
+  keydown(target, 'Space'); keyup(target, 'Space');
+  assert.equal(g.input.getDeviceFireEvents().length, 0, 'Space banks no shot outside live play');
+
+  g.input.pollGamepad(true);
+  keydown(target, 'Space');
+  const shots = g.input.getDeviceFireEvents();
+  assert.equal(shots.length, 1, 'one shot on the press');
+  assert.deepEqual([shots[0].x, shots[0].y], [300, 200], 'aimed at the pointer');
+  keydown(target, 'Space');              // a held key repeats nothing
+  assert.equal(g.input.getDeviceFireEvents().length, 0);
+  advanceClock(1500);
+  keyup(target, 'Space');
+  assert.equal(g.input.getDeviceChargeEvents().length, 1, 'a long hold adds the charged shot on release');
+});
+
 test('backgrounding pauses silently and releases held keys', () => {
   const { g, target, platform, frame } = live();
   keydown(target, 'KeyD');

@@ -116,6 +116,9 @@ export class InputSystem implements InputPort {
    *  i.e. the ship itself. */
   private padAimRead: Vector2 = { x: 0, y: 0 };
   private padFireDown: boolean = false;
+  /** Live play only (set each frame by `pollGamepad`): may Space shoot now? */
+  private keyFireEnabled: boolean = false;
+  private spaceFireStart: number = 0;
   private padFireStart: number = 0;
   /** Latched edge presses, drained by the engine. Counters, not booleans, so
    *  two presses inside one frame cannot silently become one. */
@@ -225,12 +228,30 @@ export class InputSystem implements InputPort {
     }
     if (e.code === 'Escape' && !e.repeat) this.escapePresses++;
     if (this.isUiKeyTarget(e.target)) return;
+    // SPACE FIRES (user call): a DEDICATED fire control, so it shoots on PRESS
+    // like the pad trigger and a hold past CHARGE_FULL adds the charged shot
+    // on release.  The mouse still fires and is still the aim; this only adds
+    // a second trigger, aimed at wherever the pointer already is.  It goes on
+    // the DEVICE queue so a shot is never offered to a HUD widget under the
+    // pointer.  Gated on `keyFireEnabled` (live play) so a press on a menu or
+    // while docked banks nothing and still lets Space activate a focused button.
+    if (e.code === 'Space' && this.keyFireEnabled) {
+      e.preventDefault();
+      if (!e.repeat && !this.keys.has('Space')) {
+        this.spaceFireStart = nowMs();
+        this.deviceFireEvents.push({ x: this.mousePosition.x, y: this.mousePosition.y });
+      }
+    }
     this.keys.add(e.code);
   };
 
   // Key UP is never filtered: a key held before focus moved into the panel
   // must still release, or the ship keeps thrusting on a key nobody holds.
   private handleKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'Space' && this.keys.has('Space') && this.keyFireEnabled
+        && (nowMs() - this.spaceFireStart) / 1000 >= INPUT_CONSTANTS.CHARGE_FULL) {
+      this.deviceChargeEvents.push({ x: this.mousePosition.x, y: this.mousePosition.y });
+    }
     this.keys.delete(e.code);
   };
 
@@ -1344,6 +1365,7 @@ export class InputSystem implements InputPort {
    * one frame buys nothing but garbage).
    */
   public pollGamepad(fireEnabled: boolean) {
+    this.keyFireEnabled = fireEnabled;
     const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { getGamepads?: () => (Gamepad | null)[] };
     if (typeof nav.getGamepads !== 'function') return;
 
@@ -1699,6 +1721,7 @@ export class InputSystem implements InputPort {
     // finger is not a trigger, so its hold must not fill the ring.
     if (this.fireBtnDown) return (nowMs() - this.fireBtnStart) / 1000;
     if (this.padFireDown) return (nowMs() - this.padFireStart) / 1000;
+    if (this.keyFireEnabled && this.keys.has('Space')) return (nowMs() - this.spaceFireStart) / 1000;
     if (!this.mouseDown) return 0;
     if (!this.rules.tapFires) return 0;
     return (nowMs() - this.touchStartTime) / 1000;
