@@ -186,18 +186,21 @@ every session landing before it adds new `Math.random()` sites to convert —
 and the replay harness it produces makes every later refactor verifiable
 rather than hoped-at.
 
-**Status (S1, 2026-10-02).**  PR 2 is built on top of PR 1 (branch
-`claude/s1-death-reset`): per-map seeding with a persistent hub (D8), the
-death return to the station with installed modules stripped (D4), no credit
-penalty (D6) and the arena seed on the summary (D2).  PR 1 is built: every `Math.random()` site in
-the game code now draws from a named seeded stream (`engine/systems/rng.ts`),
-the replay harness exists (`engine/replay.ts`, `tests/replay.spec.ts`) and
-D-S1-c is decided (§7 D1: AI jitter is SIM).  All of D-S1-a to g are now decided
-(§7 D2–D8).  PR 2 is therefore: death returns the player to their station
-with all equipment stripped and salvage kept, the credit penalty is removed,
-the run summary shows the ARENA's seed, and seeding moves from per-run to
-per-arena-entry with a persistent hub (D8).  The descent rift (D5) is
-deliberately NOT in PR 2.
+**Status (S1, 2026-10-03): BUILT, play-tested, in PR #109 (both halves).**
+Every `Math.random()` site in the game code draws from a named seeded stream
+(`engine/systems/rng.ts`), the replay harness exists (`engine/replay.ts`,
+`tests/replay.spec.ts`), and all of D-S1-a to g are decided (§7 D1–D8).  The
+gameplay half is in too, and the user has play-tested it on the phone
+preview: death returns the player to the hub's HOME STATION with installed
+modules stripped and salvage / cargo / slots / score kept (D4), no credit
+penalty (D6), the death screen offers only "Respawn at Home Station" and Main
+Menu (Restart Run was removed by user call), seeding is per ARENA entry with
+a persistent hub (D8), and the summary shows the arena's seed (D2).
+**Still open, and not S1's to close:** the descent rift (D5) — its rework is
+unspecified, so a later session must put it to the user before wiring it;
+and one unreproduced `weapons.spec.ts` bore-test failure (metal 15/grain vs
+14.4, seen once, 0 of 36 repeats) suspected to be seed-dependent.  The full
+suite waits for the user's merge notice (CLAUDE.md §7).
 
 **Near-term payoff** (the discipline rule): bug reports become a seed plus
 an input log; the existing 430 tests get far stronger; deterministic
