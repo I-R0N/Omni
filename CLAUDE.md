@@ -2967,14 +2967,22 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   (5) **LOST ON A SECOND DEATH, never on a clock** — read literally: any death
   before recovery replaces the record, so a bare second death also destroys the
   old wreck, and a second death with gear leaves one new wreck, never two.
-  (6) **Recovery is flying into it** (`WRECK_CONSTANTS.RECOVER_RANGE`).  Each
-  module goes back to its slot if that slot is free, unlocked, accepts it and the
-  two-gun cap holds; else to cargo; else it pays resale (`SELL_FRACTION`) — a
-  recovery never destroys a module.  It is a separate path from `moveModule`,
-  whose drydock-only guard is untouched.
+  (6) **Recovery is flying into it** (`WRECK_CONSTANTS.RECOVER_RANGE`) and gives
+  the modules back TO CARGO ONLY (user call) — nothing is re-installed, the player
+  refits at a station; a module that finds the hold full pays resale, so a recovery
+  never destroys one.  The record also carries `wave`: the wave the arena's script
+  stood at when the ship fell, which `initWaveSystem` resumes at on re-entry
+  (`WaveSystem.init(…, startIndex)`).  It resets with a second death (a new record)
+  or when that arena's boss dies before recovery (`noteBossDefeated`), and is 0
+  for the hub or an already-beaten ladder.  A save without the field reads as 0.
   (7) **The wreck is drawn by the generic POI path** (a disc in `WRECK_CONSTANTS
-  .COLOR` and the word WRECK), `found` from birth (`isRetainedContact`), so the
-  minimap dot and off-screen arrow come free and no renderer code changed.
+  .COLOR` and the word WRECK), `found` from birth (`isRetainedContact`).  Finding
+  it again is guided: `updateWreckGuide` stamps `wreckGuide` on the wreck, or from
+  another map on the rift toward it, which draws a permanent amber edge arrow
+  (budget-exempt) and a clamped, pulsing minimap beacon, no scan needed.  The
+  death screen names a wreck the death destroyed (`runSummary.lostWreck`), and
+  the main menu says CONTINUE with the saved credits / modules / wreck when the
+  save holds progress (`EngineStats.savedGame`, menu and debug panel only).
 - **ESCAPE PAUSES; BACKGROUNDING PAUSES** (engine-core S2).
   `GameEngine.escapePressed()` (spent in `pollGamepad`, above every freeze, so
   it works from inside the paused state): debug panel open → close it; docked

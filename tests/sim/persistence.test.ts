@@ -11,6 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHeadlessEngine } from './harness';
 import { MemoryStorage } from '../../engine/ports';
+import { noteBossDefeated } from '../../engine/wreck';
 import {
   SAVE_KEY, SAVE_BACKUP_KEY, SAVE_VERSION, parseSave, serializeSave, emptySave, validateSave,
 } from '../../engine/save';
@@ -267,11 +268,13 @@ test('the wreck PINS its arena: re-entering regenerates the same terrain and the
   assert.notEqual(free.g.arenaSeed, w.seed);
 });
 
-test('flying into the wreck gives the loadout back, to its slots; the wreck is gone and the save says so', () => {
+test('flying into the wreck gives the loadout back, to CARGO only; the wreck is gone and the save says so', () => {
   const storage = new MemoryStorage();
   const a = launch(storage);
   outfit(a.g);
-  const shipBefore = a.g.shipSlots.slice(), weaponBefore = a.g.weaponSlots.slice();
+  const mounted = [...a.g.shipSlots, ...a.g.weaponSlots].filter((id) => id !== null && id !== 'hull_base' && id !== 'dlv_projectile').sort();
+  assert.ok(mounted.length > 0, 'the test ship carries something');
+  const cargoBefore = a.g.inventory.filter((id: string | null) => id !== null);
   a.g.transitionToMap('arena_pocket');
   a.g.stepSim(5);
   die(a.g);
@@ -288,8 +291,10 @@ test('flying into the wreck gives the loadout back, to its slots; the wreck is g
   b.g.stepSim(3);
   assert.equal(b.g.wreck, null);
   assert.equal(b.g.wreckEntity, null);
-  assert.deepEqual(b.g.shipSlots, shipBefore);
-  assert.deepEqual(b.g.weaponSlots, weaponBefore);
+  const cargo = b.g.inventory.filter((id: string | null) => id !== null).sort();
+  assert.deepEqual(cargo, [...mounted, ...cargoBefore].sort(), 'every module is in the inventory');
+  assert.equal(b.g.shipSlots.filter((id: string | null) => id !== null && id !== 'hull_base').length, 0, 'nothing is re-installed');
+  assert.equal(b.g.weaponSlots.filter((id: string | null) => id !== null && id !== 'dlv_projectile').length, 0);
   assert.equal(JSON.parse(storage.get(SAVE_KEY)!).wreck, null, 'recovery is saved');
 });
 
@@ -373,7 +378,8 @@ test('a death in the HUB leaves a wreck there, in the persistent world', () => {
   g.player.position = { x: e.position.x, y: e.position.y };
   g.stepSim(3);
   assert.equal(g.wreck, null);
-  assert.ok(mounted(g.shipSlots).length > 0, 'the gear is back on the ship');
+  assert.equal(mounted(g.shipSlots).length, 0, 'recovery installs nothing');
+  assert.ok(g.inventory.some(Boolean), 'the gear is in cargo');
 });
 
 test('records: deaths and bests persist, and the summary reports a new best', () => {
@@ -404,4 +410,53 @@ test('Erase save is a brand-new start, settings kept', () => {
   assert.equal(b.g.records.deaths, 0);
   assert.deepEqual(mounted(b.g.shipSlots), []);
   assert.equal(b.platform.audio.volume, 0.2);
+});
+
+test('the wreck\'s arena resumes the wave script where the ship fell; a second death or the boss dying resets it', () => {
+  const storage = new MemoryStorage();
+  const a = launch(storage);
+  a.g.debugGrantModule('hull_mk2');
+  a.g.transitionToMap('arena_pocket');
+  a.g.stepSim(5);
+  a.g.waves.waveIndex = 3;
+  die(a.g);
+  assert.equal(a.g.wreck.wave, 3, 'the record carries the wave');
+
+  const b = launch(storage, { entropySeed: 9 });
+  b.g.transitionToMap('arena_pocket');
+  assert.equal(b.g.waves.waveIndex, 3, 'the arena resumes at the death wave');
+  b.g.transitionToMap('arena_ring');
+  assert.equal(b.g.waves.waveIndex, 0, 'another arena starts fresh');
+
+  // The boss falling before the wreck is collected resets the script (the wreck stays).
+  b.g.transitionToMap('arena_pocket');
+  noteBossDefeated(b.g);
+  assert.equal(b.g.wreck.wave, 0);
+  b.g.transitionToMap('arena_pocket');
+  assert.equal(b.g.waves.waveIndex, 0);
+
+  // A second death replaces the record with the new wave.
+  b.g.waves.waveIndex = 1;
+  die(b.g);
+  assert.ok(b.g.lostWreckOnDeath, 'the death screen is told the older wreck is lost');
+});
+
+test('the way back to the wreck is lit: the wreck itself, else the rift toward it', () => {
+  const a = launch(new MemoryStorage());
+  a.g.debugGrantModule('hull_mk2');
+  a.g.transitionToMap('arena_pocket');
+  a.g.stepSim(5);
+  a.g.player.position = { x: a.g.player.position.x + 900, y: a.g.player.position.y + 900 };
+  die(a.g);
+  a.g.respawnFromDeath();                      // hub: the rift to the wreck's arena
+  a.g.stepSim(2);
+  const lit = a.g.portals.filter((p: any) => p.wreckGuide);
+  assert.equal(lit.length, 1);
+  assert.equal(lit[0].portalTargetId, 'arena_pocket');
+  a.g.transitionToMap('arena_pocket');         // in the arena: the wreck
+  a.g.stepSim(2);
+  assert.equal(a.g.wreckEntity.wreckGuide, true);
+  a.g.transitionToMap('arena_ring');           // elsewhere: the way home
+  a.g.stepSim(2);
+  assert.equal(a.g.portals.filter((p: any) => p.wreckGuide).length, 1);
 });

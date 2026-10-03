@@ -101,7 +101,7 @@ test.describe('the death wreck', () => {
     expect(pinned).toBe(seed);
     await engine(page, e => { const w = e.wreckEntity; e.player.position = { x: w.position.x, y: w.position.y }; });
     await page.waitForFunction(() => (window as any).__omniEngine.wreck === null, null, { timeout: 15_000 });
-    const back = await engine(page, e => [...e.shipSlots, ...e.weaponSlots].filter((s: string | null) => s && s !== 'hull_base' && s !== 'dlv_projectile').length);
-    expect(back).toBeGreaterThanOrEqual(2);
+    const back = await engine(page, e => e.inventory.filter((s: string | null) => s && s !== 'hull_base' && s !== 'dlv_projectile').length);
+    expect(back, 'recovered modules land in cargo, not on the ship').toBeGreaterThanOrEqual(2);
   });
 });

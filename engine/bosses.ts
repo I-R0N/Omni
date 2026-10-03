@@ -30,6 +30,7 @@ import {
 import { MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { wrapPosition } from './toroidal';
 import { nextId } from './systems/IdAllocator';
+import { noteBossDefeated } from './wreck';
 
 /** Live-boss HUD readout — undefined when no boss is alive, so the HUD bar
  *  simply isn't rendered.  Cheap: `liveBoss` is maintained by updateBosses,
@@ -173,6 +174,7 @@ export function payBossBounty(g: GameEngine, boss: GameEntity) {
 g.audio.play('boss.death');
     g.bossesKilled++;
     g.records.bossesKilled++;
+    noteBossDefeated(g);
     g.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
     // The money is PHYSICAL — the same salvage drops every other source pays,
     // sprayed off the corpse so it converges and merges normally.

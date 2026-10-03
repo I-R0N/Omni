@@ -1064,6 +1064,11 @@ export interface GameEntity {
    *  and the portal, which holds the loadout the death stripped.  Flying into it
    *  recovers the modules (`engine/wreck.ts`). */
   isWreck?: boolean;
+  /** Stamped each step on the ONE contact that leads the player back to their
+   *  wreck: the wreck itself, or — from another map — the rift toward it
+   *  (`engine/wreck.ts` `updateWreckGuide`).  Draws a permanent edge arrow and a
+   *  minimap beacon that need no scan. */
+  wreckGuide?: boolean;
   isStation?: boolean;
   // Which station variant this POI is ('home' | 'shipwright' | 'armory' |
   // 'tradehub' — see STATION_VARIANTS): drives its name/colour and the
@@ -1958,6 +1963,15 @@ export interface EngineStats {
    *  automatically, and the run continues.  `credits` is the current balance
    *  (which purchases have already drawn down); `creditsEarned` is gross
    *  salvage income for the run, so the two read differently on purpose. */
+  /** The save's contents — for the main menu's CONTINUE panel and the debug
+   *  panel's records.  Published only while the menu or the panel is up. */
+  savedGame?: {
+    progress: boolean;
+    credits: number;
+    modules: number;
+    wreck: { mapName: string; modules: number; wave: number } | null;
+    records: { highScore: number; bestWave: number; bestCombo: number; bossesKilled: number; dragonsKilled: number; deaths: number };
+  };
   runSummary?: {
     score: number;
     bestCombo: number;
@@ -1984,6 +1998,8 @@ export interface EngineStats {
     /** The wreck this death left (D10): where, and how many modules are in it;
      *  null when nothing worth recovering was mounted. */
     wreck: { mapName: string; modules: number } | null;
+    /** The OLDER wreck this death destroyed (a second death loses it, D-S2-d2). */
+    lostWreck: { mapName: string; modules: number } | null;
     /** Lifetime bests from the save file (D-S2-a), as they stand AFTER this
      *  death, with whether this life set one. */
     records: { highScore: number; bestWave: number; newHighScore: boolean; deaths: number };

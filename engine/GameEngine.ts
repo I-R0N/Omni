@@ -27,7 +27,7 @@ import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponK
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type Records, type CharacterSave, type SaveStatus } from './save';
-import { leaveWreck, spawnWreckEntity, updateWreck, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
+import { leaveWreck, spawnWreckEntity, updateWreck, updateWreckGuide, wreckWaveFor, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
@@ -1234,6 +1234,7 @@ export class GameEngine {
   private onPlayerFell(): void {
     this.deathNewHighScore = this.score > this.records.highScore;
     this.records.deaths++;
+    this.lostWreckOnDeath = this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null;
     leaveWreck(this);
     this.resetOutfit(true);
     this.saveNow();
@@ -1379,6 +1380,11 @@ export class GameEngine {
    *  `wreckEntity` is its view in the loaded map (engine/wreck.ts). */
   public wreck: WreckRecord | null = null;
   public wreckEntity: GameEntity | null = null;
+  /** The contact currently carrying `wreckGuide` (engine/wreck.ts). */
+  public wreckGuideEntity: GameEntity | null = null;
+  /** The wreck an older death left that THIS death destroyed (D-S2-d2) — the
+   *  death screen says so.  Null when there was none. */
+  public lostWreckOnDeath: { mapName: string; modules: number } | null = null;
   /** Lifetime bests and counters (D-S2-a). */
   public records: Records = emptyRecords();
   /** What loading the save found: fresh / loaded / migrated / unreadable / future. */
@@ -2940,6 +2946,7 @@ export class GameEngine {
         },
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
+      savedGame: (this.gameState === GameState.MENU || this.debugPanelOpen) ? this.savedGameSnapshot() : undefined,
       runSummary: this.deathPending ? (this.deathSummary ?? undefined) : undefined,
       stageClear: this.stageClearPending && this.lastStageClear
           ? { ...this.lastStageClear, mapName: this.currentMap?.name ?? '' }
@@ -4513,6 +4520,7 @@ export class GameEngine {
     // rest of this step runs against the destination.
     this.updateInteractables();
     updateWreck(this);
+    updateWreckGuide(this);
     this.updatePortalTransit(dt);
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
@@ -5452,6 +5460,29 @@ export class GameEngine {
    *  and then republished verbatim while `deathPending` (the sim keeps running
    *  behind the screen, so a live rebuild would drift).  Every field is a
    *  counter that already exists on the engine; nothing is recomputed here. */
+  /** Does the save hold anything worth saying "continue" about? */
+  public hasSavedProgress(): boolean {
+    return this.credits > 0 || this.inventory.some(Boolean) || this.wreck !== null
+      || this.shipSlots.some((id, i) => id !== null && (moduleDef(id)?.cost ?? 0) > 0)
+      || this.weaponSlots.some((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0)
+      || this.records.deaths > 0 || this.records.highScore > 0;
+  }
+
+  /** The save's contents for the main menu's CONTINUE panel and the debug
+   *  panel's records (published only while one of them is up). */
+  private savedGameSnapshot() {
+    const modules = this.inventory.filter(Boolean).length
+      + this.shipSlots.filter((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0).length
+      + this.weaponSlots.filter((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0).length;
+    return {
+      progress: this.hasSavedProgress(),
+      credits: this.credits,
+      modules,
+      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck), wave: this.wreck.wave } : null,
+      records: { ...this.records, highScore: Math.max(this.records.highScore, Math.floor(this.score)) },
+    };
+  }
+
   private runSummarySnapshot() {
     return {
       score: this.score,
@@ -5468,6 +5499,7 @@ export class GameEngine {
       timeSec: Math.floor(this.runTimeSec),
       mapName: this.currentMap?.name ?? '',
       wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
+      lostWreck: this.lostWreckOnDeath,
       records: {
         highScore: Math.max(this.records.highScore, Math.floor(this.score)),
         bestWave: Math.max(this.records.bestWave, this.runHighestWave),
@@ -7712,7 +7744,10 @@ export class GameEngine {
     // Depth carries the difficulty curve and the boss rotation forward; the
     // arena's own wave counter still restarts at 1 for the HUD.
     this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
-    this.waves.init(ctx, this.wavesEnabled);
+    // A wreck pins where this arena's wave script stood when the ship fell:
+    // flying back for it resumes there (user call), not from wave 1.
+    this.waves.init(ctx, this.wavesEnabled,
+      wreckWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id));
     if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
 

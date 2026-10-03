@@ -43,6 +43,10 @@ export interface WreckRecord {
    *  ship restarts with.  No expiry: a wreck is lost on a second death (D10). */
   ship: (string | null)[];
   weapon: (string | null)[];
+  /** The wave the arena resumes at when the player returns for this wreck
+   *  (0-based, as `WaveSystem.waveIndex`; 0 = from the start).  Optional in the
+   *  file — a save written before the field reads as 0, so no migration. */
+  wave: number;
 }
 
 export interface Records {
@@ -161,6 +165,7 @@ function validWreck(raw: unknown): WreckRecord | null {
     seed: raw.seed === null || raw.seed === undefined ? null : (num(raw.seed, 0, 0, 0xffffffff) >>> 0),
     x: num(raw.x, 0), y: num(raw.y, 0),
     ship, weapon,
+    wave: int(raw.wave, 0, 0, 1e4),
   };
 }
 

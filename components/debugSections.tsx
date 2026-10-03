@@ -602,6 +602,18 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
     ],
   },
   {
+    id: 'records', label: 'Save & Records', group: 'economy',
+    rows: [
+      stat('Saved game', c => c.s.savedGame ? (c.s.savedGame.progress ? 'yes' : 'new character') : '—', 'Whether the save holds a character worth continuing.'),
+      stat('Deaths', c => String(c.s.savedGame?.records.deaths ?? '—'), 'Lifetime deaths, from the save file.'),
+      stat('Best score', c => (c.s.savedGame?.records.highScore ?? 0).toLocaleString(), 'Lifetime high score, from the save file.'),
+      stat('Best wave', c => String(c.s.savedGame?.records.bestWave ?? '—'), 'The deepest wave ever reached.'),
+      stat('Best combo', c => String(c.s.savedGame?.records.bestCombo ?? '—'), 'The best kill combo multiplier ever reached.'),
+      stat('Bosses / dragons', c => c.s.savedGame ? `${c.s.savedGame.records.bossesKilled} / ${c.s.savedGame.records.dragonsKilled}` : '—', 'Lifetime bosses and dragons killed.'),
+      stat('Wreck', c => c.s.savedGame?.wreck ? `${c.s.savedGame.wreck.modules} in ${c.s.savedGame.wreck.mapName}, resumes wave ${c.s.savedGame.wreck.wave + 1}` : 'none', 'The outstanding death wreck: what is in it, where, and the wave its arena resumes at.'),
+    ],
+  },
+  {
     id: 'salvage', label: 'Salvage & Stations', group: 'economy',
     rows: [
       stat('Salvage', c => (c.s.credits ?? 0).toLocaleString(), 'Your Salvage balance — the money the shops take.', c => 'text-amber-300'),

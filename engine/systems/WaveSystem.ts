@@ -103,7 +103,7 @@ export class WaveSystem {
    *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no
    *  wave 1 banner, no grace-period cycling, no enemies. */
-  public init(ctx: WaveSpawnContext, enabled: boolean = true) {
+  public init(ctx: WaveSpawnContext, enabled: boolean = true, startIndex: number = 0) {
     this.halted = false;
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
@@ -117,7 +117,7 @@ export class WaveSystem {
     this.nextSpawnIdx = 0;
     this.lastSpawnAtSec = -Infinity;
     if (!enabled || ctx.enemyScale <= 0) return;
-    this.startWave(0, ctx);
+    this.startWave(startIndex, ctx);
   }
 
   /**

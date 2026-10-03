@@ -27,11 +27,11 @@
  */
 import type { GameEngine } from './GameEngine';
 import { EntityType, type GameEntity } from '../types';
-import { MODULE_RESALE, MAX_INSTALLED_GUNS, moduleDef, moduleFitsSlot, WRECK_CONSTANTS } from '../constants';
+import { MODULE_RESALE, moduleDef, WRECK_CONSTANTS } from '../constants';
 import { descriptorForMapType, mapDescriptor } from './maps/MapDescriptors';
 import { nextId } from './systems/IdAllocator';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
-import { syncLoadoutFromSlots, modulePrice } from './outfitting';
+import { modulePrice } from './outfitting';
 import type { WreckRecord } from './save';
 
 /** Modules a death takes: everything mounted that is not free.  The free Base
@@ -39,6 +39,32 @@ import type { WreckRecord } from './save';
  *  holding a second copy would be a duplication. */
 function leftBehind(slots: (string | null)[]): (string | null)[] {
   return slots.map((id) => (id !== null && (moduleDef(id)?.cost ?? 0) > 0 ? id : null));
+}
+
+/** Which wave an arena resumes at when the player flies back for this wreck
+ *  (user call): where they died.  0 in the hub (no waves), and 0 once this
+ *  arena's boss is dead — the ladder is finished, so there is nothing to resume. */
+function waveToResume(g: GameEngine): number {
+  if (!g.wavesEnabled) return 0;
+  const bossAlive = g.currentMap.entities.some((e) => e.isBoss === true && e.active);
+  if (g.waves.halted && !bossAlive) return 0;
+  return Math.max(0, g.waves.waveIndex);
+}
+
+/** The boss of the wreck's arena fell before the wreck was recovered: the
+ *  wave script starts over on the next visit (user call). */
+export function noteBossDefeated(g: GameEngine): void {
+  const w = g.wreck;
+  if (!w || w.wave === 0) return;
+  if (descriptorForMapType(g.currentMap?.type)?.id !== w.arenaId) return;
+  w.wave = 0;
+  g.saveNow();
+}
+
+/** The wave an arena load must resume at: the wreck's, when it lies in `mapId`. */
+export function wreckWaveFor(g: GameEngine, mapId: string | undefined): number {
+  const w = g.wreck;
+  return w !== null && mapId !== undefined && w.arenaId === mapId ? w.wave : 0;
 }
 
 /** Build the record for a ship that has just fallen, or null when nothing
@@ -56,6 +82,7 @@ export function makeWreckRecord(g: GameEngine): WreckRecord | null {
     x: g.player.position.x,
     y: g.player.position.y,
     ship, weapon,
+    wave: waveToResume(g),
   };
 }
 
@@ -115,43 +142,53 @@ export function updateWreck(g: GameEngine): void {
   if (dx * dx + dy * dy <= r * r) recoverWreck(g);
 }
 
-/** Give the loadout back.  Each module returns to the slot it was mounted in
- *  when that slot is free and accepts it (and the two-gun cap holds); else it
- *  goes to cargo; else — cargo full — it pays its resale value, so a recovery
- *  never silently destroys anything.  Returns what happened to each module. */
+/** Give the loadout back — TO CARGO ONLY (user call).  Recovery never installs
+ *  anything: the player refits at a station, so a recovered ship is not
+ *  silently rebuilt around them.  A module that finds cargo full pays its
+ *  resale value instead, so a recovery never destroys anything.  `restored`
+ *  stays in the result as 0 for callers that read it. */
 export function recoverWreck(g: GameEngine): { restored: number; cargo: number; sold: number } {
   const w = g.wreck;
   const out = { restored: 0, cargo: 0, sold: 0 };
   if (!w) return out;
-  const place = (group: 'ship' | 'weapon', slots: (string | null)[]) => {
-    const mounted = group === 'ship' ? g.shipSlots : g.weaponSlots;
-    for (let i = 0; i < slots.length; i++) {
-      const id = slots[i];
+  const give = (slots: (string | null)[]) => {
+    for (const id of slots) {
       if (id === null) continue;
       const def = moduleDef(id);
       if (!def) continue;
-      const gunsMounted = g.weaponSlots.reduce((n, s) => n + (s !== null && moduleDef(s)?.kind === 'weapon' ? 1 : 0), 0);
-      const gunBlocked = group === 'weapon' && def.kind === 'weapon' && gunsMounted >= MAX_INSTALLED_GUNS;
-      if (mounted[i] === null && g.slotUnlocked(group, i) && moduleFitsSlot(def, group, i) && !gunBlocked) {
-        mounted[i] = id; out.restored++;
-        continue;
-      }
       const free = g.inventory.indexOf(null);
       if (free >= 0) { g.inventory[free] = id; out.cargo++; continue; }
       g.credits += Math.round(modulePrice(def.cost) * MODULE_RESALE.SELL_FRACTION);
       out.sold++;
     }
   };
-  place('ship', w.ship);
-  place('weapon', w.weapon);
-  syncLoadoutFromSlots(g);
+  give(w.ship);
+  give(w.weapon);
   removeWreckEntity(g);
   g.wreck = null;
-  const n = out.restored + out.cargo + out.sold;
-  g.pushPlayerMessage(`WRECK RECOVERED — ${n} MODULE${n === 1 ? '' : 'S'}`, WRECK_CONSTANTS.COLOR);
+  const n = out.cargo + out.sold;
+  g.pushPlayerMessage(`WRECK RECOVERED — ${n} MODULE${n === 1 ? '' : 'S'} TO CARGO`, WRECK_CONSTANTS.COLOR);
   g.audio.play('pickup.salvage', { x: g.player.position.x, y: g.player.position.y });
   g.saveNow();
   return out;
+}
+
+/** Keep `wreckGuide` on the one contact that leads back to the wreck: the wreck
+ *  itself when it is in this map, else the rift toward it (the hub's rift to the
+ *  wreck's arena; from any other arena, its way home).  One pass per step. */
+export function updateWreckGuide(g: GameEngine): void {
+  if (g.wreckGuideEntity) { g.wreckGuideEntity.wreckGuide = false; g.wreckGuideEntity = null; }
+  const w = g.wreck;
+  if (!w || g.player.isExploding) return;
+  let target: GameEntity | null = g.wreckEntity && g.wreckEntity.active ? g.wreckEntity : null;
+  if (!target) {
+    const inHub = mapDescriptor(w.arenaId)?.kind !== 'hub' && descriptorForMapType(g.currentMap?.type)?.kind === 'hub';
+    for (const p of g.portals) {
+      if (!p.active) continue;
+      if (!inHub || p.portalTargetId === w.arenaId) { target = p; break; }
+    }
+  }
+  if (target) { target.wreckGuide = true; g.wreckGuideEntity = target; }
 }
 
 /** Display name of the map a wreck lies in (the death summary). */

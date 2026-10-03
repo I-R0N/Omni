@@ -22,7 +22,7 @@
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType, CameraState, MapType, DamageText, PlayerHUDMessage, WaveAnnouncement, JoystickHUDState, FireButtonHUDState } from '../../../types';
 import {
-    COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS,
+    COLORS, MINIMAP_CONSTANTS, UI_CONSTANTS, WAVE_ANNOUNCE_CONSTANTS, WRECK_CONSTANTS,
     LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, weaponConfig, SPRITE_CONSTANTS,
     STATION_CONSTANTS, PORTAL_CONSTANTS, BOSS_CONSTANTS, DRAGON_CONSTANTS,
     BUBBLE_CONSTANTS, SNITCH_CONSTANTS, CHARGE_CONSTANTS, effectiveDpr, BOSS_DEFS,
@@ -252,11 +252,14 @@ export function renderIndicators(
             if (isBubble)      { color = COLORS.BUBBLE; hunting = t.provoked === true && t.aggroTargetId === 'player'; }
             else if (isRival)  { color = COLORS.RIVAL;  hunting = t.huntingPlayer === true; }
             else               { color = COLORS.ENEMY; }
-        } else if (isPortal)      color = COLORS.PORTAL;
+        } else if (t.wreckGuide === true) color = WRECK_CONSTANTS.COLOR;
+        else if (isPortal)      color = COLORS.PORTAL;
         else if (t.isStation)     color = COLORS.STATION;
         else                      color = COLORS.OTHER;
 
-        if (t.type === EntityType.ENEMY) {
+        if (t.wreckGuide === true) {
+            // The way back to the wreck is never starved by the budgets.
+        } else if (t.type === EntityType.ENEMY) {
             // A (h) boss capstone never competes for the enemy budget:
             // losing the boss arrow behind a crowd of stragglers is exactly
             // the case the arrow exists for.
@@ -347,9 +350,10 @@ export function renderIndicators(
         // already says how far away it is.  The NAME stays, because
         // an unlabelled arrow is ambiguous the moment a second rift is on
         // the same edge, which on the hub is the normal case.
-        const portalName = isPortal ? (t.name ?? '')
+        const portalName = t.wreckGuide === true ? (t.isWreck ? 'WRECK' : `WRECK · ${t.name ?? ''}`)
+            : isPortal ? (t.name ?? '')
             : isBoss ? (t.enemySubtype ? (BOSS_DEFS[t.enemySubtype]?.name ?? 'BOSS') : 'BOSS') : '';
-        const showDist = t.type !== EntityType.ENEMY && !isPortal
+        const showDist = t.type !== EntityType.ENEMY && !isPortal && t.wreckGuide !== true
             && item.distSq > TEXT_THRESHOLD_POI;
 
         if (showDist || portalName) {
@@ -1060,6 +1064,38 @@ export function renderMinimap(
                 ctx.stroke();
             }
             ctx.globalAlpha = 1;
+            continue;
+        }
+
+        if (entity.wreckGuide === true) {
+            // ── Wreck BEACON ──────────────────────────────────────────
+            // The way back to the loadout the player lost: the wreck itself,
+            // or the rift that leads toward it.  Amber, pulsing, and CLAMPED
+            // to the border like a portal so it is always on the map.
+            const pb = MINIMAP_CONSTANTS.PORTAL_BLIP;
+            let ex = item.dx * scale;
+            let ey = item.dy * scale;
+            const bExtent = Math.max(Math.abs(ex), Math.abs(ey));
+            const bHalf = currentSize / 2 - pb.EDGE_INSET;
+            const bClamped = bExtent > bHalf;
+            if (bClamped) { const f = bHalf / bExtent; ex *= f; ey *= f; }
+            const bx = centerX + ex;
+            const by = centerY + ey;
+            const ping = (performance.now() / 1000 * pb.PULSE_HZ) % 1;
+            ctx.globalAlpha = 1 - ping;
+            ctx.strokeStyle = WRECK_CONSTANTS.COLOR;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(bx, by, pb.RING_MIN + (pb.RING_MAX - pb.RING_MIN) * ping, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = WRECK_CONSTANTS.COLOR;
+            ctx.beginPath();
+            ctx.arc(bx, by, pb.RADIUS * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = `rgba(255,255,255,${pb.OUTLINE_ALPHA})`;
+            ctx.lineWidth = pb.OUTLINE_WIDTH;
+            ctx.stroke();
             continue;
         }
 

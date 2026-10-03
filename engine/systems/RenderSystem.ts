@@ -190,7 +190,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
     // hands the map everything, so measuring the cost of scanning does not
     // mean measuring it blind.
     if (getScanRevealAll()) return 1;
-    if (e.found === true) return 1;
+    if (e.found === true || e.wreckGuide === true) return 1;
     const a = this.detectAlpha(e.detectedAt);
     const b = this.detectAlpha(e.trackedAt);
     return a > b ? a : b;
@@ -1120,7 +1120,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
         // blinking red once they hunt you) under their own small budget.
         if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
                 || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
-            const detect = this.detectAlpha(entity.detectedAt);
+            const detect = entity.wreckGuide === true ? 1 : this.detectAlpha(entity.detectedAt);
             if (detect > 0) {
                 const distSq = dx*dx + dy*dy;
                 // Whether the entity is currently within the true (unpadded)
