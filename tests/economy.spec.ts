@@ -388,7 +388,8 @@ test.describe('economy', () => {
     // The summary shows the seed of the arena the life ended in.
     expect(dead.runSummary!.arenaSeed).toBe(seed);
 
-    await engine(page, e => e.respawnFromDeath());
+    // Through the real button, not the engine call: the wiring is the claim.
+    await page.getByRole('button', { name: 'Respawn' }).click();
     await waitForStats(page, s => !s.runSummary && s.currentMapType === 'OVERWORLD', 'the hub');
     const home = await engine(page, e => ({
       arenaSeed: e.arenaSeed as number | null,
