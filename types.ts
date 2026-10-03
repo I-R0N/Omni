@@ -2470,6 +2470,11 @@ export interface EngineStats {
     /** Context→speaker latency readout (base + output), ms; null until the
      *  context exists.  ~30-45ms = wired/speaker, 150-250ms = Bluetooth. */
     latencyMs: number | null;
+    /** The adaptive score (null until the first gesture creates it). */
+    music: {
+      intensity: number; target: number; forced: number | null;
+      layers: string[]; bar: number;
+    } | null;
   };
 }
 

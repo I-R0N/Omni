@@ -1166,6 +1166,22 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
     ],
   },
   {
+    id: 'music', label: 'Adaptive Music', group: 'perf',
+    rows: [
+      stat('Music int', c => {
+        const m = c.s.audio?.music;
+        return m ? `${m.intensity.toFixed(2)} → ${m.target.toFixed(2)}` : '—';
+      }, 'The adaptive score\u2019s smoothed intensity and the target it is moving toward.'),
+      stat('Layers', c => c.s.audio?.music?.layers.join(' · ') || '—',
+        'Which score layers are in: atmos · pulse · groove · heavy · apex · boss.'),
+      stat('Music bar', c => c.s.audio?.music?.bar ?? '—', 'Bar 1–32 of the 60-second score loop.'),
+      ctrl('Music force', dbg(e => e.audio.cycleMusicDebugIntensity()),
+        c => { const f = c.s.audio?.music?.forced; return f === null || f === undefined ? 'game' : f.toFixed(2); },
+        'Pin the score\u2019s intensity to audition each layer.',
+        'GAME follows the fight. The fixed steps sit just past each layer\u2019s threshold: 0 atmos only, 0.25 + pulse, 0.45 + groove, 0.70 + heavy, 0.90 + apex, 1.00 adds the boss stem.'),
+    ],
+  },
+  {
     id: 'stats', label: 'Stats', group: 'perf', defaultOpen: true,
     rows: [
       stat('FPS', c => c.s.fps, 'Frames drawn per second.'),

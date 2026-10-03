@@ -8,15 +8,9 @@ asset architecture.
 
 - **Effects:** Kenney's [Sci-Fi Sounds](https://kenney.nl/assets/sci-fi-sounds)
   and [Impact Sounds](https://kenney.nl/assets/impact-sounds), both CC0.
-- **Exploration music:** Osmic's [Space ambient](https://opengameart.org/content/space-ambient),
-  CC BY 3.0; `space-ambient.mp3` is the complete, unmodified ten-minute file.
-- **Battle music:** Alexandr Zhelanov's [Fly](https://opengameart.org/content/techno-space),
-  CC BY 3.0; `fly-battle.mp3` is a 192 kbps transcode of the published MP3, with
-  no musical edits.
-- **Battle playlist:** Sygil's [Tracers](https://opengameart.org/content/tracers),
-  CC BY 4.0, and Alexandr Zhelanov's [Countdown](https://opengameart.org/content/countdown-0),
-  CC BY 3.0, transcoded the same way. The three battle tracks rotate without
-  looping one track during prolonged combat.
+- **Music:** the original adaptive score composed for Omni — six synchronised
+  stems plus two transition one-shots (`score-*.mp3`), synthesized entirely by
+  `scripts/score/`. No third-party material, so no attribution requirement.
 
 Keep a license record for every new asset. Put the source URL, author, license,
 whether the file was changed, and the local filename in
@@ -38,113 +32,66 @@ source page and the exact CC-BY license. Do not imply that the creator endorses
 Omni. Keep the license text in `public/assets/audio/licenses/` when it is supplied
 by the source.
 
-## Add or replace background music
+## The adaptive score
 
-The game streams a looping exploration bed and a non-looping battle playlist
-through `BackgroundMusic`, which routes them to the Music bus:
-`space-ambient.mp3` is the exploration bed and
-`fly-battle.mp3`, `tracers-battle.mp3`, and `countdown-battle.mp3` form a battle
-playlist that hands over from one track to the next only when a track ENDS.
-Hostile proximity ducks that layer and pauses it, holding its position, so a
-lull never costs the song its place. A lull is graded by
-`AUDIO_CONSTANTS.MUSIC_LINGER_SEC` — an arena's field empties on every wave
-clear with the next wave seconds away, so the layer rides that gap out rather
-than cutting. **A MAP CHANGE IS NOT A LULL**: `transitionToMap` deliberately
-leaves the enemies behind, so `loadMapFresh` drops the linger stamp
-(`lastHostileNearAt`) along with the other handles to the old map's fight, and
-the destination decides from its own hostiles on the next frame. Without that,
-fleeing a boss into the quiet hub kept its music playing for the full linger
-plus the layer's own fade (measured: 6.0 s of overworld, ~5 s of fade on top).
-Arriving somewhere dangerous still engages instantly. **A MAP CHANGE ALSO
-STARTS A NEW SONG**: the same `loadMapFresh` calls `cueBattleTrack()`, so
-re-entering an arena opens a fresh track instead of resuming the previous one
-mid-phrase (user report). The continuous-playlist rule is drawn around ONE
-arena's wave ladder, and the map boundary is where that ladder ends rather than
-an exception to it. Order is load-bearing there: the stand-down
-(`audio.setCombat(false)`, pushed with `lastReportedCombat` so the transition
-gate cannot desync) runs FIRST, which is what makes the cue silent — the
-successor waits paused at 0 for the destination's own first engagement, instead
-of starting at full level over the warp beat and fading straight back out.
+The music is ONE piece (D minor, 128 BPM, 32 bars = 60 s) split into six stems
+that loop forever on one AudioContext clock (`engine/systems/AdaptiveMusic.ts`).
+Intensity never changes where the music is — only how loud each stem is.
+`scripts/score/README.md` describes the stems and the composition; this
+section is how it is wired.
 
-Two callers therefore cut a track short, and both say the same thing — a new
-encounter begins: a boss capstone's entrance, and a map change. Everywhere
-INSIDE an encounter a track still runs to its own end. Add boss-specific music
-by choosing it inside `cueBattleTrack()` rather than at a call site.
+**Intensity.** `GameEngine.hostileNearPlayer` walks the enemy index once a
+frame and, besides the combat gate, measures PRESSURE (each hostile weighs
+sqrt(maxHealth / `MUSIC_WEIGHT_REF_HP`), full inside `MUSIC_CLOSE_SCREENS`,
+falling to zero at `MUSIC_ALERT_SCREENS`), ALERT (anything inside that ring)
+and BOSS.  The loop reports that, plus hull and EHP fractions, through
+`audio.setMusicThreat` every frame.  The score reads DAMAGE from EHP falling
+(no damage path reports itself), and combines: a floor per state (explore
+0.05, alert 0.22, combat gate 0.42, boss 0.62) plus 0.45·pressure +
+0.35·damage + 0.2·low-hull.  Smoothed: rises with τ 0.25 s, holds 3.5 s
+after the last rise, falls with τ 2.2 s.
 
-Fades: `FADE_IN_SEC` (0.75) and `FADE_OUT_SEC` (0.8) are `setTargetAtTime` time
-CONSTANTS, not durations — an exponential approach is ~95% done after three of
-them, so the audible fade-out tail is ~2.4 s. `FADE_OUT_SEC` is the only
-fade-out in the score and so governs every instance of one: leaving an arena,
-the pause menu, returning to the menu, and an ordinary fight ending. It was
-halved from 1.6 (user call). `BATTLE_PAUSE_DELAY_MS` is DERIVED from it — the
-pause is what holds a track's position, so it must land after the fade rather
-than race it — which means retuning the fade moves that too, by construction.
-The ambient bed is deliberately not direction-aware: its downward move is a
-DUCK between two audible levels, not a fade to silence.
+**Layers.**  Each has an on and a lower off threshold (pulse 0.18/0.12, groove
+0.38/0.30, heavy 0.62/0.54, apex 0.82/0.72; boss follows the boss flag, atmos
+is always on and ducks to 0.7 under the groove, 0.55 in menus).  Entries are
+QUANTISED — groove, heavy and boss to the next bar line, pulse and apex to the
+next beat — and the groove's entry gets a riser that ends on that downbeat; a
+heavy entry lands an impact at most once per 8 bars.  Exits start on the next
+beat.  Every gain move goes through `AdaptiveMusic.fade`, which anchors the
+start value before a `setTargetAtTime`: a future-start target with no anchor
+is computed differently by different Web Audio implementations (one overshot
+to 10^10 in testing).
 
-All are streamed rather than decoded into
-long Web Audio buffers. Battle sources are attached only when combat first
-starts; one upcoming track receives a metadata preload, so the title screen does
-not download the whole playlist.
+**Encounters.**  `audio.cueEncounter('map' | 'boss')` returns every stem to
+bar 1 at the next bar line (short crossfade for drums, longer for pads).  A
+boss also lands an impact there.  **A MAP CHANGE IS NOT A LULL**:
+`loadMapFresh` drops the linger stamp and stands combat down before cueing,
+and the map cue also zeroes intensity and its hold — otherwise the hold that
+carries a stack through a wave clear would carry the drums into the hub (the
+old "battle music followed me through the portal" report).  Inside an arena
+nothing ever jumps; a lull only lowers intensity.
 
-1. Use a repository-safe MP3 and place it in `public/assets/audio/`.
-2. If replacing the soundtrack, update the filename in
-   `engine/systems/BackgroundMusic.ts` and update the visible credit in
-   `components/UIOverlay.tsx`.
-3. Add its credit and license notice as described above.
-4. Run `npm run build`, then `node scripts/inline-build.mjs`, which embeds every
-   MP3 in `public/assets/audio/` for the standalone build.
-5. Verify user-gesture start, music-volume zero, mute, pause, tab hiding and
-   resume. The existing `tests/audio.spec.ts` music test is the baseline.
+**Loading and memory.**  The title screen fetches `score-atmos.mp3` only; the
+combat set and one-shots are fetched when a run starts (`setActive(true)`),
+the boss stem on the first boss sighting.  Stems decode at 32 kHz through an
+OfflineAudioContext (≈ 77 MB decoded for all six) and resample on playback.
+Each file is the loop with 0.5 s lead-in and 1.5 s run-out and is exactly
+periodic, so the loop window is immune to MP3 encoder/decoder delay.
 
-Tracks are a small, credited catalog inside `BackgroundMusic`: each
-`makeTrack(file, destination, loop)` owns one `<audio>` element and a gain on the
-single Music bus. Battle tracks change only in `advanceBattle` (a song's own
-`ended`, or `cueBattleTrack`). Do not create audio elements anywhere else, and
-keep every track on the Music bus so the Master and Music sliders continue to
-work.
+**Changing the music.**  Edit `scripts/score/compose.py` /
+`instruments.py`, run `python scripts/score/build.py`, then `npm run build`
+and `node scripts/inline-build.mjs` (which embeds every MP3 in
+`public/assets/audio/`).  Keep `SCORE` in `AdaptiveMusic.ts` in step with
+`BPM`/`BARS`/`PRE` in `compose.py`.  Layer balance lives in the files
+(`TARGET` in `mix.py`); the engine plays an "on" layer at gain 1.
 
-### Exact OpenGameArt workflow
+**Adding a stem** (e.g. a second boss): render it on the same grid in
+`compose.py`, add a `LAYERS` entry in `AdaptiveMusic.ts` with its thresholds
+and grid, and give it a gate in `evaluate()`.
 
-Use this when requesting or selecting a specific OpenGameArt track for Omni. It
-matches the implementation of the existing `Space ambient` soundtrack.
-
-1. On the track's OpenGameArt page, record its title, creator, license and direct
-   download URL before downloading. Use only a license that permits Omni's intended
-   commercial use; CC0 and CC-BY are the usual candidates. Do not assume an asset
-   is free to use merely because it is hosted on OpenGameArt.
-2. Download the creator's published MP3 and place it at
-   `public/assets/audio/<descriptive-track-name>.mp3`. Retain the original unless
-   the credits explicitly describe an edit.
-3. Add a dedicated entry to `public/assets/audio/AUDIO_CREDITS.md` using the
-   CC-BY template above. For CC-BY, copy the supplied license notice to
-   `public/assets/audio/licenses/`; for CC0, record the asset page and CC0 status.
-4. Set that filename in `engine/systems/BackgroundMusic.ts` using the current
-   track-construction pattern:
-
-   ```ts
-   this.battleTracks = [
-     'fly-battle.mp3',
-     'tracers-battle.mp3',
-     'countdown-battle.mp3',
-   ].map(file => this.makeTrack(file, destination, false));
-   ```
-
-   Replace the appropriate track filename, add a new battle file to that list, or
-   add another `makeTrack` call when implementing a new music state. `makeTrack`
-   preserves web serving and standalone data-URI playback.
-5. Update the visible music-credit links in `components/UIOverlay.tsx` to the new
-   title, creator, source page and license. This is required for CC-BY and is good
-   provenance for CC0.
-6. Run `npm run typecheck`, `npm run build`, `npm run test:audio`, and
-   `node scripts/inline-build.mjs`. Confirm the music starts after a gesture,
-   fades correctly, follows the Music/Master controls, resumes after mute and is
-   present in the generated standalone HTML.
-
-Adding a file alone does not make it selectable. `BackgroundMusic.ts` selects and
-mixes the active tracks. For another track or a new music state, extend its small
-track catalog/fade behavior and include a complete credit entry for every catalog
-item.
+**Debug.**  Perf & Diagnostics ▸ Adaptive Music shows intensity → target,
+the live layers and the bar; *Music force* pins intensity to audition each
+layer.  Pinned by the music tests in `tests/audio.spec.ts`.
 
 ## Add a produced sound effect
 

@@ -434,9 +434,9 @@ engine/
                           recipe, through the AudioMix buses
     SfxRegistry.ts        The procedural FALLBACK of every sound in
                           docs/SFX_INVENTORY.md, keyed by its stable id
-    BackgroundMusic.ts    The streamed SCORE: ambient bed + three-track
-                          battle playlist on the Music bus; `setCombat`
-                          fades it, `cueBattleTrack` changes song
+    AdaptiveMusic.ts      The adaptive SCORE: six synchronised stems on the
+                          Music bus, faded by intensity (`setMusicThreat`,
+                          `setCombat`); `cueEncounter` returns to bar 1
     AudioMix.ts           Bus gains + policy: `busFor`, `survivesPause`,
                           `ducksWorld` (no entity dependencies)
     SfxVoicing.ts         `finishVoice`, the production layer wrapped round
@@ -5206,8 +5206,8 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
   **Adding or licensing music and produced audio:** see
-  `docs/AUDIO_AUTHORING.md`. It documents the bank generator, streaming music
-  path, standalone inclusion, credits and validation; this paragraph remains the
+  `docs/AUDIO_AUTHORING.md`. It documents the bank generator, the adaptive
+  score, standalone inclusion, credits and validation; this paragraph remains the
   system-contract reference.
   `docs/SFX_INVENTORY.md` is the source of truth for each id's CONTRACT —
   trigger site, mix tier, variation, polyphony + throttle, mix level,
@@ -5265,10 +5265,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   than being routed back through the orchestrator.
 - **Audio is EVENT-DRIVEN; nothing audio-related runs per frame** except
   `audio.setListener(camera)` and `audio.setActive(...)`, two number
-  writes and a boolean, plus the battle score's proximity test
-  (`GameEngine.inCombatProximity`, an early-outing walk of the enemy index
-  already built that frame), which reaches `audio.setCombat` only on a
-  transition.  A voice lives as long as its buffer (or the duration its
+  writes and a boolean, plus the score's threat scan
+  (`GameEngine.inCombatProximity`, one walk of the enemy index already
+  built that frame), which reaches `audio.setCombat` only on a transition
+  and `audio.setMusicThreat` as one small object per frame.  A voice lives as long as its buffer (or the duration its
   synth returns) and schedules one `setTimeout` to retire itself; retired
   entries are also pruned lazily inside `play()`, and there are no
   `onended` handlers.  Measured before the sample banks landed and not
@@ -5382,24 +5382,26 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   recorded bed, all smoothed) — gating the loop on `throttle > 0` snapped
   the whole bed on and off with the input and read as jarring.  It stops
   only on death, pause and dock.
-- **Music is a STREAMED score that combat only ducks** (`BackgroundMusic.ts`,
+- **Music is an ADAPTIVE score of synchronised stems** (`AdaptiveMusic.ts`,
   on `AudioMix`'s Music bus, which feeds master directly rather than the
-  SFX bus).  `space-ambient.mp3` loops as the bed and is only ever ducked;
-  `fly-`, `tracers-` and `countdown-battle.mp3` form a battle PLAYLIST
-  that never loops a track.  Tracks are `<audio>` elements routed through
-  `createMediaElementSource`, never decoded PCM, and load lazily: the title
-  screen requests none of the battle catalog.  Combat is
-  `GameEngine.inCombatProximity` — any live boss at any range, or a hostile
-  within `AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS` screens (let go at
-  `MUSIC_RELEASE_SCREENS`; neutral fauna and rivals count only once they
-  hunt the player), held for `MUSIC_LINGER_SEC` after the last one leaves
-  — sent to `audio.setCombat` on transitions only.  A lull fades the layer
-  and then PAUSES it, so the song resumes in place; inside an encounter a
-  track changes only on its own `ended`.  Only a boss arriving
+  SFX bus).  One original piece (D minor, 128 BPM, 60 s) as six stems —
+  atmos, pulse, groove, heavy, apex, boss — decoded at 32 kHz and looping
+  on ONE AudioContext clock, so a layer always joins on the beat the music
+  is already on.  Intensity = state floor (explore / alert / combat gate /
+  boss) + pressure + damage (read from EHP falling) + low hull, smoothed
+  (fast rise, 3.5 s hold, slow fall); each layer has on/off thresholds and
+  enters on the next beat or bar (the groove behind a riser).  Combat is
+  still `GameEngine.inCombatProximity` — any live boss at any range, or a
+  hostile within `AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS` screens (let go at
+  `MUSIC_RELEASE_SCREENS`), held for `MUSIC_LINGER_SEC` — sent to
+  `audio.setCombat` on transitions; the same enemy walk measures pressure
+  and alert (`MUSIC_ALERT_SCREENS`, `MUSIC_CLOSE_SCREENS`) for
+  `audio.setMusicThreat`, reported every frame.  Only a boss arriving
   (`handleBossSpawn`) or a map load (`loadMapFresh`, which first drops the
-  linger and stands the layer down) cuts to a new song from the top
-  (`cueBattleTrack`), which is where boss-specific music will be chosen.
-  Pinned by `tests/audio.spec.ts`; how-to in `docs/AUDIO_AUTHORING.md`.
+  linger, stands combat down and zeroes the intensity hold) returns the
+  score to bar 1 (`cueEncounter`).  The title screen loads only the bed.
+  Pinned by `tests/audio.spec.ts`; how-to in `docs/AUDIO_AUTHORING.md`;
+  the music itself is generated by `scripts/score/`.
 - **iOS needs three things desktop does not.**  (1) The ring/silent switch
   silences WebAudio, because Safari puts it in the "ambient" session by
   default — the game claims the `playback` session instead, via

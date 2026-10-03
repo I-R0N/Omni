@@ -7247,10 +7247,10 @@ export const AUDIO_CONSTANTS = {
   SNITCH_DISTANCE_CURVE: 2.5,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 
-  /** THE BATTLE LAYER'S PROXIMITY GATE — what makes the score DUCK, never
-   *  what makes it start over.  The playlist runs continuously once opened
-   *  and a track changes only when it ENDS (see BackgroundMusic); these
-   *  numbers decide nothing but whether it is currently audible.
+  /** THE COMBAT GATE — the floor under the adaptive score's GROOVE layer
+   *  (kick, snare, bass).  The score itself never starts over on it: every
+   *  stem runs continuously on one clock (see AdaptiveMusic), and these
+   *  numbers decide only whether the fight is HERE.
    *
    *  Measured in SCREENS (`GameEngine.viewportHalfDiagonal`) rather than in
    *  world units, unlike every other radius in this block, and the reason is
@@ -7274,6 +7274,23 @@ export const AUDIO_CONSTANTS = {
    *  ducked on every clear field would be the "switches too easily"
    *  behaviour moved from the playlist into the mixer. */
   MUSIC_LINGER_SEC: 6,
+  /** THE ADAPTIVE SCORE'S THREAT SCAN (see AdaptiveMusic).  Same unit as
+   *  the gate above — SCREENS — for the same reason.
+   *
+   *  ALERT is wider than ENGAGE: a hostile inside it brings in the score's
+   *  PULSE layer (arpeggio, hats) before the fight reaches the screen, so the
+   *  music anticipates the wave rather than reacting to it.  CLOSE is the
+   *  radius inside which a hostile counts at full weight toward PRESSURE;
+   *  between CLOSE and ALERT its weight falls off linearly to zero. */
+  MUSIC_ALERT_SCREENS: 2.6,
+  MUSIC_CLOSE_SCREENS: 0.6,
+  /** An enemy's pressure weight is sqrt(maxHealth / REF), clamped to
+   *  [MIN, MAX]: a stock enemy (30 hp) weighs 1, a tank ~2, nothing alone
+   *  weighs more than three.  A live boss adds BOSS_WEIGHT at any range. */
+  MUSIC_WEIGHT_REF_HP: 30,
+  MUSIC_WEIGHT_MIN: 0.5,
+  MUSIC_WEIGHT_MAX: 3,
+  MUSIC_BOSS_WEIGHT: 3,
 } as const;
 
 // ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────

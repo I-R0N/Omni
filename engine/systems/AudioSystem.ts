@@ -1,5 +1,5 @@
 import CINEMATIC_BANKS from './CinematicBank.json';
-import { BackgroundMusic } from './BackgroundMusic';
+import { AdaptiveMusic, type MusicThreat } from './AdaptiveMusic';
 import { finishVoice } from './SfxVoicing';
 import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
 import SFX_MANIFEST from 'virtual:sfx-manifest';
@@ -181,7 +181,7 @@ export class AudioSystem {
   // ── Context (created on first gesture only) ──
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  public music: BackgroundMusic | null = null;
+  public music: AdaptiveMusic | null = null;
   private cinematicIds = new Set<string>();
   public bankFailures: string[] = [];
   private noiseBuf: AudioBuffer | null = null;
@@ -190,6 +190,7 @@ export class AudioSystem {
   private _sfxVolume = 1;
   private _musicVolume = 1;
   private _combat = false;
+  private _threat: MusicThreat | null = null;
   private live = new Set<LiveVoice>();
   private synthesized = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
   private _prepared = false;
@@ -404,9 +405,11 @@ export class AudioSystem {
       this.buses.set(name, bus);
     }
 
-    this.music = new BackgroundMusic(this.ctx, this.buses.get('music')!);
+    this.music = new AdaptiveMusic(this.ctx, this.buses.get('music')!);
     this.music.setEnabled(!this._muted && this._musicVolume > 0);
+    this.music.setActive(this._active);
     this.music.setCombat(this._combat);
+    if (this._threat) this.music.setThreat(this._threat);
 
     // Shared white noise — one buffer for every noise-based voice in the
     // game, sampled at a random offset per voice so repeats don't phase.
@@ -646,17 +649,33 @@ export class AudioSystem {
   }
   public get active(): boolean { return this._active; }
   /** Current combat proximity (`GameEngine.inCombatProximity`, sent on a
-   *  transition). Repeated values are ignored by the score. */
+   *  transition) — the floor that brings the score's groove in.  Repeated
+   *  values are ignored by the score. */
   public setCombat(combat: boolean) {
     this._combat = combat;
     this.music?.setCombat(combat);
   }
-  /** A new encounter begins — a capstone reaching the field, or a map change:
-   *  cut the battle layer to a new song.  Not queued if the score does not
-   *  exist yet, which is why a map load before the first gesture is silently
-   *  a no-op rather than an ordering hazard: the context is created on that
-   *  gesture, and the playlist has nothing to carry over yet anyway. */
-  public cueBattleTrack() { this.music?.cueBattleTrack(); }
+  /** The per-frame threat snapshot the adaptive score folds into its
+   *  intensity (see AdaptiveMusic).  Kept so a score created later — on the
+   *  first gesture — starts from the current picture. */
+  public setMusicThreat(threat: MusicThreat) {
+    this._threat = threat;
+    this.music?.setThreat(threat);
+  }
+  /** A new encounter begins — a map change, or a capstone reaching the
+   *  field: the score returns to bar 1 at the next bar line (a boss also
+   *  lands an impact).  A no-op before the first gesture creates the score:
+   *  there is no phrase to cut yet, and the score starts at bar 1 anyway. */
+  public cueEncounter(kind: 'map' | 'boss') { this.music?.cueEncounter(kind); }
+  /** Debug: pin the score's intensity (null = follow the game). */
+  public setMusicDebugIntensity(v: number | null) { this.music?.setDebugIntensity(v); }
+  /** Debug: step the pinned intensity through the layer thresholds. */
+  public cycleMusicDebugIntensity() {
+    const steps: (number | null)[] = [null, 0, 0.25, 0.45, 0.7, 0.9, 1];
+    const cur = this.music?.forcedIntensity ?? null;
+    const i = steps.findIndex(v => v === cur);
+    this.setMusicDebugIntensity(steps[(i + 1) % steps.length]);
+  }
 
   private applyMaster() {
     if (!this.master || !this.ctx) return;
