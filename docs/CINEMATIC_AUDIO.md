@@ -46,7 +46,7 @@ that was already unlocked.
 ## Music and controls
 
 The score is the original adaptive score (`engine/systems/AdaptiveMusic.ts`):
-six stems of one 60-second piece — atmos, pulse, groove, heavy, apex, boss —
+two songs (a portal rotates between them), each six stems — atmos, pulse, groove, heavy, apex, boss —
 looping on one clock and faded in and out by a smoothed intensity built from
 nearby hostiles' weight, damage taken, low hull and boss presence.  Entries
 land on the beat or bar; a map change or a boss arrival returns the score to

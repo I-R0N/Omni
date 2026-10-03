@@ -1497,7 +1497,7 @@ export class GameEngine {
    *  alongside them) is deliberately NOT touched — resetAndLoadSelectedMap
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
-  private loadMapFresh(type: MapType) {
+  private loadMapFresh(type: MapType, viaPortal = false) {
       this.shards.reset();
       this.energy.reset();
       this.perfController.reset();
@@ -1554,7 +1554,9 @@ export class GameEngine {
       // ORDER STILL MATTERS: combat went down on the lines above, so the
       // combat layers are already leaving when the phrase restarts, and the
       // destination's own first engagement brings them back on a downbeat.
-      this.audio.cueEncounter('map');
+      // Travelling through a PORTAL also rotates the score to its next song;
+      // a run start, a restart or a menu map pick keeps the current one.
+      this.audio.cueEncounter(viaPortal ? 'portal' : 'map');
       this.loadMap(this.buildMap(type));
   }
 
@@ -1738,7 +1740,7 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
 
-      this.loadMapFresh(dest.mapType);
+      this.loadMapFresh(dest.mapType, true);
       // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
       // back at the map just left — which is exactly the hub's per-arena
       // portal — surface beside that rift rather than at the map's declared
@@ -2790,6 +2792,8 @@ export class GameEngine {
           forced: this.audio.music.forcedIntensity,
           layers: this.audio.music.activeLayers,
           bar: this.audio.music.bar,
+          song: this.audio.music.song.title,
+          songPinned: this.audio.music.songMode !== 'auto',
         } : null,
       },
     });

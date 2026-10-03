@@ -1,4 +1,4 @@
-"""Balance the stems, verify every intensity stack, and encode.
+"""Balance one song's stems (`python mix.py` for song A, `python mix.py b-` for B), verify every intensity stack, and encode.
 
 Loudness targets are per STEM ALONE (integrated LUFS).  The game plays every
 stem at layer gain 1.0 when it is on, so the balance between layers lives
@@ -31,10 +31,13 @@ def softclip(x, knee):
     return y.astype(np.float32)
 
 
+PREFIX = sys.argv[1] if len(sys.argv) > 1 else ''   # '' = song A, 'b-' = song B
+
+
 def load():
     st = {}
     for n in TARGET:
-        x = np.load(f'out/{n}.npy')
+        x = np.load(f'out/{PREFIX}{n}.npy')
         if n in MONO:
             m = (x[0] + x[1]) * 0.5
             x = np.stack([m, m])
@@ -65,5 +68,5 @@ if __name__ == '__main__':
     os.makedirs('final', exist_ok=True)
     for n, x in st.items():
         x = x * g
-        sf.write(f'final/{n}.wav', (x[0] if n in MONO else x.T), SR, subtype='FLOAT')
-    np.save('final/_trim.npy', np.array([g]))
+        sf.write(f'final/{PREFIX}{n}.wav', (x[0] if n in MONO else x.T), SR, subtype='FLOAT')
+    np.save(f'final/_{PREFIX}trim.npy', np.array([g]))

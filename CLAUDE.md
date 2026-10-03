@@ -5396,7 +5396,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `MUSIC_RELEASE_SCREENS`), held for `MUSIC_LINGER_SEC` — sent to
   `audio.setCombat` on transitions; the same enemy walk measures pressure
   and alert (`MUSIC_ALERT_SCREENS`, `MUSIC_CLOSE_SCREENS`) for
-  `audio.setMusicThreat`, reported every frame.  Only a boss arriving
+  `audio.setMusicThreat`, reported every frame.  Two songs ("Omni",
+  "Event Horizon"); one is resident, and a PORTAL transit rotates to the
+  next (`cueEncounter('portal')`).  Only a boss arriving
   (`handleBossSpawn`) or a map load (`loadMapFresh`, which first drops the
   linger, stands combat down and zeroes the intensity hold) returns the
   score to bar 1 (`cueEncounter`).  The title screen loads only the bed.

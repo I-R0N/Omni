@@ -1,7 +1,13 @@
 # The adaptive score
 
-Omni's music is one original piece — D minor, 128 BPM, 32 bars (exactly
-60 s) — rendered as six synchronised stems that the game fades in and out by
+Omni's music is two original songs, each rendered as six synchronised stems.
+This page describes **Omni** (D minor, 128 BPM, 32 bars = 60 s, `compose.py`);
+**Event Horizon** (E minor, 160 BPM, 32 bars = 48 s, `song2.py`) is the
+heavier one — a thrash skank beat with 16th palm mutes in groove, a
+syncopated 3+3+2 riff with double kick and chinas in heavy, twin leads in
+thirds throughout in apex, and an E-against-F Phrygian chug for the boss.
+Its pulse layer is a crunchy picked guitar arpeggio rather than a synth.
+Both are faded in and out by
 intensity (`engine/systems/AdaptiveMusic.ts`). Everything is synthesized by
 these scripts; there are no samples, so nothing here needs attribution.
 
@@ -36,9 +42,11 @@ key (kicks settle on A1, snare body on F3, ride bell D7/A7, taiko A1/D2).
   stem renderers. Each stem is rendered as three passes of the loop and the
   steady-state middle pass is cut out, so reverb/delay tails wrap and the file
   is exactly periodic. `python compose.py groove` renders one stem.
-- `mix.py` — per-stem loudness targets, soft clip, a report of every
+- `song2.py` — Event Horizon, same structure and contract (writes `out/b-*`).
+- `mix.py` — (`python mix.py` for Omni, `python mix.py b-` for Event Horizon) per-stem loudness targets, soft clip, a report of every
   intensity stack's loudness and peak, one global trim.
-- `build.py` — all of the above, then encodes into `public/assets/audio/`.
+- `build.py` — both songs end to end, encoded into `public/assets/audio/`
+  (`score-*` for Omni, `score2-*` for Event Horizon).
 
 ## Changing the music
 

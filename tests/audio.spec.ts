@@ -413,6 +413,38 @@ test('a new arena opens a new phrase', async ({ page }) => {
   watch.assertClean();
 });
 
+// TWO SONGS, ONE IN MEMORY.  A PORTAL rotates to the next song (AUTO); a run
+// start / restart / menu pick keeps the current one, and a pin holds through
+// portals.  The resident song's stems are the only ones decoded.
+test('a portal rotates the song; restarts keep it; a pin holds', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page, 'POCKET');
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.playing, null, { timeout: 20000 });
+  const first = await engine(page, e => e.audio.music.song.id);
+  expect(first, 'a run starts on the first song, not a rotated one').toBe('omni');
+
+  await engine(page, e => e.transitionToMap('overworld'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+  expect(await engine(page, e => e.audio.music.song.id), 'a portal rotates').toBe('event-horizon');
+  await page.waitForFunction(() => window.__omniEngine.audio.music.playing, null, { timeout: 20000 });
+  expect(await engine(page, e => e.audio.music.bar), 'a new song starts at the top').toBeLessThanOrEqual(4);
+
+  // Pin the first song: it switches now and survives the next portal.
+  await engine(page, e => e.audio.music.setSongMode(0));
+  expect(await engine(page, e => e.audio.music.song.id)).toBe('omni');
+  await engine(page, e => e.transitionToMap('arena_pocket'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'back in the arena');
+  expect(await engine(page, e => e.audio.music.song.id), 'a pin holds through a portal').toBe('omni');
+  await engine(page, e => e.audio.music.setSongMode('auto'));
+  expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(96 * 1024 * 1024);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
 test('a lull inside one arena still holds the combat layers up', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
