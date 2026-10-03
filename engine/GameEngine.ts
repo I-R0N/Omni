@@ -1163,6 +1163,8 @@ export class GameEngine {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
       this.loadMapSeeded(type);
+      this.announceMusicArea(type);
+      this.audio.cueEncounter('map');
       // Recentre the player on the newly-loaded map's spawn so the
       // menu backdrop renders the new map at frame 0 instead of the
       // previous map's viewport.
@@ -1595,10 +1597,19 @@ export class GameEngine {
       // destination's own first engagement brings them back on a downbeat.
       // The area picks its theme (the music director's plan — see MUSIC_PLAN
       // in AdaptiveMusic); a different song comes in seamlessly on a bar line.
-      const area = descriptorForMapType(type);
-      this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
+      this.announceMusicArea(type);
       this.audio.cueEncounter(viaPortal ? 'portal' : 'map');
       this.loadMapSeeded(type);
+  }
+
+  /** Tell the music director which area is being entered, so it picks that
+   *  area's theme.  Every map load announces it: `loadMapFresh` (a run, a
+   *  portal, a death return) and the menu backdrop swap in `setMapType`, which
+   *  loads through `loadMapSeeded` alone and would otherwise start a run on a
+   *  picked arena with the hub's song. */
+  private announceMusicArea(type: MapType) {
+      const area = descriptorForMapType(type);
+      this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
   }
 
   /** Seed for the map's kind and load it.  SEEDING IS PER MAP, NOT PER RUN
