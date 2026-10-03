@@ -2527,6 +2527,8 @@ export interface WaveAnnouncement {
   color: string;
   lifetime: number;
   maxLifetime: number;
+  /** A wave-start banner's kill list: what must die this wave, per subtype. */
+  roster?: { subtype: EnemySubtype; count: number }[];
 }
 
 // Screen-space messages stacked above the player (damage taken, pickups, unlocks).

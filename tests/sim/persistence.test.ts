@@ -500,3 +500,16 @@ test('a finished ladder is forgotten: the boss dying clears the held wave', () =
   stampArenaWave(a.g);
   assert.equal(a.g.arenaWaves.arena_pocket, undefined);
 });
+
+test('a wave opens with a ROSTER: every subtype it must kill, counted, summing to the spawn list', () => {
+  const a = launch(new MemoryStorage());
+  a.g.transitionToMap('arena_pocket');
+  const w = a.g.waves;
+  const ann = w.announcements.find((x) => x.roster);
+  assert.ok(ann, 'the wave banner carries a roster');
+  const total = ann!.roster!.reduce((s, r) => s + r.count, 0);
+  assert.equal(total, w.spawnList.length + (w.capstoneWave ? 1 : 0));
+  for (const r of ann!.roster!) {
+    assert.equal(r.count, w.spawnList.filter((s) => s === r.subtype).length + (w.capstoneWave && r.count > 0 && !w.spawnList.includes(r.subtype) ? 1 : 0));
+  }
+});

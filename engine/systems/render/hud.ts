@@ -29,8 +29,9 @@ import {
     INPUT_CONSTANTS, getActiveMinimapMaterial, detectionAlpha,
     computeMinimapRect, computeIndicatorRect,
     FOG,
-    SCANNER, getScanRevealAll,
+    SCANNER, getScanRevealAll, ENEMY_VARIANTS,
 } from '../../../constants';
+import { drawEnemyIcon } from './enemyShapes';
 import { MAP_WIDTH, MAP_HEIGHT, wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { shiftX, shiftY, roundRectPath } from './drawUtils';
 import { fogMemoryPeriodX, fogMemoryPeriodY, fogEffectiveDark } from './fog';
@@ -1329,6 +1330,42 @@ export function renderWaveAnnouncements(
             ctx.font = `bold ${subPx}px monospace`;
             ctx.fillStyle = UI_CONSTANTS.HUD.ACCENT_COLOR;
             ctx.fillText(a.subtext, width / 2, baseY);
+        }
+
+        // Roster window: what must die this wave, as the archetype silhouette
+        // and an "xN" count, in one row above the banner.  Cells shrink to fit
+        // the safe width so a mixed wave still clears a 320px screen.
+        if (a.roster && a.roster.length > 0) {
+            const n = a.roster.length;
+            const cell = Math.min(76, safe / n);
+            const iconR = Math.max(7, Math.min(13, cell * 0.2));
+            const numPx = Math.max(11, Math.min(16, Math.floor(cell * 0.24)));
+            const panelW = cell * n + 16;
+            const panelH = iconR * 2 + 16;
+            const bannerTop = baseY - (a.subtext ? mainPx * 0.58 : 0) - mainPx;
+            const py = bannerTop - 10 - panelH;
+            const px = width / 2 - panelW / 2;
+            ctx.fillStyle = UI_CONSTANTS.HUD.PANEL_FILL;
+            roundRectPath(ctx, px, py, panelW, panelH, 8);
+            ctx.fill();
+            ctx.strokeStyle = UI_CONSTANTS.HUD.RULE_COLOR;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.font = `bold ${numPx}px monospace`;
+            const cy = py + panelH / 2;
+            for (let k = 0; k < n; k++) {
+                const r = a.roster[k];
+                const v = ENEMY_VARIANTS[r.subtype];
+                const cx = px + 8 + cell * k;
+                ctx.save();
+                ctx.translate(cx + iconR + 2, cy);
+                drawEnemyIcon(ctx, v.shape, v.color, iconR);
+                ctx.restore();
+                ctx.fillStyle = UI_CONSTANTS.HUD.TEXT_COLOR;
+                ctx.fillText(`x${r.count}`, cx + iconR * 2 + 7, cy);
+            }
         }
 
         ctx.restore();

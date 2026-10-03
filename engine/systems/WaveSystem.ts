@@ -204,6 +204,7 @@ export class WaveSystem {
     this.waveState = 'active';
     this.capstoneWave = !!boss;
     const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    const roster = this.rosterOf(this.spawnList, boss);
     if (boss) {
       this.spawnBoss(boss, ctx);
       this.announcements.push({
@@ -212,6 +213,7 @@ export class WaveSystem {
         color: '#f87171',
         lifetime: totalLife,
         maxLifetime: totalLife,
+        roster,
       });
     } else {
       this.announcements.push({
@@ -220,8 +222,20 @@ export class WaveSystem {
         color: '#ffffff',
         lifetime: totalLife,
         maxLifetime: totalLife,
+        roster,
       });
     }
+  }
+
+  /** Per-subtype counts of what this wave must kill — the spawn list plus the
+   *  capstone's boss — in first-appearance order (boss first). */
+  private rosterOf(list: EnemySubtype[], boss: EnemySubtype | null): { subtype: EnemySubtype; count: number }[] {
+    const counts = new Map<EnemySubtype, number>();
+    if (boss) counts.set(boss, 1);
+    for (const s of list) counts.set(s, (counts.get(s) ?? 0) + 1);
+    const out: { subtype: EnemySubtype; count: number }[] = [];
+    counts.forEach((count, subtype) => out.push({ subtype, count }));
+    return out;
   }
 
   /**

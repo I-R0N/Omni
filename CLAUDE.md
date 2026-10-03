@@ -6274,6 +6274,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
      and teal on the map is two contacts as far as the player is
      concerned.  Drops stay excluded entirely.
 
+- **A wave banner carries a ROSTER** (`WaveAnnouncement.roster`, set by `WaveSystem.startWave` from the spawn list plus a capstone's boss): a small panel above the banner text showing each subtype that must die as its flat silhouette (`drawEnemyIcon`, `render/enemyShapes.ts`) and an "xN" count.  Same fade as the banner; cells shrink to fit the width.  A wave resumed from the arena memory shows its full roster.
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
   width isn't known at design time, and the game is played on a 390px-wide
