@@ -5437,6 +5437,9 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
   FADEIN: 0.3,
   HOLD: 1.0,
   FADEOUT: 0.5,
+  /** A wave-start ROSTER dialogue holds longer than a plain banner: it is
+   *  something to read, not a flash. */
+  ROSTER_HOLD: 3.2,
   // Banner type sizes.  These are the DESIGN sizes on a roomy viewport;
   // `fitFontPx` (render/hud.ts) shrinks a line that would overflow (banner
   // text is authored content — boss names, reward labels — so its width isn't

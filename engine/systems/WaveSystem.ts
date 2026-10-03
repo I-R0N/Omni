@@ -203,16 +203,16 @@ export class WaveSystem {
 
     this.waveState = 'active';
     this.capstoneWave = !!boss;
-    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     const roster = this.rosterOf(this.spawnList, boss);
+    const rosterLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     if (boss) {
       this.spawnBoss(boss, ctx);
       this.announcements.push({
         text: BOSS_DEFS[boss]?.name ?? 'BOSS',
         subtext: `WAVE ${index + 1}  ·  CAPSTONE`,
         color: '#f87171',
-        lifetime: totalLife,
-        maxLifetime: totalLife,
+        lifetime: rosterLife,
+        maxLifetime: rosterLife,
         roster,
       });
     } else {
@@ -220,8 +220,8 @@ export class WaveSystem {
         text: `WAVE ${index + 1}`,
         subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
         color: '#ffffff',
-        lifetime: totalLife,
-        maxLifetime: totalLife,
+        lifetime: rosterLife,
+        maxLifetime: rosterLife,
         roster,
       });
     }

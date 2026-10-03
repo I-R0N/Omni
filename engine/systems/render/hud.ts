@@ -1258,6 +1258,73 @@ export function fitFontPx(
 }
 
 /**
+ * The wave-start DIALOGUE: one panel, above centre, that puts the enemy roster
+ * first — silhouette and "xN" at the largest size the width allows — with the
+ * wave number as a small heading over it.  Replaces the plain banner for any
+ * announcement carrying a roster.  Cells shrink to fit so a mixed wave still
+ * clears a 320px screen.
+ */
+function renderWaveRosterDialogue(
+    ctx: CanvasRenderingContext2D,
+    a: WaveAnnouncement,
+    width: number,
+    height: number,
+) {
+    const roster = a.roster!;
+    const n = roster.length;
+    const safe = Math.max(80, width - WAVE_ANNOUNCE_CONSTANTS.SIDE_MARGIN * 2);
+    const pad = 12;
+    const cell = Math.min(110, (safe - pad * 2) / n);
+    const iconR = Math.max(9, Math.min(30, cell * 0.28));
+    const numPx = Math.max(14, Math.min(32, Math.floor(cell * 0.3)));
+    const head = a.subtext ? `${a.text}  ·  ${a.subtext}` : a.text;
+    const headPx = fitFontPx(ctx, head, safe - pad * 2, 12, 9);
+    const headH = headPx + 8;
+    ctx.font = `bold ${headPx}px monospace`;
+    const headW = ctx.measureText(head).width;
+    const rowW = cell * n;
+    // The panel is as wide as its wider part, and the roster row is centred in it.
+    const panelW = Math.max(rowW, headW, 150) + pad * 2;
+    const panelH = headH + iconR * 2 + pad * 2 + 4;
+    const px = width / 2 - panelW / 2;
+    // Above centre: the panel's middle sits at 30% of the screen.
+    const py = Math.max(8, height * 0.3 - panelH / 2);
+
+    ctx.fillStyle = UI_CONSTANTS.HUD.PANEL_FILL;
+    roundRectPath(ctx, px, py, panelW, panelH, 12);
+    ctx.fill();
+    ctx.strokeStyle = a.color === '#ffffff' ? UI_CONSTANTS.HUD.RULE_COLOR : a.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${headPx}px monospace`;
+    ctx.fillStyle = a.color === '#ffffff' ? UI_CONSTANTS.HUD.ACCENT_COLOR : a.color;
+    ctx.fillText(head, width / 2, py + pad + headPx / 2);
+
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${numPx}px monospace`;
+    const cy = py + pad + headH + iconR;
+    // Cells are centred as a group inside the panel.
+    const gx = px + (panelW - rowW) / 2;
+    for (let k = 0; k < n; k++) {
+        const r = roster[k];
+        const v = ENEMY_VARIANTS[r.subtype];
+        const label = `x${r.count}`;
+        const cx = gx + cell * k;
+        const contentW = iconR * 2 + 6 + ctx.measureText(label).width;
+        const ox = cx + Math.max(0, (cell - contentW) / 2);
+        ctx.save();
+        ctx.translate(ox + iconR, cy);
+        drawEnemyIcon(ctx, v.shape, v.color, iconR);
+        ctx.restore();
+        ctx.fillStyle = UI_CONSTANTS.HUD.TEXT_COLOR;
+        ctx.fillText(label, ox + iconR * 2 + 6, cy);
+    }
+}
+
+/**
  * The wave banner.
  *
  * `minimapExpanded` is a PARAMETER rather than an assumption (5d U3, audit
@@ -1274,11 +1341,14 @@ export function renderWaveAnnouncements(
     height: number,
     minimapExpanded: boolean = false,
 ) {
-    const { FADEIN, HOLD, FADEOUT } = WAVE_ANNOUNCE_CONSTANTS;
-    const totalLife = FADEIN + HOLD + FADEOUT;
+    const { FADEIN, FADEOUT } = WAVE_ANNOUNCE_CONSTANTS;
 
     for (let i = 0; i < announcements.length; i++) {
         const a = announcements[i];
+        // Each banner carries its own length (a roster dialogue holds longer),
+        // so the hold is whatever its life leaves between the two fades.
+        const totalLife = a.maxLifetime;
+        const HOLD = Math.max(0, totalLife - FADEIN - FADEOUT);
         const elapsed = totalLife - a.lifetime;
 
         // Compute alpha: fade in → hold → fade out
@@ -1295,6 +1365,11 @@ export function renderWaveAnnouncements(
 
         ctx.save();
         ctx.globalAlpha = alpha;
+        if (a.roster && a.roster.length > 0) {
+            renderWaveRosterDialogue(ctx, a, width, height);
+            ctx.restore();
+            continue;
+        }
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
 
@@ -1330,42 +1405,6 @@ export function renderWaveAnnouncements(
             ctx.font = `bold ${subPx}px monospace`;
             ctx.fillStyle = UI_CONSTANTS.HUD.ACCENT_COLOR;
             ctx.fillText(a.subtext, width / 2, baseY);
-        }
-
-        // Roster window: what must die this wave, as the archetype silhouette
-        // and an "xN" count, in one row above the banner.  Cells shrink to fit
-        // the safe width so a mixed wave still clears a 320px screen.
-        if (a.roster && a.roster.length > 0) {
-            const n = a.roster.length;
-            const cell = Math.min(76, safe / n);
-            const iconR = Math.max(7, Math.min(13, cell * 0.2));
-            const numPx = Math.max(11, Math.min(16, Math.floor(cell * 0.24)));
-            const panelW = cell * n + 16;
-            const panelH = iconR * 2 + 16;
-            const bannerTop = baseY - (a.subtext ? mainPx * 0.58 : 0) - mainPx;
-            const py = bannerTop - 10 - panelH;
-            const px = width / 2 - panelW / 2;
-            ctx.fillStyle = UI_CONSTANTS.HUD.PANEL_FILL;
-            roundRectPath(ctx, px, py, panelW, panelH, 8);
-            ctx.fill();
-            ctx.strokeStyle = UI_CONSTANTS.HUD.RULE_COLOR;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.font = `bold ${numPx}px monospace`;
-            const cy = py + panelH / 2;
-            for (let k = 0; k < n; k++) {
-                const r = a.roster[k];
-                const v = ENEMY_VARIANTS[r.subtype];
-                const cx = px + 8 + cell * k;
-                ctx.save();
-                ctx.translate(cx + iconR + 2, cy);
-                drawEnemyIcon(ctx, v.shape, v.color, iconR);
-                ctx.restore();
-                ctx.fillStyle = UI_CONSTANTS.HUD.TEXT_COLOR;
-                ctx.fillText(`x${r.count}`, cx + iconR * 2 + 7, cy);
-            }
         }
 
         ctx.restore();

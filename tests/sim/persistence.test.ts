@@ -507,6 +507,7 @@ test('a wave opens with a ROSTER: every subtype it must kill, counted, summing t
   const w = a.g.waves;
   const ann = w.announcements.find((x) => x.roster);
   assert.ok(ann, 'the wave banner carries a roster');
+  assert.ok(ann!.maxLifetime > 3.5, 'the roster dialogue holds longer than a plain banner');
   const total = ann!.roster!.reduce((s, r) => s + r.count, 0);
   assert.equal(total, w.spawnList.length + (w.capstoneWave ? 1 : 0));
   for (const r of ann!.roster!) {
