@@ -454,25 +454,33 @@ tightening that assertion back up is a consequence of this work landing,
 not a separate task.
 
 **SCOPE WARNING.**  This is the item most likely to sprawl.  `constants.ts`
-is ~1000 lines of deliberately mixed data and logic, and much of what looks
-like data is load-bearing derivation.  Pick **two or three tables**, land
-them, stop.  This session is expected to recur rather than complete.
+is **11,359 lines** (MEASURED, PM 2026-10-04 — this brief said "~1000",
+which understated the warning by an order of magnitude) of deliberately
+mixed data and logic, and much of what looks like data is load-bearing
+derivation: it exports ~307 functions, and `WEAPONS` is **30 lines**
+because it is COMPUTED from `DELIVERY_BASE` + `COMBOS` — the trap, concretely.
+Pick **two or three tables**, land them, stop.  This session is expected to
+recur rather than complete.
 
 **OPEN DECISIONS — for the user, inside S3.**
 
-- **D-S3-a — Which tables go first?**  Candidates: material grain
-  (`SHARD_VARIANTS` + grain specs), enemies (`ENEMY_VARIANTS`), weapons
-  (`WEAPONS`), modules (`MODULE_DEFS`), bosses (`BOSS_DEFS`), map
-  population (`MAP_POPULATION`), scoring (`SCORE_CONSTANTS`).
-- **D-S3-b — Knob triage.**  For each of the ~90 DBG cycles: a
-  player-facing setting, baked at its play-tested value, or dev-only.
-  Consequence: this is the biggest single legibility win available to the
-  project, and only the user can make the calls.
-- **D-S3-c — Data format.**  JSON / TOML / data-only TS modules.
-  Consequence: a non-TS format is what a console port can actually read;
-  data-only TS is cheaper now and re-does this work later.
+- ~~**D-S3-a — Which tables go first?**~~  **SETTLED (D32):**
+  `MAP_POPULATION` (126 lines) + `ENEMY_VARIANTS` (317) + `BOSS_DEFS` (117).
+  Held for a later pass, with reasons: `SHARD_VARIANTS` (961 lines, the
+  `grainSpecFor` seam and the per-material DBG overrides), `WEAPONS`
+  (computed, not data), `MODULE_DEFS` (`BASE_BANK_DIVISOR` pins to it).
+- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32).**  There are
+  **59** `*_CYCLE` tables, not ~90 (measured, PM 2026-10-04).  Triage is
+  scoped to the knobs belonging to the tables being extracted, so each call
+  lands in the PR for the table it concerns and no session faces all 59.
+- ~~**D-S3-c — Data format.**~~  **SETTLED (D32): TOML**, parsed at BUILD
+  time through a Vite virtual-manifest plugin (the `nebulaManifestPlugin` /
+  `sfxManifestPlugin` precedent), so the parser is a devDependency and ships
+  zero runtime bytes.  See D32 for the three consumers that must all resolve
+  it.
 - **D-S3-d — Does the player get more than the 4-level difficulty index?**
-- **D-S3-e — Balance targets, stated as numbers.**  How long should wave 5
+- **D-S3-e — Balance targets, stated as numbers.**  STILL OPEN and the one
+  to put to the user at the moment the harness is built, not before.  How long should wave 5
   take?  What is a healthy run length?  Consequence: without stated
   targets the harness has nothing to measure against and the session
   degenerates into taste.
@@ -747,6 +755,7 @@ who made it, and the consequences for other sessions.
 | D29 | S2 | 2026-10-03 | **The roster window and wave banner are ONE dialogue (user call, refines D28).** A wave-start announcement with a roster draws a single panel above centre (30% of the height) that gives the enemies the focus — large silhouettes and "xN" — with the wave number as a small heading, and holds 3.2 s (`ROSTER_HOLD`) instead of 1 s. The banner's hold became per-announcement (`maxLifetime`). | Presentation only. Non-roster banners (clear, snitch, phases) are unchanged. |
 | D30 | PM | 2026-10-04 | **`dmath` goes to `S3`, in its GAMEPLAY-tier PR** (user call), placing S2's D17 hand-up.  The finding: JS engines' libm differs in the last place (`Math.pow`, Node 22 vs Chromium 141, ~10% of non-trivial inputs; `atan2` / `hypot` / `exp` / `log` / `sqrt` agree only by two V8s sharing fdlibm), and iOS is JavaScriptCore — a third libm — so replay is bit-exact WITHIN an engine and not across them.  Options weighed: **S3, as S2 recommended** (it already touches every constant and is next) / its own session before S3 / defer past the mobile release / drop it and narrow D0b to within-engine determinism. | §4's `S3` brief now carries it, with four things stated up front: it is a BEHAVIOUR change so it rides the gameplay PR; it invalidates every hash ONCE and must re-baseline `tests/replay.spec.ts` in the same commit; it needs a `perf/` number either side because `pow` sits in the collision resolver; and it does NOT block the mobile release — replay is dev-only (D7) and the save is not replay-based (D21), so what JSC costs today is reproducing an iPhone bug report on a dev machine.  What it DOES unblock is cross-device replay and §1/D0b's port-verification premise, which stays UNBACKED until this lands — the honest cost of choosing S3 over a session of its own.  Tightening D17's restated parity assertion back up is a consequence of this landing, not separate work. |
 | D31 | PM | 2026-10-04 | **Audio memory: the score decodes at 25 kHz, and the SFX banks decode LAZILY** (user call), after PR #110's adaptive score landed and the resident figure was MEASURED at ~133 MB (70.9 music + ~62 sliced cue buffers) against a mobile-first phase.  Options put to the user: drop the music decode rate / hold fewer layers / decode the banks lazily instead of all four at unlock.  **Call: 25 kHz and lazy.** | Music: `SCORE.DECODE_RATE` 32 → 25 kHz, measured 70.9 → **55.4 MB**; linear, and nothing about the bar grid is rate-dependent.  Banks: only the MENU bank decodes at unlock; `requestBank` starts the others FIRE-AND-FORGET from `play()` / `loop()`, so CLAUDE.md §8's "never a decode inside a frame" rule is kept — the asking trigger plays its procedural draft and returns, which is what every id already did while the eager preload was in flight.  Measured: title screen **4.7 MB** of banks (was ~62), a run that never fires **49.3**, audio in total ~105 MB in play and 16.5 at the title against 133 / ~77.  **Stated honestly: lazy decoding DEFERS rather than reduces** — impacts and world are asked for within seconds of a run, so a few seconds in the steady state is close to what it was; the reduction is the rate cut, and what laziness buys is the PEAK (the whole-bank buffer no longer stacks against the score's decode at unlock) and the menu.  Two consequences were load-bearing and are documented in §8: the WAV pass and the procedural pre-render had to switch from `hasSample` to the MANIFEST, or a not-yet-decoded bank id gets a WAV fetched AND three Offline takes rendered — costing more than the eager decode saved; and a live LOOP is dropped when its bank lands, or `move.thrust` keeps its draft for the whole run.  `tests/audio.spec.ts` gained a laziness regression (verified to FAIL against the eager build) and its whole-manifest test now asks for every bank via `decodeAllBanks()` — the claim is unchanged, only its trigger moved.  **Not a work-session payload:** done here, in the phase branch, because it is a two-constant change plus its guards and it blocked nothing in S3's brief. |
+| D32 | PM | 2026-10-04 | **S3's four pre-flight calls, settled before the brief was written** (user).  (a) **FORMAT: TOML.**  Options weighed: TOML / JSON + a TS schema / data-only TS modules.  The decider was COMMENTS — this repo's tables carry the reasoning behind each number (the grain table's "neither is visible in the row", the bank divisor's two factors), and that commentary is a large part of their value, so JSON would either lose it or scatter it into sibling files.  (b) **FIRST TABLES: `MAP_POPULATION` + `ENEMY_VARIANTS` + `BOSS_DEFS`** — ~560 measured lines, all three DESCRIPTIONS rather than derivations, one small / one medium / one nested-shape, and exactly what a balance harness needs to vary.  (c) **ORDER: tables before `dmath`** (D30 placed dmath in S3; this settles its position WITHIN the session, and does not reopen D30).  (d) **KNOB TRIAGE: only the extracted tables' knobs**, riding each extraction. | **The format choice is cheap here only because of an existing precedent, and that is the brief's load-bearing constraint.**  `vite.config.ts` already resolves two BUILD-TIME virtual manifests (`virtual:nebula-manifest`, `virtual:sfx-manifest`), so a TOML table parses at build time into a typed module: the parser is a devDependency, the bundle ships zero parser bytes, and `scripts/inline-build.mjs`'s single-file standalone — which cannot fetch anything — works for free because the data is already in the module.  THREE consumers must all resolve the new virtual ids or the gates break, and the second is the one that gets forgotten: (1) `vite.config.ts`; (2) `scripts/sim-test.mjs`, whose esbuild shim hardcodes `/^virtual:(nebula\|sfx)-manifest$/`, so `npm run test:sim` fails the moment a table becomes virtual; (3) `playwright.config.ts`'s webServer, which builds, so it is covered by (1).  ORDER rationale: extraction is the session's stated payoff and the lower-risk half, so if `dmath` sprawls (~150 call sites plus a `perf/` number either side) the valuable work has landed, and `dmath` explicitly does not block the mobile release.  The honest cost of that order: `dmath` later shifts the extraction's derived-value assertions in the LAST PLACE, so those assertions need tolerances rather than equality — the brief says so, since discovering it as a red suite is how it turns into a day.  MEASURED AND CORRECTED in §4 while settling these: `constants.ts` is 11,359 lines (the brief said ~1000) and there are 59 `*_CYCLE` tables (it said ~90). |
 
 ---
 
