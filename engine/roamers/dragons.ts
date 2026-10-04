@@ -17,6 +17,7 @@
  *  on the head entity, so the entity stays lean.  Any number can be alive at
  *  once; `GameEngine.dragons` holds them.
  */
+import * as dmath from '../systems/dmath';
 import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WeaponType, WeaponConfig } from '../../types';
@@ -65,15 +66,15 @@ export function updateDragons(g: GameEngine, dt: number) {
         if (inst.state === 'leave' && inst.portal) {
             if (!inst.headThrough) {
                 const px = wrapDeltaX(d.position.x, inst.portal.x), py = wrapDeltaY(d.position.y, inst.portal.y);
-                const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm;
+                const pm = dmath.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm;
             } else {
-                const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1; dirX = d.velocity.x / vm; dirY = d.velocity.y / vm; // continue straight
+                const vm = dmath.hypot(d.velocity.x, d.velocity.y) || 1; dirX = d.velocity.x / vm; dirY = d.velocity.y / vm; // continue straight
             }
             speedMul = D.LEAVE_SPEED_MULT;
         } else {
             const flow = g.flowField.sampleShardFlow(d.position.x, d.position.y);
-            const wob = Math.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
-            const cosW = Math.cos(wob), sinW = Math.sin(wob);
+            const wob = dmath.sin(inst.time * D.WEAVE_FREQ + (d.glowPhase ?? 0)) * D.WEAVE_AMP;
+            const cosW = dmath.cos(wob), sinW = dmath.sin(wob);
             dirX = flow.x * cosW - flow.y * sinW;
             dirY = flow.x * sinW + flow.y * cosW;
             speedMul = 1;
@@ -82,7 +83,7 @@ export function updateDragons(g: GameEngine, dt: number) {
         const alpha = Math.min(1, D.STEER_RATE * dt * 60 * (inst.state === 'leave' ? 4 : 1));
         d.velocity.x += (dirX * target - d.velocity.x) * alpha;
         d.velocity.y += (dirY * target - d.velocity.y) * alpha;
-        d.rotation = Math.atan2(d.velocity.y, d.velocity.x);
+        d.rotation = dmath.atan2(d.velocity.y, d.velocity.x);
 
         // ── Body path history (newest first) ──
         if (!d.dragonPath) d.dragonPath = [{ x: d.position.x, y: d.position.y }];
@@ -189,7 +190,7 @@ export function updateDragons(g: GameEngine, dt: number) {
             if (inst.stateTimer <= 0) {
                 inst.state = 'leave';
                 inst.stateTimer = D.LEAVE_DURATION; // safety cap only
-                const vm = Math.hypot(d.velocity.x, d.velocity.y) || 1;
+                const vm = dmath.hypot(d.velocity.x, d.velocity.y) || 1;
                 const portal = { x: d.position.x + (d.velocity.x / vm) * D.PORTAL_AHEAD, y: d.position.y + (d.velocity.y / vm) * D.PORTAL_AHEAD };
                 wrapPosition(portal);
                 inst.portal = portal;
@@ -205,10 +206,10 @@ export function updateDragons(g: GameEngine, dt: number) {
 export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'mixed') {
     if (!g.currentMap) return;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    const halfDiag = dmath.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
     const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
-    const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };
+    const pos = { x: g.player.position.x + dmath.cos(angle) * dist, y: g.player.position.y + dmath.sin(angle) * dist };
     wrapPosition(pos);
     openDragonPortal(g, pos);
     // The roar rides on TOP of the rift the portal already sounds — a
@@ -221,7 +222,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         type: EntityType.ENEMY,
         enemySubtype: EnemySubtype.DRAGON,
         position: { x: pos.x, y: pos.y },
-        velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // head inward
+        velocity: { x: -dmath.cos(angle) * 2, y: -dmath.sin(angle) * 2 }, // head inward
         size: { x: v.size, y: v.size },
         rotation: angle + Math.PI,
         color: v.color,
@@ -246,7 +247,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
     };
     // Seed a trailing path (outward, away from the head's inward heading) so the
     // starting body lays out behind it immediately instead of stacking.
-    const ox = Math.cos(angle), oy = Math.sin(angle); // outward = away from movement
+    const ox = dmath.cos(angle), oy = dmath.sin(angle); // outward = away from movement
     const seed: Vector2[] = [];
     for (let k = 0; k < 110; k++) seed.push({ x: pos.x + ox * k * DRAGON_CONSTANTS.PATH_SPACING, y: pos.y + oy * k * DRAGON_CONSTANTS.PATH_SPACING });
     d.dragonPath = seed;
@@ -288,7 +289,7 @@ function appendDragonSegment(g: GameEngine, inst: DragonInstance, tile: GameEnti
     g.physics.removeStaticEntity(tile);
     g.flowField.onTileDestroyed(tile.position.x, tile.position.y);
     if (inst.body.length >= DRAGON_CONSTANTS.MAX_SEGMENTS) {
-        const inward = Math.atan2(-dy, -dx);
+        const inward = dmath.atan2(-dy, -dx);
         g.spawnParticles(tile.position, 6, tile.color || '#94a3b8', {
             spreadAngle: inward, spreadCone: 0.9, speedMin: 2, speedMax: 6, sizeMin: 1, sizeMax: 2.4, lifetimeMin: 0.1, lifetimeMax: 0.3,
         });
@@ -330,7 +331,7 @@ function positionDragonBody(inst: DragonInstance) {
     for (let i = 0; i < path.length && seg < body.length; i++) {
         const cur = path[i];
         const vx = wrapDeltaX(prevX, cur.x), vy = wrapDeltaY(prevY, cur.y); // prev → cur
-        const len = Math.hypot(vx, vy);
+        const len = dmath.hypot(vx, vy);
         if (len > 1e-4) {
             while (seg < body.length && acc + len >= target) {
                 const t = (target - acc) / len;
@@ -338,7 +339,7 @@ function positionDragonBody(inst: DragonInstance) {
                 s.position.x = prevX + vx * t;
                 s.position.y = prevY + vy * t;
                 wrapPosition(s.position);
-                s.rotation = Math.atan2(vy, vx);
+                s.rotation = dmath.atan2(vy, vx);
                 s.velocity.x = 0; s.velocity.y = 0;
                 seg++; target += SP;
             }
@@ -378,8 +379,8 @@ function detachDragonSegment(seg: GameEntity) {
     seg.phasesTerrain = false; // a loose shard collides normally again
     seg.shardVariant = tileToShardVariant(seg.shardVariant);
     const a = sim.roamers() * Math.PI * 2;
-    seg.velocity.x = Math.cos(a) * 3.5;
-    seg.velocity.y = Math.sin(a) * 3.5;
+    seg.velocity.x = dmath.cos(a) * 3.5;
+    seg.velocity.y = dmath.sin(a) * 3.5;
 }
 
 /** A killed body segment: sever the owning dragon's tail, then dissolve it
@@ -410,7 +411,7 @@ g.audio.play('destroy.dragon',
              { x: inst.head.position.x, y: inst.head.position.y });
     const d = inst.head;
     // Payout doubles per kill this run: 3000, 6000, 12000, …
-    g.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, g.dragonsKilled), d.position);
+    g.awardScore(DRAGON_CONSTANTS.SCORE * dmath.pow(2, g.dragonsKilled), d.position);
     g.dragonsKilled++;
     g.records.dragonsKilled++;
     openDragonPortal(g, d.position);

@@ -19,6 +19,7 @@
  *  enemy can carry, not a boss mechanism, so filing it under bosses would be
  *  a misfile.
  */
+import * as dmath from './systems/dmath';
 import { sim } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, EnemySubtype, EngineStats, Vector2 } from '../types';
@@ -187,8 +188,8 @@ g.audio.play('boss.death');
         const a = sim.roamers() * Math.PI * 2;
         const d = 30 + sim.roamers() * 140;
         g.spawnSalvageDrop({
-            x: boss.position.x + Math.cos(a) * d,
-            y: boss.position.y + Math.sin(a) * d,
+            x: boss.position.x + dmath.cos(a) * d,
+            y: boss.position.y + dmath.sin(a) * d,
         });
     }
     // ── The payoff moment ──────────────────────────────────────────────
@@ -343,8 +344,8 @@ function openDescentPortal(g: GameEngine, pos: Vector2) {
     // Offset from the corpse so the rift doesn't sit under the debris.
     const a = sim.roamers() * Math.PI * 2;
     const p = {
-        x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
-        y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+        x: pos.x + dmath.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+        y: pos.y + dmath.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
     };
     wrapPosition(p);
     const portal: GameEntity = {

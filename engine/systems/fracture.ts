@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 /** Seeded Voronoi fracture core (gauntlet voronoi, V1).
  *
  *  Pure geometry — NO engine imports, no `Math.random`, no per-call state
@@ -382,8 +383,8 @@ export function placeFractureSites(
       if (biased) {
         const ang = rand() * Math.PI * 2;
         const r = biasR * Math.sqrt(rand());
-        x = impact!.x + Math.cos(ang) * r;
-        y = impact!.y + Math.sin(ang) * r;
+        x = impact!.x + dmath.cos(ang) * r;
+        y = impact!.y + dmath.sin(ang) * r;
       } else {
         x = minX + rand() * (maxX - minX);
         y = minY + rand() * (maxY - minY);
@@ -484,7 +485,7 @@ function buildCells(
       let mx = (si.x + sj.x) / 2, my = (si.y + sj.y) / 2;
       const nx = sj.x - si.x, ny = sj.y - si.y;
       // Normalise so lineEps means a distance, not distance × |n|.
-      const d = Math.max(Math.hypot(nx, ny), 1e-12);
+      const d = Math.max(dmath.hypot(nx, ny), 1e-12);
       const invLen = 1 / d;
       if (weights !== null) {
         // POWER DIAGRAM (A2 sizeSpread): shift the divider off the

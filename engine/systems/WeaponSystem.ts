@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, WeaponConfig, RumbleKind } from '../../types';
 import {
@@ -304,9 +305,9 @@ export class WeaponSystem {
       // the player's current position with the weapon's slight inaccuracy.
       const aimAngle = arch.aimLaser
         ? enemy.rotation
-        : Math.atan2(dy, dx) + (sim.combat() - 0.5) * (weapon.spread * Math.PI / 180);
-      const targetX = enemy.position.x + Math.cos(aimAngle) * 500;
-      const targetY = enemy.position.y + Math.sin(aimAngle) * 500;
+        : dmath.atan2(dy, dx) + (sim.combat() - 0.5) * (weapon.spread * Math.PI / 180);
+      const targetX = enemy.position.x + dmath.cos(aimAngle) * 500;
+      const targetY = enemy.position.y + dmath.sin(aimAngle) * 500;
       // Per-wave damage scaling + the Orbiter's corrosion payload.
       const dmgMult = enemy.damageMult ?? 1;
       const fx = enemy.enemySubtype ? ENEMY_ATTACK_EFFECTS[enemy.enemySubtype] : undefined;

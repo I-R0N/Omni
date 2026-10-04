@@ -1,5 +1,6 @@
 
 
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EnemySubtype, EnemyRole, EntityType, Vector2 } from '../../types';
 import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS, calmBubble } from '../../constants';
@@ -114,7 +115,7 @@ export class AISystem {
       // player at a capped rate so it ATTEMPTS to face the threat — flank it
       // faster than it can turn and the hull is exposed.  Toroidal bearing.
       if (enemy.shieldArcHalfWidth !== undefined && enemy.shieldArcSpin !== undefined) {
-          const want = Math.atan2(
+          const want = dmath.atan2(
               wrapDeltaY(enemy.position.y, player.position.y),
               wrapDeltaX(enemy.position.x, player.position.x),
           );
@@ -224,10 +225,10 @@ export class AISystem {
       // WeaponSystem fires down this same facing.
       let targetAngle: number;
       if (enemy.aimLaser) {
-          targetAngle = Math.atan2(dy, dx);
+          targetAngle = dmath.atan2(dy, dx);
       } else {
           const leadTime = (dist / PROJECTILE_SPEED) * LEAD_FACTOR;
-          targetAngle = Math.atan2(dy + player.velocity.y * leadTime, dx + player.velocity.x * leadTime);
+          targetAngle = dmath.atan2(dy + player.velocity.y * leadTime, dx + player.velocity.x * leadTime);
       }
 
       const stunned = (enemy.hitStun ?? 0) > 0;
@@ -289,7 +290,7 @@ export class AISystem {
       // Cap Speed — suspended while staggered so the hit knockback carries
       // the enemy back instead of being clamped to cruise.  Skipped for
       // stationary turrets (the no-move bleed above handles their velocity).
-      const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
+      const speed = Math.sqrt(enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y);
       if (!stationary && !stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
@@ -363,7 +364,7 @@ export class AISystem {
           if (enemy.swarmTimer === undefined) enemy.swarmTimer = sim.ai() * Math.PI * 2;
           enemy.swarmTimer += dt * S.WEAVE.FREQ;
           const amp = S.WEAVE.AMP * Math.min(1, dist / S.WEAVE.CLOSE_DAMP); // straighten out up close
-          const w = Math.sin(enemy.swarmTimer) * amp;
+          const w = dmath.sin(enemy.swarmTimer) * amp;
           let mx = toX - toY * w; // perpendicular = (-toY, toX)
           let my = toY + toX * w;
           const mmag = Math.sqrt(mx * mx + my * my) || 1;
@@ -421,7 +422,7 @@ export class AISystem {
       if (!stunned) {
           enemy.velocity.x += ax * dt;
           enemy.velocity.y += ay * dt;
-          const speed = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+          const speed = Math.sqrt(enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y);
           if (speed > speedCap) {
               enemy.velocity.x = (enemy.velocity.x / speed) * speedCap;
               enemy.velocity.y = (enemy.velocity.y / speed) * speedCap;
@@ -429,7 +430,7 @@ export class AISystem {
       }
 
       // Face travel direction.
-      const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      const targetAngle = dmath.atan2(enemy.velocity.y, enemy.velocity.x);
       let angleDiff = targetAngle - enemy.rotation;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -557,7 +558,7 @@ export class AISystem {
       }
 
       // Face travel direction (the membrane highlight tracks heading).
-      const targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+      const targetAngle = dmath.atan2(enemy.velocity.y, enemy.velocity.x);
       let angleDiff = targetAngle - enemy.rotation;
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
@@ -721,7 +722,7 @@ export class AISystem {
               // Retreat arc: when the rammer has just overshot the player,
               // kick it laterally so it circles away instead of stopping dead.
               if (isRammer && distToPlayer < AI_CONFIG.RAMMER.RETREAT_TRIGGER_DIST) {
-                  const spd = Math.sqrt(enemy.velocity.x ** 2 + enemy.velocity.y ** 2);
+                  const spd = Math.sqrt(enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y);
                   if (spd > 0.1) {
                       const vx = enemy.velocity.x / spd;
                       const vy = enemy.velocity.y / spd;
@@ -795,7 +796,7 @@ export class AISystem {
 
       // Cap Speed — suspended while staggered so the hit knockback carries
       // the enemy back instead of being clamped to cruise.
-      const speed = Math.sqrt(enemy.velocity.x**2 + enemy.velocity.y**2);
+      const speed = Math.sqrt(enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y);
       if (!stunned && speed > maxSpeed) {
           enemy.velocity.x = (enemy.velocity.x / speed) * maxSpeed;
           enemy.velocity.y = (enemy.velocity.y / speed) * maxSpeed;
@@ -814,8 +815,8 @@ export class AISystem {
               const sy = wrapDeltaY(last.y, enemy.position.y);
               if (sx * sx + sy * sy < AI_CONFIG.STUCK_DIST_THRESHOLD * AI_CONFIG.STUCK_DIST_THRESHOLD) {
                   const nudgeAngle = sim.ai() * Math.PI * 2;
-                  enemy.velocity.x += Math.cos(nudgeAngle) * maxSpeed * 0.8;
-                  enemy.velocity.y += Math.sin(nudgeAngle) * maxSpeed * 0.8;
+                  enemy.velocity.x += dmath.cos(nudgeAngle) * maxSpeed * 0.8;
+                  enemy.velocity.y += dmath.sin(nudgeAngle) * maxSpeed * 0.8;
               }
           }
           // Reuse the existing Vector2 when one already exists for this
@@ -837,11 +838,11 @@ export class AISystem {
       let targetAngle = enemy.rotation;
 
       if (speed > rotThreshold) {
-          targetAngle = Math.atan2(enemy.velocity.y, enemy.velocity.x);
+          targetAngle = dmath.atan2(enemy.velocity.y, enemy.velocity.x);
       } else {
           const toTargetX = wrapDeltaX(enemy.position.x, player.position.x);
           const toTargetY = wrapDeltaY(enemy.position.y, player.position.y);
-          targetAngle = Math.atan2(toTargetY, toTargetX);
+          targetAngle = dmath.atan2(toTargetY, toTargetX);
       }
 
       let angleDiff = targetAngle - enemy.rotation;

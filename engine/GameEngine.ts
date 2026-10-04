@@ -1,5 +1,6 @@
 
 
+import * as dmath from './systems/dmath';
 import { sim, fxRng, seedRng } from './systems/rng';
 import { resetIdCounter } from './systems/IdAllocator';
 import { installClock, installViewport, nowMs, viewport, clock } from './ports';
@@ -195,7 +196,7 @@ function recentreFracturedBody(e: GameEntity, remainder: Vector2[], eps: number)
 
   // Compensate in WORLD terms so the body does not jump: the local origin
   // moved by +c, so the world anchor moves by +c rotated into world.
-  const cs = Math.cos(e.rotation), sn = Math.sin(e.rotation);
+  const cs = dmath.cos(e.rotation), sn = dmath.sin(e.rotation);
   e.position.x += c.x * cs - c.y * sn;
   e.position.y += c.x * sn + c.y * cs;
   wrapPosition(e.position);
@@ -2081,7 +2082,7 @@ export class GameEngine {
       if (exitMouth) {
           const ex = wrapDeltaX(exitMouth.position.x, this.player.position.x);
           const ey = wrapDeltaY(exitMouth.position.y, this.player.position.y);
-          const len = Math.hypot(ex, ey);
+          const len = dmath.hypot(ex, ey);
           if (len > 1e-3) {
               const k = playerEjectSpeed(this.currentMap.type) / len;
               this.player.velocity.x = ex * k;
@@ -2397,8 +2398,8 @@ export class GameEngine {
   private tickPlayerRoll(dt: number, moveDir: Vector2) {
     const { YAW_SMOOTHING, MAX_TILT } = PLAYER_ROLL_CONSTANTS;
     const facing = this.player.rotation;
-    const cosF = Math.cos(facing);
-    const sinF = Math.sin(facing);
+    const cosF = dmath.cos(facing);
+    const sinF = dmath.sin(facing);
     const vel = this.player.velocity;
     // TURN tracker — the facing's angular step this tick, wrapped so aiming
     // across the ±π seam is a small swing rather than a full spin, low-passed
@@ -2708,7 +2709,7 @@ export class GameEngine {
    *  wave the ring just placed. */
   viewportHalfDiagonal(): number {
     const zoom = this.camera.zoom || 1;
-    return Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    return dmath.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
   }
 
   /**
@@ -3559,7 +3560,7 @@ export class GameEngine {
           // normalised; (0,0) means "no direction" and keeps the isotropic
           // jitter, so every existing caller is unchanged.
           const dx = opts?.dirX, dy = opts?.dirY;
-          const dm = dx !== undefined && dy !== undefined ? Math.hypot(dx, dy) : 0;
+          const dm = dx !== undefined && dy !== undefined ? dmath.hypot(dx, dy) : 0;
           this.shakeDirX = dm > 0 ? dx! / dm : 0;
           this.shakeDirY = dm > 0 ? dy! / dm : 0;
       }
@@ -4332,14 +4333,14 @@ export class GameEngine {
       for (let i=0; i<5; i++) {
           const angle = sim.engine() * Math.PI * 2;
           const dist = 500 + sim.engine() * (config.radius - 500);
-          const x = Math.cos(angle) * dist;
-          const y = Math.sin(angle) * dist;
+          const x = dmath.cos(angle) * dist;
+          const y = dmath.sin(angle) * dist;
 
           let safe = true;
           for (const p of pois) {
-              const d2 = (x - p.position.x)**2 + (y - p.position.y)**2;
+              const d2 = (x - p.position.x) * (x - p.position.x) + (y - p.position.y) * (y - p.position.y);
               const safeDist = (p.gravityRange || p.size.x) + 800; 
-              if (d2 < safeDist**2) {
+              if (d2 < safeDist * safeDist) {
                   safe = false;
                   break;
               }
@@ -4428,7 +4429,7 @@ export class GameEngine {
             // — the camera moves with the hit instead of vibrating about it.
             const S = COLLISION_CONFIG.SHAKE;
             const elapsed = CAMERA_CONSTANTS.SHAKE_DECAY - this.shakeTimer;
-            const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
+            const osc = dmath.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
             const along = mag * osc;
             const jitter = mag * S.DIR_JITTER;
             this.camera.shakeOffset.x = this.shakeDirX * along + (fxRng.render() - 0.5) * jitter;
@@ -4657,11 +4658,11 @@ export class GameEngine {
         if (over <= 0.5) {
             this.player.overSpeedAllow = undefined;
         } else {
-            this.player.overSpeedAllow = maxSpeed + over * Math.pow(HIT_FEEDBACK.PLAYER_KNOCKBACK_DECAY, timeScale);
+            this.player.overSpeedAllow = maxSpeed + over * dmath.pow(HIT_FEEDBACK.PLAYER_KNOCKBACK_DECAY, timeScale);
             speedCap = this.player.overSpeedAllow;
         }
     }
-    const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
+    const currentSpeed = Math.sqrt(this.player.velocity.x * this.player.velocity.x + this.player.velocity.y * this.player.velocity.y);
     if (currentSpeed > speedCap) {
         this.player.velocity.x = (this.player.velocity.x / currentSpeed) * speedCap;
         this.player.velocity.y = (this.player.velocity.y / currentSpeed) * speedCap;
@@ -4705,7 +4706,7 @@ export class GameEngine {
             // (LINE / TRIANGLE) orient consistently with the ship's heading.
             const vx = this.player.velocity.x;
             const vy = this.player.velocity.y;
-            const angle = (vx !== 0 || vy !== 0) ? Math.atan2(vy, vx) : 0;
+            const angle = (vx !== 0 || vy !== 0) ? dmath.atan2(vy, vx) : 0;
             // Trail-extension direction — VELOCITY mode (default) emits at
             // player.position with no per-point velocity, so the trail
             // naturally extends opposite to velocity as the ship moves
@@ -4749,7 +4750,7 @@ export class GameEngine {
     const mousePos = this.input.getMousePosition();
     const cx = viewport().width / 2;
     const cy = viewport().height / 2;
-    this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
+    this.player.rotation = dmath.atan2(mousePos.y - cy, mousePos.x - cx);
 
     // Banking roll — after the rotation update so the lateral decomposition
     // reads this step's facing, not last step's.
@@ -5063,7 +5064,7 @@ export class GameEngine {
       this.applyStatusEffect(target, proj.appliesEffect);
     }
     // Derive impact direction for a slight forward cone bias
-    const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
+    const impactAngle = dmath.atan2(proj.velocity.y, proj.velocity.x);
 
     switch (target.type) {
       case EntityType.ENEMY:
@@ -5259,7 +5260,7 @@ export class GameEngine {
     if (target.type === EntityType.PLAYER) {
       const stacks = (list.find(e => e.kind === payload.kind)?.stacks ?? 0) + 1;
       if (payload.kind === 'corrosion') {
-        this.audio.play('status.corrosion.apply', { pitch: Math.pow(2, (stacks - 1) / 12) });
+        this.audio.play('status.corrosion.apply', { pitch: dmath.pow(2, (stacks - 1) / 12) });
       } else {
         this.audio.play('status.disable.apply');
       }
@@ -6351,7 +6352,7 @@ export class GameEngine {
       if (from !== undefined) {
           const ax = wrapDeltaX(from.x, target.position.x);
           const ay = wrapDeltaY(from.y, target.position.y);
-          const m = Math.hypot(ax, ay) || 1;
+          const m = dmath.hypot(ax, ay) || 1;
           target.lastImpactVelocity = { x: (ax / m) * 6, y: (ay / m) * 6 };
       }
       if (target.health > 0) {
@@ -6468,8 +6469,8 @@ export class GameEngine {
       // ends the body.
       if (local === undefined) return true;
       const reach2 = grain !== null ? Infinity
-          : (Math.max(target.size.x, target.size.y)
-             * FRACTURE_DETACH.CONTACT_RADIUS_FRAC) ** 2;
+          : dmath.pow(Math.max(target.size.x, target.size.y)
+             * FRACTURE_DETACH.CONTACT_RADIUS_FRAC, 2);
 
       for (let pass = 0; pass <= cells.length; pass++) {
           const living = new Set<number>();
@@ -6746,8 +6747,8 @@ export class GameEngine {
       let dirX = localX, dirY = localY;
       const angleOffset = dent.dentVertexAngleOffset;
       if (angleOffset !== undefined && angleOffset !== 0) {
-          const cosA = Math.cos(angleOffset);
-          const sinA = Math.sin(angleOffset);
+          const cosA = dmath.cos(angleOffset);
+          const sinA = dmath.sin(angleOffset);
           dirX = localX * cosA - localY * sinA;
           dirY = localX * sinA + localY * cosA;
       }
@@ -6977,7 +6978,7 @@ export class GameEngine {
           // flame): damage is measured from the speed a round still has, so
           // bleeding speed is bleeding damage — no curve authored anywhere.
           if (p.speedRetain !== undefined && p.speedRetain < 1 && p.active) {
-              const k = Math.pow(p.speedRetain, dt);
+              const k = dmath.pow(p.speedRetain, dt);
               p.velocity.x *= k; p.velocity.y *= k;
           }
           // CURVING rounds (the flamer): turn by the pellet's own rate plus a
@@ -6985,11 +6986,11 @@ export class GameEngine {
           if (p.curveRate !== undefined && p.active) {
               const age = (p.maxLifetime ?? 0) - (p.lifetime ?? 0);
               const w = p.curveRate + (p.curveWobble ?? 0)
-                  * Math.sin((p.curvePhase ?? 0) + 2 * Math.PI * (p.curveHz ?? 0) * age);
-              const a = w * dt, c = Math.cos(a), sn = Math.sin(a);
+                  * dmath.sin((p.curvePhase ?? 0) + 2 * Math.PI * (p.curveHz ?? 0) * age);
+              const a = w * dt, c = dmath.cos(a), sn = dmath.sin(a);
               const vx = p.velocity.x, vy = p.velocity.y;
               p.velocity.x = vx * c - vy * sn; p.velocity.y = vx * sn + vy * c;
-              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
+              p.rotation = dmath.atan2(p.velocity.y, p.velocity.x);
           }
           // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
           // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
@@ -7202,7 +7203,7 @@ export class GameEngine {
       if (reach <= 0) return;
       const dx = wrapDeltaX(px, e.position.x);
       const dy = wrapDeltaY(py, e.position.y);
-      const d = Math.hypot(dx, dy);
+      const d = dmath.hypot(dx, dy);
       if (d < prev || d >= cur || d > reach) return;
       if (auto) {
           e.trackedAt = now;
@@ -7559,13 +7560,13 @@ export class GameEngine {
           const e = item.entity;
           const scatterA = sim.engine() * Math.PI * 2;
           const scatterR = sim.engine() * cfg.SCATTER;
-          e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
-          e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
+          e.position.x = this.portalTransitExit.x + dmath.cos(scatterA) * scatterR;
+          e.position.y = this.portalTransitExit.y + dmath.sin(scatterA) * scatterR;
           wrapPosition(e.position);
           const heading = sim.engine() * Math.PI * 2;
           const speed = cfg.SPEED_MIN + sim.engine() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
-          e.velocity.x = Math.cos(heading) * speed;
-          e.velocity.y = Math.sin(heading) * speed;
+          e.velocity.x = dmath.cos(heading) * speed;
+          e.velocity.y = dmath.sin(heading) * speed;
           if (e.rotationSpeed !== undefined) {
               e.rotationSpeed += (sim.engine() - 0.5) * 1.5;
           }
@@ -7598,8 +7599,8 @@ export class GameEngine {
       const spread = 420 + sim.engine() * 260;
       const a = sim.engine() * Math.PI * 2;
       const pos = {
-          x: this.player.position.x + Math.cos(a) * spread,
-          y: this.player.position.y + Math.sin(a) * spread,
+          x: this.player.position.x + dmath.cos(a) * spread,
+          y: this.player.position.y + dmath.sin(a) * spread,
       };
       wrapPosition(pos);
       const boss = this.waves.spawnAt(subtype, pos, ctx, true);
@@ -7643,8 +7644,8 @@ export class GameEngine {
       const hAngle = sim.engine() * Math.PI * 2;
       const hDist  = 20 + sim.engine() * 80; // 20–100 units from player
       const hPos   = {
-        x: this.player.position.x + Math.cos(hAngle) * hDist,
-        y: this.player.position.y + Math.sin(hAngle) * hDist,
+        x: this.player.position.x + dmath.cos(hAngle) * hDist,
+        y: this.player.position.y + dmath.sin(hAngle) * hDist,
       };
       this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
     }
@@ -7659,8 +7660,8 @@ export class GameEngine {
       const a = sim.engine() * Math.PI * 2;
       const d = 40 + sim.engine() * 80;
       this.spawnSalvageDrop({
-        x: this.player.position.x + Math.cos(a) * d,
-        y: this.player.position.y + Math.sin(a) * d,
+        x: this.player.position.x + dmath.cos(a) * d,
+        y: this.player.position.y + dmath.sin(a) * d,
       });
     }
   };
@@ -7845,7 +7846,7 @@ export class GameEngine {
             ? Math.min(this.salvageStreak + 1, SALVAGE_STREAK_MAX) : 0;
         this.salvageStreakAt = now;
         this.audio.play('pickup.salvage', {
-            x: pos.x, y: pos.y, pitch: Math.pow(2, this.salvageStreak / 12),
+            x: pos.x, y: pos.y, pitch: dmath.pow(2, this.salvageStreak / 12),
         });
     } else if (entity.dropType === 'health') {
         this.audio.play('pickup.health', { x: pos.x, y: pos.y });

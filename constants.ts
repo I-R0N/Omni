@@ -1,5 +1,6 @@
 
 
+import * as dmath from './engine/systems/dmath';
 import { sim, fxRng } from './engine/systems/rng';
 import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig, ControlScheme } from './types';
 import {
@@ -3089,7 +3090,7 @@ export const HOTSPOT_COLLAPSE = {
 // the piece size.
 //
 // DAMPING values are velocity/spin RETENTION factors per 60 Hz step
-// (applied as Math.pow(value, timeScale) in PhysicsSystem): 1.0 = lossless
+// (applied as dmath.pow(value, timeScale) in PhysicsSystem): 1.0 = lossless
 // inertial drift, < 1.0 bleeds motion.  A gentle bleed (≈0.99 ≈ 30 %/s) lets
 // a freed composite drift visibly for several seconds, then coast to rest
 // and SLEEP — so it stops driving the PerfController's dynamic-load signal
@@ -4560,7 +4561,7 @@ export function rockBreakChance(hitsTaken: number, ceiling: number): number {
   if (hitsTaken <= 1) return 0;
   if (hitsTaken >= ceiling) return 1;
   const frac = (hitsTaken - 1) / (ceiling - 1);
-  return Math.pow(frac, ROCK_BREAK.CURVE);
+  return dmath.pow(frac, ROCK_BREAK.CURVE);
 }
 
 // ── Rock chipping (conservation of mass) ───────────────────────────────────
@@ -4741,7 +4742,7 @@ export const NEBULA_CONSTANTS = {
   FADE_RATE_REFERENCE_SPEED: 1.0,
   FADE_RATE_MAX_SCALE: 3.0,
   // Per-frame damping (60Hz reference).  Applied as
-  //   velocity *= Math.pow(damping, dt * 60)
+  //   velocity *= dmath.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
   // damping = shards drift longer.  LINEAR at 0.97 → velocity halves
   // in ~23 frames (~0.38 s).  Nebula shards already skip the flow-
@@ -6965,7 +6966,7 @@ const SCANNER_MK_DESC: Record<number, string> = {
 
 /** One mark's OWN scan radius. */
 export function scannerMarkRange(mk: number): number {
-  return SCANNER.BASE_RANGE * Math.pow(SCANNER.MARK_RANGE_STEP, mk - 1);
+  return SCANNER.BASE_RANGE * dmath.pow(SCANNER.MARK_RANGE_STEP, mk - 1);
 }
 
 /** The ship's scan radius PER TIER, from the marks actually installed and
@@ -7484,7 +7485,7 @@ export function portalHorizonRadius(e: GameEntity): number {
   const span = e.portalDestSpan;
   const scale = span && span > 0
     ? Math.min(H.MAX_SCALE, Math.max(H.MIN_SCALE,
-        Math.pow(span / H.REFERENCE_SPAN, H.EXPONENT)))
+        dmath.pow(span / H.REFERENCE_SPAN, H.EXPONENT)))
     : 1;
   return (e.size.x / 2) * H.BASE_FRACTION * scale * getPortalSizeMult();
 }

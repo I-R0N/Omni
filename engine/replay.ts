@@ -27,10 +27,10 @@
  *    it from the log (`ReplayInput.simMs`, 0 when absent), so skip tiers are
  *    reproducible once a RECORDER writes them — no recorder exists yet, so
  *    today's logs replay at zero time load.
- *  - `Math.sin` / `Math.cos` / `Math.pow` are not correctly rounded and differ
- *    between JS engines in the last place, so a hash is bit-exact within one
- *    engine and agrees across engines on the random streams and the player
- *    only (docs/ENGINE_CORE_PLAN.md §8, S2 → PM).
+ *  - the sim calls `engine/systems/dmath.ts`, never the engine's libm, whose
+ *    last-place rounding differs between JS engines.  A hash is therefore
+ *    bit-exact ACROSS engines too (Node vs Chromium, tests/headless.spec.ts);
+ *    changing dmath on purpose moves every hash and is a rebaseline.
  */
 import type { GameEngine } from './GameEngine';
 import { EntityType, MapType } from '../types';

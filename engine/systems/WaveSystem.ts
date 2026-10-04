@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WaveAnnouncement } from '../../types';
 import {
@@ -353,8 +354,8 @@ export class WaveSystem {
     for (let attempt = 0; attempt < 8; attempt++) {
       const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
       const dist = minSpawnDistance + sim.waves() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
-      pos.x = player.position.x + Math.cos(a) * dist;
-      pos.y = player.position.y + Math.sin(a) * dist;
+      pos.x = player.position.x + dmath.cos(a) * dist;
+      pos.y = player.position.y + dmath.sin(a) * dist;
       wrapPosition(pos);
       if (physics.isPositionClear(pos.x, pos.y, safeRadius)) break;
     }

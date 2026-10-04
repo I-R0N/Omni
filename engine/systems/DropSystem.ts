@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, NebulaColorStop } from '../../types';
 import { ShardVariantId } from './ShardSystem.types';
@@ -228,8 +229,8 @@ export class DropSystem {
       const baseAngle = (i / total) * Math.PI * 2;
       const angle     = baseAngle + (sim.drops() - 0.5) * (Math.PI / total) * 1.5;
       const speed     = 1.5 + sim.drops() * 3.0;
-      const vx = pv.x * 0.2 + Math.cos(angle) * speed;
-      const vy = pv.y * 0.2 + Math.sin(angle) * speed;
+      const vx = pv.x * 0.2 + dmath.cos(angle) * speed;
+      const vy = pv.y * 0.2 + dmath.sin(angle) * speed;
 
       const kind = slots[i];
 
@@ -258,7 +259,7 @@ export class DropSystem {
         rawPts.push({ angle: ba + aj, r: baseR * (rMin + sim.drops() * rRange) });
       }
       rawPts.sort((a, b) => a.angle - b.angle);
-      const pts: Vector2[] = rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+      const pts: Vector2[] = rawPts.map(p => ({ x: dmath.cos(p.angle) * p.r, y: dmath.sin(p.angle) * p.r }));
 
       entities.push({
         id:           nextId('enemy_shard'),
@@ -318,7 +319,7 @@ export class DropSystem {
 
     // Power-law area distribution — same principle as asteroids.
     const alpha    = 0.3 + damageNorm * 1.5; // 0.3 → few large; 1.8 → many small
-    const rawAreas = Array.from({ length: count }, () => Math.pow(sim.drops(), alpha));
+    const rawAreas = Array.from({ length: count }, () => dmath.pow(sim.drops(), alpha));
     const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
     // Radii derived from normalised areas (area = r²).
     const radii: number[] = rawAreas
@@ -329,7 +330,7 @@ export class DropSystem {
 
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const impactAngle = impactSpeed > 0.001 ? dmath.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE   = Math.PI * 0.6;
     const scatter     = 12;
 
@@ -359,7 +360,7 @@ export class DropSystem {
           x: tile.position.x + (sim.drops() - 0.5) * scatter * 2,
           y: tile.position.y + (sim.drops() - 0.5) * scatter * 2,
         },
-        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        velocity:      { x: dmath.cos(angle) * speed, y: dmath.sin(angle) * speed },
         size:          { x: size, y: size },
         rotation:       sim.drops() * Math.PI * 2,
         rotationSpeed:  (sim.drops() - 0.5) * 2 * (2.8 / Math.max(1, radius / 4)),
@@ -377,7 +378,7 @@ export class DropSystem {
 
     // Impact sparks: tile-colored chips + bright white hot sparks
     const tileImpactAngle = tile.lastImpactVelocity
-      ? Math.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
+      ? dmath.atan2(tile.lastImpactVelocity.y, tile.lastImpactVelocity.x)
       : undefined;
     this.particles.spawn(entities, tile.position, 6, tile.color || '#6366f1', {
       speedMin: 2, speedMax: 7, sizeMin: 1, sizeMax: 2.5,
@@ -564,7 +565,7 @@ export class DropSystem {
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const baseAngle = impactSpeed > 0.001
-      ? Math.atan2(iv!.y, iv!.x)
+      ? dmath.atan2(iv!.y, iv!.x)
       : sim.drops() * Math.PI * 2;
     // Damp the inherited speed so shards drift rather than rocket
     // away — projectile speeds are typically 30–100, and we want a
@@ -605,9 +606,9 @@ export class DropSystem {
         // alignment later snaps it to the 60° tiling grid.
         const R = HEX_SIZE / Math.sqrt(3);
         scaledPts = [
-          { x: R * Math.cos(-Math.PI / 2),               y: R * Math.sin(-Math.PI / 2) },
-          { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
-          { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+          { x: R * dmath.cos(-Math.PI / 2),               y: R * dmath.sin(-Math.PI / 2) },
+          { x: R * dmath.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * dmath.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+          { x: R * dmath.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * dmath.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
         ];
         targetSize = 2 * R;
       } else if (spec.inheritParentPolygon && tile.polygonPoints && tile.polygonPoints.length > 0) {
@@ -658,8 +659,8 @@ export class DropSystem {
       const offsetDist = expanded.length > 1
         ? (deformedDiameter / 2) * (0.3 + sim.drops() * 0.7)
         : 0;
-      const offsetX = Math.cos(shardAngle) * offsetDist;
-      const offsetY = Math.sin(shardAngle) * offsetDist;
+      const offsetX = dmath.cos(shardAngle) * offsetDist;
+      const offsetY = dmath.sin(shardAngle) * offsetDist;
 
       // Speed scales mildly with shard size — smaller fragments fly
       // a bit faster (lighter, gets a stronger kick from the same
@@ -714,8 +715,8 @@ export class DropSystem {
           y: tile.position.y + offsetY,
         },
         velocity:      {
-          x: Math.cos(shardAngle) * launchSpeed,
-          y: Math.sin(shardAngle) * launchSpeed,
+          x: dmath.cos(shardAngle) * launchSpeed,
+          y: dmath.sin(shardAngle) * launchSpeed,
         },
         size:          { x: targetSize, y: targetSize },
         // Inherit the parent tile's rotation when the shard clones its
@@ -812,7 +813,7 @@ export class DropSystem {
     // same size," not exact area match.
     const spawn = variantDef.spawn;
     const polyN = (spawn.polyVerticesMin + spawn.polyVerticesMax) / 2;
-    const kArea = (polyN / 2) * Math.sin(2 * Math.PI / polyN);
+    const kArea = (polyN / 2) * dmath.sin(2 * Math.PI / polyN);
     const targetR = Math.max(2, Math.sqrt(triArea / kArea));
     const targetSize = targetR * 2;
 
@@ -835,7 +836,7 @@ export class DropSystem {
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const baseAngle = impactSpeed > 0.001
-      ? Math.atan2(iv!.y, iv!.x)
+      ? dmath.atan2(iv!.y, iv!.x)
       : sim.drops() * Math.PI * 2;
     // Mild speed inherited from the projectile so the freed triangle
     // pops off rather than launches.
@@ -851,8 +852,8 @@ export class DropSystem {
         y: tile.position.y + cy,
       },
       velocity:      {
-        x: Math.cos(launchAngle) * launchSpeed,
-        y: Math.sin(launchAngle) * launchSpeed,
+        x: dmath.cos(launchAngle) * launchSpeed,
+        y: dmath.sin(launchAngle) * launchSpeed,
       },
       size:          { x: sizeX, y: sizeY },
       rotation:      sim.drops() * Math.PI * 2,
@@ -933,7 +934,7 @@ export class DropSystem {
     const iv = tile.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
     const baseAngle = impactSpeed > 0.001
-      ? Math.atan2(iv!.y, iv!.x)
+      ? dmath.atan2(iv!.y, iv!.x)
       : sim.drops() * Math.PI * 2;
     const launchSpeed = 0.3 + Math.min(impactSpeed * 0.05, 1.5);
     const launchAngle = baseAngle + (sim.drops() - 0.5) * 0.4;
@@ -944,8 +945,8 @@ export class DropSystem {
       shardVariant:  spec.variant,
       position:      { x: spawnWorldPos.x, y: spawnWorldPos.y },
       velocity:      {
-        x: Math.cos(launchAngle) * launchSpeed,
-        y: Math.sin(launchAngle) * launchSpeed,
+        x: dmath.cos(launchAngle) * launchSpeed,
+        y: dmath.sin(launchAngle) * launchSpeed,
       },
       size:          { x: targetSize, y: targetSize },
       rotation:      sim.drops() * Math.PI * 2,
@@ -1030,7 +1031,7 @@ export class DropSystem {
       : 0;
     const hasImpact = impactSpeed > 0.001;
     const baseAngle = hasImpact
-      ? Math.atan2(inheritVelocity!.y, inheritVelocity!.x)
+      ? dmath.atan2(inheritVelocity!.y, inheritVelocity!.x)
       : sim.drops() * Math.PI * 2;
     // Fan the shards in a wide cone around the hit direction (full
     // circle when there's no impact) AND give each its own speed, so a
@@ -1050,8 +1051,8 @@ export class DropSystem {
       fromRock:            fromRock || undefined,
       position:            { x: spawnWorldPos.x, y: spawnWorldPos.y },
       velocity:            {
-        x: Math.cos(launchAngle) * launchSpeed,
-        y: Math.sin(launchAngle) * launchSpeed,
+        x: dmath.cos(launchAngle) * launchSpeed,
+        y: dmath.sin(launchAngle) * launchSpeed,
       },
       size:                { x: targetSize, y: targetSize },
       rotation:            sim.drops() * Math.PI * 2,
@@ -1142,7 +1143,7 @@ export class DropSystem {
     // every 1/120s boundary — and both are identity at the 120Hz default.
     const stepScale = simStepScale();
     const pullStrength = DROP_PULL.STRENGTH * stepScale;
-    const dampPerStep = Math.pow(DROP_PULL.DAMP_PER_STEP, stepScale);
+    const dampPerStep = dmath.pow(DROP_PULL.DAMP_PER_STEP, stepScale);
     for (let i = 0; i < activeDrops.length; i++) {
       const a = activeDrops[i];
       // Generalized to any collectible drop (DROP_TYPES.collectible) — drops
@@ -1277,7 +1278,7 @@ export class DropSystem {
       rawPts.push({ angle: baseAngle + jitter, r: baseR * radiusFrac });
     }
     rawPts.sort((a, b) => a.angle - b.angle);
-    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+    return rawPts.map(p => ({ x: dmath.cos(p.angle) * p.r, y: dmath.sin(p.angle) * p.r }));
   }
 
   public generateShardPolygon(type: 'health' | 'salvage', baseR: number): Vector2[] {
@@ -1302,7 +1303,7 @@ export class DropSystem {
       rawPts.push({ angle: baseAngle + jitter, r: baseR * (radMin + sim.drops() * (radMax - radMin)) });
     }
     rawPts.sort((a, b) => a.angle - b.angle);
-    return rawPts.map(p => ({ x: Math.cos(p.angle) * p.r, y: Math.sin(p.angle) * p.r }));
+    return rawPts.map(p => ({ x: dmath.cos(p.angle) * p.r, y: dmath.sin(p.angle) * p.r }));
   }
 
   /** Create a generic collectible-drop entity skeleton. */
@@ -1317,7 +1318,7 @@ export class DropSystem {
     return {
       id, type: EntityType.INTERACTABLE,
       position: { x: pos.x + (sim.drops() - 0.5) * scatter * 2, y: pos.y + (sim.drops() - 0.5) * scatter * 2 },
-      velocity: { x: (pv?.x ?? 0) * 0.3 + Math.cos(angle) * speed, y: (pv?.y ?? 0) * 0.3 + Math.sin(angle) * speed },
+      velocity: { x: (pv?.x ?? 0) * 0.3 + dmath.cos(angle) * speed, y: (pv?.y ?? 0) * 0.3 + dmath.sin(angle) * speed },
       size: { x: r * 3, y: r * 3 },
       rotation: sim.drops() * Math.PI * 2,
       rotationSpeed: (sim.drops() - 0.5) * 2 * 2.5,

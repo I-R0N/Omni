@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../../types';
 import {
@@ -62,16 +63,16 @@ const SEEK_MIN_SPEED_FRAC = 0.4;       // the slowest a braking round flies, × 
 const SEEK_THROTTLE_PER_FRAME = 0.08;  // speed change per frame, × launch speed
 function steerHermite(p: GameEntity, dx: number, dy: number, tvx: number, tvy: number, dt: number): void {
   const v = p.velocity;
-  const s = Math.hypot(v.x, v.y);
+  const s = dmath.hypot(v.x, v.y);
   if (!(s > 1e-3)) return;
   const frames = dt * 60;
   const s0 = p.spawnSpeed && p.spawnSpeed > 0 ? p.spawnSpeed : s;
   // Time-to-go (frames) and the target's position then.
-  let T = Math.max(SEEK_MIN_T, Math.hypot(dx, dy) / s);
+  let T = Math.max(SEEK_MIN_T, dmath.hypot(dx, dy) / s);
   let px = dx + tvx * T, py = dy + tvy * T;
-  T = Math.max(SEEK_MIN_T, Math.hypot(px, py) / s);
+  T = Math.max(SEEK_MIN_T, dmath.hypot(px, py) / s);
   px = dx + tvx * T; py = dy + tvy * T;
-  const pl = Math.hypot(px, py) || 1;
+  const pl = dmath.hypot(px, py) || 1;
   const ux = px / pl, uy = py / pl;
   // The Hermite start acceleration (per frame²).
   let ax = (6 * px - 4 * v.x * T - 2 * ux * s * T) / (T * T);
@@ -82,7 +83,7 @@ function steerHermite(p: GameEntity, dx: number, dy: number, tvx: number, tvy: n
   ax -= along * hx; ay -= along * hy;
   // Turn authority: a lateral acceleration fixed at launch speed.
   const aMax = (SEEK_TURN_PER_STRENGTH * (p.homingStrength ?? 1) / 60) * s0;
-  const lat = Math.hypot(ax, ay);
+  const lat = dmath.hypot(ax, ay);
   if (lat > aMax) { ax *= aMax / lat; ay *= aMax / lat; }
   // Throttle: the circle through the target tangent to the velocity has
   // radius d / (2 sin θ); the round can hold it at s ≤ √(aMax · R).
@@ -97,10 +98,10 @@ function steerHermite(p: GameEntity, dx: number, dy: number, tvx: number, tvy: n
   const step = s0 * SEEK_THROTTLE_PER_FRAME * frames;
   const ns = want > s ? Math.min(want, s + step) : Math.max(want, s - step);
   let nx = v.x + ax * frames, ny = v.y + ay * frames;
-  const nl = Math.hypot(nx, ny) || 1;
+  const nl = dmath.hypot(nx, ny) || 1;
   nx = (nx / nl) * ns; ny = (ny / nl) * ns;
   v.x = nx; v.y = ny;
-  p.rotation = Math.atan2(ny, nx);
+  p.rotation = dmath.atan2(ny, nx);
 }
 
 export class ProjectileSystem {
@@ -178,13 +179,13 @@ export class ProjectileSystem {
     // just across the seam doesn't fire in the opposite direction.
     const aimDX = wrapDeltaX(shooter.position.x, target.x);
     const aimDY = wrapDeltaY(shooter.position.y, target.y);
-    const angle = Math.atan2(aimDY, aimDX);
+    const angle = dmath.atan2(aimDY, aimDX);
 
     // Only apply recoil to player for now
     if (ownerType === EntityType.PLAYER) {
       const recoilImpulse = (PROJECTILE_CONSTANTS.MASS * config.speed * config.recoil) / (shooter.mass || 1);
-      shooter.velocity.x -= Math.cos(angle) * recoilImpulse;
-      shooter.velocity.y -= Math.sin(angle) * recoilImpulse;
+      shooter.velocity.x -= dmath.cos(angle) * recoilImpulse;
+      shooter.velocity.y -= dmath.sin(angle) * recoilImpulse;
     }
 
     const halfSpread = (config.spread * (Math.PI / 180)) / 2;
@@ -197,8 +198,8 @@ export class ProjectileSystem {
         currentAngle += (sim.combat() - 0.5) * (config.spread * (Math.PI / 180));
       }
 
-      const ax = Math.cos(currentAngle);
-      const ay = Math.sin(currentAngle);
+      const ax = dmath.cos(currentAngle);
+      const ay = dmath.sin(currentAngle);
       let vx = ax * config.speed;
       let vy = ay * config.speed;
 
@@ -234,7 +235,7 @@ export class ProjectileSystem {
       const startX = shooter.position.x + ax * muzzleOffset;
       const startY = shooter.position.y + ay * muzzleOffset;
 
-      const rotation = Math.atan2(vy, vx);
+      const rotation = dmath.atan2(vy, vx);
       // KINETIC DAMAGE (step 3): the bolt flies a real mass, derived from the
       // damage and muzzle speed the weapon already authors, and remembers the
       // speed it launched at.  `muzzleSpeed` is the WORLD speed — inherited
@@ -242,7 +243,7 @@ export class ProjectileSystem {
       // 'muzzle' impact-velocity mode divides by, which is exactly what makes
       // that mode land the authored damage however the ship was moving.
       const projMass = projectileMassFor(config);
-      const muzzleSpeed = Math.hypot(vx, vy);
+      const muzzleSpeed = dmath.hypot(vx, vy);
       // THE BLAST IS DERIVED unless a config authors one.  Absent means "work
       // it out from the shell's own energy" (`blastDamageFor`), which is what
       // makes a Gunnery mark, a charge and MASS_SCALE all reach the splash
@@ -536,7 +537,7 @@ export class ProjectileSystem {
       // Keep rotation aligned with velocity
       const sp = Math.sqrt(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y);
       if (sp > 0.1) {
-        p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
+        p.rotation = dmath.atan2(p.velocity.y, p.velocity.x);
       }
     }
 
