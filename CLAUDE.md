@@ -493,6 +493,10 @@ engine/
                           draw in the game comes from a named mulberry32
                           stream, `sim.*` (changes the world, must replay
                           exactly) or `fxRng.*` (decoration only).  See §8
+    dmath.ts              DETERMINISTIC MATH (engine-core S3) — the sim's sin /
+                          cos / pow / exp / log / atan2 … from exact IEEE ops
+                          only, so every JS engine agrees to the bit.  The
+                          guard forbids native libm and `**` in the sim (§8)
     IdAllocator.ts        Monotonic nextId() for entity IDs (cosmetic
                           prefixes count on their own sequence — §8)
     PerfController.ts     Load-driven frame-skip coordinator for every
@@ -2982,20 +2986,36 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `tests/headless.spec.ts`: (a) a headless-platform engine and the live
   engine replay every parity map to the SAME HASHES, bit for bit, in one page
   — the ports change nothing; (b) Node against Chromium reproduces the random
-  streams and the player exactly but NOT the world, because `Math.sin`,
-  `Math.cos` and `Math.pow` are not correctly rounded and differ between V8s
-  in the last place (Node 22's fdlibm trig against Chromium 141's glibc-derived
-  trig, which `--js-flags=--no-use-libm-trig-functions` turns off; `pow` differs
-  on ~10% of non-trivial inputs and has no flag).  One ULP in an asteroid's
-  velocity is amplified by collisions: measured, POCKET diverges by step 200 and
-  NEBULA_FIELD by step 600 while the player never does.  `atan2`, `hypot`,
-  `exp`, `log` and `sqrt` agree today.  So a replay is bit-exact WITHIN one JS
-  engine, and a console port or a cross-device replay needs a deterministic
-  math layer (own `sin` / `cos` / `pow`, ~150 call sites in the sim) — which
-  was deliberately NOT done in a behaviour-preserving PR, since it moves
-  every number at the last place.  The libm probe in the test says which
-  functions disagree on the machine running it; exact world equality is
-  required exactly where it reports none.
+  streams, the player AND THE WORLD, bit for bit, on every parity map
+  (engine-core S3, D30).  Until `dmath` this held only for streams and player:
+  `Math.sin`, `Math.cos` and `Math.pow` are not correctly rounded and differ
+  between V8s in the last place, and collisions amplify one ULP.  The sim now
+  calls `engine/systems/dmath.ts` (see the DMATH bullet below), so the
+  assertion is unconditional; the native-libm probe in the test survives as
+  information only.  Cross-engine agreement is also pinned as a table
+  (`tests/sim/fixtures/dmath.bits.json`, reproduced by Node in `test:sim` and
+  by Chromium in `headless.spec.ts` through `window.__omniDmath`).
+- **THE SIM NEVER CALLS THE ENGINE'S LIBM — `dmath`** (engine-core S3, plan D30;
+  `engine/systems/dmath.ts`).  `sin cos tan asin acos atan atan2 exp log log2
+  pow cbrt hypot` plus `PI` are rebuilt from operations the IEEE-754 standard
+  fixes (`+ - * /`, `Math.sqrt`, `floor`, `abs`, and integer views of a double):
+  fdlibm kernels with Cody-Waite reduction, so every JS engine (V8, JSC, SM)
+  returns the same bits.  Rules: (1) call it as `dmath.sin(x)` — never
+  `Math.sin`, and never the `**` operator, which V8 may lower to libm `pow`
+  (write `x * x`, or `dmath.pow`); `tests/sim/guard.test.ts` greps for both and,
+  like the platform guard, is an ALLOW-LIST of PRESENTATION files (render/,
+  RenderSystem, audio, background, particles, trails, NebulaColor, PerfRecorder),
+  so a new engine file is deterministic by default.  (2) Accuracy is secondary
+  to agreement but measured against native: sin/cos ≤ 2.2e-16 abs, exp / cbrt /
+  hypot ≤ ~4e-16 rel, pow ≤ 7e-15 rel; `pow` with an integer exponent in
+  [-64, 64] is repeated squaring, else exp(y·log x).  Arguments beyond ~1e5 rad
+  fold deterministically but lose accuracy (irrelevant to the sim).  (3) Changing
+  dmath on purpose moves every replay hash, so it is a rebaseline in the same
+  commit, with `OMNI_WRITE_DMATH_BITS=1 npm run test:sim -- --filter dmath`.
+  (4) It introduced no per-call cost worth a knob: `perf/simbench.mjs` ms per
+  sim substep (before → after, noisy ±15-30% in this container) hub-idle
+  1.25 → 1.61, asteroid-6k 2.22 → 2.48, glass-field 0.99 → 0.81, roamer-stack
+  2.51 → 2.49.
 - **THE SAVE FILE AND THE WRECK** (plan D10, D14, D20–D24; `engine/save.ts`,
   `engine/wreck.ts`).  What persists, through the `Storage` port under one key
   (`omni.save`): the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
@@ -5767,7 +5787,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns fourteen, once, in its mount effect — except
+  them.**  `App.tsx` assigns fifteen, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5834,6 +5854,8 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     suites (`tests/mass.spec.ts` first).  A projectile a twentieth the
     density of the hull that fires it plays perfectly well; only the
     tables side by side show it.
+  - `__omniDmath` — the deterministic math layer; `headless.spec.ts` hands
+    Chromium the pinned bit table and requires the same bits.
   - `__omniReplay` — the replay harness (`runReplay`, `endReplay`,
     `hashSimState`, `firstDivergence`) and the `rng` stream module.  A
     stream that leaks into the sim still plays perfectly and throws nothing,

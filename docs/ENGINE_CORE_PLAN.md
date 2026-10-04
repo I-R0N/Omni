@@ -417,8 +417,17 @@ tables are `data/*.toml`, parsed at build time into `virtual:table/*` modules
 through ONE loader (`scripts/toml-tables.mjs`) that `vite.config.ts` and
 `scripts/sim-test.mjs` both import; `tests/sim/tables.test.ts` pins the resolved
 values against a golden captured BEFORE the move (commit order: golden + test
-first, passing on the old literals; extraction second).  PR 2 (`dmath`) has NOT
-started and waits on PR 1 landing.  Two facts worth carrying forward: a table
+first, passing on the old literals; extraction second).  PR 2 (`dmath`) is ALSO BUILT, rolled
+into the SAME PR at the user's request (to keep the PR count down): separate
+commits, so the invisible table move and the behaviour-moving math layer stay
+reviewable apart.  `engine/systems/dmath.ts` replaces every native libm call and
+`**` in the sim; `tests/sim/guard.test.ts` keeps it out; Node and Chromium now
+agree on the WORLD bit for bit (`tests/headless.spec.ts` asserts it
+unconditionally), and replay hashes were rebaselined by construction (the suites
+compare runs to each other, no hash literals).  simbench before → after is in
+CLAUDE.md §8 and is within container noise.  Still open for the user: D-S3-d
+(more than the 4-level difficulty index?) and D-S3-e (balance targets, asked when
+the balance harness exists).  Two facts worth carrying forward: a table
 NAME that does not resolve (a sprite key, a weapon `extends`, a subtype) fails at
 module load, so `test:sim` and the boot smoke catch it and `vite build` does not;
 and the golden is a one-time migration check that a deliberate rebalance
@@ -940,3 +949,9 @@ history stays readable.
   `scripts/sim-test.mjs` pick it up from there — no second place to register it.
   Arena layouts as data (S1's earlier flag) can use the same mechanism.
   *(S3, 2026-10-04)*
+- **S3 → PM (PR 1 and PR 2 are one PR).**  At the user's request `dmath` was
+  rolled into the content-tables PR.  Consequences for later sessions: the
+  Node-vs-Chromium parity assertion is now EXACT for the world (S2's "streams and
+  player only" caveat is retired); any new sim code must use `dmath.*` and avoid
+  `**` or the guard fails; a deliberate change to dmath is a rebaseline.  *(S3,
+  2026-10-04)*
