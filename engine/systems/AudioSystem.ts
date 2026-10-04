@@ -17,7 +17,7 @@ const BANK_OF_ID: Map<string, string> = (() => {
  *  title screen is usually the gesture that unlocked the context and it has
  *  to be heard.  Every other bank waits for an id in it to be asked for. */
 const MENU_BANK = 'interface.mp3';
-import { AdaptiveMusic, SONGS, type MusicThreat } from './AdaptiveMusic';
+import { AdaptiveMusic, type MusicThreat } from './AdaptiveMusic';
 import { finishVoice } from './SfxVoicing';
 import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
 import SFX_MANIFEST from 'virtual:sfx-manifest';
@@ -790,7 +790,7 @@ export class AudioSystem implements AudioPort {
   public cycleMusicSong() {
     const m = this.music;
     if (!m) return;
-    const modes: ('auto' | number)[] = ['auto', ...SONGS.map((_, i) => i)];
+    const modes: ('auto' | number)[] = ['auto', ...m.songList.map((_, i) => i)];
     const i = modes.findIndex(v => v === m.songMode);
     m.setSongMode(modes[(i + 1) % modes.length]);
   }

@@ -2502,6 +2502,8 @@ export interface EngineStats {
       layers: string[]; bar: number;
       /** Resident song's title, and whether it is pinned (vs rotating). */
       song: string; songPinned: boolean; pending: string | null;
+      /** Every song in score/index.json, in index order (the pin uses the index). */
+      songs: { id: string; title: string; bpm: number }[];
       /** 'auto' follows the music plan; a number pins that SONGS index. */
       songMode: 'auto' | number;
     } | null;

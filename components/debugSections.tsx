@@ -1206,7 +1206,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
             act: dbg(e => e.audio.setMusicSong('auto')),
             active: mode === 'auto', on: DEBUG_ON.indigo, hover: 'hover:border-indigo-400',
           },
-          ...SONGS.map((s, i) => ({
+          // The live list from score/index.json; the built-in SONGS only until the index loads.
+          ...(c.s.audio?.music?.songs ?? SONGS).map((s, i) => ({
             key: s.id, label: s.title,
             summary: `Pin ${s.title} (${s.bpm} BPM) until you pick Auto.`,
             detail: 'The pin overrides the plan, through portals and boss fights too. The change lands on the next bar line: the new song loads alongside the old one, then they crossfade.',

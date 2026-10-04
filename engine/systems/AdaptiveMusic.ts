@@ -4,7 +4,7 @@
  * Each SONG is one piece of music split into six synchronised stems — "Omni"
  * (D minor, 128 BPM, 60 s), "Event Horizon" (E minor, 160 BPM, 48 s) and
  * "Critical Mass" (C minor, 150 BPM half-time, 51.2 s, the guitar-forward one);
- * one is resident at a time and a map change rotates to the next (SONGS,
+ * one is resident at a time, chosen by the director's plan (score/index.json,
  * `requestSong`).  Every stem loops forever from the
  * moment the score starts, sample-locked to the same AudioContext clock, and
  * the game decides only how LOUD each one is.  Intensity therefore never
@@ -64,43 +64,36 @@ export interface MusicThreat {
   ehp: number;
 }
 
-/** A SONG is one complete set of stems on its own grid.  The engine holds
- *  exactly one in memory; a map change can rotate to the next (see
- *  `cueEncounter`).  Files are `${prefix}${layer}.mp3` (+ `${prefix}riser`);
- *  the impact is shared. */
-export interface SongSpec { id: string; title: string; bpm: number; bars: number; prefix: string }
+/** A SONG is one complete set of stems on its own grid, in its own folder
+ *  under public/assets/audio/ (`${folder}${layer}.mp3`, plus optional
+ *  `riser.mp3` / `victory.mp3`).  The engine holds exactly one in memory.
+ *
+ *  THE SONG LIST AND THE PLAN ARE DATA: `score/index.json`, which
+ *  `npm run music:import` maintains (docs/MUSIC_PIPELINE.md).  Adding a song
+ *  is a folder and an index entry — no code.  These built-in values are only
+ *  the fallback used until (or unless) the index loads. */
+export interface SongSpec { id: string; title: string; bpm: number; bars: number; folder: string }
 export const SONGS: readonly SongSpec[] = [
-  { id: 'omni', title: 'Omni', bpm: 128, bars: 32, prefix: 'score-' },
-  { id: 'event-horizon', title: 'Event Horizon', bpm: 160, bars: 32, prefix: 'score2-' },
-  { id: 'critical-mass', title: 'Critical Mass', bpm: 150, bars: 32, prefix: 'score3-' },
+  { id: 'omni', title: 'Omni', bpm: 128, bars: 32, folder: 'score/omni/' },
+  { id: 'event-horizon', title: 'Event Horizon', bpm: 160, bars: 32, folder: 'score/event-horizon/' },
+  { id: 'critical-mass', title: 'Critical Mass', bpm: 150, bars: 32, folder: 'score/critical-mass/' },
 ];
 
 /**
  * THE MUSIC PLAN — which song a moment calls for, the way AAA scores assign
  * cues: each AREA owns a theme (so a place keeps its identity and the hub
  * always sounds like home), and a BOSS gets a theme of its own that takes
- * over when it arrives and hands back when it dies.
- *   hub and `field_*` maps → Omni (the main theme)
- *   `arena_*` maps         → Event Horizon (the battle theme)
- *   any boss               → Critical Mass (the heaviest, kept for climaxes)
+ * over when it arrives and hands back when it dies.  Keys: `hub`; `arena`
+ * (maps whose id starts `arena_`); `field` (every other map); `boss`.
+ * Values are song ids.  Overridden by `plan` in score/index.json.
  */
-export const MUSIC_PLAN = {
-  hub: 'omni',
-  arenaPrefix: 'arena_',
-  arena: 'event-horizon',
-  other: 'omni',
-  boss: 'critical-mass',
-} as const;
+export interface MusicPlan { hub: string; arena: string; field: string; boss: string }
+export const MUSIC_PLAN: MusicPlan = { hub: 'omni', arena: 'event-horizon', field: 'omni', boss: 'critical-mass' };
+const ARENA_PREFIX = 'arena_';
+const INDEX_PATH = 'score/index.json';
+const DEFAULT_IMPACT = 'score/impact.mp3';
 
-export function areaSongId(areaId: string, kind: 'hub' | 'arena'): string {
-  if (kind === 'hub') return MUSIC_PLAN.hub;
-  return areaId.startsWith(MUSIC_PLAN.arenaPrefix) ? MUSIC_PLAN.arena : MUSIC_PLAN.other;
-}
-
-function songIndex(id: string): number {
-  const i = SONGS.findIndex(s => s.id === id);
-  return i < 0 ? 0 : i;
-}
+interface ScoreIndex { songs?: SongSpec[]; plan?: Partial<MusicPlan>; impact?: string }
 
 /** Seconds the outgoing and incoming songs overlap across a change. */
 const SONG_XFADE = 0.3;
@@ -163,8 +156,7 @@ const LAYERS: readonly LayerSpec[] = [
 ];
 
 type OneShotId = 'riser' | 'impact' | 'victory';
-/** Shared by every song. */
-const IMPACT_FILE = 'score-impact.mp3';
+
 
 /** atmos level by state.  It ducks once the groove is in so the pads do not
  *  smear the drums, but never leaves: the score has no holes. */
@@ -220,6 +212,11 @@ export class AdaptiveMusic {
   /** A switch stops the old song on a schedule; the new one may not start
    *  before then. */
   private resumeAt = 0;
+  /** The song list, plan and shared impact — built-in until the index loads. */
+  private songs: SongSpec[] = [...SONGS];
+  private plan: MusicPlan = { ...MUSIC_PLAN };
+  private impactFile = DEFAULT_IMPACT;
+  private areaKind: 'hub' | 'arena' = 'hub';
   /** The director's state. */
   private _area = '';
   private areaSong = 0;
@@ -270,7 +267,47 @@ export class AdaptiveMusic {
       gain.connect(this.out);
       this.layers.set(spec.id, { spec, gain, source: null, sourceGain: null, on: false });
     }
+    void this.loadIndex();
   }
+
+  /** Read score/index.json (inlined in the standalone build) and adopt its
+   *  songs and plan.  A missing or malformed index keeps the built-in ones. */
+  private async loadIndex() {
+    try {
+      const w = globalThis as { __omniScoreIndex?: ScoreIndex };
+      let idx = w.__omniScoreIndex;
+      if (!idx) {
+        const res = await fetch(`/assets/audio/${INDEX_PATH}`);
+        if (!res.ok) return;
+        idx = await res.json() as ScoreIndex;
+      }
+      const songs = (idx.songs ?? []).filter(x => x && x.id && x.folder && x.bpm > 0 && x.bars > 0);
+      if (!songs.length) return;
+      const current = this.song.id;
+      this.songs = songs;
+      this.plan = { ...MUSIC_PLAN, ...(idx.plan ?? {}) };
+      if (idx.impact) this.impactFile = idx.impact;
+      const i = this.songIndex(current);
+      this.songIdx = this.songs[i]?.id === current ? i : 0;
+      this.areaSong = this.songIndex(this.areaSongId(this._area, this.areaKind));
+      this.requestSong(this.wantedSong(), null);
+    } catch (e) {
+      this.errors.push(`${INDEX_PATH}: ${(e as Error)?.message ?? e}`);
+    }
+  }
+
+  private areaSongId(areaId: string, kind: 'hub' | 'arena'): string {
+    if (kind === 'hub') return this.plan.hub;
+    return areaId.startsWith(ARENA_PREFIX) ? this.plan.arena : this.plan.field;
+  }
+
+  private songIndex(id: string): number {
+    const i = this.songs.findIndex(x => x.id === id);
+    return i < 0 ? 0 : i;
+  }
+
+  /** The songs available (index order) — for the debug pin. */
+  public get songList(): readonly SongSpec[] { return this.songs; }
 
   // ── public control surface (AudioSystem) ─────────────────────────────────
 
@@ -339,7 +376,8 @@ export class AdaptiveMusic {
   /** The area being entered (from `loadMapFresh`): picks its theme. */
   public setArea(id: string, kind: 'hub' | 'arena') {
     this._area = id;
-    this.areaSong = songIndex(areaSongId(id, kind));
+    this.areaKind = kind;
+    this.areaSong = this.songIndex(this.areaSongId(id, kind));
   }
 
   /**
@@ -417,7 +455,7 @@ export class AdaptiveMusic {
 
   private wantedSong(): number {
     if (this._songMode !== 'auto') return this._songMode;
-    return this.bossActive ? songIndex(MUSIC_PLAN.boss) : this.areaSong;
+    return this.bossActive ? this.songIndex(this.plan.boss) : this.areaSong;
   }
 
   /**
@@ -432,7 +470,7 @@ export class AdaptiveMusic {
    * old song plus the new one's needed stems, for the length of one decode.
    */
   private requestSong(idx: number, stinger: OneShotId | null, notBefore = 0): boolean {
-    if (!SONGS[idx]) return false;
+    if (!this.songs[idx]) return false;
     if (idx === this.songIdx) { this.pending = null; return false; }
     if (this.pending && this.pending.idx === idx) {
       this.pending.notBefore = Math.max(this.pending.notBefore, notBefore);
@@ -454,7 +492,7 @@ export class AdaptiveMusic {
   }
 
   private loadPending(p: PendingSong, id: MusicLayerId) {
-    const file = `${SONGS[p.idx].prefix}${id}.mp3`;
+    const file = `${this.songs[p.idx].folder}${id}.mp3`;
     void this.fetchDecode(file).then(buf => {
       if (this.pending !== p) return;          // superseded: drop it
       p.buffers.set(id, buf);
@@ -515,7 +553,7 @@ export class AdaptiveMusic {
    * than the old one's stop.  Returns false if `idx` is already resident.
    */
   private swapNow(idx: number): boolean {
-    if (idx === this.songIdx || !SONGS[idx]) return false;
+    if (idx === this.songIdx || !this.songs[idx]) return false;
     const now = this.ctx.currentTime;
     const stopAt = now + 0.4;
     if (this.running) {
@@ -562,9 +600,9 @@ export class AdaptiveMusic {
   /** How many times the score has been cued back to bar 1 (`cueEncounter`). */
   public get jumps(): number { return this._jumps; }
   public get bar(): number { return Math.floor(this.position / this.barSec) + 1; }
-  public get song(): SongSpec { return SONGS[this.songIdx]; }
+  public get song(): SongSpec { return this.songs[this.songIdx] ?? this.songs[0]; }
   /** The song a change is loading toward, if one is in flight. */
-  public get pendingSong(): SongSpec | null { return this.pending ? SONGS[this.pending.idx] : null; }
+  public get pendingSong(): SongSpec | null { return this.pending ? this.songs[this.pending.idx] : null; }
   public get area(): string { return this._area; }
   public get lastStinger(): string | null { return this._lastStinger; }
   /** Completed song changes (seamless or immediate). */
@@ -767,7 +805,7 @@ export class AdaptiveMusic {
   // ── loading ───────────────────────────────────────────────────────────────
 
   private load(id: MusicLayerId | OneShotId) {
-    const file = id === 'impact' ? IMPACT_FILE : `${this.song.prefix}${id}.mp3`;  // riser/victory are per song
+    const file = id === 'impact' ? this.impactFile : `${this.song.folder}${id}.mp3`;  // riser/victory are per song
     if (this.buffers.has(id) || this.loading.has(file)) return;
     const gen = this.generation;
     this.loading.add(file);
@@ -780,7 +818,9 @@ export class AdaptiveMusic {
         this.buffers.set(id, buf);
         this.onLoaded(id);
       } catch (e) {
-        this.errors.push(`${file}: ${(e as Error)?.message ?? e}`);
+        // A song's riser and victory stinger are OPTIONAL (an imported song
+        // may not have them): without one, that moment simply has no hit.
+        if (id !== 'riser' && id !== 'victory') this.errors.push(`${file}: ${(e as Error)?.message ?? e}`);
       } finally {
         this.loading.delete(file);
       }

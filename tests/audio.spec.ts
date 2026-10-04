@@ -378,6 +378,10 @@ test('intensity brings the layers in in order, and the stems stay in budget', as
     { timeout: 4000 }).toBeGreaterThan(0.5);
   expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(96 * 1024 * 1024);
   expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  // The song list comes from public/assets/audio/score/index.json (DATA,
+  // maintained by `npm run music:import`), not from code.
+  expect(await engine(page, e => e.audio.music.songList.map((s: { id: string }) => s.id)))
+    .toEqual(expect.arrayContaining(['omni', 'event-horizon', 'critical-mass']));
   watch.assertClean();
 });
 

@@ -9,7 +9,7 @@ asset architecture.
 - **Effects:** Kenney's [Sci-Fi Sounds](https://kenney.nl/assets/sci-fi-sounds)
   and [Impact Sounds](https://kenney.nl/assets/impact-sounds), both CC0.
 - **Music:** the original adaptive score composed for Omni — six synchronised
-  stems plus two transition one-shots (`score-*.mp3`), synthesized entirely by
+  stems plus two transition one-shots (`score/<song>/*.mp3`), synthesized entirely by
   `scripts/score/`. No third-party material, so no attribution requirement.
 
 Keep a license record for every new asset. Put the source URL, author, license,
@@ -33,6 +33,11 @@ Omni. Keep the license text in `public/assets/audio/licenses/` when it is suppli
 by the source.
 
 ## The adaptive score
+
+**Adding or changing songs: see `docs/MUSIC_PIPELINE.md`** (GarageBand kit →
+`npm run music:import`). Songs and the plan live in
+`public/assets/audio/score/index.json`; this section is how the engine uses
+them.
 
 The music is three SONGS — "Omni" (D minor, 128 BPM, 60 s), "Event Horizon"
 (E minor, 160 BPM, 48 s, thrash) and "Critical Mass" (C minor, 150 BPM with
@@ -98,7 +103,7 @@ chip per `SONGS` entry; the active one is lit).  Adding a song: render it with i
 add it to `build.py`, append a `SONGS` entry, and give it a place in
 `MUSIC_PLAN`.
 
-**Loading and memory.**  The title screen fetches `score-atmos.mp3` only; the
+**Loading and memory.**  The title screen fetches the current song's `atmos.mp3` only; the
 combat set and one-shots are fetched when a run starts (`setActive(true)`),
 the boss stem on the first boss sighting.  Stems decode at **25 kHz** through an
 OfflineAudioContext (≈ 60 MB decoded for Omni's six, ≈ 48 MB for Event Horizon's, ≈ 57 MB for Critical Mass's) and resample on playback.

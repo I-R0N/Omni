@@ -3179,6 +3179,9 @@ export class GameEngine {
           songPinned: this.audio.music.songMode !== 'auto',
           songMode: this.audio.music.songMode,
           pending: this.audio.music.pendingSong?.title ?? null,
+          // The LIVE song list (score/index.json), so songs added by
+          // `npm run music:import` show up in the debug panel's Play song.
+          songs: this.audio.music.songList.map(s => ({ id: s.id, title: s.title, bpm: s.bpm })),
         } : null,
       },
     });

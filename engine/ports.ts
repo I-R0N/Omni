@@ -209,6 +209,8 @@ export interface AudioPort {
     readonly song: { readonly title: string };
     readonly songMode: 'auto' | number;
     readonly pendingSong: { readonly title: string } | null;
+    /** The song list from score/index.json (index order). */
+    readonly songList: readonly { readonly id: string; readonly title: string; readonly bpm: number }[];
   } | null;
 }
 
