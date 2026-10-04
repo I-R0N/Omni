@@ -33,6 +33,7 @@
 import { GameEntity, EntityType } from '../../types';
 import { sampleFlow, FlowVector as AnalyticalFlowVector } from './FlowField';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, onMapDimensionsChanged } from '../toroidal';
+import { nowMs } from '../ports';
 
 export type FlowSampler = (wx: number, wy: number) => AnalyticalFlowVector;
 
@@ -204,7 +205,7 @@ export class FlowFieldGrid {
   private breathePhase: number = 0;
 
   // Per-cell timestamp of the most recent asteroid-field recompute (ms,
-  // performance.now() domain).  Written by `_computeShardFlowCell` for
+  // nowMs() domain).  Written by `_computeShardFlowCell` for
   // every cell it touches: every cell at `buildShardFlowField` (map load)
   // and the (2R+1)² kernel block (5 cells at legacy R=0) at each
   // `onTileDestroyed` / `onTileCreated`.  Consumed only by the DBG Flow
@@ -389,7 +390,7 @@ export class FlowFieldGrid {
     // Stamp the recompute time for the DBG Flow Field ▸ "Rebuilds" overlay
     // regardless of blocked-vs-open outcome — every recompute is a
     // rebuild event worth surfacing.
-    this.astRebuildTs[idx] = performance.now();
+    this.astRebuildTs[idx] = nowMs();
     if (this.blocked[idx]) {
       this.astFlowX[idx] = 0; this.astFlowY[idx] = 0; return;
     }
@@ -510,17 +511,17 @@ export class FlowFieldGrid {
    */
   flushEnemyField(): void {
     if (!this.enemyDirty) { this.lastFlushMs = 0; return; }
-    const t0 = performance.now();
+    const t0 = nowMs();
     this.enemyDirty = false;
     this.eneDist.fill(INF);
     if (this.playerCell < 0 || this.blocked[this.playerCell]) {
-      this.lastFlushMs = performance.now() - t0;
+      this.lastFlushMs = nowMs() - t0;
       return;
     }
     this.eneDist[this.playerCell] = 0;
     this._runFullBFS([this.playerCell], this.eneDist, MAX_ENEMY_RANGE);
     this._computeAllGradients(this.eneDist, this.eneFlowX, this.eneFlowY);
-    this.lastFlushMs = performance.now() - t0;
+    this.lastFlushMs = nowMs() - t0;
   }
 
   /**

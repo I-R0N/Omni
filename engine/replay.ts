@@ -18,17 +18,25 @@
  * the format below is not yet a compatibility surface.
  *
  * Known limits of a replay, so a bug report knows what it can promise:
- *  - input is keys + pointer + tap fires; a HELD charge reads the wall clock
- *    and is not recorded;
+ *  - input is keys + pointer + tap fires + charged-shot RELEASES (the outcome,
+ *    not the wall-clock hold that earned it);
  *  - aim is a screen position measured from the viewport centre, so a replay
- *    only matches at the viewport it was recorded at;
- *  - the PerfController's load EWMA is wall-clock, so a held replay feeds it
- *    no time term (`GameEngine.simStep`).
+ *    only matches at the viewport it was recorded at — a log carries its
+ *    `viewport` and `runReplay` throws on a mismatch;
+ *  - the PerfController's load EWMA has a wall-clock time term; a replay feeds
+ *    it from the log (`ReplayInput.simMs`, 0 when absent), so skip tiers are
+ *    reproducible once a RECORDER writes them — no recorder exists yet, so
+ *    today's logs replay at zero time load.
+ *  - `Math.sin` / `Math.cos` / `Math.pow` are not correctly rounded and differ
+ *    between JS engines in the last place, so a hash is bit-exact within one
+ *    engine and agrees across engines on the random streams and the player
+ *    only (docs/ENGINE_CORE_PLAN.md §8, S2 → PM).
  */
 import type { GameEngine } from './GameEngine';
 import { EntityType, MapType } from '../types';
 import { peekIdCounter } from './systems/IdAllocator';
 import { simStates } from './systems/rng';
+import { viewport } from './ports';
 
 /** One change to the input state, taking effect at `at` (a sim step index).
  *  `keys` and `aim` LATCH until the next entry that sets them; `fire` taps
@@ -38,12 +46,24 @@ export interface ReplayInput {
   keys?: string[];
   aim?: [number, number];
   fire?: Array<[number, number]>;
+  /** CHARGED-shot releases, this step only.  Recorded as the release rather
+   *  than the hold that earned it, because the hold is wall-clock. */
+  charge?: Array<[number, number]>;
+  /** The PerfController's sim-time load term (ms per substep) from this step
+   *  on — it LATCHES.  Wall-clock in a live run, so a recorder writes it when
+   *  it changes; a log without it replays at zero time load. */
+  simMs?: number;
 }
 
 export interface ReplayLog {
   seed: number;
   mapType: MapType;
   inputs: ReplayInput[];
+  /** The display the log was recorded at, `[width, height]` in CSS px.  Aim is
+   *  a screen position and the spawn ring is sized in screens, so a replay at
+   *  another size is a DIFFERENT run — `runReplay` refuses it by name instead
+   *  of diverging for no visible reason.  Absent = unchecked (legacy logs). */
+  viewport?: [number, number];
 }
 
 export interface ReplayHash {
@@ -60,18 +80,6 @@ export interface ReplayResult {
   steps: number;
   hashes: ReplayHash[];
   final: ReplayHash;
-}
-
-/** A root seed for a run nobody asked to pin.  Hidden from the player
- *  (D-S1-a); the platform clock is read here and nowhere in the sim. */
-export function freshRunSeed(): number {
-  const c = (globalThis as { crypto?: Crypto }).crypto;
-  if (c && typeof c.getRandomValues === 'function') {
-    const a = new Uint32Array(1);
-    c.getRandomValues(a);
-    return a[0];
-  }
-  return (Date.now() ^ ((typeof performance !== 'undefined' ? performance.now() : 0) * 1000)) >>> 0;
 }
 
 // ── hashing ─────────────────────────────────────────────────────────────
@@ -145,23 +153,36 @@ export function runReplay(
    *  fx streams here and requires the hashes not to notice. */
   beforeStep?: (step: number) => void,
 ): ReplayResult {
+  g.activatePlatform();
+  if (log.viewport) {
+    const v = viewport();
+    if (v.width !== log.viewport[0] || v.height !== log.viewport[1]) {
+      throw new Error(
+        `replay was recorded at ${log.viewport[0]}×${log.viewport[1]} but is running at ${v.width}×${v.height}: ` +
+        'aim and spawn geometry are sized in screens, so it would be a different run');
+    }
+  }
   g.beginSeededRun(log.seed, log.mapType);
-  const input = (g as unknown as { input: { applyReplayFrame: (k: readonly string[], x: number, y: number, f: ReadonlyArray<readonly [number, number]>) => void } }).input;
+  const input = (g as unknown as { input: { applyReplayFrame: (k: readonly string[], x: number, y: number, f: ReadonlyArray<readonly [number, number]>, c: ReadonlyArray<readonly [number, number]>) => void } }).input;
   const inputs = log.inputs.slice().sort((a, b) => a.at - b.at);
   let next = 0;
   let keys: string[] = [];
-  let aim: [number, number] = [window.innerWidth / 2 + 200, window.innerHeight / 2];
+  g.replayLoadMs = 0;
+  let aim: [number, number] = [viewport().width / 2 + 200, viewport().height / 2];
   const hashes: ReplayHash[] = [hashSimState(g, 0)];
 
   for (let step = 0; step < steps; step++) {
     let fire: Array<[number, number]> = [];
+    let charge: Array<[number, number]> = [];
     while (next < inputs.length && inputs[next].at <= step) {
       const i = inputs[next++];
       if (i.keys) keys = i.keys;
       if (i.aim) aim = i.aim;
+      if (i.simMs !== undefined) g.replayLoadMs = i.simMs;
       if (i.fire && i.at === step) fire = i.fire;
+      if (i.charge && i.at === step) charge = i.charge;
     }
-    input.applyReplayFrame(keys, aim[0], aim[1], fire);
+    input.applyReplayFrame(keys, aim[0], aim[1], fire, charge);
     if (beforeStep) beforeStep(step);
     g.stepSim(1);
     if ((step + 1) % hashEvery === 0) hashes.push(hashSimState(g, step + 1));
@@ -172,8 +193,8 @@ export function runReplay(
 /** Hand the engine back to the frame loop and drop the held keys. */
 export function endReplay(g: GameEngine): void {
   g.replayHold = false;
-  (g as unknown as { input: { applyReplayFrame: (k: readonly string[], x: number, y: number, f: []) => void } })
-    .input.applyReplayFrame([], window.innerWidth / 2, window.innerHeight / 2, []);
+  (g as unknown as { input: { applyReplayFrame: (k: readonly string[], x: number, y: number, f: [], c: []) => void } })
+    .input.applyReplayFrame([], viewport().width / 2, viewport().height / 2, [], []);
 }
 
 /** First step at which two hash series disagree, and which section moved;

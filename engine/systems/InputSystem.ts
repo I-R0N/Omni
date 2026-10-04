@@ -3,6 +3,8 @@
 import { Vector2, JoystickHUDState, FireButtonHUDState, ControlScheme, RumbleKind } from '../../types';
 import { INPUT_CONSTANTS, CONTROL_SCHEME_RULES } from '../../constants';
 import { DualSenseHID, TriggerProfile, TriggerEncoding, TRIGGER_ENCODINGS, TRIGGER_OFF } from './DualSenseHID';
+import { nowMs, viewport } from '../ports';
+import type { InputPort } from '../ports';
 
 /** One frame of pad state, reduced to what the mapping layer cares about.
  *  `applyPadSnapshot` takes this rather than a live `Gamepad` so the whole
@@ -19,7 +21,7 @@ export interface PadSnapshot {
   values?: readonly number[];
 }
 
-export class InputSystem {
+export class InputSystem implements InputPort {
   private keys: Set<string>;
   private mousePosition: Vector2;
   private mouseDown: boolean;
@@ -114,6 +116,9 @@ export class InputSystem {
    *  i.e. the ship itself. */
   private padAimRead: Vector2 = { x: 0, y: 0 };
   private padFireDown: boolean = false;
+  /** Live play only (set each frame by `pollGamepad`): may Space shoot now? */
+  private keyFireEnabled: boolean = false;
+  private spaceFireStart: number = 0;
   private padFireStart: number = 0;
   /** Latched edge presses, drained by the engine. Counters, not booleans, so
    *  two presses inside one frame cannot silently become one. */
@@ -122,7 +127,7 @@ export class InputSystem {
   private padCyclePresses: number = 0;
   private padPausePresses: number = 0;
   /** DEBUG PANEL toggles — the pad's Select/Share, the ` key — and Escape,
-   *  which only ever closes it.  Latched like the pad edges and drained by
+   *  which closes it first and is otherwise the pause key.  Latched like the pad edges and drained by
    *  `GameEngine.pollGamepad`, above every freeze, so each works from any
    *  screen. */
   private padDebugPresses: number = 0;
@@ -153,34 +158,42 @@ export class InputSystem {
   constructor() {
     this.keys = new Set();
     // Initialize to center of screen so player looks forward/neutral initially
-    this.mousePosition = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    this.mousePosition = { x: viewport().width / 2, y: viewport().height / 2 };
     this.mouseDown = false;
-
-    this.initListeners();
+    // No listeners here: the constructor touches no platform object, so the
+    // very same class runs headless, driven by `applyReplayFrame`.  The
+    // browser platform calls `attach(window)` (platform/browser.ts).
   }
 
-  private initListeners() {
+  /** The event target the DOM listeners are on, or null when driven by hand. */
+  private target: EventTarget | null = null;
+
+  /** Start listening on `target` (the browser's `window`).  Idempotent. */
+  public attach(target: EventTarget): void {
+    if (this.target) return;
+    this.target = target;
+    const t = target;
     // Keyboard
-    window.addEventListener('keydown', this.handleKeyDown);
-    window.addEventListener('keyup', this.handleKeyUp);
+    t.addEventListener('keydown', this.handleKeyDown as EventListener);
+    t.addEventListener('keyup', this.handleKeyUp as EventListener);
 
     // Mouse
-    window.addEventListener('mousemove', this.handleMouseMove);
-    window.addEventListener('mousedown', this.handleMouseDown);
-    window.addEventListener('mouseup', this.handleMouseUp);
+    t.addEventListener('mousemove', this.handleMouseMove as EventListener);
+    t.addEventListener('mousedown', this.handleMouseDown as EventListener);
+    t.addEventListener('mouseup', this.handleMouseUp as EventListener);
 
     // Note: We removed 'click' listener to handle timing manually in mouseup
 
     // Touch (Passive false allows us to prevent scrolling)
-    window.addEventListener('touchstart', this.handleTouchStart, { passive: false });
-    window.addEventListener('touchmove', this.handleTouchMove, { passive: false });
-    window.addEventListener('touchend', this.handleTouchEnd);
-    window.addEventListener('touchcancel', this.handleTouchEnd);
+    t.addEventListener('touchstart', this.handleTouchStart as EventListener, { passive: false });
+    t.addEventListener('touchmove', this.handleTouchMove as EventListener, { passive: false });
+    t.addEventListener('touchend', this.handleTouchEnd as EventListener);
+    t.addEventListener('touchcancel', this.handleTouchEnd as EventListener);
 
     // Gamepad.  These two events only announce arrival/departure — the state
     // itself is polled.  Safari on iOS fires them for a Bluetooth DualSense.
-    window.addEventListener('gamepadconnected', this.handleGamepadConnected);
-    window.addEventListener('gamepaddisconnected', this.handleGamepadDisconnected);
+    t.addEventListener('gamepadconnected', this.handleGamepadConnected);
+    t.addEventListener('gamepaddisconnected', this.handleGamepadDisconnected);
   }
 
   private handleGamepadConnected = (e: Event) => {
@@ -215,12 +228,30 @@ export class InputSystem {
     }
     if (e.code === 'Escape' && !e.repeat) this.escapePresses++;
     if (this.isUiKeyTarget(e.target)) return;
+    // SPACE FIRES (user call): a DEDICATED fire control, so it shoots on PRESS
+    // like the pad trigger and a hold past CHARGE_FULL adds the charged shot
+    // on release.  The mouse still fires and is still the aim; this only adds
+    // a second trigger, aimed at wherever the pointer already is.  It goes on
+    // the DEVICE queue so a shot is never offered to a HUD widget under the
+    // pointer.  Gated on `keyFireEnabled` (live play) so a press on a menu or
+    // while docked banks nothing and still lets Space activate a focused button.
+    if (e.code === 'Space' && this.keyFireEnabled) {
+      e.preventDefault();
+      if (!e.repeat && !this.keys.has('Space')) {
+        this.spaceFireStart = nowMs();
+        this.deviceFireEvents.push({ x: this.mousePosition.x, y: this.mousePosition.y });
+      }
+    }
     this.keys.add(e.code);
   };
 
   // Key UP is never filtered: a key held before focus moved into the panel
   // must still release, or the ship keeps thrusting on a key nobody holds.
   private handleKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'Space' && this.keys.has('Space') && this.keyFireEnabled
+        && (nowMs() - this.spaceFireStart) / 1000 >= INPUT_CONSTANTS.CHARGE_FULL) {
+      this.deviceChargeEvents.push({ x: this.mousePosition.x, y: this.mousePosition.y });
+    }
     this.keys.delete(e.code);
   };
 
@@ -236,7 +267,7 @@ export class InputSystem {
    *  undocks from the station screen however its buttons happen to hold
    *  focus, and that must keep working. */
   private isUiKeyTarget(t: EventTarget | null): boolean {
-    if (!(t instanceof HTMLElement)) return false;
+    if (typeof HTMLElement === 'undefined' || !(t instanceof HTMLElement)) return false;
     if (t.isContentEditable) return true;
     const tag = t.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
@@ -245,7 +276,7 @@ export class InputSystem {
 
   /** Inside the debug panel or on its launcher (`[data-debug-ui]`). */
   private isDebugUiTarget(t: EventTarget | null): boolean {
-    return t instanceof Element && t.closest('[data-debug-ui]') !== null;
+    return typeof Element !== 'undefined' && t instanceof Element && t.closest('[data-debug-ui]') !== null;
   }
 
   private handleMouseMove = (e: MouseEvent) => {
@@ -271,7 +302,7 @@ export class InputSystem {
   // on, so a game drag that began on the canvas keeps driving movement
   // even when the finger crosses a HUD element.
   private shouldIgnoreEvent(e: Event): boolean {
-    return !(e.target instanceof HTMLCanvasElement);
+    return typeof HTMLCanvasElement === 'undefined' || !(e.target instanceof HTMLCanvasElement);
   }
 
   private handleMouseDown = (e: MouseEvent) => {
@@ -280,13 +311,13 @@ export class InputSystem {
     // The fire button is drawn in this scheme, so it is clickable in it too.
     if (this.inFireButton(e.clientX, e.clientY)) {
       this.fireBtnDown = true;
-      this.fireBtnStart = performance.now();
+      this.fireBtnStart = nowMs();
       return;
     }
 
     this.mouseDown = true;
     this.pointerIsTouch = false;
-    this.touchStartTime = performance.now();
+    this.touchStartTime = nowMs();
     this.touchStartPos = { x: e.clientX, y: e.clientY };
     // Update pos immediately so rotation is correct
     if (this.rules.pointerAims) this.mousePosition = { x: e.clientX, y: e.clientY };
@@ -330,7 +361,7 @@ export class InputSystem {
           && this.inFireButton(touch.clientX, touch.clientY)) {
         this.fireTouchId = touch.identifier;
         this.fireBtnDown = true;
-        this.fireBtnStart = performance.now();
+        this.fireBtnStart = nowMs();
         continue;
       }
 
@@ -356,7 +387,7 @@ export class InputSystem {
         // The touch is still tracked, because a TAP still docks the ship and
         // still reaches the minimap and the loadout slots.
         if (this.rules.pointerAims) this.mousePosition = { x: touch.clientX, y: touch.clientY };
-        this.touchStartTime = performance.now();
+        this.touchStartTime = nowMs();
         this.touchStartPos = { x: touch.clientX, y: touch.clientY };
       }
     }
@@ -408,7 +439,7 @@ export class InputSystem {
   };
 
   private checkTap(x: number, y: number) {
-    const duration = (performance.now() - this.touchStartTime) / 1000; // seconds
+    const duration = (nowMs() - this.touchStartTime) / 1000; // seconds
 
     // Charged shot path: only fires when the player has held for the full
     // CHARGE_FULL window (the visible ring is also complete at this
@@ -636,7 +667,7 @@ export class InputSystem {
    *  headless browser cannot provide. */
   public currentActuator(): { playEffect(type: string, params: object): Promise<unknown> } | null {
     if (this.padIndex === null) return null;
-    const nav = navigator as Navigator & { getGamepads?: () => (Gamepad | null)[] };
+    const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { getGamepads?: () => (Gamepad | null)[] };
     if (typeof nav.getGamepads !== 'function') return null;
     const pad = nav.getGamepads()[this.padIndex];
     const act = (pad as unknown as { vibrationActuator?: { playEffect?: unknown } } | null)?.vibrationActuator;
@@ -650,7 +681,7 @@ export class InputSystem {
    * which today is most of them, so this must never be load-bearing.
    */
   public rumble(amount: number, kind: RumbleKind = 'impact') {
-    const now = performance.now();
+    const now = nowMs();
     const params = this.rumbleParamsFor(amount, now);
     if (!params) return;
 
@@ -733,8 +764,8 @@ export class InputSystem {
     // minimap already owns that corner, and a fire button on top of the map
     // toggle would cost the player their map.
     const mirrored = this.rules.stickSide === 'right';
-    out.x = mirrored ? B.MARGIN_X : window.innerWidth - B.MARGIN_X;
-    out.y = window.innerHeight - (mirrored ? B.MARGIN_Y_MIRRORED : B.MARGIN_Y);
+    out.x = mirrored ? B.MARGIN_X : viewport().width - B.MARGIN_X;
+    out.y = viewport().height - (mirrored ? B.MARGIN_Y_MIRRORED : B.MARGIN_Y);
     return out;
   }
   private _fbScratch: Vector2 = { x: 0, y: 0 };
@@ -755,7 +786,7 @@ export class InputSystem {
   private releaseFireButton() {
     if (!this.fireBtnDown) return;
     this.fireBtnDown = false;
-    const held = (performance.now() - this.fireBtnStart) / 1000;
+    const held = (nowMs() - this.fireBtnStart) / 1000;
     // Fire along the CURRENT aim, wherever the aim finger last left it —
     // the button says when, the aim says where.
     const target = { x: this.mousePosition.x, y: this.mousePosition.y };
@@ -777,7 +808,7 @@ export class InputSystem {
     if (!this.rules.fireButton) return null;
     const c = this.fireButtonCenter(this._fbScratch);
     const held = this.fireBtnDown
-      ? (performance.now() - this.fireBtnStart) / 1000 / INPUT_CONSTANTS.CHARGE_FULL
+      ? (nowMs() - this.fireBtnStart) / 1000 / INPUT_CONSTANTS.CHARGE_FULL
       : 0;
     return {
       x: c.x,
@@ -821,8 +852,8 @@ export class InputSystem {
   public inJoystickZone(x: number, y: number): boolean {
     if (!this.rules.joystick) return false;
     const J = INPUT_CONSTANTS.JOYSTICK;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = viewport().width;
+    const h = viewport().height;
 
     const cx = w / 2;
     const cy = h / 2;
@@ -887,8 +918,8 @@ export class InputSystem {
     // the paths the mouse already drives, with nothing else to keep in sync.
     // The heading persists when the thumb lifts, exactly as a released stick
     // or a hand off the mouse does.
-    this.mousePosition.x = window.innerWidth / 2 + nx * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
-    this.mousePosition.y = window.innerHeight / 2 + ny * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
+    this.mousePosition.x = viewport().width / 2 + nx * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
+    this.mousePosition.y = viewport().height / 2 + ny * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
 
     // The knob rides the thumb but stops at the ring; past that the thumb
     // can wander without the widget chasing it off into the corner.
@@ -916,9 +947,9 @@ export class InputSystem {
       // DBG: park a neutral stick where a right-handed thumb would land.
       const J = INPUT_CONSTANTS.JOYSTICK;
       const x = this.rules.stickSide === 'right'
-        ? window.innerWidth * (1 - J.ZONE_W_FRAC * 0.55)
-        : window.innerWidth * J.ZONE_W_FRAC * 0.55;
-      const y = window.innerHeight - J.ZONE_BOTTOM_PX - J.RADIUS - 20;
+        ? viewport().width * (1 - J.ZONE_W_FRAC * 0.55)
+        : viewport().width * J.ZONE_W_FRAC * 0.55;
+      const y = viewport().height - J.ZONE_BOTTOM_PX - J.RADIUS - 20;
       return { originX: x, originY: y, knobX: x, knobY: y, fade: 1, held: false };
     }
     if (this.stickFade <= 0) return null;
@@ -1011,7 +1042,7 @@ export class InputSystem {
       this.padNavHeld.y = 0;
       return;
     }
-    const now = performance.now();
+    const now = nowMs();
     // A CHANGE of direction restarts the repeat clock, so rolling the thumb
     // around the pad steps once per direction rather than machine-gunning.
     if (x !== this.padNavHeld.x || y !== this.padNavHeld.y) {
@@ -1291,7 +1322,7 @@ export class InputSystem {
     const fireHeld = fireEnabled && this.padGroupValue(snap, fireGroup) >= this.padFirePoint();
     if (fireHeld && !this.padFireDown) {
       this.padFireDown = true;
-      this.padFireStart = performance.now();
+      this.padFireStart = nowMs();
       this.writePadPointer();
       // DEVICE queue, not the tap queue: a pad shot must not be offered to
       // the minimap toggle or the loadout slots on its way to the weapon.
@@ -1302,7 +1333,7 @@ export class InputSystem {
       this.padFireDown = false;
       // Only the CHARGED shot is owed on release now — the ordinary one was
       // paid at the press.
-      if (fireEnabled && (performance.now() - this.padFireStart) / 1000 >= INPUT_CONSTANTS.CHARGE_FULL) {
+      if (fireEnabled && (nowMs() - this.padFireStart) / 1000 >= INPUT_CONSTANTS.CHARGE_FULL) {
         this.deviceChargeEvents.push(this.padPointerTarget());
       }
     }
@@ -1317,14 +1348,14 @@ export class InputSystem {
    *  ship is there, and `claimTapNear` would eat the shot as a dock tap. */
   private padPointerTarget(): Vector2 {
     return {
-      x: window.innerWidth / 2 + this.padAim.x * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS,
-      y: window.innerHeight / 2 + this.padAim.y * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS,
+      x: viewport().width / 2 + this.padAim.x * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS,
+      y: viewport().height / 2 + this.padAim.y * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS,
     };
   }
 
   private writePadPointer() {
-    this.mousePosition.x = window.innerWidth / 2 + this.padAim.x * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
-    this.mousePosition.y = window.innerHeight / 2 + this.padAim.y * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
+    this.mousePosition.x = viewport().width / 2 + this.padAim.x * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
+    this.mousePosition.y = viewport().height / 2 + this.padAim.y * INPUT_CONSTANTS.GAMEPAD.AIM_RADIUS;
   }
 
   /**
@@ -1334,7 +1365,8 @@ export class InputSystem {
    * one frame buys nothing but garbage).
    */
   public pollGamepad(fireEnabled: boolean) {
-    const nav = navigator as Navigator & { getGamepads?: () => (Gamepad | null)[] };
+    this.keyFireEnabled = fireEnabled;
+    const nav = (typeof navigator !== 'undefined' ? navigator : {}) as Navigator & { getGamepads?: () => (Gamepad | null)[] };
     if (typeof nav.getGamepads !== 'function') return;
 
     const pads = nav.getGamepads();
@@ -1492,7 +1524,7 @@ export class InputSystem {
     // Name the effects, so "can this pad do trigger feedback" is answered by
     // looking rather than by guessing at browser support tables.
     const effects = this.actuatorEffects().join('+');
-    return (performance.now() < this.rumbleUntilMs ? 'playing · ' : 'ready · ') + effects;
+    return (nowMs() < this.rumbleUntilMs ? 'playing · ' : 'ready · ') + effects;
   }
 
   /** DBG readout, line 2: the numbers that tell you whether the pad is
@@ -1515,12 +1547,17 @@ export class InputSystem {
    *  downstream can tell it from a person (engine/replay.ts).  `fire` taps
    *  are queued for this step only. */
   public applyReplayFrame(keys: readonly string[], aimX: number, aimY: number,
-                          fire: ReadonlyArray<readonly [number, number]>): void {
+                          fire: ReadonlyArray<readonly [number, number]>,
+                          charge: ReadonlyArray<readonly [number, number]> = []): void {
     this.keys.clear();
     for (const k of keys) this.keys.add(k);
     this.mousePosition.x = aimX;
     this.mousePosition.y = aimY;
     for (const f of fire) this.fireEvents.push({ x: f[0], y: f[1] });
+    // A CHARGED shot is recorded as the release it produced, not the hold that
+    // earned it: the hold is wall-clock (`getMouseHoldDuration`), and a log
+    // that stored it would only replay on a machine with the same frame times.
+    for (const c of charge) this.chargeReleaseEvents.push({ x: c[0], y: c[1] });
   }
 
   public getMovementVector(): Vector2 {
@@ -1583,8 +1620,8 @@ export class InputSystem {
     // This makes direction and magnitude fully independent of where the
     // touch started, so sweeping past 180° never drops acceleration.
     if (this.mouseDown) {
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 2;
+      const cx = viewport().width / 2;
+      const cy = viewport().height / 2;
 
       const dx = this.mousePosition.x - cx;
       const dy = this.mousePosition.y - cy;
@@ -1682,27 +1719,43 @@ export class InputSystem {
     // everywhere, so the ring means the same thing whichever control you are
     // holding.  The fire button reads first: in the joystick scheme the aim
     // finger is not a trigger, so its hold must not fill the ring.
-    if (this.fireBtnDown) return (performance.now() - this.fireBtnStart) / 1000;
-    if (this.padFireDown) return (performance.now() - this.padFireStart) / 1000;
+    if (this.fireBtnDown) return (nowMs() - this.fireBtnStart) / 1000;
+    if (this.padFireDown) return (nowMs() - this.padFireStart) / 1000;
+    if (this.keyFireEnabled && this.keys.has('Space')) return (nowMs() - this.spaceFireStart) / 1000;
     if (!this.mouseDown) return 0;
     if (!this.rules.tapFires) return 0;
-    return (performance.now() - this.touchStartTime) / 1000;
+    return (nowMs() - this.touchStartTime) / 1000;
+  }
+
+  /** Let go of everything held down by a device that may not report its
+   *  release: keys, a pressed pointer, the on-screen fire button.  Called when
+   *  the app goes to the background — `keyup` is never delivered to a hidden
+   *  page, so without this a key held at that moment keeps thrusting the ship
+   *  on return.  A cancelled gesture fires nothing. */
+  public releaseAll(): void {
+    this.keys.clear();
+    this.mouseDown = false;
+    this.fireBtnDown = false;
   }
 
   public cleanup() {
-    window.removeEventListener('keydown', this.handleKeyDown);
-    window.removeEventListener('keyup', this.handleKeyUp);
-    window.removeEventListener('mousemove', this.handleMouseMove);
-    window.removeEventListener('mousedown', this.handleMouseDown);
-    window.removeEventListener('mouseup', this.handleMouseUp);
+    const t = this.target;
+    this.target = null;
+    if (t) {
+      t.removeEventListener('keydown', this.handleKeyDown as EventListener);
+      t.removeEventListener('keyup', this.handleKeyUp as EventListener);
+      t.removeEventListener('mousemove', this.handleMouseMove as EventListener);
+      t.removeEventListener('mousedown', this.handleMouseDown as EventListener);
+      t.removeEventListener('mouseup', this.handleMouseUp as EventListener);
 
-    window.removeEventListener('touchstart', this.handleTouchStart);
-    window.removeEventListener('touchmove', this.handleTouchMove);
-    window.removeEventListener('touchend', this.handleTouchEnd);
-    window.removeEventListener('touchcancel', this.handleTouchEnd);
+      t.removeEventListener('touchstart', this.handleTouchStart as EventListener);
+      t.removeEventListener('touchmove', this.handleTouchMove as EventListener);
+      t.removeEventListener('touchend', this.handleTouchEnd as EventListener);
+      t.removeEventListener('touchcancel', this.handleTouchEnd as EventListener);
 
-    window.removeEventListener('gamepadconnected', this.handleGamepadConnected);
-    window.removeEventListener('gamepaddisconnected', this.handleGamepadDisconnected);
+      t.removeEventListener('gamepadconnected', this.handleGamepadConnected);
+      t.removeEventListener('gamepaddisconnected', this.handleGamepadDisconnected);
+    }
 
     // A pad left holding a stiff trigger stays stiff in whatever the player
     // opens next — the clutch is physical state, not page state.

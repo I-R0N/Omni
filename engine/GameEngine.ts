@@ -2,12 +2,9 @@
 
 import { sim, fxRng, seedRng } from './systems/rng';
 import { resetIdCounter } from './systems/IdAllocator';
-import { freshRunSeed } from './replay';
-import { InputSystem } from './systems/InputSystem';
+import { installClock, installViewport, nowMs, viewport, clock } from './ports';
+import type { Platform, AudioPort, InputPort, RendererPort, Storage, Lifecycle, LifecycleEvent } from './ports';
 import { PhysicsSystem } from './systems/PhysicsSystem';
-import { RenderSystem } from './systems/RenderSystem';
-import type { Renderer } from './systems/Renderer';
-import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
@@ -21,8 +18,6 @@ import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
-import { AudioSystem } from './systems/AudioSystem';
-import { registerSfx } from './systems/SfxRegistry';
 import { nextId } from './systems/IdAllocator';
 import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
@@ -230,7 +225,7 @@ export class GameEngine {
    *  and the Playwright suites drive the pad mapping through it (CLAUDE.md
    *  §8 — `private` is compile-time only, so the suites could read it either
    *  way; this just stops the compiler disagreeing with the debug menu). */
-  input: InputSystem;
+  input: InputPort;
   physics: PhysicsSystem;
   /* Typed by the SEAM, not the class (gauntlet WebGPU stage 3): the engine
      depends on what a renderer must provide, and `new RenderSystem()` below
@@ -240,7 +235,7 @@ export class GameEngine {
      `RendererDiagnostics` is the debug/perf surface that grows with the
      renderer and is not part of that contract. Split because 15 of the last
      15 additions were diagnostics — see engine/systems/Renderer.ts. */
-  renderer: Renderer & RendererDiagnostics;
+  renderer: RendererPort;
   private ai: AISystem;
   private particles: ParticleSystem;
   trails: TrailSystem;
@@ -263,7 +258,7 @@ export class GameEngine {
   // simulation state, so there is nothing to protect.  See
   // docs/SFX_INVENTORY.md for the id contract and
   // engine/systems/AudioSystem.ts for the voice budget.
-  public audio: AudioSystem;
+  public audio: AudioPort;
   // Salvage-pickup streak: consecutive collections inside
   // SALVAGE_STREAK_WINDOW_MS step the pickup chime up a semitone, so a
   // magnetised cluster climbs a scale instead of rattling.  Audio-only
@@ -991,23 +986,27 @@ export class GameEngine {
 
   private onStatsUpdate: (stats: EngineStats) => void;
 
-  constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
+  /** The outside world: clock, viewport, storage, lifecycle, entropy, and the
+   *  audio / input / renderer adapters (engine/ports.ts).  Everything the sim
+   *  reads from outside arrives through here. */
+  public readonly platform: Platform;
+  public readonly storage: Storage;
+
+  constructor(platform: Platform, onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
+    this.platform = platform;
+    this.storage = platform.storage;
+    this.activatePlatform();
     this.onStatsUpdate = onStatsUpdate;
     const clamped = Math.min(3, Math.max(0, Math.round(difficultyLevel)));
     this.difficultyLevel = clamped;
     this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
     
-    this.input = new InputSystem();
-    // Audio: the AudioContext is NOT created here.  Mobile browsers
-    // refuse to start audio outside a user gesture, so the manager only
-    // arms one-shot window listeners and builds its graph on the first
-    // real tap/click/keypress (including a menu tap, which on phones is
-    // usually the first gesture there is).
-    this.audio = new AudioSystem();
-    registerSfx(this.audio);
+    this.input = platform.input;
+    this.audio = platform.audio;
     this.audio.armGestureUnlock();
+    this.lifecycleOff = platform.lifecycle.subscribe((e) => this.onLifecycle(e));
     this.physics = new PhysicsSystem();
-    this.renderer = new RenderSystem();
+    this.renderer = platform.renderer;
     // Wire physics into the renderer so the material-tile branch can
     // suppress edge strokes on edges that are cleanly butted against
     // a neighbour tile (queried via hasStaticTileNear).
@@ -1182,15 +1181,52 @@ export class GameEngine {
   public start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    this.lastTime = performance.now();
+    this.lastTime = nowMs();
     this.simAccumulator = 0;
     this.prepareFrameEntities();
-    requestAnimationFrame(this.loop);
+    clock().requestFrame(this.loop);
   }
 
   public stop() {
     this.isRunning = false;
     this.input.cleanup();
+    this.lifecycleOff?.();
+    this.lifecycleOff = null;
+  }
+
+  private lifecycleOff: (() => void) | null = null;
+
+  /** Make this engine's clock and viewport THE ones the sim reads.  They are
+   *  module-level (engine/ports.ts), so the engine constructed last owns them;
+   *  a process that holds two engines (the browser parity test, a headless
+   *  suite) calls this on the one it is about to drive — `runReplay` does. */
+  public activatePlatform(): void {
+    installClock(this.platform.clock);
+    installViewport(this.platform.viewport);
+  }
+
+  /** The app went to the background / came back (engine/ports.ts `Lifecycle`).
+   *
+   *  BACKGROUND pauses live play — a phone call or an app switch must not cost
+   *  the player their ship — and lets go of every held key, because a hidden
+   *  page is never told a key came up.  The pause is SILENT: the audio layer
+   *  is already being suspended, and a "back" blip queued on a suspended
+   *  context would play on return.  Docked, dead, stage-clear and menu states
+   *  are left alone (each is already a screen; `pauseGame` refuses them).
+   *
+   *  FOREGROUND never resumes by itself — the player taps resume — but it
+   *  always re-anchors the frame clock.  The accumulator drain clamps a long
+   *  frame (`MAX_FRAME_TIME`), so a stale `lastTime` could never cost more than
+   *  one clamped frame; re-anchoring makes it cost NONE, in every state
+   *  including the ones that keep running (the death screen). */
+  public onLifecycle(e: LifecycleEvent): void {
+    if (e === 'background') {
+      this.input.releaseAll();
+      this.pauseGame(true);
+    } else {
+      this.lastTime = nowMs();
+      this.simAccumulator = 0;
+    }
   }
 
   // --- STATE MANAGEMENT ---
@@ -1205,6 +1241,9 @@ export class GameEngine {
   /** True while a replay is driving the sim by hand: the rAF loop then only
    *  draws, and `stepSim` is the one thing that advances the world. */
   public replayHold = false;
+  /** The PerfController's sim-time load term while a replay holds the loop
+   *  (ms per substep).  Set by `runReplay` from the log; 0 = no time term. */
+  public replayLoadMs = 0;
 
   /** Begin a NEW run on `mapType` from `seed` and hold the loop so `stepSim`
    *  drives it.  The replay harness's entry point (engine/replay.ts).  `seed`
@@ -1218,6 +1257,12 @@ export class GameEngine {
     this.deathSummary = null;
     this.resetAndLoadSelectedMap();
     this.startGame();
+    // A replay starts from a DEFINED state, not from wherever the last run left
+    // the ship pointing: map load re-places the player but leaves its heading
+    // (the next step re-derives it from the aim), so the step-0 hash used to
+    // depend on the previous replay.  Pinned here, in the replay entry only —
+    // the in-game respawn path is untouched.
+    this.player.rotation = 0;
     this.replayHold = true;
     this.simAccumulator = 0;
     this.prepareFrameEntities();
@@ -1450,7 +1495,7 @@ export class GameEngine {
     });
   }
 
-  public pauseGame() {
+  public pauseGame(silent = false) {
     // The docked station UI, the death/run-summary screen and the stage-clear
     // screen are already up; stacking the pause menu on top would double up
     // two full-screen overlays.  (Docked and stage-clear freeze the sim; the
@@ -1459,7 +1504,7 @@ export class GameEngine {
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
         this.audio.setActive(false);
-        this.audio.play('ui.back');
+        if (!silent) this.audio.play('ui.back');
     }
   }
 
@@ -1467,7 +1512,7 @@ export class GameEngine {
     if (this.gameState === GameState.PAUSED) {
         this.gameState = GameState.PLAYING;
         this.audio.play('ui.confirm');
-        this.lastTime = performance.now(); // Prevent physics jump
+        this.lastTime = nowMs(); // Prevent physics jump
         this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
   }
@@ -1616,7 +1661,7 @@ export class GameEngine {
         seedRng(HUB_WORLD_SEED);
         this.arenaSeed = null;
       } else {
-        const seed = (this.pendingRunSeed ?? freshRunSeed()) >>> 0;
+        const seed = (this.pendingRunSeed ?? this.platform.entropy.seed()) >>> 0;
         this.pendingRunSeed = null;
         seedRng(seed);
         this.arenaSeed = seed;
@@ -1629,7 +1674,7 @@ export class GameEngine {
         // fauna, drops, rivals) is not, and must not repeat every visit.
         // The streams continue from a pinned seed (replay / tests) or a fresh
         // one.
-        const live = (this.pendingRunSeed ?? freshRunSeed()) >>> 0;
+        const live = (this.pendingRunSeed ?? this.platform.entropy.seed()) >>> 0;
         this.pendingRunSeed = null;
         seedRng(live);
         this.runSeed = live;
@@ -1920,7 +1965,7 @@ export class GameEngine {
       // Called from inside the substep loop, the pending decrement takes
       // this one step negative, which simply drops a single sim step
       // across the load hitch — the right answer for a stall.
-      this.lastTime = performance.now();
+      this.lastTime = nowMs();
       this.simAccumulator = 0;
       return true;
   }
@@ -1982,7 +2027,7 @@ export class GameEngine {
           seedAmbientBubbles(this);
       }
       this.respawnPlayer();
-      this.lastTime = performance.now();
+      this.lastTime = nowMs();
       this.simAccumulator = 0;
   }
 
@@ -1993,7 +2038,7 @@ export class GameEngine {
       if (!this.stageClearPending) return;
       this.stageClearPending = false;
       // Same stale-time hygiene resumeGame() uses after a freeze.
-      this.lastTime = performance.now();
+      this.lastTime = nowMs();
       this.simAccumulator = 0;
       this.prepareFrameEntities();
   }
@@ -2394,7 +2439,7 @@ export class GameEngine {
     // it on any screen; Escape only ever closes it.
     if (this.input.consumeDebugKeyPress()) this.toggleDebugPanel('key');
     if (this.input.consumePadDebugPress()) this.toggleDebugPanel('pad');
-    if (this.input.consumeEscapePress() && this.debugPanelOpen) this.setDebugPanelOpen(false);
+    if (this.input.consumeEscapePress()) this.escapePressed();
 
     if (this.input.consumePausePress()) {
       // pauseGame() is already a no-op while docked (one full-screen overlay
@@ -2414,6 +2459,22 @@ export class GameEngine {
     if (cycle && !frozen && !captured) this.cycleWeapon();
     if ((frozen && !this.dockedAtStation) || captured) this.input.consumeInteractPress();
     if (captured) while (this.input.consumeScanPress()) { /* drained, not banked */ }
+  }
+
+  /** ESCAPE (keyboard).  The pause key, and the keyboard's BACK:
+   *  - the debug panel is open → close it (it floats above everything, so it
+   *    is always the first thing dismissed);
+   *  - the station UI or the pause menu is up → what BACK does there;
+   *  - live play → pause.
+   *  Nothing on the death and stage-clear screens, for `menuBack`'s reason:
+   *  those are decisions, and a key that quietly picks one is worse than none.
+   *  The menu is not live play, so Escape there does nothing either. */
+  public escapePressed(): void {
+    if (this.debugPanelOpen || this.dockedAtStation || this.gameState === GameState.PAUSED) {
+      this.menuBack();
+      return;
+    }
+    if (this.gameState === GameState.PLAYING) this.pauseGame();
   }
 
   /**
@@ -2451,7 +2512,7 @@ export class GameEngine {
   private tickJoystick(frameTime: number) {
     this.input.tickJoystick(frameTime);
 
-    const mm = computeMinimapRect(window.innerHeight, this.minimapExpanded);
+    const mm = computeMinimapRect(viewport().height, this.minimapExpanded);
     this.input.setStickExclusion(mm.x, mm.y, mm.size, mm.size);
   }
 
@@ -2462,7 +2523,7 @@ export class GameEngine {
    *  wave the ring just placed. */
   viewportHalfDiagonal(): number {
     const zoom = this.camera.zoom || 1;
-    return Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    return Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
   }
 
   /**
@@ -2544,21 +2605,24 @@ export class GameEngine {
             this.perfCounts.totalEntities,
             this.physics.lastDynamicCount,
             this.physics.lastMaxCellDensity,
-            // The load signal's TIME term is wall-clock, so it is the one
-            // input a replay cannot reproduce: a held replay reports 0 and the
-            // controller sees entity count and cell density alone.
-            this.replayHold ? 0 : this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
+            // The load signal's TIME term is wall-clock, so a held replay does
+            // not measure it: it is an INPUT of the log (`ReplayInput.simMs`,
+            // latched like the held keys; 0 until a log says otherwise), so a
+            // replay can reproduce the skip tiers of a heavy real scene, and a
+            // log that never mentions it sees entity count and cell density
+            // alone, as before.
+            this.replayHold ? this.replayLoadMs : this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
         );
         // Wall-clock the two top-level sim phases so the perf overlay
         // can show the gap between summed sub-timers and total sim
         // time.  Untimed work (entity compaction, flow-field nudge,
         // weapon ticks, drop scan, etc.) shows up as the difference.
-        const tPhys0 = performance.now();
+        const tPhys0 = nowMs();
         try { this.updatePhysics(dt); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
-        this.lastUpdatePhysicsMs = performance.now() - tPhys0;
-        const tLogic0 = performance.now();
+        this.lastUpdatePhysicsMs = nowMs() - tPhys0;
+        const tLogic0 = nowMs();
         try { this.updateGameLogic(dt); } catch (e) { console.error('[GameLogic] update error:', e); }
-        this.lastUpdateGameLogicMs = performance.now() - tLogic0;
+        this.lastUpdateGameLogicMs = nowMs() - tLogic0;
         // Push per-substep perf samples.  Every timed sub-phase was written
         // to instance fields on its owning system during the two calls above;
         // the recorder just reads and ring-buffers them in one shot.
@@ -2571,7 +2635,7 @@ export class GameEngine {
 
     // NEVER NEGATIVE.  `time` is the rAF frame timestamp, which is the moment
     // the frame STARTED — so any code that stamps `lastTime` from
-    // `performance.now()` mid-frame (transitionToMap does, to keep the map
+    // `nowMs()` mid-frame (transitionToMap does, to keep the map
     // load out of the sim clock) can leave lastTime AHEAD of the next frame's
     // timestamp.  The delta then comes back negative, and everything
     // downstream that subtracts it runs BACKWARDS: measured -0.16s, which
@@ -2663,7 +2727,7 @@ export class GameEngine {
         this.renderer.lastTintMisses,
       );
     }
-    const tStats0 = performance.now();
+    const tStats0 = nowMs();
     if (pushStats) this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
@@ -2902,7 +2966,7 @@ export class GameEngine {
     // number this line produces is ~0 whatever the tree costs.  The measured
     // cost is `lastUiActualMs`, reported in by the `<Profiler>` in App.tsx.
     // Kept as the control that demonstrates the point.
-    this.lastStatsScheduleMs = pushStats ? performance.now() - tStats0 : 0;
+    this.lastStatsScheduleMs = pushStats ? nowMs() - tStats0 : 0;
 
     // Audio follows the camera, and goes quiet whenever the sim does.  Two
     // number writes and a boolean per frame, plus one early-outing walk of
@@ -2931,7 +2995,7 @@ export class GameEngine {
         // only thing that advances it.
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2946,7 +3010,7 @@ export class GameEngine {
         this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2956,7 +3020,7 @@ export class GameEngine {
     if (this.stageClearPending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2968,7 +3032,7 @@ export class GameEngine {
         this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2981,7 +3045,7 @@ export class GameEngine {
     if (debugFrozen) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -3067,7 +3131,7 @@ export class GameEngine {
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
     this.recordRenderPerf();
 
-    requestAnimationFrame(this.loop);
+    clock().requestFrame(this.loop);
   };
 
   private prepareFrameEntities() {
@@ -3106,8 +3170,8 @@ export class GameEngine {
       // padding (CAMERA_CONSTANTS.CULL_MARGIN) keeps shards that are
       // about-to-enter-frame on the on-screen side of the partition.
       const zoom = this.camera.zoom || 1;
-      const halfW = (window.innerWidth / 2) / zoom;
-      const halfH = (window.innerHeight / 2) / zoom;
+      const halfW = (viewport().width / 2) / zoom;
+      const halfH = (viewport().height / 2) / zoom;
       const margin = CAMERA_CONSTANTS.CULL_MARGIN;
       this._viewportRect.left   = this.camera.position.x - halfW - margin;
       this._viewportRect.right  = this.camera.position.x + halfW + margin;
@@ -4224,9 +4288,9 @@ export class GameEngine {
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
 
-    const tRings = performance.now();
+    const tRings = nowMs();
     updateExplosionRings(this);
-    this.lastExplosionRingsMs = performance.now() - tRings;
+    this.lastExplosionRingsMs = nowMs() - tRings;
 
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
@@ -4446,8 +4510,8 @@ export class GameEngine {
     this.spawnGlitterTrail();
 
     const mousePos = this.input.getMousePosition();
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
+    const cx = viewport().width / 2;
+    const cy = viewport().height / 2;
     this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
 
     // Banking roll — after the rotation update so the lateral decomposition
@@ -4457,7 +4521,7 @@ export class GameEngine {
     const fireEvents = this.input.getFireEvents();
     fireEvents.forEach(evt => {
         const { x: mapX, y: mapY, size: currentSize } =
-            computeMinimapRect(window.innerHeight, this.minimapExpanded);
+            computeMinimapRect(viewport().height, this.minimapExpanded);
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
@@ -4473,7 +4537,7 @@ export class GameEngine {
         // Loadout HUD slot selection — intercept taps on the 2 equip slots.
         const { SLOT_H } = LOADOUT_HUD_CONSTANTS;
         const { startY: slotStartY, slotW, slotXs } =
-            computeLoadoutHUDLayout(window.innerWidth, window.innerHeight);
+            computeLoadoutHUDLayout(viewport().width, viewport().height);
 
         if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
             for (let i = 0; i < slotXs.length; i++) {
@@ -4567,11 +4631,11 @@ export class GameEngine {
 
     // Tick the weapon cooldown via WeaponSystem — frozen while EMP-disabled
     // (Stage 3c).
-    const tWeapons = performance.now();
+    const tWeapons = nowMs();
     if (this.currentMap && !this.player.systemsDisabled) {
         this.weapons.tickPlayerCooldown(this.player, dt);
     }
-    this.lastWeaponsMs = performance.now() - tWeapons;
+    this.lastWeaponsMs = nowMs() - tWeapons;
 
     // Refresh the candidate index before projectile post-processing: the
     // physics / AI / burst pass above may have spawned new projectiles or
@@ -4632,7 +4696,7 @@ export class GameEngine {
     // coast toward its last-aimed point until the next re-aim.  The
     // compaction below still runs every step so drops expired elsewhere
     // drop out promptly.
-    const tDrops = performance.now();
+    const tDrops = nowMs();
     if (!this.player.isExploding && this.perfController.shouldRun('dropScan')) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
       const magnetRangeSq = DROP_CONFIG.MAGNET_RANGE * DROP_CONFIG.MAGNET_RANGE;
@@ -4683,7 +4747,7 @@ export class GameEngine {
         if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
     }
     this.activeDrops.length = dropWriteIdx;
-    this.lastDropsMs = performance.now() - tDrops;
+    this.lastDropsMs = nowMs() - tDrops;
 
 
     this.camera.position.x = this.player.position.x;
@@ -5207,7 +5271,7 @@ export class GameEngine {
     this.audio.play('poi.undock');
     this.dockedAtStation = false;
     this.dockedStation = null;
-    this.lastTime = performance.now();
+    this.lastTime = nowMs();
     this.simAccumulator = 0;
   }
 
@@ -6515,8 +6579,8 @@ export class GameEngine {
 
       // Convert screen-space target to world coords once; the rest of the
       // firing flow lives in WeaponSystem.
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 2;
+      const cx = viewport().width / 2;
+      const cy = viewport().height / 2;
       const worldX = this.player.position.x + (target.x - cx) / this.camera.zoom;
       const worldY = this.player.position.y + (target.y - cy) / this.camera.zoom;
 
@@ -7438,8 +7502,8 @@ export class GameEngine {
    *  numbers were measured at (a wide desktop FOV draws more than a tablet). */
   public perfRecExport(): string {
     return this.perfRecorder.report({
-      viewportW: typeof window !== 'undefined' ? window.innerWidth : 0,
-      viewportH: typeof window !== 'undefined' ? window.innerHeight : 0,
+      viewportW: viewport().width,
+      viewportH: viewport().height,
       // The EFFECTIVE ratio — what the frame was actually rasterised at, and
       // therefore what the render numbers below correspond to.  The raw device
       // ratio is recoverable from the `set` line's rscale entry.
@@ -7502,7 +7566,7 @@ export class GameEngine {
     // pauses.
     const pos = entity.position;
     if (entity.dropType === 'salvage') {
-        const now = performance.now();
+        const now = nowMs();
         this.salvageStreak = (now - this.salvageStreakAt < SALVAGE_STREAK_WINDOW_MS)
             ? Math.min(this.salvageStreak + 1, SALVAGE_STREAK_MAX) : 0;
         this.salvageStreakAt = now;

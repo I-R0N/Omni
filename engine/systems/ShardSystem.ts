@@ -75,6 +75,7 @@ import {
   MergeRule,
   ShardAdapter,
 } from './ShardSystem.types';
+import { nowMs } from '../ports';
 
 /**
  * Resolve an entity's variant id from `shardVariant` (set at every
@@ -558,7 +559,7 @@ export class ShardSystem {
     physics: PhysicsSystem,
     runMergePass: boolean = true,
   ): void {
-    const t0 = performance.now();
+    const t0 = nowMs();
     this.tickDentRecovery(entities, dt);
     // DBG bonding toggle is destructive — when off, any bonds left
     // over from the previous frame are dropped here so cohesion
@@ -587,7 +588,7 @@ export class ShardSystem {
     // gates the broadphase passes; recovery is independent of that
     // cadence and runs every sim step so the lerp is smooth).
     this.tickPlasticDentRecovery(entities, dt);
-    this.lastUpdateMs = performance.now() - t0;
+    this.lastUpdateMs = nowMs() - t0;
   }
 
   /**

@@ -34,6 +34,7 @@ import {
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import type { WaveSpawnContext } from '../systems/WaveSystem';
+import { viewport } from '../ports';
 
 // ─── Bubble engagement pass (Stage 5) ──────────────────────────────────
 //
@@ -287,7 +288,7 @@ function spawnAmbientBubble(g: GameEngine): GameEntity | null {
     const ctx = g.waveContext();
     if (!ctx) return null;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
     const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + sim.roamers() * 240;
     const pos = {

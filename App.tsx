@@ -1,6 +1,8 @@
 
 import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
+import { createBrowserPlatform } from './platform/browser';
+import { createHeadlessPlatform } from './platform/headless';
 import * as Energy from './engine/systems/energy';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
@@ -70,7 +72,7 @@ const App: React.FC = () => {
     if (!canvasRef.current) return;
 
     // Initialize Engine
-    const engine = new GameEngine((newStats) => {
+    const engine = new GameEngine(createBrowserPlatform(), (newStats) => {
         setStats(newStats);
         // Debug handle for the live stats payload — same rationale as
         // __omniEngine below.
@@ -248,6 +250,19 @@ const App: React.FC = () => {
     // this handle.
     (window as any).__omniReplay = {
       runReplay, endReplay, hashSimState, firstDivergence, rng: rngStreams,
+    };
+
+    // The HEADLESS platform (engine-core S2): builds a second, real GameEngine
+    // on the stand-in ports (manual clock, null renderer, silent audio).  The
+    // ports claim is that where the sim reads the clock / input / output moves
+    // and NOTHING ELSE does — and the only way to see that is to replay one
+    // seed in the live engine and in this one, in the SAME JS engine, and
+    // require every hash to match to the bit (tests/headless.spec.ts).  It
+    // installs its own clock and viewport (they are module-level, see
+    // engine/ports.ts), so a caller `stop()`s the live engine first.  Nothing
+    // in the game reads this handle.
+    (window as any).__omniHeadless = {
+      createEngine: () => new GameEngine(createHeadlessPlatform(), () => { /* no UI */ }, 3),
     };
 
     const handleResize = () => {

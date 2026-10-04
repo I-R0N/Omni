@@ -5,6 +5,7 @@ import { GameEntity, EnemySubtype, EnemyRole, EntityType, Vector2 } from '../../
 import { ENEMY_VARIANTS, ENEMY_ROLE, ENEMY_BEHAVIOR, EnemyMovement, AI_CONFIG, getActiveSwarmMove, BUBBLE_CONSTANTS, calmBubble } from '../../constants';
 import { FlowFieldGrid } from './FlowFieldGrid';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+import { nowMs } from '../ports';
 
 export class AISystem {
   // Store persistent aim targets to simulate reaction time.
@@ -68,7 +69,7 @@ export class AISystem {
    * instead of O(allEntities²) with filtering.
    */
   public update(dt: number, enemies: GameEntity[], player: GameEntity, flowField: FlowFieldGrid, shards: GameEntity[] = [], projectiles: GameEntity[] = []) {
-    const t0 = performance.now();
+    const t0 = nowMs();
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
 
@@ -180,7 +181,7 @@ export class AISystem {
         }
     }
 
-    this.lastUpdateMs = performance.now() - t0;
+    this.lastUpdateMs = nowMs() - t0;
   }
 
   /**

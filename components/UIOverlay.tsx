@@ -871,9 +871,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         {group('Keyboard & mouse', 'text-emerald-300', [
           ['W A S D / arrows', 'Fly.'],
           ['Mouse', 'Aims. Click to shoot.'],
+          ['Space', 'Shoots too (hold 1s for a charged shot). The mouse still aims.'],
           ['Hold 1s, release', 'Charged shot.'],
           ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
           ['Q', 'Scan — sweeps for contacts. Needs a Scanner module installed.'],
+          ['Esc', 'Pause, and resume from the pause menu. Also leaves the station screen.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], null, ['keyboard'])}
 
