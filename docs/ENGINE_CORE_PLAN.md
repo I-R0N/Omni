@@ -422,6 +422,37 @@ files; derivation *logic* (`massFor`, `enemyHpMult`, the DBG ladders) stays
 code.  Teach the headless harness to answer balance questions over many
 runs.
 
+**ALSO YOURS: `dmath`, THE DETERMINISTIC MATH LAYER** (PM call D30,
+2026-10-04, placing S2's D17 hand-up here as S2 recommended).  JS engines'
+libm differs in the last place — measured, `Math.pow` disagrees between Node
+22 and Chromium 141 on ~10% of non-trivial inputs, and `atan2` / `hypot` /
+`exp` / `log` / `sqrt` agree today only because both are V8 sharing fdlibm.
+iOS is JavaScriptCore, a THIRD libm.  So replay is bit-exact within one
+engine and not across them, which leaves §1/D0b's "a port is a verified
+translation checked by replaying inputs against state hashes" — the stated
+reason this phase exists — unbacked until this lands.  Build `dmath` (own
+`sin` / `cos` / `pow`, then `exp` / `log` / `atan2` against JSC) and route
+the ~150 sim call sites through it.
+Four things the PM session wants stated rather than discovered:
+- **It is a BEHAVIOUR change, so it belongs in the GAMEPLAY-tier PR**, not
+  the invisible one.  It moves every number in the last place.
+- **It invalidates every existing hash ONCE.**  Say so in the PR
+  description, and re-baseline `tests/replay.spec.ts` in the same commit
+  rather than leaving a red suite between two.
+- **There is a measurable per-call cost on hot paths** — `pow` sits in the
+  collision resolver — so take a `perf/` number before and after and put it
+  in the PR.  A sim that is correct and slower is a trade the user gets to
+  see.
+- **It does NOT block the mobile release**, which is why it could wait for
+  this session: replay is dev-only (D7) and the save is not replay-based
+  (D21), so what JSC costs today is reproducing an iPhone bug report on a
+  dev machine.  What it DOES block is cross-device replay and the
+  port-verification premise.
+D17 also restated `S2`'s own parity acceptance test to what is true — Node
+and CI Chromium agree on streams and the player but NOT on world state — so
+tightening that assertion back up is a consequence of this work landing,
+not a separate task.
+
 **SCOPE WARNING.**  This is the item most likely to sprawl.  `constants.ts`
 is ~1000 lines of deliberately mixed data and logic, and much of what looks
 like data is load-bearing derivation.  Pick **two or three tables**, land
@@ -714,6 +745,7 @@ who made it, and the consequences for other sessions.
 | D27 | S2 | 2026-10-03 | **Arenas remember their wave script (user call; supersedes D25c and D26b, which were wreck-only).** `g.arenaWaves[arenaId]` = {wave, kills already scored, wall-clock last-there}, kept for EVERY arena (wreck or not), stamped by every save while in it and before any map unloads. Within 5 minutes of leaving the wave returns exactly (same wave, same kills scored); after that it restarts from the top of the same wave, and from a wave earlier for each hour away (3 → fresh 3 at 5 min → fresh 2 at 1 h → fresh 1 at 2 h). A finished ladder (boss dead) is forgotten. Constants `ARENA_WAVE_MEMORY.GRACE_SEC` / `DECAY_SEC`. Replaces the wreck record's `wave` / `leftAt`. | **S6 flag:** this is the first per-arena state in the save (`SaveFile.arenaWaves`, optional → no migration). It is deliberately only the wave script — the arena's world still regenerates per entry (D8) except for the wreck's pinned seed — and S6's arena graph should absorb it as a field on its node record rather than keep two stores. S4: a native Clock must provide `wallMs()`. Live enemies at the moment of leaving are not restored; the spawn stream continues from the slot after the last kill. |
 | D28 | S2 | 2026-10-03 | **A wave opens with a ROSTER window (user call).** The wave banner carries `roster` — per-subtype counts of what the wave must kill (the spawn list, plus the boss on a capstone) — drawn by `renderWaveAnnouncements` as a small panel above the banner: each archetype's silhouette (`drawEnemyIcon`, the world's own path, flat) and "xN". Same fade as the banner; cells shrink to fit the width. | Presentation only; the sim reads nothing new. A wave resumed mid-script (D27) shows its full roster, not the remainder. |
 | D29 | S2 | 2026-10-03 | **The roster window and wave banner are ONE dialogue (user call, refines D28).** A wave-start announcement with a roster draws a single panel above centre (30% of the height) that gives the enemies the focus — large silhouettes and "xN" — with the wave number as a small heading, and holds 3.2 s (`ROSTER_HOLD`) instead of 1 s. The banner's hold became per-announcement (`maxLifetime`). | Presentation only. Non-roster banners (clear, snitch, phases) are unchanged. |
+| D30 | PM | 2026-10-04 | **`dmath` goes to `S3`, in its GAMEPLAY-tier PR** (user call), placing S2's D17 hand-up.  The finding: JS engines' libm differs in the last place (`Math.pow`, Node 22 vs Chromium 141, ~10% of non-trivial inputs; `atan2` / `hypot` / `exp` / `log` / `sqrt` agree only by two V8s sharing fdlibm), and iOS is JavaScriptCore — a third libm — so replay is bit-exact WITHIN an engine and not across them.  Options weighed: **S3, as S2 recommended** (it already touches every constant and is next) / its own session before S3 / defer past the mobile release / drop it and narrow D0b to within-engine determinism. | §4's `S3` brief now carries it, with four things stated up front: it is a BEHAVIOUR change so it rides the gameplay PR; it invalidates every hash ONCE and must re-baseline `tests/replay.spec.ts` in the same commit; it needs a `perf/` number either side because `pow` sits in the collision resolver; and it does NOT block the mobile release — replay is dev-only (D7) and the save is not replay-based (D21), so what JSC costs today is reproducing an iPhone bug report on a dev machine.  What it DOES unblock is cross-device replay and §1/D0b's port-verification premise, which stays UNBACKED until this lands — the honest cost of choosing S3 over a session of its own.  Tightening D17's restated parity assertion back up is a consequence of this landing, not separate work. |
 
 ---
 
@@ -788,7 +820,7 @@ history stays readable.
   carries its brief.  The per-node persistence it asked about was deferred
   out of `S2` into `S6` by D14, so `S6` owns both the world and its save
   format.)*
-- **S2 → PM (libm: cross-engine determinism needs a math layer — D17).**
+- ~~**S2 → PM (libm: cross-engine determinism needs a math layer — D17).**
   `Math.sin` / `Math.cos` / `Math.pow` differ between JS engines in the last
   place (measured: Node 22 vs Chromium 141, `pow` on ~10% of non-trivial
   inputs), and `atan2` / `hypot` / `exp` / `log` / `sqrt` agree today only by
@@ -805,8 +837,11 @@ history stays readable.
   collision resolver), and it moves every number in the last place — so it is a
   BEHAVIOUR change, belongs in a gameplay-tier PR or its own session, and
   invalidates every existing hash once.  PM to place it (S3 is the natural home
-  since it already touches every constant); S2 did not do it.  *(S2,
-  2026-10-03)*
+  since it already touches every constant); S2 did not do it.~~  *(S2,
+  2026-10-03; RESOLVED by D30, PM 2026-10-04 — it goes to `S3`'s GAMEPLAY-tier
+  PR, user call, and §4's S3 brief now carries it with the hash re-baseline,
+  the `perf/` requirement and the note that it does not block the mobile
+  release.)*
 - **S2 → S3 (ports in the sim).**  Content tables stay platform-free: the
   guard fails on `window` / `performance` in `constants.ts`, so a data file that
   needs the display size reads `viewport()` from `engine/ports.ts`, and one that
