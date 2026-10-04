@@ -43,7 +43,17 @@ export class NullAudio implements AudioPort {
   setActive(): void {}
   stopScene(): void {}
   setCombat(): void {}
-  cueBattleTrack(): void {}
+  // The adaptive score's surface (PR #110): silent headless, like every other
+  // voice here — the sim must behave identically with no audio.
+  cueEncounter(): void {}
+  setMusicThreat(): void {}
+  setMusicArea(): void {}
+  musicBossDefeated(): void {}
+  cycleMusicSong(): void {}
+  setMusicSong(): void {}
+  cycleMusicDebugIntensity(): void {}
+  /** There is no score here, so there is nothing to read out. */
+  readonly music = null;
   setListener(): void {}
   armGestureUnlock(): void {}
   unlock(): boolean { return false; }

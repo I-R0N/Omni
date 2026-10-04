@@ -42,6 +42,8 @@ import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 
 // ── Clock ───────────────────────────────────────────────────────────────
 
+import type { MusicThreat, MusicLayerId } from './systems/AdaptiveMusic';
+
 export interface Clock {
   /** Monotonic milliseconds.  Differences are meaningful; the origin is not. */
   now(): number;
@@ -159,7 +161,20 @@ export interface AudioPort {
   setActive(active: boolean): void;
   stopScene(all?: boolean): void;
   setCombat(combat: boolean): void;
-  cueBattleTrack(): void;
+  // The ADAPTIVE SCORE's surface (PR #110).  `cueBattleTrack` was the streamed
+  // playlist's one-shot and is gone with it.  `MusicThreat` is imported as a
+  // TYPE so this file still pulls in nothing at runtime (see §8): one
+  // definition rather than a duplicated shape that could drift from the
+  // adapter's.
+  cueEncounter(kind: 'map' | 'portal' | 'boss'): void;
+  setMusicThreat(threat: MusicThreat): void;
+  setMusicArea(id: string, kind: 'hub' | 'arena'): void;
+  musicBossDefeated(): void;
+  // The score's DEBUG controls, reached from the debug panel (which talks to
+  // the engine's ports, not to `AudioSystem`).  No-ops where there is no score.
+  cycleMusicSong(): void;
+  setMusicSong(mode: 'auto' | number): void;
+  cycleMusicDebugIntensity(): void;
   setListener(x: number, y: number): void;
   /** Arm the first-gesture unlock (a no-op where there is nothing to unlock). */
   armGestureUnlock(): void;
@@ -180,6 +195,21 @@ export interface AudioPort {
   readonly allIds: string[];
   readonly unmatchedFiles: string[];
   readonly loopSampleFilenames: string[];
+  /** The adaptive score's own READOUT (PR #110), for the debug panel; null
+   *  where there is no score at all — the headless adapter.  Declared
+   *  STRUCTURALLY and read-only, naming only the fields the engine reads: the
+   *  engine DRIVES the score through the four methods above and never reaches
+   *  into it, so the port must not hand the sim a live `AdaptiveMusic`. */
+  readonly music: {
+    readonly intensity: number;
+    readonly targetIntensity: number;
+    readonly forcedIntensity: number | null;
+    readonly activeLayers: MusicLayerId[];
+    readonly bar: number;
+    readonly song: { readonly title: string };
+    readonly songMode: 'auto' | number;
+    readonly pendingSong: { readonly title: string } | null;
+  } | null;
 }
 
 // ── Input ───────────────────────────────────────────────────────────────

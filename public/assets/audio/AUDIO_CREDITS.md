@@ -1,50 +1,24 @@
 # Audio credits and permissions
 
-## Background music
+## Background music — the adaptive score
 
-**Space ambient** — **Osmic**
+**Omni adaptive score** — composed for Omni (2026).
 
-- Source: https://opengameart.org/content/space-ambient
-- Original download: https://opengameart.org/sites/default/files/ville_seppanen-1_g.mp3
-- License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
-- License terms: https://creativecommons.org/licenses/by/3.0/
-- Legal code: https://creativecommons.org/licenses/by/3.0/legalcode
-- File: `space-ambient.mp3`, complete original ten-minute track, unmodified.
-- Runtime volume adjustment and looping only. No endorsement by the author is implied.
-- Attribution and license links are also visible in the game's audio settings.
+- Original work made for this game; no third-party music, samples or loops.
+  Every sound in it is synthesized from scratch by the scripts in
+  `scripts/score/` (oscillators, filters, envelopes and generated reverb
+  impulse responses), so the score carries no attribution requirement.
+- Three songs, each six synchronised stems plus a riser: **Omni**
+  (`score-atmos/pulse/groove/heavy/apex/boss/riser.mp3`), **Event Horizon**
+  (`score2-*.mp3`) and **Critical Mass** (`score3-*.mp3`), each with a
+  victory stinger (`*-victory.mp3`); `score-impact.mp3` is shared.
+- Format: 32 kHz MP3 (128 kbps stereo; groove and boss 80 kbps mono). Each stem
+  is the song's loop (60 / 48 / 51.2 s) with 0.5 s of lead-in and 1.5 s of run-out, exactly
+  periodic — see `engine/systems/AdaptiveMusic.ts` for why.
+- Rebuild: `scripts/score/README.md`.
 
-**Fly** — **Alexandr Zhelanov**
-
-- Source: https://opengameart.org/content/techno-space
-- Original download: https://opengameart.org/sites/default/files/Fly.mp3
-- License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
-- License terms: https://creativecommons.org/licenses/by/3.0/
-- File: `fly-battle.mp3`, transcoded from the published `Fly.mp3` to a 192 kbps
-  MP3 runtime encode; no musical edits.
-- Runtime playback and gain fades only. No endorsement by the author is implied.
-- One of the three rotating battle-playlist tracks, heard while hostiles are
-  near the player; attribution and license links are visible in the game's
-  audio settings.
-
-**Tracers** — **Sygil**
-
-- Source: https://opengameart.org/content/tracers
-- Original download: https://opengameart.org/sites/default/files/tracers.mp3
-- License: Creative Commons Attribution 4.0 International (CC BY 4.0)
-- License terms: https://creativecommons.org/licenses/by/4.0/
-- File: `tracers-battle.mp3`, transcoded from the published `tracers.mp3` to a
-  192 kbps MP3 runtime encode; no musical edits.
-- Runtime playback and gain fades only. No endorsement by the author is implied.
-
-**Countdown** — **Alexandr Zhelanov**
-
-- Source: https://opengameart.org/content/countdown-0
-- Original download: https://opengameart.org/sites/default/files/Countdown.mp3
-- License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
-- License terms: https://creativecommons.org/licenses/by/3.0/
-- File: `countdown-battle.mp3`, transcoded from the published `Countdown.mp3`
-  to a 192 kbps MP3 runtime encode; no musical edits.
-- Runtime playback and gain fades only. No endorsement by the author is implied.
+The previous soundtrack (Space ambient by Osmic; Fly and Countdown by Alexandr
+Zhelanov; Tracers by Sygil) was removed from the game together with its credits.
 
 ## Sound effects
 

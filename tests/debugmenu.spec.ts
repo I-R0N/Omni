@@ -61,6 +61,7 @@ const PAD = { CROSS: 0, CIRCLE: 1, R2: 7, SELECT: 8, DPAD_DOWN: 13 };
  *  ·lit-N and ·fog, which use plain ones.  Seeded from the pre-overhaul panel
  *  (PR #105). */
 const ROW_LABELS = [
+  'Music int', 'Layers', 'Music song', 'Play song', 'Music bar', 'Music force',
   'Overlays', 'FPS', 'Wave', 'State', 'Wave timer', 'Thrust', 'Speed',
   'Snitch catch', 'Snitch spd', 'Gamepad', '  ↳ axes', '  ↳ rumble',
   '  ↳ triggers', '  ↳ report', '  ↳ trig enc', '  ↳ HID buzz', 'Impact vel',

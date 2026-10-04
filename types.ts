@@ -2496,6 +2496,15 @@ export interface EngineStats {
     /** Context→speaker latency readout (base + output), ms; null until the
      *  context exists.  ~30-45ms = wired/speaker, 150-250ms = Bluetooth. */
     latencyMs: number | null;
+    /** The adaptive score (null until the first gesture creates it). */
+    music: {
+      intensity: number; target: number; forced: number | null;
+      layers: string[]; bar: number;
+      /** Resident song's title, and whether it is pinned (vs rotating). */
+      song: string; songPinned: boolean; pending: string | null;
+      /** 'auto' follows the music plan; a number pins that SONGS index. */
+      songMode: 'auto' | number;
+    } | null;
   };
 }
 

@@ -2028,14 +2028,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <span className={`w-10 text-right text-slate-400 ${T_BODY}`}>{Math.round((value ?? 1) * 100)}%</span>
               </label>;
             })}
-            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music: <a href="https://opengameart.org/content/space-ambient" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Space ambient — Osmic</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a></p>
-            {/* The battle playlist is three separately-licensed CC-BY tracks,
-                and AUDIO_CREDITS.md promises their attribution is visible
-                HERE — so every one is named with its own creator and its own
-                licence version.  Two of the three are CC BY 3.0 and one is
-                4.0; a single shared licence link would misattribute one of
-                them. */}
-            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Battle: <a href="https://opengameart.org/content/techno-space" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Fly — Alexandr Zhelanov</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a> — <a href="https://opengameart.org/content/tracers" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Tracers — Sygil</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 4.0</a> — <a href="https://opengameart.org/content/countdown-0" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Countdown — Alexandr Zhelanov</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a></p>
+            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music: original adaptive score composed for Omni.</p>
 
             {/* Output-latency READOUT (playtest: "sounds feel slightly
                 delayed").  The engine side is measured tight — tap → play()

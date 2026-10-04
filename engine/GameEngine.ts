@@ -836,6 +836,11 @@ export class GameEngine {
   private lastReportedCombat: boolean | undefined;
   /** `simClock` when a hostile was last in range — the linger's only state. */
   private lastHostileNearAt = -Infinity;
+  /** The adaptive score's threat picture, refreshed by `hostileNearPlayer`
+   *  and reported every frame (see the audio block in `loop`). */
+  private musicAlert = false;
+  private musicBoss = false;
+  private musicPressure = 0;
   // ── React reconciliation cost, reported IN by the UI layer ────────────
   //
   // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
@@ -1290,6 +1295,8 @@ export class GameEngine {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
       this.loadMapSeeded(type);
+      this.announceMusicArea(type);
+      this.audio.cueEncounter('map');
       // Recentre the player on the newly-loaded map's spawn so the
       // menu backdrop renders the new map at frame 0 instead of the
       // previous map's viewport.
@@ -1735,7 +1742,7 @@ export class GameEngine {
    *  alongside them) is deliberately NOT touched — resetAndLoadSelectedMap
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
-  private loadMapFresh(type: MapType) {
+  private loadMapFresh(type: MapType, viaPortal = false) {
       // Leaving an arena (portal, respawn, quit): stamp the wave it was at and
       // when, before the map is torn down — the held wave decays from here.
       stampArenaWave(this);
@@ -1788,22 +1795,29 @@ export class GameEngine {
       // leaving the layer down.  Both move together or neither does.
       this.lastReportedCombat = false;
       this.audio.setCombat(false);
-      // A NEW ARENA IS A NEW ENCOUNTER, SO IT GETS A NEW SONG (user report:
-      // re-entering an arena resumed the previous one mid-phrase).  The
-      // continuous-playlist rule exists for a WAVE LADDER — one arena's fight
-      // is one encounter and a lull inside it must not cut the song — and a
-      // map change is the boundary that rule is drawn around, not an
-      // exception to it.
+      // A NEW ARENA IS A NEW ENCOUNTER, SO IT OPENS A NEW PHRASE (user
+      // report: re-entering an arena resumed the previous music mid-phrase).
+      // The score returns to bar 1 at the next bar line; inside one arena's
+      // wave ladder it never does, and a lull only lowers the intensity.
       //
-      // ORDER IS LOAD-BEARING: the cue is silent only because combat went
-      // down on the two lines above it.  `cueBattleTrack` plays the new track
-      // immediately when the layer is audible, so cueing first would start a
-      // fresh song at full level over the warp beat and then fade it out.
-      // Standing down first takes the documented hand-off instead — the
-      // successor waits, paused at 0, for the destination's own first
-      // engagement.
-      this.audio.cueBattleTrack();
+      // ORDER STILL MATTERS: combat went down on the lines above, so the
+      // combat layers are already leaving when the phrase restarts, and the
+      // destination's own first engagement brings them back on a downbeat.
+      // The area picks its theme (the music director's plan — see MUSIC_PLAN
+      // in AdaptiveMusic); a different song comes in seamlessly on a bar line.
+      this.announceMusicArea(type);
+      this.audio.cueEncounter(viaPortal ? 'portal' : 'map');
       this.loadMapSeeded(type);
+  }
+
+  /** Tell the music director which area is being entered, so it picks that
+   *  area's theme.  Every map load announces it: `loadMapFresh` (a run, a
+   *  portal, a death return) and the menu backdrop swap in `setMapType`, which
+   *  loads through `loadMapSeeded` alone and would otherwise start a run on a
+   *  picked arena with the hub's song. */
+  private announceMusicArea(type: MapType) {
+      const area = descriptorForMapType(type);
+      this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
   }
 
   /** Seed for the map's kind and load it.  SEEDING IS PER MAP, NOT PER RUN
@@ -2034,7 +2048,7 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
 
-      this.loadMapFresh(dest.mapType);
+      this.loadMapFresh(dest.mapType, true);
       // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
       // back at the map just left — which is exactly the hub's per-arena
       // portal — surface beside that rift rather than at the map's declared
@@ -2720,8 +2734,17 @@ export class GameEngine {
       ? AUDIO_CONSTANTS.MUSIC_RELEASE_SCREENS
       : AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS);
     const reach2 = reach * reach;
+    // THE SAME WALK MEASURES THE SCORE'S THREAT.  It used to return on the
+    // first hostile in range; the adaptive score also wants to know HOW MUCH
+    // is near (pressure), whether anything is approaching (alert) and whether
+    // a boss is up, so it walks the whole enemy index once.  A handful of
+    // multiplies per enemy, on an index `prepareFrameEntities` already built.
+    const alertR = screens * AUDIO_CONSTANTS.MUSIC_ALERT_SCREENS;
+    const alert2 = alertR * alertR;
+    const closeR = screens * AUDIO_CONSTANTS.MUSIC_CLOSE_SCREENS;
     const px = this.player.position.x, py = this.player.position.y;
     const enemies = this.entityIndex.enemies;
+    let near = false, alert = false, boss = false, pressure = 0;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (e.isExploding) continue;
@@ -2729,7 +2752,11 @@ export class GameEngine {
       // than ambient wave fighting, and it warps in on the OFFSCREEN ring —
       // so a distance test would duck the track its own entrance cue just
       // started, and would duck it again every time the fight opened up.
-      if (e.isBoss === true) return true;
+      if (e.isBoss === true) {
+        near = alert = boss = true;
+        pressure += AUDIO_CONSTANTS.MUSIC_BOSS_WEIGHT;
+        continue;
+      }
       if (e.thirdParty === true || e.isRival === true) {
         // Conditionally hostile — the same "hunting the PLAYER specifically"
         // test the off-screen indicators blink red on.
@@ -2737,9 +2764,20 @@ export class GameEngine {
           || (e.provoked === true && e.aggroTargetId === 'player'))) continue;
       }
       const dx = wrapDeltaX(px, e.position.x), dy = wrapDeltaY(py, e.position.y);
-      if (dx * dx + dy * dy <= reach2) return true;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= reach2) near = true;
+      if (d2 > alert2) continue;
+      alert = true;
+      const d = Math.sqrt(d2);
+      const falloff = d <= closeR ? 1 : 1 - (d - closeR) / Math.max(1, alertR - closeR);
+      const w = Math.min(AUDIO_CONSTANTS.MUSIC_WEIGHT_MAX, Math.max(AUDIO_CONSTANTS.MUSIC_WEIGHT_MIN,
+        Math.sqrt(Math.max(1, e.maxHealth) / AUDIO_CONSTANTS.MUSIC_WEIGHT_REF_HP)));
+      pressure += w * falloff;
     }
-    return false;
+    this.musicAlert = alert;
+    this.musicBoss = boss;
+    this.musicPressure = pressure;
+    return near;
   }
 
   /** The battle layer's ducking signal: a hostile is near, or was recently
@@ -3131,6 +3169,17 @@ export class GameEngine {
         unmatched: this.audio.unmatchedFiles,
         loopFiles: this.audio.loopSampleFilenames,
         latencyMs: this.audio.latencyMs,
+        music: this.audio.music ? {
+          intensity: this.audio.music.intensity,
+          target: this.audio.music.targetIntensity,
+          forced: this.audio.music.forcedIntensity,
+          layers: this.audio.music.activeLayers,
+          bar: this.audio.music.bar,
+          song: this.audio.music.song.title,
+          songPinned: this.audio.music.songMode !== 'auto',
+          songMode: this.audio.music.songMode,
+          pending: this.audio.music.pendingSong?.title ?? null,
+        } : null,
       },
     });
     // Cost of SCHEDULING the React update — not of performing it.  The
@@ -3161,6 +3210,18 @@ export class GameEngine {
       this.lastReportedCombat = combat;
       this.audio.setCombat(combat);
     }
+    // The adaptive score's per-frame threat.  Outside live play the scan is
+    // not run, so the picture is reported empty and the score sits at its
+    // exploration / menu level whatever was last measured.
+    const live = this.gameState === GameState.PLAYING && !this.dockedAtStation && !debugFrozen;
+    const maxEhp = Math.max(1, this.player.maxHealth + (this.player.maxShield ?? 0));
+    this.audio.setMusicThreat({
+      alert: live && this.musicAlert,
+      pressure: live ? this.musicPressure : 0,
+      boss: live && this.musicBoss,
+      hull: Math.max(0, Math.min(1, this.player.health / Math.max(1, this.player.maxHealth))),
+      ehp: Math.max(0, Math.min(1, (Math.max(0, this.player.health) + Math.max(0, this.player.shield ?? 0)) / maxEhp)),
+    });
 
     if (this.gameState !== GameState.PLAYING || this.replayHold) {
         // If paused or in menu, still draw (static frame) but skip updates.
@@ -7387,10 +7448,11 @@ export class GameEngine {
       // WaveSystem.haltForBoss.
       this.waves.haltForBoss();
       this.audio.play('boss.intro');
-      // The score joins the entrance beat.  One of the two places a track is
-      // cut short (the other is a map change, in `loadMapFresh`); everywhere
-      // INSIDE an encounter a track runs to its own end.
-      this.audio.cueBattleTrack();
+      // The score joins the entrance beat: at the next bar line it returns
+      // to bar 1 with an impact on the downbeat, and the boss stem comes in
+      // there.  The only other phrase restart is a map change (in
+      // `loadMapFresh`); inside an encounter the score never jumps.
+      this.audio.cueEncounter('boss');
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,

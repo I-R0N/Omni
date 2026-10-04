@@ -29,7 +29,7 @@ const ADAPTERS = new Set<string>([
   'engine/systems/RenderSystem.ts',      // canvas
   'engine/systems/BackgroundManager.ts', // render-side star field
   'engine/systems/AudioSystem.ts',       // WebAudio
-  'engine/systems/BackgroundMusic.ts',   // <audio> elements
+  'engine/systems/AdaptiveMusic.ts',     // WebAudio stems + document.hidden
   'engine/systems/PerfRecorder.ts',      // in-page capture harness (dev tool)
 ]);
 /** A whole directory of adapters: everything the renderer draws with. */
