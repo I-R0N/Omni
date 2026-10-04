@@ -333,7 +333,9 @@ export class AISystem {
       // ── Base steer by mode ──
       let ax = 0, ay = 0;
       let speedCap = baseMaxSpeed;
-      const mode = getActiveSwarmMove();
+      // A row may pin its own steer (`swarmMove`, data/enemies.toml); none does
+      // today, so every gnat still follows the DBG "Gnat move" cycle.
+      const mode = config.swarmMove ?? getActiveSwarmMove();
       const S = AI_CONFIG.SWARM;
       if (mode === 'vortex') {
           // Orbit at a radius (radial correction + tangential swirl), darting

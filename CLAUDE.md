@@ -52,7 +52,15 @@ types.ts                  All shared TS types; see §4
 constants.ts              ~11,000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + the nebula- and sfx-manifest
-                          plugins, build defines, OMNI_PROFILE_REACT alias
+                          plugins, the TOML content-table plugin, build
+                          defines, OMNI_PROFILE_REACT alias
+data/                     CONTENT TABLES as TOML (engine-core S3): 
+                          map-population.toml, enemies.toml (ENEMY_VARIANTS
+                          + the DBG enemy-scale steps), bosses.toml
+                          (BOSS_DEFS).  Parsed at BUILD time into
+                          `virtual:table/<name>` modules and resolved by
+                          constants.ts; the comments in them carry the
+                          reasoning behind each number (see §8)
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
                           (= test:smoke — boot + loop, the DEFAULT), plus
@@ -74,8 +82,11 @@ platform/                 THE PORTS' ADAPTERS (§8).  browser.ts builds the
                           Node one (manual clock, 390×844, memory storage,
                           silent audio, null renderer, the REAL InputSystem
                           driven by hand)
+scripts/toml-tables.mjs   The content tables' ONE loader + id list, imported by
+                          vite.config.ts AND sim-test.mjs so the browser
+                          build and the Node harness cannot disagree
 scripts/sim-test.mjs      `npm run test:sim` — esbuilds tests/sim/*.test.ts
-                          (resolving the two virtual manifests) and runs
+                          (resolving the virtual manifests and tables) and runs
                           them under `node --test`; `bundle()` is shared by
                           sim-hash.mjs, which prints the Node hash series
                           the browser parity test compares against
@@ -96,6 +107,9 @@ tests/sim/                HEADLESS SIM SUITES (node:test, engine-core S2):
                           (Escape, backgrounding), guard.test.ts (no
                           platform globals in the sim — an allow-list of
                           ADAPTERS, so a new file is guarded by default),
+                          tables.test.ts (the extracted content tables
+                          resolve to what they did before extraction,
+                          against fixtures/tables.golden.json),
                           harness.ts + parityLog.ts (the shared kit and
                           the canonical replay log).  Run by
                           `npm run test:sim`, in CI before the browser
@@ -1417,7 +1431,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   call (`getActiveFractureMode`).  See
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/GAUNTLET_VORONOI_LOG.md` for the gauntlet ledger.
-- `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
+- `MAP_POPULATION` (`data/map-population.toml`) — central per-MapType per-ShardVariantId entity-
   count table, and since step 5 (G7) the ACTUAL authority rather than a
   parallel description for every map's rock free-spawn
   (`getRockShardFreeSpawn()`) and for the natural maps' tile-variant mix.
@@ -1439,7 +1453,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the CHAIN itself is the energy layer's `ENERGY_CONSTANTS.CHAIN_*`),
   `HOMING_ACQUIRE_RANGE`
 - `PROJECTILE_CONSTANTS`, `MAX_PROJECTILES`, `MAX_PARTICLES`
-- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
+- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (`data/enemies.toml`, schema
+  `EnemyVariantDef`; per-archetype `weapon` override +
   optional `burst` fire pattern + `glow` shot hint — the per-archetype
   `cooldown` is the real fire cadence; the old global burst config is gone),
   `ENEMY_ROLE`, `ENEMY_WEAPON`.  Roster today: 6 base archetypes
@@ -1845,7 +1860,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `ENEMY_SCALING` / `enemyHpMult()` / `enemyDamageMult()` — per-wave
   enemy growth on top of difficulty: HP scales at spawn, damage rides a
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
-  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
+  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` (its steps
+  are `enemy_scale_cycle` in `data/enemies.toml`) is the
   DBG "Enemy scale" knob (Enemies & Bosses ▸ Enemy Tuning, with the
   "↳ live" hp/dmg-mult readout).
 - `ENEMY_TRAITS` / `EnemyTraitSet` — enemy counterplay traits (the
@@ -1893,7 +1909,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
   front-shield reduce damage BEFORE the bucket sees it, so bursting a
   plated target means bursting it FROM BEHIND.
-- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
+- `BOSS_CONSTANTS` / `BOSS_DEFS` (`data/bosses.toml`) / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
   `isBossWave()` / `bossForWave()` / `buildBossWaveSpawnList()` — the (h)
   BOSS capstone tables.  A stage is `BOSS_CONSTANTS.WAVE_INTERVAL`
   ordinary waves plus the boss's OWN wave, so every
@@ -2887,6 +2903,44 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   never collide; the sim clock (`simClock`) restarts with the map; the
   PerfController's load signal has a wall-clock term, which a held replay
   feeds as 0; and `PhysicsSystem.shardPairCallCount` restarts with the map.
+- **CONTENT TABLES ARE TOML, PARSED AT BUILD TIME** (engine-core S3, plan D32;
+  `data/*.toml`, `scripts/toml-tables.mjs`).  `MAP_POPULATION`, `ENEMY_VARIANTS`
+  (+ `enemy_scale_cycle`) and `BOSS_DEFS` are files, not literals, because this
+  repo's tables carry the reasoning behind each number as comments and TOML
+  keeps them beside the value.  Derivation LOGIC stays code (`massFor`,
+  `enemyHpMult`, the DBG ladders, `BOSS_WEAPONS`, which is computed from the
+  weapon table); `SHARD_VARIANTS`, `WEAPONS` and `MODULE_DEFS` are deliberately
+  NOT extracted yet.  Rules to keep:
+  (1) **The parser runs at build time and ships zero runtime bytes.**  Each file
+  becomes a `virtual:table/<name>` module — the `virtual:nebula-manifest`
+  precedent — exporting plain JSON.  Do NOT fetch a data file at runtime: the
+  single-file standalone cannot fetch anything, and works today only because the
+  data is already inside the module.
+  (2) **TWO consumers resolve the ids and share ONE loader**:
+  `vite.config.ts` (dev, `vite build`, and so Playwright's webServer and the
+  standalone) and `scripts/sim-test.mjs`'s esbuild shim (`npm run test:sim`,
+  `sim-hash.mjs`).  Both import `scripts/toml-tables.mjs`; a new table is an
+  entry in its `TABLES`, a file, and nothing else.  The shim throws on an
+  unknown `virtual:table/…` rather than falling through to the manifest branch.
+  (3) **A file holds NAMES where a value is code**, resolved by the `resolve*`
+  functions beside each table in `constants.ts`: `sprite = "ENEMY_DRONE"` is an
+  `ASSETS` key, `weapon = { extends = "SCATTER", cooldown = 1.25 }` spreads
+  `BOSS_WEAPONS.SCATTER` and then the listed fields (as `{ ...BOSS_WEAPONS.SCATTER,
+  cooldown: 1.25 }` did), `spawner.subtype` / `companions` are `EnemySubtype`
+  ids.  A malformed file fails the BUILD with the file and the parser's reason; an
+  unknown NAME fails at module load — naming the file and row — so it is caught by
+  `test:sim` and the boot smoke, NOT by `vite build`.
+  (4) **Equivalence is pinned against a golden, not the literals**
+  (`tests/sim/tables.test.ts`, `fixtures/tables.golden.json`): the resolved tables
+  as they were before extraction, compared with a relative 1e-9 tolerance so
+  `dmath`'s last-place shifts do not turn it red, with key ORDER enforced only at
+  the table levels (maps, variants, archetypes).  A deliberate rebalance edits the
+  TOML and re-captures the golden in the same commit, which is what makes it a
+  visible one — `tests/maps.spec.ts` plays the same role for populations.
+  (5) **`swarmMove` is the seam for non-default gnat flocks**: an optional
+  `ENEMY_VARIANTS` field that pins a 'swarm'-behaviour row to one steer
+  (boids / vortex / weave / burst); absent follows the DBG "Gnat move" cycle.
+  No shipped row sets it.
 - **THE SIM TALKS TO THE PLATFORM THROUGH PORTS, AND ONLY THROUGH PORTS**
   (`engine/ports.ts`; engine-core S2).  Five named ports — Clock, Storage,
   Renderer, Audio, Input — plus Viewport, Lifecycle and Entropy, bundled as

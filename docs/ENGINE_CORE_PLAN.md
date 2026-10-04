@@ -412,6 +412,18 @@ faithful, and is only checkable because `S1` landed.
 
 ### S3 — "The numbers"  (content as data + balance + knob triage)
 
+**STATUS (S3, 2026-10-04).**  PR 1, the invisible one, is BUILT: the three
+tables are `data/*.toml`, parsed at build time into `virtual:table/*` modules
+through ONE loader (`scripts/toml-tables.mjs`) that `vite.config.ts` and
+`scripts/sim-test.mjs` both import; `tests/sim/tables.test.ts` pins the resolved
+values against a golden captured BEFORE the move (commit order: golden + test
+first, passing on the old literals; extraction second).  PR 2 (`dmath`) has NOT
+started and waits on PR 1 landing.  Two facts worth carrying forward: a table
+NAME that does not resolve (a sprite key, a weapon `extends`, a subtype) fails at
+module load, so `test:sim` and the boot smoke catch it and `vite build` does not;
+and the golden is a one-time migration check that a deliberate rebalance
+re-captures in the same commit.
+
 **Near-term payoff.**  Tuning without a rebuild, and a console port that
 inherits every balanced number instead of retyping it.  With `S2`'s
 headless harness, balance claims become measurements rather than feelings —
@@ -469,16 +481,34 @@ recur rather than complete.
   Held for a later pass, with reasons: `SHARD_VARIANTS` (961 lines, the
   `grainSpecFor` seam and the per-material DBG overrides), `WEAPONS`
   (computed, not data), `MODULE_DEFS` (`BASE_BANK_DIVISOR` pins to it).
-- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32).**  There are
-  **59** `*_CYCLE` tables, not ~90 (measured, PM 2026-10-04).  Triage is
-  scoped to the knobs belonging to the tables being extracted, so each call
-  lands in the PR for the table it concerns and no session faces all 59.
+- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32); BOTH CALLS MADE
+  (user, in S3 PR 1).**  There are **59** `*_CYCLE` tables, not ~90 (measured, PM
+  2026-10-04).  Triage is scoped to the knobs belonging to the tables being
+  extracted, so each call lands in the PR for the table it concerns and no session
+  faces all 59.  The three tables own two:
+  - **`ENEMY_SCALE_CYCLE` ("Enemy scale") → its steps MOVE INTO `enemies.toml`**
+    (`enemy_scale_cycle`).  The user chose this over keeping it as code or
+    removing it.  The cycle STAYS a cycle: it multiplies `ENEMY_SCALING`, which is
+    not an extracted table and stays in `constants.ts`; the resolver requires
+    index 0 = 1, so the first click is still the A/B.  Done; DBG row unchanged.
+  - **`SWARM_MOVE_MODES` ("Gnat move") stays a cycle, and gains a SEAM.**  The
+    user's answer was a question: does it make sense to add enemy types that wear
+    the alternate move modes, since the modes were never retired and the variety
+    is good?  Yes — it makes sense, and the seam is cheap: `swarmMove?` on an
+    `ENEMY_VARIANTS` row pins that archetype to one steer (absent follows the
+    cycle).  PR 1 lands ONLY the seam, which no row sets, so the invariant holds
+    (`tests/sim/tables.test.ts` pins both halves).  The NEW ENEMY TYPES are
+    gameplay content, not an extraction, so they are NOT in PR 1 and are not
+    `dmath`'s either: each needs an `EnemySubtype`, `ENEMY_ROLE`/`ENEMY_BEHAVIOR`
+    rows, a `shape` (+ `drawEnemyIcon` for the roster dialogue), a sprite, a place
+    in `WAVE_DEFINITIONS`, and a balance pass.  FLAGGED in §8 for the PM to place.
 - ~~**D-S3-c — Data format.**~~  **SETTLED (D32): TOML**, parsed at BUILD
   time through a Vite virtual-manifest plugin (the `nebulaManifestPlugin` /
   `sfxManifestPlugin` precedent), so the parser is a devDependency and ships
   zero runtime bytes.  See D32 for the three consumers that must all resolve
   it.
 - **D-S3-d — Does the player get more than the 4-level difficulty index?**
+  STILL OPEN; not reached (it belongs with the balance work, after `dmath`).
 - **D-S3-e — Balance targets, stated as numbers.**  STILL OPEN and the one
   to put to the user at the moment the harness is built, not before.  How long should wave 5
   take?  What is a healthy run length?  Consequence: without stated
@@ -489,7 +519,7 @@ recur rather than complete.
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
 with the numbers visible in the diff.
 
-**Acceptance, as tests to write.**
+**Acceptance, as tests to write.**  *(PR 1: `tests/sim/tables.test.ts` — done.)*
 - for each extracted table, the loaded data is byte-equivalent in effect to
   the previous constants (assert the derived values, not the literals)
 - the existing suites that pin populations and balance (`maps.spec.ts`,
@@ -893,3 +923,20 @@ history stays readable.
 - **S2 → S3 (knob triage input).**  Persisted settings are only audio volumes
   + mute, control scheme and difficulty (D20).  Every other DBG cycle is
   per-session by construction.  *(S2, 2026-10-03)*
+- **S3 → PM (new gnat-flock enemy types need a home).**  The user wants VARIETY
+  from the "Gnat move" modes (boids / vortex / weave / burst), which were never
+  retired: archetypes that each wear one, rather than one global DBG cycle.  S3
+  PR 1 landed only the SEAM (`swarmMove?` on an `ENEMY_VARIANTS` row; no row sets
+  it).  The enemy types themselves are gameplay content — an `EnemySubtype`,
+  role/behaviour rows, a shape + roster icon, a sprite, wave placement and a
+  balance pass — and are not part of the extraction or of `dmath`.  PM to place
+  them: a third S3 PR, or a content item for after the balance harness exists
+  (they would be a natural first customer of it).  *(S3, 2026-10-04)*
+- **S3 → all sessions (content tables are files).**  `MAP_POPULATION`,
+  `ENEMY_VARIANTS` and `BOSS_DEFS` live in `data/*.toml`.  A balance change is a
+  TOML edit that also re-captures `tests/sim/fixtures/tables.golden.json` in the
+  same commit (that is what makes it visible); a new table is an entry in
+  `scripts/toml-tables.mjs` `TABLES`, and BOTH `vite.config.ts` and
+  `scripts/sim-test.mjs` pick it up from there — no second place to register it.
+  Arena layouts as data (S1's earlier flag) can use the same mechanism.
+  *(S3, 2026-10-04)*
