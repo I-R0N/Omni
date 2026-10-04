@@ -40,6 +40,12 @@ test('all cinematic cues decode with full coverage and bounded memory', async ({
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.prepared, null, { timeout: 90000 });
+  // The banks decode LAZILY now (one family per first use), and this test's
+  // claim is about the WHOLE manifest — every take decodes, carries signal
+  // and fits the ceiling — so it asks for all four.  The claim is unchanged;
+  // only what triggers the decode moved.  The laziness itself is pinned by
+  // 'the banks decode lazily' below.
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
   const result = await engine(page, e => {
     const a = e.audio;
     const bad: string[] = [];
@@ -72,10 +78,60 @@ test('all cinematic cues decode with full coverage and bounded memory', async ({
   watch.assertClean();
 });
 
+test('the banks decode lazily, and the title screen holds one of them', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.prepared, null, { timeout: 90000 });
+
+  // THE TITLE SCREEN HOLDS THE MENU BANK AND NOTHING ELSE.  All four used to
+  // decode at unlock; measured, that was ~62 MB of cue buffers before the
+  // player had pressed START.
+  const menu = await engine(page, e => ({
+    mb: e.audio.decodedBankBytes / 1048576,
+    takes: e.audio.sampleCount,
+    failures: e.audio.bankFailures,
+    // The menu's own cue is decoded — this screen's sounds must be heard.
+    ui: e.audio.hasSample('ui.confirm'),
+    // A combat cue is NOT, and it is not standing on a WAV or a pre-rendered
+    // procedural cache either: `BANK_OF_ID` keeps both fallbacks off a bank
+    // id, so lazy decoding cannot cost more memory than it saves.
+    impact: e.audio.hasSample('impact.tile.rock'),
+  }));
+  expect(menu.failures).toEqual([]);
+  expect(menu.ui).toBe(true);
+  expect(menu.impact).toBe(false);
+  expect(menu.mb).toBeLessThan(12);
+
+  // ASKING FOR A CUE STARTS ITS BANK, and the asking trigger does not wait:
+  // play() returns having only kicked the decode off, so no decode lands in
+  // the frame (CLAUDE.md §8).  The draft voice covers that trigger.
+  await engine(page, e => { e.audio.setActive(true); e.audio.play('impact.tile.rock'); });
+  await page.waitForFunction(() => window.__omniEngine.audio.hasSample('impact.tile.rock'),
+                             null, { timeout: 60000 });
+  const after = await engine(page, e => ({
+    mb: e.audio.decodedBankBytes / 1048576,
+    takes: e.audio.sampleCount,
+    failures: e.audio.bankFailures,
+    // Still lazy: one more bank arrived, not all of them.
+    weapon: e.audio.hasSample('weapon.cannon.fire'),
+  }));
+  expect(after.failures).toEqual([]);
+  expect(after.takes).toBeGreaterThan(menu.takes);
+  expect(after.mb).toBeGreaterThan(menu.mb);
+  expect(after.weapon).toBe(false);
+
+  // And the whole manifest is still reachable on demand.
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
+  expect(await engine(page, e => e.audio.sampleCount)).toBe(304);
+  expect(await engine(page, e => e.audio.bankFailures)).toEqual([]);
+  watch.assertClean();
+});
+
 test('mix controls, variation inspection, torus pan and pause cleanup', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page);
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
   await page.waitForFunction(() => window.__omniEngine.audio.sampleCount === 304);
   const result = await engine(page, e => {
     const a = e.audio;
@@ -521,6 +577,8 @@ test('long player tails do not suppress the next attack', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.prepared);
+  // Reads a weapons-bank take directly, so it needs that bank decoded.
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
   await startRun(page);
   const result = await engine(page, async e => {
     const a = e.audio;

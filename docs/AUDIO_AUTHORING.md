@@ -100,8 +100,15 @@ add it to `build.py`, append a `SONGS` entry, and give it a place in
 
 **Loading and memory.**  The title screen fetches `score-atmos.mp3` only; the
 combat set and one-shots are fetched when a run starts (`setActive(true)`),
-the boss stem on the first boss sighting.  Stems decode at 32 kHz through an
-OfflineAudioContext (≈ 77 MB decoded for Omni's six, ≈ 62 MB for Event Horizon's, ≈ 73 MB for Critical Mass's) and resample on playback.
+the boss stem on the first boss sighting.  Stems decode at **25 kHz** through an
+OfflineAudioContext (≈ 60 MB decoded for Omni's six, ≈ 48 MB for Event Horizon's, ≈ 57 MB for Critical Mass's) and resample on playback.
+The rate was 32 kHz and was cut (user call) because the score is the single
+largest block of decoded PCM in the game and this phase targets MOBILE, where
+the tab is killed on peak RSS: measured in-browser, Omni's resident stems went
+70.9 MB → 55.4.  What it costs is bandwidth above 12.5 kHz, and the stems are
+mastered dark, so there is little up there to lose.  Nothing about the GRID is
+rate-dependent — lead-in, bpm and bars are all seconds — so bar lines land
+where they did.
 Each file is the loop with 0.5 s lead-in and 1.5 s run-out and is exactly
 periodic, so the loop window is immune to MP3 encoder/decoder delay.
 

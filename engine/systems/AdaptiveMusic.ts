@@ -34,8 +34,8 @@
  *
  * WHY DECODED BUFFERS.  Sample-accurate sync between stems needs every stem
  * on the AudioContext clock; separate <audio> elements drift.  Stems decode
- * at `DECODE_RATE` (32 kHz — the music bus never needs more, and it is a
- * third less memory than 48 kHz) through an OfflineAudioContext; the source
+ * at `DECODE_RATE` (25 kHz — the music bus never needs more, and it is
+ * roughly half the memory of 48 kHz) through an OfflineAudioContext; the source
  * node resamples on playback.  Only the exploration bed is fetched on the
  * title screen; the combat stems arrive when a run starts and the boss stem
  * when a boss first appears.
@@ -119,7 +119,17 @@ interface PendingSong {
 export const SCORE = {
   /** Seconds of lead-in before bar 1 in every stem file. */
   LOOP_START: 0.5,
-  DECODE_RATE: 32000,
+  // 25 kHz, down from 32 (user call).  The score is the single largest
+  // block of decoded PCM in the game and this is a straight linear cut on
+  // it: MEASURED 70.9 MB resident at 32 kHz for one song's stems, 55.4 at
+  // 25 (`AdaptiveMusic.decodedBytes`, in-browser).  What it costs is
+  // bandwidth above 12.5 kHz — the stems are mastered dark (the generator
+  // lowpasses hard, see docs/AUDIO_AUTHORING.md) so there is little up
+  // there to lose, and the phase this serves is a MOBILE release where the
+  // tab is killed for peak RSS long before anyone notices the top octave.
+  // Nothing about the GRID is rate-dependent: LOOP_START, bpm and bars are
+  // all seconds, so bar lines land in the same places.
+  DECODE_RATE: 25000,
   /** Output gain of the whole score into the Music bus.  Sets exploration
    *  (atmos alone, mastered at −20 LUFS) where the old ambient bed sat. */
   OUTPUT: 0.53,

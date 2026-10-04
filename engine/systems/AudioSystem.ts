@@ -1,5 +1,22 @@
 import { fxRng } from './rng';
 import CINEMATIC_BANKS from './CinematicBank.json';
+
+/** WHICH BANK CARRIES WHICH ID, read off the manifest WITHOUT decoding
+ *  anything.  The banks decode LAZILY (see `ensureBank`), so every pass that
+ *  used to ask "has this id got a sample yet?" to mean "will a bank cover
+ *  it?" has to ask the MANIFEST instead — otherwise the WAV fetch and the
+ *  procedural pre-render both treat a not-yet-decoded bank id as uncovered
+ *  and build a fallback for it, which costs MORE memory than the eager
+ *  decode this replaces. */
+const BANK_OF_ID: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const bank of CINEMATIC_BANKS) for (const id of Object.keys(bank.cues)) m.set(id, bank.file);
+  return m;
+})();
+/** The bank decoded at unlock: the menu's own cues, because a tap on the
+ *  title screen is usually the gesture that unlocked the context and it has
+ *  to be heard.  Every other bank waits for an id in it to be asked for. */
+const MENU_BANK = 'interface.mp3';
 import { AdaptiveMusic, SONGS, type MusicThreat } from './AdaptiveMusic';
 import { finishVoice } from './SfxVoicing';
 import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
@@ -186,6 +203,9 @@ export class AudioSystem implements AudioPort {
   public music: AdaptiveMusic | null = null;
   private cinematicIds = new Set<string>();
   public bankFailures: string[] = [];
+  /** One in-flight-or-done promise per bank file, so N triggers in one frame
+   *  start exactly one decode and nothing is decoded twice. */
+  private bankJobs = new Map<string, Promise<void>>();
   private noiseBuf: AudioBuffer | null = null;
   private buses = new Map<AudioBus, GainNode>();
   private sfxBus: GainNode | null = null;
@@ -450,7 +470,11 @@ export class AudioSystem implements AudioPort {
     const discovered = this.discoverSamples();
     const jobs: Promise<void>[] = [];
     for (const [id, def] of this.defs) {
-      if (this.hasSample(id)) continue;
+      // MANIFEST, not `hasSample`: the banks decode lazily now, so an id
+      // whose bank has not been asked for yet has no sample and would
+      // otherwise have a WAV fetched for it — a recovery asset standing in
+      // for a bank that is going to arrive, held in memory alongside it.
+      if (this.hasSample(id) || BANK_OF_ID.has(id)) continue;
       const found = discovered.get(id);
       // An explicit `sample` on the def WINS, so a one-off can always be
       // pinned by name; otherwise the folder decides.  With neither, the id
@@ -496,36 +520,106 @@ export class AudioSystem implements AudioPort {
     await Promise.all(jobs);
   }
 
-  /** Decode one compressed bank at a time, then retain only cue buffers.
+  /** THE BANKS DECODE LAZILY, ONE FAMILY AT A TIME (user call), and only the
+   *  MENU bank is decoded at unlock.  All four used to decode here: measured,
+   *  that is ~62 MB of sliced cue buffers resident with a ~67 MB whole-bank
+   *  buffer passing through on top, and it landed at the same moment as the
+   *  score's own decode — the worst possible peak on the one platform this
+   *  phase targets.
+   *
+   *  WHAT THIS BUYS, stated honestly: the TITLE SCREEN now holds one bank
+   *  instead of four, and the transient whole-bank buffer no longer stacks
+   *  against the score's.  It does NOT cut steady-state memory in play —
+   *  impacts, weapons and world are all asked for within seconds of a run
+   *  starting, so a few seconds in the resident figure is what it always
+   *  was.  This defers; only the rate cut in `AdaptiveMusic.SCORE` reduces.
+   *
+   *  THE §8 RULE IS INTACT: a decode still never happens inside a frame.
+   *  `requestBank` is fire-and-forget — the trigger that asked plays its
+   *  procedural voice and returns, which is exactly what every id already
+   *  did while the eager preload was in flight. */
+  private async preloadCinematicBanks() {
+    await this.ensureBank(MENU_BANK);
+  }
+
+  /** Decode one compressed bank, then retain only cue buffers.
    * MP3 gapless metadata is honored by decodeAudioData; offsets are in seconds
    * so AudioContext resampling cannot shift cue boundaries. */
-  private async preloadCinematicBanks() {
+  private ensureBank(file: string): Promise<void> {
+    const existing = this.bankJobs.get(file);
+    if (existing) return existing;
+    const job = this.decodeBank(file);
+    this.bankJobs.set(file, job);
+    return job;
+  }
+
+  private async decodeBank(file: string) {
+    const bank = CINEMATIC_BANKS.find(b => b.file === file);
+    if (!bank || !this.ctx) return;
     const inline = (globalThis as { __omniAudioInline?: Record<string, string> }).__omniAudioInline;
-    for (const bank of CINEMATIC_BANKS) {
-      try {
-        const response = await fetch(inline?.[bank.file] ?? `/assets/audio/${bank.file}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const buffer = await this.ctx!.decodeAudioData(await response.arrayBuffer());
-        if (Math.abs(buffer.duration - bank.frames / bank.sampleRate) > 0.04) throw new Error('Bank timing mismatch');
-        for (const [id, regions] of Object.entries(bank.cues)) {
-          if (!this.has(id)) continue;
-          const bufs = regions.map(([offset, duration]) => {
-            const length = Math.round(duration * buffer.sampleRate);
-            const cue = this.ctx!.createBuffer(1, length, buffer.sampleRate);
-            const start = Math.round(offset * buffer.sampleRate);
-            cue.copyToChannel(buffer.getChannelData(0).subarray(start, start + length), 0);
-            if (peakOf(cue) < AUDIO_CONSTANTS.SAMPLE_MIN_PEAK) throw new Error(`Silent cue ${id}`);
-            return cue;
-          });
-          this.samples.set(id, { bufs, next: -1 });
-          this.cinematicIds.add(id);
-          this.samplesLoaded += bufs.length;
-        }
-      } catch (error) {
-        this.bankFailures.push(`${bank.file}: ${String(error)}`);
-        // Legacy files/recipes remain a recovery path for network/codec failure.
+    try {
+      const response = await fetch(inline?.[bank.file] ?? `/assets/audio/${bank.file}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const buffer = await this.ctx.decodeAudioData(await response.arrayBuffer());
+      if (Math.abs(buffer.duration - bank.frames / bank.sampleRate) > 0.04) throw new Error('Bank timing mismatch');
+      for (const [id, regions] of Object.entries(bank.cues)) {
+        if (!this.has(id)) continue;
+        const bufs = regions.map(([offset, duration]) => {
+          const length = Math.round(duration * buffer.sampleRate);
+          const cue = this.ctx!.createBuffer(1, length, buffer.sampleRate);
+          const start = Math.round(offset * buffer.sampleRate);
+          cue.copyToChannel(buffer.getChannelData(0).subarray(start, start + length), 0);
+          if (peakOf(cue) < AUDIO_CONSTANTS.SAMPLE_MIN_PEAK) throw new Error(`Silent cue ${id}`);
+          return cue;
+        });
+        this.samples.set(id, { bufs, next: -1 });
+        this.cinematicIds.add(id);
+        this.samplesLoaded += bufs.length;
       }
+      // A LIVE LOOP started on its draft must be re-asked, or it keeps that
+      // draft for the rest of the run: `move.thrust` idles continuously while
+      // the player is alive and `loop()` only builds a voice at creation, so
+      // nothing would ever swap it for the texture that just arrived.
+      // Dropping the voice is enough — the engine re-asks every frame.
+      for (const id of Object.keys(bank.cues)) {
+        const live = this.loops.get(id);
+        if (!live) continue;
+        this.releaseLoop(live);
+        this.loops.delete(id);
+      }
+    } catch (error) {
+      this.bankFailures.push(`${bank.file}: ${String(error)}`);
+      // Legacy files/recipes remain a recovery path for network/codec failure.
     }
+  }
+
+  /** Ask for the bank an id lives in, WITHOUT waiting for it.  Called from
+   *  the trigger paths, so it must stay O(1) and allocation-free in the
+   *  common case — a Map hit and a Map hit. */
+  private requestBank(id: string) {
+    const file = BANK_OF_ID.get(id);
+    if (file !== undefined && !this.bankJobs.has(file)) void this.ensureBank(file);
+  }
+
+  /** Decode every bank and wait for all of them.  Not used in play — this is
+   *  for the suites and the tooling, which assert over the WHOLE manifest
+   *  (all 304 takes carry signal and fit the ceiling) and so have to be able
+   *  to ask for the lot. */
+  public async decodeAllBanks(): Promise<void> {
+    await Promise.all(CINEMATIC_BANKS.map(b => this.ensureBank(b.file)));
+  }
+
+  /** Bytes of decoded cue PCM the banks hold right now (the score's own
+   *  figure is `AdaptiveMusic.decodedBytes`).  The two together are the
+   *  audio layer's whole resident cost. */
+  public get decodedBankBytes(): number {
+    let bytes = 0;
+    for (const id of this.cinematicIds) {
+      const set = this.samples.get(id);
+      if (!set) continue;
+      for (const buf of set.bufs) if (buf) bytes += buf.length * buf.numberOfChannels * 4;
+    }
+    return bytes;
   }
 
   /**
@@ -587,7 +681,14 @@ export class AudioSystem implements AudioPort {
   private async prepareSynthesis() {
     try {
       for (const [id, def] of this.defs) {
-        if (this.hasSample(id)) continue;
+        // MANIFEST, for the WAV pass's reason and more sharply: pre-rendering
+        // three OfflineAudioContext takes for every bank id would be ~300
+        // renders and a second cache the size of the banks, so reading
+        // `hasSample` here would make lazy decoding cost memory rather than
+        // save it.  A bank id that has not decoded yet still SOUNDS — it
+        // falls through to the LIVE procedural recipe, which is the
+        // documented startup path.
+        if (this.hasSample(id) || BANK_OF_ID.has(id)) continue;
         const bufs: AudioBuffer[] = [];
         for (let i = 0; i < AUDIO_MIX.variants; i++) {
           const ctx = new OfflineAudioContext(1, 44100 * 4, 44100);
@@ -736,6 +837,11 @@ export class AudioSystem implements AudioPort {
     // `_active`.  Counted as a drop rather than returning silently, so the
     // headless tests can tell "suppressed" from "never reached the manager".
     if ((!this._active && !survivesPause(id)) || this.ctx.state !== 'running') { this.counts.dropped++; return; }
+    // First ask for an id in a bank that has not decoded yet STARTS that
+    // bank and plays the draft.  Fire-and-forget on purpose: the decode must
+    // not land in this frame (§8), and a draft voice for a trigger or two is
+    // exactly what the eager preload already did while it was in flight.
+    this.requestBank(id);
 
     const now = this.ctx.currentTime;
     // 4. Static per-voice gain: mix level × caller trim × distance.
@@ -937,6 +1043,11 @@ export class AudioSystem implements AudioPort {
     // silences only a loop whose bank failed to decode — and a draft there is
     // exactly what would be mistaken for a recording: the engine bed and the
     // POI hums are always there.
+    // A loop asks for its bank too (`world.mp3` carries all three), only
+    // while it is being turned ON — a loop asked to stop must not pull a
+    // bank in.  `decodeBank` drops any live voice when the texture lands,
+    // so the draft is swapped for the recording rather than kept for the run.
+    if (on) this.requestBank(id);
     const draftOnly = !this.hasSample(id);
     if (!on || outOfEarshot || this._muted || !this._active
         || (draftOnly && !this._draftsEnabled)) {
