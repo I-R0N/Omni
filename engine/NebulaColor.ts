@@ -12,6 +12,7 @@
 // information because shards carry a *copy* of the parent composition, and
 // merges concatenate + dedupe rather than averaging-then-storing.
 
+import { sim } from './systems/rng';
 import { NebulaColorStop } from '../types';
 import { NEBULA_CONSTANTS, getActiveNebulaPalette } from '../constants';
 
@@ -239,7 +240,7 @@ export function circularLerpHue(
 // default palette regardless of the DBG cycle — see paletteHueToHex
 // above for the rationale.
 export function randomPaletteHueDeg(): number {
-    return (NEBULA_PALETTE_HUE_MIN + Math.random() * NEBULA_PALETTE_HUE_RANGE) % 360;
+    return (NEBULA_PALETTE_HUE_MIN + sim.nebula() * NEBULA_PALETTE_HUE_RANGE) % 360;
 }
 
 /**
@@ -263,7 +264,7 @@ export function randomPaletteHueDeg(): number {
  */
 export function randomGlassNebulaComposition(): NebulaColorStop[] {
     const p = getActiveNebulaPalette();
-    const hue = (p.hueMin + Math.random() * p.hueRange) % 360;
+    const hue = (p.hueMin + sim.nebula() * p.hueRange) % 360;
     return [{ hex: hslToHex(hue, p.saturation, p.lightness), weight: 1 }];
 }
 export function randomRockNebulaComposition(): NebulaColorStop[] {

@@ -229,13 +229,13 @@ for (const vp of VIEWPORTS) {
       watch.assertClean();
     });
 
-    test('the death summary fits and its three exits clear the floor', async ({ page }) => {
+    test('the death summary fits and its two exits clear the floor', async ({ page }) => {
       const watch = await boot(page);
       await startRun(page);
       await engine(page, e => e.startExplosion(e.player));
       await waitForStats(page, s => !!s.runSummary, 'the run summary');
 
-      for (const id of ['death-respawn', 'death-restart', 'death-menu']) {
+      for (const id of ['death-respawn', 'death-menu']) {
         const box = (await page.getByTestId(id).boundingBox())!;
         expect(box, `${id} laid out`).not.toBeNull();
         expect(box.height, `${id} height`).toBeGreaterThanOrEqual(TAP_FLOOR);

@@ -39,3 +39,7 @@ perf/out/
 # `npm run build`) — a build output.  pr-preview and publish-standalone both
 # rebuild it from source, so a committed copy only ever went stale.
 omniverse-standalone.html
+scripts/score/.work/
+
+# Python bytecode / numba caches (scripts/score)
+__pycache__/

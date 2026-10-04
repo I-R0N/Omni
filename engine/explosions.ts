@@ -22,6 +22,7 @@
  *  (it flips `isExploding` and arms the wreck timer), not the FX layer, and
  *  the 5b suites call it straight off `window.__omniEngine`.
  */
+import { sim } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
 import { GameEntity, EntityType, Vector2 } from '../types';
@@ -436,7 +437,7 @@ export function applyBlastToPlayer(g: GameEngine, pos: Vector2, radius: number, 
     const k = knockback * falloff;
     let nx: number, ny: number;
     if (dist > 0.001) { nx = dx / dist; ny = dy / dist; }
-    else { const a = Math.random() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
+    else { const a = sim.combat() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
     p.velocity.x += nx * k;
     p.velocity.y += ny * k;
     p.overSpeedAllow = Math.max(p.overSpeedAllow ?? 0, Math.hypot(p.velocity.x, p.velocity.y));

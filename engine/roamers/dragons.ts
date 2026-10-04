@@ -17,6 +17,7 @@
  *  on the head entity, so the entity stays lean.  Any number can be alive at
  *  once; `GameEngine.dragons` holds them.
  */
+import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WeaponType, WeaponConfig } from '../../types';
 import {
@@ -27,6 +28,7 @@ import {
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
 import { TileGenerator, HEX_WIDTH, HEX_HEIGHT } from '../maps/TileGenerator';
+import { viewport } from '../ports';
 
 /** One live dragon mini-boss (Stage 6): its head entity + Snake body + per-
  *  dragon lifecycle/attack timers.  Multiple can be alive at once. */
@@ -161,7 +163,7 @@ export function updateDragons(g: GameEngine, dt: number) {
         if (inst.state === 'roam' && d.provoked) {
             inst.gnatTimer -= dt;
             if (inst.gnatTimer <= 0) {
-                inst.gnatTimer = D.GNAT_INTERVAL + Math.random() * D.GNAT_INTERVAL * 0.5;
+                inst.gnatTimer = D.GNAT_INTERVAL + sim.roamers() * D.GNAT_INTERVAL * 0.5;
                 const ctx = g.waveContext();
                 if (ctx) {
                     g.waves.spawnAt(EnemySubtype.SWARM, d.position, ctx, false);
@@ -203,8 +205,8 @@ export function updateDragons(g: GameEngine, dt: number) {
 export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'mixed') {
     if (!g.currentMap) return;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-    const angle = Math.random() * Math.PI * 2;
+    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + DRAGON_CONSTANTS.SPAWN_MARGIN;
     const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };
     wrapPosition(pos);
@@ -240,7 +242,7 @@ export function spawnDragon(g: GameEngine, type: StructureVariant | 'mixed' = 'm
         thirdParty: true,             // neutral: enemy fire hits it; provoke-on-attack
         consume: v.consume ? { ...v.consume } : undefined,
         aiState: 'chase',
-        glowPhase: Math.random() * Math.PI * 2,
+        glowPhase: fxRng.sprites() * Math.PI * 2,
     };
     // Seed a trailing path (outward, away from the head's inward heading) so the
     // starting body lays out behind it immediately instead of stacking.
@@ -375,7 +377,7 @@ function detachDragonSegment(seg: GameEntity) {
     seg.dragonSegment = false;
     seg.phasesTerrain = false; // a loose shard collides normally again
     seg.shardVariant = tileToShardVariant(seg.shardVariant);
-    const a = Math.random() * Math.PI * 2;
+    const a = sim.roamers() * Math.PI * 2;
     seg.velocity.x = Math.cos(a) * 3.5;
     seg.velocity.y = Math.sin(a) * 3.5;
 }
@@ -410,6 +412,7 @@ g.audio.play('destroy.dragon',
     // Payout doubles per kill this run: 3000, 6000, 12000, …
     g.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, g.dragonsKilled), d.position);
     g.dragonsKilled++;
+    g.records.dragonsKilled++;
     openDragonPortal(g, d.position);
     g.spawnParticles(d.position, 24, DRAGON_CONSTANTS.COLOR, { // Tier 2b: 40 → 24
         speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,

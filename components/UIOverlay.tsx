@@ -24,7 +24,6 @@ interface UIOverlayProps {
    *  from the current map's spawn (unchanged death semantics), RESTART RUN
    *  wipes and replays the same map, MAIN MENU wipes and exits to the menu. */
   onRespawn?: () => void;
-  onRestartRun?: () => void;
   onQuitToMenu?: () => void;
   /** Stage-clear screen: dismiss and resume the cleared arena.  There is no
    *  "descend" action here on purpose — the choice is made by flying to a
@@ -93,7 +92,6 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onResume,
   onRestart,
   onRespawn,
-  onRestartRun,
   onQuitToMenu,
   onDismissStageClear,
   onAudioCue,
@@ -873,9 +871,11 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
         {group('Keyboard & mouse', 'text-emerald-300', [
           ['W A S D / arrows', 'Fly.'],
           ['Mouse', 'Aims. Click to shoot.'],
+          ['Space', 'Shoots too (hold 1s for a charged shot). The mouse still aims.'],
           ['Hold 1s, release', 'Charged shot.'],
           ['E', 'Dock, enter a portal, or undock. Clicking your ship does the same.'],
           ['Q', 'Scan — sweeps for contacts. Needs a Scanner module installed.'],
+          ['Esc', 'Pause, and resume from the pause menu. Also leaves the station screen.'],
           ['Touch', 'Still works alongside: drag to fly, tap to shoot.'],
         ], null, ['keyboard'])}
 
@@ -1666,20 +1666,35 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {row('Salvage earned',
                      `◈${rs.creditsEarnedLife.toLocaleString()}`,
                      'since last death')}
-                {rs.creditsLost > 0 && (
-                  <div className="flex items-baseline justify-between gap-2 py-1 border-b border-slate-700/40 last:border-0">
-                    <span className={`text-rose-400/90 ${T_BODY} uppercase tracking-widest`}>Salvage lost</span>
-                    <span className="text-right">
-                      <span className={`text-rose-300 font-bold tabular-nums ${T_ROW}`}>−◈{rs.creditsLost.toLocaleString()}</span>
-                      {rs.creditsLostRun > rs.creditsLost && (
-                        <span className={`text-slate-500 ${T_NOTE} ml-1.5`}>◈{rs.creditsLostRun.toLocaleString()} this run</span>
-                      )}
-                    </span>
-                  </div>
-                )}
-                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'after loss')}
+                {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'kept')}
+                {rs.arenaSeed !== null && row('Arena seed', rs.arenaSeed.toString(16).toUpperCase().padStart(8, '0'))}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
+                {row('Best score', rs.records.highScore.toLocaleString(),
+                     rs.records.newHighScore ? 'new best!' : undefined)}
+                {rs.wavesEnabled && rs.records.bestWave > 0 && row('Best wave', rs.records.bestWave)}
               </div>
+
+              {/* The wreck (D10): what was mounted is left where the ship fell. */}
+              {rs.wreck && (
+                <div className={`${panelAccent('border-amber-600/40')} text-center`} data-testid="death-wreck">
+                  <div className={`text-amber-300 ${HEADING}`}>Wreck</div>
+                  <div className={`text-slate-200 ${T_ROW}`}>
+                    {rs.wreck.modules} module{rs.wreck.modules === 1 ? '' : 's'} left in {rs.wreck.mapName}
+                  </div>
+                  <div className={`text-slate-500 ${T_NOTE} mt-0.5`}>
+                    Fly back and touch it to recover them into your cargo. Dying again first loses them.
+                  </div>
+                </div>
+              )}
+              {/* A second death destroys the older wreck (D-S2-d2): say so. */}
+              {rs.lostWreck && (
+                <div className={`${panelAccent('border-rose-700/40')} text-center`} data-testid="death-wreck-lost">
+                  <div className={`text-rose-300 ${HEADING}`}>Previous wreck lost</div>
+                  <div className={`text-slate-300 ${T_ROW}`}>
+                    The {rs.lostWreck.modules} module{rs.lostWreck.modules === 1 ? '' : 's'} left in {rs.lostWreck.mapName} are gone for good.
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <button
@@ -1687,30 +1702,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   data-testid="death-respawn"
                   className={BTN_PRIMARY}
                 >
-                  Respawn
+                  Respawn at Home Station
                 </button>
                 <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
-                  Continue this run — hull restored at the {rs.mapName} spawn. Score and outfit are kept
-                  {rs.creditsLost > 0
-                    ? `; the wreck cost you ◈${rs.creditsLost.toLocaleString()} of your unspent Salvage${rs.credits === 0 ? ' — all of it' : ''}.`
-                    : '.'}
+                  You return to your station. What you had installed stays with the wreck; salvage, cargo and score are kept.
                 </p>
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <button
-                    onClick={onRestartRun}
-                    data-testid="death-restart"
-                    className={BTN_SECONDARY}
-                  >
-                    Restart Run
-                  </button>
-                  <button
-                    onClick={onQuitToMenu}
-                    data-testid="death-menu"
-                    className={BTN_SECONDARY}
-                  >
-                    Main Menu
-                  </button>
-                </div>
+                <button
+                  onClick={onQuitToMenu}
+                  data-testid="death-menu"
+                  className={`${BTN_SECONDARY} mt-1`}
+                >
+                  Main Menu
+                </button>
               </div>
 
             </div>
@@ -1753,6 +1756,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
             <div className="w-full flex flex-col items-center gap-3">
               <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
+              <span className={`text-slate-500 ${T_NOTE} -mt-2 text-center`}>
+                How hard arena waves hit. Saved with your character; the hub has no waves.
+              </span>
               {/* A 4-up grid rather than a flex row: the buttons then divide
                   the column's width instead of setting it, so the row can
                   never overflow a narrow screen. */}
@@ -1786,6 +1792,26 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderAdaptiveTriggers()}
             </div>
 
+            {/* A returning player sees that their game is there (user call:
+                a reload used to look like a fresh start). */}
+            {stats.savedGame?.progress && (
+              <div className={`${panelAccent('border-emerald-600/40')} w-full text-center`} data-testid="menu-saved">
+                <div className={`text-emerald-300 ${HEADING}`}>Saved game</div>
+                <div className={`text-slate-200 ${T_ROW}`}>
+                  ◈{stats.savedGame.credits.toLocaleString()} · {stats.savedGame.modules} module{stats.savedGame.modules === 1 ? '' : 's'}
+                  {stats.savedGame.records.deaths > 0 ? ` · ${stats.savedGame.records.deaths} death${stats.savedGame.records.deaths === 1 ? '' : 's'}` : ''}
+                </div>
+                {stats.savedGame.records.highScore > 0 && (
+                  <div className={`text-slate-500 ${T_NOTE}`}>Best score {stats.savedGame.records.highScore.toLocaleString()}</div>
+                )}
+                {stats.savedGame.wreck && (
+                  <div className={`text-amber-300 ${T_NOTE} mt-0.5`}>
+                    Wreck waiting in {stats.savedGame.wreck.mapName} ({stats.savedGame.wreck.modules} module{stats.savedGame.wreck.modules === 1 ? '' : 's'})
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               data-testid="menu-start"
               onClick={onStart}
@@ -1797,7 +1823,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                  Kept indigo and rounded-full; the tap floor is shared. */
               className={`w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 rounded-full ${TAP} shadow-2xl transition-all transform hover:scale-105 active:scale-95`}
             >
-              START
+              {stats.savedGame?.progress ? 'CONTINUE' : 'START'}
             </button>
 
             {/* Controls & basics — the same widget the pause menu shows.
@@ -2002,14 +2028,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 <span className={`w-10 text-right text-slate-400 ${T_BODY}`}>{Math.round((value ?? 1) * 100)}%</span>
               </label>;
             })}
-            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music: <a href="https://opengameart.org/content/space-ambient" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Space ambient — Osmic</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a></p>
-            {/* The battle playlist is three separately-licensed CC-BY tracks,
-                and AUDIO_CREDITS.md promises their attribution is visible
-                HERE — so every one is named with its own creator and its own
-                licence version.  Two of the three are CC BY 3.0 and one is
-                4.0; a single shared licence link would misattribute one of
-                them. */}
-            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Battle: <a href="https://opengameart.org/content/techno-space" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Fly — Alexandr Zhelanov</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a> — <a href="https://opengameart.org/content/tracers" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Tracers — Sygil</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 4.0</a> — <a href="https://opengameart.org/content/countdown-0" target="_blank" rel="noreferrer" className="pointer-events-auto underline">Countdown — Alexandr Zhelanov</a> · <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noreferrer" className="pointer-events-auto underline">CC BY 3.0</a></p>
+            <p className={`mx-auto max-w-xs text-slate-500 ${T_BODY}`}>Music: original adaptive score composed for Omni.</p>
 
             {/* Output-latency READOUT (playtest: "sounds feel slightly
                 delayed").  The engine side is measured tight — tap → play()

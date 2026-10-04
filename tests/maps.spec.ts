@@ -662,7 +662,9 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
         const anchor = exit ? exit.position : e.player.position;
         for (const id of ids) {
           if (seen[id]) continue;
-          const en = e.currentMap.entities.find((x: any) => x.id === id && x.active);
+          // Carried debris is re-id'd `xfer_<id>` at capture (ids restart with
+          // the destination map, so it must not collide with a new one).
+          const en = e.currentMap.entities.find((x: any) => x.id === 'xfer_' + id && x.active);
           if (!en) continue;
           seen[id] = {
             speed: Math.hypot(en.velocity.x, en.velocity.y),
@@ -676,7 +678,7 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
 
       const ok = e.transitionToMap(rift.portalTargetId);
       const queuedIds = e.portalTransit.map((t: any) => t.entity.id);
-      return { ok, ids, queued: e.portalTransit.length, carried: ids.filter(id => queuedIds.includes(id)).length };
+      return { ok, ids, queued: e.portalTransit.length, carried: ids.filter(id => queuedIds.includes('xfer_' + id)).length };
     });
 
     expect(run, 'an arena rift on the hub').not.toBeNull();

@@ -55,8 +55,8 @@ npm run build && node scripts/inline-build.mjs
   commitment; some entries are stale by design.
 - `docs/SFX_INVENTORY.md` — every sound id and its spec, the source of
   truth for sound. `docs/CINEMATIC_AUDIO.md` describes the shipped
-  sample-bank audio and mix; `docs/AUDIO_AUTHORING.md` is how to add
-  recorded or licensed music and sound.
+  sample-bank audio and mix; `docs/AUDIO_AUTHORING.md` covers the adaptive
+  score and adding sound; `scripts/score/` generates the music.
 - `tests/README.md` — the Playwright suites: how to run them, what each
   covers, and the harness rules that keep them from flaking.
 

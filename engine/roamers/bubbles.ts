@@ -25,6 +25,7 @@
  *  `GameEngine`: they are small generic wave-enemy passes with nothing bubble
  *  about them, and filing them here would be a misfile.
  */
+import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, ConsumeConfig, GameState } from '../../types';
 import {
@@ -33,6 +34,7 @@ import {
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import type { WaveSpawnContext } from '../systems/WaveSystem';
+import { viewport } from '../ports';
 
 // ─── Bubble engagement pass (Stage 5) ──────────────────────────────────
 //
@@ -87,7 +89,7 @@ export function updateBubbles(g: GameEngine, dt: number) {
         // shrinking ghost is drawn inside the membrane by RenderSystem. ──
         if ((e.bubbleDigestTimer ?? 0) > 0) {
             e.bubbleDigestTimer = e.bubbleDigestTimer! - dt;
-            if (Math.random() < 0.25) {
+            if (fxRng.particles() < 0.25) {
                 g.spawnParticles(e.position, 1, e.bubbleDigestColor || '#a8a29e', {
                     speedMin: 0.5, speedMax: 2, sizeMin: 0.8, sizeMax: 1.8,
                     lifetimeMin: 0.2, lifetimeMax: 0.45, positionJitter: Math.max(e.size.x, e.size.y) * 0.3,
@@ -171,7 +173,7 @@ export function updateBubbles(g: GameEngine, dt: number) {
             const base = cfg.size;
             e.size.x = base; e.size.y = base;
             syncBubbleMaxHealth(e); // back to base maxHP after shedding mass
-            const a = Math.random() * Math.PI * 2;
+            const a = sim.roamers() * Math.PI * 2;
             e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
             e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
             const child = g.waves.spawnAt(EnemySubtype.BUBBLE, e.position, ctx, false);
@@ -286,9 +288,9 @@ function spawnAmbientBubble(g: GameEngine): GameEntity | null {
     const ctx = g.waveContext();
     if (!ctx) return null;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-    const angle = Math.random() * Math.PI * 2;
-    const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + Math.random() * 240;
+    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    const angle = sim.roamers() * Math.PI * 2;
+    const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + sim.roamers() * 240;
     const pos = {
         x: g.player.position.x + Math.cos(angle) * dist,
         y: g.player.position.y + Math.sin(angle) * dist,

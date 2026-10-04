@@ -56,6 +56,7 @@ import {
 import { applyModuleEffects } from './outfitting';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { nowMs } from './ports';
 
 /** DBG-only cycle tables.  They lived as private statics on `GameEngine`;
  *  nothing but the cycle methods below ever read them, so they came here
@@ -1189,7 +1190,7 @@ export class DebugControls {
   cycleSubstepCap() {
     cycleSubstepCap();
     this.g.simAccumulator = 0;
-    this.g.lastTime = performance.now();
+    this.g.lastTime = nowMs();
   }
 
   /** DBG: cycle the HUD (React) update rate — 60Hz default / 30 / 15.
@@ -1219,7 +1220,7 @@ export class DebugControls {
   cycleSimRate() {
     cycleSimRate();
     this.g.simAccumulator = 0;
-    this.g.lastTime = performance.now();
+    this.g.lastTime = nowMs();
   }
 
   /** Toggle the FF Vectors overlay (asteroid-flow arrows). */

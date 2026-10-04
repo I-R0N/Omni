@@ -1,5 +1,6 @@
 
 
+import { sim, fxRng } from './engine/systems/rng';
 import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig, ControlScheme } from './types';
 import {
   ShardVariantId,
@@ -16,6 +17,7 @@ import {
   type Delivery, type EnergyModifier, DELIVERIES, ENERGY_MODIFIERS, weaponKey, resolveWeaponKey,
   MATERIALS, registerVariantMaterials,
 } from './engine/systems/energy';
+import { viewport } from './engine/ports';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -100,7 +102,7 @@ export function cycleRockPalette(): number {
  *  free rock-shard spawn site; shards otherwise inherit their parent's. */
 export function randomRockShade(): string {
   const shades = ROCK_PALETTES[activeRockPaletteIndex].shades;
-  return shades[(Math.random() * shades.length) | 0];
+  return shades[(fxRng.sprites() * shades.length) | 0];
 }
 
 // ── Plastic palettes ───────────────────────────────────────────────
@@ -421,7 +423,7 @@ export function cycleNebulaPalette(): number {
  *  reads as "different shades" within the chosen family. */
 export function randomPlasticShade(): string {
   const palette = PLASTIC_PALETTES[activePlasticPaletteIndex].shades;
-  return palette[Math.floor(Math.random() * palette.length)];
+  return palette[Math.floor(fxRng.sprites() * palette.length)];
 }
 
 /** Pick a random shade from the ACTIVE plastic-SHARD palette.  Cycles
@@ -430,7 +432,7 @@ export function randomPlasticShade(): string {
  *  family without touching tiles, and vice-versa. */
 export function randomPlasticShardShade(): string {
   const palette = PLASTIC_PALETTES[activePlasticShardPaletteIndex].shades;
-  return palette[Math.floor(Math.random() * palette.length)];
+  return palette[Math.floor(fxRng.sprites() * palette.length)];
 }
 
 /** Constant base colour for the plastic-shard neighbour-brightness
@@ -1273,8 +1275,10 @@ export const INPUT_CONSTANTS = {
    *  is a physical POSITION (left of 1, under Esc) rather than a character,
    *  and survives keyboard layouts that put something other than ` there.
    *  The classic dev-console key, and unbound: flight is WASD/arrows, the
-   *  mouse aims and shoots, E interacts and Q scans.  Escape also CLOSES the
-   *  panel (never opens it).  The pad's twin is `GAMEPAD.BUTTONS.DEBUG`. */
+   *  mouse aims and shoots, E interacts and Q scans.  Escape CLOSES the panel
+   *  (never opens it) — and with the panel shut it is the pause key
+   *  (`GameEngine.escapePressed`).  The pad's twin is
+   *  `GAMEPAD.BUTTONS.DEBUG`. */
   DEBUG_KEY: 'Backquote',
 
   // ── Gamepad rumble ─────────────────────────────────────────────────────
@@ -1729,7 +1733,7 @@ let activeRenderScaleIndex = 0;
 export function getActiveRenderScaleCap(): number { return RENDER_SCALE_CYCLE[activeRenderScaleIndex]; }
 export function getActiveRenderScaleName(): string {
   const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const dpr = viewport().dpr || 1;
   return dpr <= cap ? `${cap}x (native)` : `${cap}x`;
 }
 /** The device pixel ratio ACTUALLY in use, after the cap.  Every site that
@@ -1737,7 +1741,7 @@ export function getActiveRenderScaleName(): string {
  *  `window.devicePixelRatio` — mixing the two makes the renderer compute a
  *  logical viewport that does not match the canvas it is drawing into. */
 export function effectiveDpr(): number {
-  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  const dpr = viewport().dpr || 1;
   const cap = RENDER_SCALE_CYCLE[activeRenderScaleIndex];
   return dpr < cap ? dpr : cap;
 }
@@ -5433,6 +5437,9 @@ export const WAVE_ANNOUNCE_CONSTANTS = {
   FADEIN: 0.3,
   HOLD: 1.0,
   FADEOUT: 0.5,
+  /** A wave-start ROSTER dialogue holds longer than a plain banner: it is
+   *  something to read, not a flash. */
+  ROSTER_HOLD: 3.2,
   // Banner type sizes.  These are the DESIGN sizes on a roomy viewport;
   // `fitFontPx` (render/hud.ts) shrinks a line that would overflow (banner
   // text is authored content — boss names, reward labels — so its width isn't
@@ -7247,10 +7254,10 @@ export const AUDIO_CONSTANTS = {
   SNITCH_DISTANCE_CURVE: 2.5,
   PAN_WIDTH: 900,          // world units mapping to full L/R pan
 
-  /** THE BATTLE LAYER'S PROXIMITY GATE — what makes the score DUCK, never
-   *  what makes it start over.  The playlist runs continuously once opened
-   *  and a track changes only when it ENDS (see BackgroundMusic); these
-   *  numbers decide nothing but whether it is currently audible.
+  /** THE COMBAT GATE — the floor under the adaptive score's GROOVE layer
+   *  (kick, snare, bass).  The score itself never starts over on it: every
+   *  stem runs continuously on one clock (see AdaptiveMusic), and these
+   *  numbers decide only whether the fight is HERE.
    *
    *  Measured in SCREENS (`GameEngine.viewportHalfDiagonal`) rather than in
    *  world units, unlike every other radius in this block, and the reason is
@@ -7274,6 +7281,23 @@ export const AUDIO_CONSTANTS = {
    *  ducked on every clear field would be the "switches too easily"
    *  behaviour moved from the playlist into the mixer. */
   MUSIC_LINGER_SEC: 6,
+  /** THE ADAPTIVE SCORE'S THREAT SCAN (see AdaptiveMusic).  Same unit as
+   *  the gate above — SCREENS — for the same reason.
+   *
+   *  ALERT is wider than ENGAGE: a hostile inside it brings in the score's
+   *  PULSE layer (arpeggio, hats) before the fight reaches the screen, so the
+   *  music anticipates the wave rather than reacting to it.  CLOSE is the
+   *  radius inside which a hostile counts at full weight toward PRESSURE;
+   *  between CLOSE and ALERT its weight falls off linearly to zero. */
+  MUSIC_ALERT_SCREENS: 2.6,
+  MUSIC_CLOSE_SCREENS: 0.6,
+  /** An enemy's pressure weight is sqrt(maxHealth / REF), clamped to
+   *  [MIN, MAX]: a stock enemy (30 hp) weighs 1, a tank ~2, nothing alone
+   *  weighs more than three.  A live boss adds BOSS_WEIGHT at any range. */
+  MUSIC_WEIGHT_REF_HP: 30,
+  MUSIC_WEIGHT_MIN: 0.5,
+  MUSIC_WEIGHT_MAX: 3,
+  MUSIC_BOSS_WEIGHT: 3,
 } as const;
 
 // ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────
@@ -7863,23 +7887,8 @@ export function isCollectibleDrop(e: GameEntity): boolean {
 // touching the gun price ladder.
 export const SALVAGE_CONSTANTS = {
   CREDITS_PER_DROP: 1000,     // credits per salvage unit, applied at collection
-  // Death penalty (interim, user call): dying forfeits this fraction of the
-  // player's UNSPENT Salvage, charged once when the run-summary screen is
-  // raised so the summary can report exactly what it cost.  0.25 is
-  // PROVISIONAL — big enough that a death stings, small enough that it never
-  // wipes a run — and is placeholder for the dynamic system the economy
-  // tuning pass (roadmap step 6) will design.  Money already SPENT on modules
-  // is untouched: the penalty taxes hoarding, not investment.
-  DEATH_PENALTY_FRACTION: 0.25,
-  // ...and a FLOOR, so death still costs something at a low balance where a
-  // percentage rounds to pocket change.  The charge is
-  //   min(balance, max(fraction × balance, MIN))
-  // — whichever of the two is higher, but never more than the player has, so
-  // it can bring them to zero and never below.  12 500 ≈ 12–13 salvage drops
-  // (CREDITS_PER_DROP 1000), i.e. roughly two waves of combat income, and it
-  // is the binding term below a 50 000 balance.  PROVISIONAL like the
-  // fraction: both are placeholders for the economy tuning pass (step 6).
-  DEATH_PENALTY_MIN: 12500,
+  // No death penalty on salvage (user call D6): dying strips the installed
+  // loadout instead (GameEngine.returnToStation).
   DROP_COLOR: '#cbd5e1',      // silver scrap — steel-grey chunk, white glint rim
                               // (deliberately NOT gold: gold "+N" popups mean
                               // score, which no longer pays money)
@@ -7905,6 +7914,26 @@ export const SALVAGE_CONSTANTS = {
 // avoids POIs — so the station is pure scenery + a dock zone with zero
 // collision/flow surprises.  Docking freezes the sim (cardChoicePending-
 // style loop short-circuit) and opens the station UI.
+/** The death WRECK (D10; `engine/wreck.ts`).  Flown into, it gives back what
+ *  was mounted when the ship fell. */
+export const WRECK_CONSTANTS = {
+  /** Distance at which the hull recovers it — a collect, like a drop, not a dock. */
+  RECOVER_RANGE: 70,
+  SIZE: 44,
+  COLOR: '#f59e0b',
+} as const;
+
+/** What an arena remembers of its wave script when the player leaves it
+ *  (`engine/arenaWaves.ts`, user call).  For `GRACE_SEC` of real time the wave
+ *  comes back EXACTLY as it was — same wave, same kills already scored.  After
+ *  that it starts over from the top of the wave, and it starts over a wave
+ *  EARLIER for every `DECAY_SEC` away (wave 3 → fresh 3 at 5 min → fresh 2 at
+ *  1 h → fresh 1 at 2 h). */
+export const ARENA_WAVE_MEMORY = {
+  GRACE_SEC: 5 * 60,
+  DECAY_SEC: 60 * 60,
+} as const;
+
 export const STATION_CONSTANTS = {
   SIZE: 180,             // world-unit diameter of the station body
   COLOR: '#38bdf8',      // sky — matches the Drydock UI headers; minimap dot + chevron colour
@@ -8531,7 +8560,7 @@ export function detectTierFor(e: GameEntity): number {
  *  Stations and portals are the fixed landmarks today.  Everything else —
  *  enemies, rivals, fauna, dragons, the snitch, materials — is transient. */
 export function isRetainedContact(e: GameEntity): boolean {
-  return e.isStation === true || e.isPortal === true;
+  return e.isStation === true || e.isPortal === true || e.isWreck === true;
 }
 
 /** The landmarks a run STARTS knowing, seeded as `found` at map load: the
@@ -9728,7 +9757,7 @@ export function getWaveSpawnBudget(index: number): number {
 
 /** Roll a 0-based tier from a [w1, w2, w3] weight row. */
 function rollTier(weights: [number, number, number]): number {
-  const r = Math.random() * (weights[0] + weights[1] + weights[2]);
+  const r = sim.waves() * (weights[0] + weights[1] + weights[2]);
   if (r < weights[0]) return 0;
   if (r < weights[0] + weights[1]) return 1;
   return 2;
@@ -9763,7 +9792,7 @@ export function buildWaveSpawnList(index: number, budget: number, forced?: Enemy
   );
   const weights = WAVE_TIER_WEIGHTS[set];
   for (let i = 0; i < budget; i++) {
-    const role = Math.random() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
+    const role = sim.waves() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
     list.push(SUBTYPE_BY_ROLE_TIER[role][rollTier(weights)]);
   }
 
@@ -9771,7 +9800,7 @@ export function buildWaveSpawnList(index: number, budget: number, forced?: Enemy
     const hasRam   = list.some(s => ENEMY_ROLE[s] === EnemyRole.RAMMING);
     const hasShoot = list.some(s => ENEMY_ROLE[s] === EnemyRole.SHOOTING);
     if (!hasRam || !hasShoot) {
-      const k = Math.floor(Math.random() * budget);
+      const k = Math.floor(sim.waves() * budget);
       const tier = SUBTYPE_BY_ROLE_TIER[ENEMY_ROLE[list[k]]].indexOf(list[k]);
       list[k] = SUBTYPE_BY_ROLE_TIER[hasRam ? EnemyRole.SHOOTING : EnemyRole.RAMMING][tier];
     }

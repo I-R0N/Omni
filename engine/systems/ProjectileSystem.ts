@@ -1,3 +1,4 @@
+import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../../types';
 import {
   PROJECTILE_CONSTANTS,
@@ -12,6 +13,7 @@ import {
 import { nextId } from './IdAllocator';
 import { enforceTypeCap } from './enforceCap';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
+import { nowMs } from '../ports';
 
 /** A seeker keeps its lock until the target is this far outside the acquire
  *  range (squared ratio), so a lock does not flicker at the rim. */
@@ -192,7 +194,7 @@ export class ProjectileSystem {
         const step = (halfSpread * 2) / (config.count - 1);
         currentAngle = (angle - halfSpread) + (step * i);
       } else if (config.spread > 0) {
-        currentAngle += (Math.random() - 0.5) * (config.spread * (Math.PI / 180));
+        currentAngle += (sim.combat() - 0.5) * (config.spread * (Math.PI / 180));
       }
 
       const ax = Math.cos(currentAngle);
@@ -294,10 +296,10 @@ export class ProjectileSystem {
         pooled.detonateOn = config.detonateOn;
         pooled.boreCostScale = config.boreCostScale;
         // A curving pellet rolls its own bend (unconditional: pooled state).
-        pooled.curveRate = config.curve ? (Math.random() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * Math.random()) : undefined;
+        pooled.curveRate = config.curve ? (sim.combat() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * sim.combat()) : undefined;
         pooled.curveWobble = config.curve ? (config.wobble ?? 0) : undefined;
         pooled.curveHz = config.curve ? (config.wobbleHz ?? 0) : undefined;
-        pooled.curvePhase = config.curve ? Math.random() * Math.PI * 2 : undefined;
+        pooled.curvePhase = config.curve ? sim.combat() * Math.PI * 2 : undefined;
         pooled.fuseTimer = config.fuseSeconds;
         // Unconditional like the fuse beside it, and for a sharper reason: a
         // recycled shell that kept `detonated` from its last life would never
@@ -359,10 +361,10 @@ export class ProjectileSystem {
           explosionKnockback: config.explosionKnockback,
           detonateOn: config.detonateOn,
           boreCostScale: config.boreCostScale,
-          curveRate: config.curve ? (Math.random() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * Math.random()) : undefined,
+          curveRate: config.curve ? (sim.combat() < 0.5 ? -1 : 1) * config.curve * (0.4 + 0.6 * sim.combat()) : undefined,
           curveWobble: config.curve ? (config.wobble ?? 0) : undefined,
           curveHz: config.curve ? (config.wobbleHz ?? 0) : undefined,
-          curvePhase: config.curve ? Math.random() * Math.PI * 2 : undefined,
+          curvePhase: config.curve ? sim.combat() * Math.PI * 2 : undefined,
           fuseTimer: config.fuseSeconds,
           blastPending: false,
           detonated: false,
@@ -402,7 +404,7 @@ export class ProjectileSystem {
    * does not split projectiles by `.homing`.
    */
   public updateHoming(projectiles: GameEntity[], enemies: GameEntity[], player: GameEntity, dt: number) {
-    const t0 = performance.now();
+    const t0 = nowMs();
 
     const acquireRangeSq = HOMING_ACQUIRE_RANGE * HOMING_ACQUIRE_RANGE;
     const playerHomeable = player.active && !player.isExploding;
@@ -462,7 +464,7 @@ export class ProjectileSystem {
       if (hasTarget) steerHermite(p, targetDx, targetDy, targetVx, targetVy, dt);
     }
 
-    this.lastHomingMs = performance.now() - t0;
+    this.lastHomingMs = nowMs() - t0;
   }
 
   /**
@@ -480,7 +482,7 @@ export class ProjectileSystem {
     asteroids: GameEntity[],
     dt: number,
   ) {
-    const t0 = performance.now();
+    const t0 = nowMs();
     const rangeSq = LIGHTNING_GRAVITY_RANGE * LIGHTNING_GRAVITY_RANGE;
 
     // Fast-path: scan projectile list once to see if any are lightning.
@@ -488,8 +490,8 @@ export class ProjectileSystem {
     for (let i = 0; i < projectiles.length; i++) {
       if (projectiles[i].isLightningProjectile) { hasLightning = true; break; }
     }
-    if (!hasLightning) { this.lastLightningMs = performance.now() - t0; return; }
-    if (enemies.length === 0 && asteroids.length === 0) { this.lastLightningMs = performance.now() - t0; return; }
+    if (!hasLightning) { this.lastLightningMs = nowMs() - t0; return; }
+    if (enemies.length === 0 && asteroids.length === 0) { this.lastLightningMs = nowMs() - t0; return; }
 
     for (let i = 0; i < projectiles.length; i++) {
       const p = projectiles[i];
@@ -538,6 +540,6 @@ export class ProjectileSystem {
       }
     }
 
-    this.lastLightningMs = performance.now() - t0;
+    this.lastLightningMs = nowMs() - t0;
   }
 }

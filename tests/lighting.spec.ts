@@ -263,6 +263,9 @@ test.describe('occluder collection', () => {
   test('opaque casts a full shadow, glass a partial one, passThrough none', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'GLASS_FIELD');
+    // The wave-start roster dialogue sits over the frame for a few seconds;
+    // hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // A generated map gives no control over WHERE the occluders are, so the
     // scene is hand-built: every static tile deactivated, exactly one revived
@@ -1564,6 +1567,9 @@ test.describe('occluder collection', () => {
   test('the flashlight is a cone that follows the aim, with a spill floor', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // The wave-start roster dialogue sits over the frame for a few seconds;
+    // hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // Ships as `off` now (user call, superseding the beam default): the
     // flashlight became the Light-module-gated ship-tap TOOL, so the DBG
@@ -1996,6 +2002,9 @@ test.describe('occluder collection', () => {
   test('fog of war: the light cuts it, and the memory remembers', async ({ page }) => {
     const watch = await boot(page);
     await startRun(page, 'METAL_FIELD');
+    // The wave-start roster dialogue sits over the frame for a few seconds;
+    // hold the scene still for the pixel readings below — see `quietScene`.
+    await quietScene(page);
 
     // OFF by default: this changes how the whole game reads, so it is a
     // design decision rather than a rendering one.

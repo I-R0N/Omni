@@ -1,5 +1,6 @@
 
 
+import { sim } from './rng';
 import { mechanicalScale, materialOf, stampFractureProfile } from './energy';
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
 import { PHYSICS_CONSTANTS, SPATIAL_GRID_SIZE, PLAYER_MOVEMENT_CONFIG, STRUCTURE_CONSTANTS, LOCAL_GRAVITY_CONSTANTS, COLLISION_CONFIG, SHIELD_CONSTANTS, HIT_FEEDBACK, NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_SLEEP_CONSTANTS, PLASTIC_TRANSMUTE_EXCLUDE, PLASTIC_DENT_RECOVERY, randomPlasticShardShade, ROCK_BREAK, rockBreakChance, isCollectibleDrop, BUBBLE_CONSTANTS, stampBubbleAggro, hitReactStrength, noteTraitDamage, markDamaged, markShieldDamaged, AUDIO_CONSTANTS, getNebulaWakeSpinMode, getPortalGravityMult, getPortalGravityRangeMult, portalHorizonRadius, avoidsPortals, PORTAL_CONSTANTS, getActiveFractureMode, isProgressiveFracture, grainSpecFor, PROJECTILE_CONSTANTS, projectileBite, kineticDamage, speedAfterSpending, getActiveImpactVelocityMode, crashDamageFor, crashEnergyCost, reducedMass } from '../../constants';
@@ -11,6 +12,7 @@ import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, wrapPosition, w
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import type { PerfController } from './PerfController';
 import { CellBuckets } from './CellBuckets';
+import { nowMs } from '../ports';
 
 /**
  * How a projectile should come off a surface — see
@@ -367,6 +369,9 @@ export class PhysicsSystem {
 
   // Call this when loading a map to cache static geometry
   public initializeStaticGrid(entities: GameEntity[]) {
+    // Per-map phase of the shard-pair catch-up cadence: a run's pairs must
+    // not depend on how many steps the previous map ran (engine-core S1).
+    this.shardPairCallCount = 0;
       this.staticGrid.clear();
       // Map load: drop the per-substep bucket pools too.  Their free lists are
       // sized to the OUTGOING map, and holding a 6k-shard map's worth of empty
@@ -442,7 +447,7 @@ export class PhysicsSystem {
     onHit?: (impactPos: Vector2, proj: GameEntity, target: GameEntity) => void,
     onPortalEject?: (entity: GameEntity, portal: GameEntity) => void
   ) {
-    const t0 = performance.now();
+    const t0 = nowMs();
 
     // Determine Friction based on Environment (MapType) from Config
     const config = PLAYER_MOVEMENT_CONFIG[mapType];
@@ -462,21 +467,21 @@ export class PhysicsSystem {
     // Apply Planetary/Stellar Gravity (Scaled by time).
     // DBG-toggleable: when attractorGravityEnabled is false the scan
     // is skipped entirely and lastGravityMs reads zero.
-    const tGrav = performance.now();
+    const tGrav = nowMs();
     if (this.attractorGravityEnabled) {
       this.applyGravity(entities, timeScale, onDamage, onPortalEject);
     }
-    this.lastGravityMs = performance.now() - tGrav;
+    this.lastGravityMs = nowMs() - tGrav;
 
     // Apply Player-Asteroid Mutual Gravity (Scaled by time).
     // DBG-toggleable: when localGravityEnabled is false, the scan is
     // skipped entirely and lastLocalGravityMs reads zero — letting the
     // perf overlay show the cost dropping to baseline in real time.
-    const tLocal = performance.now();
+    const tLocal = nowMs();
     if (this.localGravityEnabled) {
       this.applyLocalGravity(asteroids, player, timeScale);
     }
-    this.lastLocalGravityMs = performance.now() - tLocal;
+    this.lastLocalGravityMs = nowMs() - tLocal;
 
     // Player → nebula-shard pull (independent of local gravity toggle
     // — this is the only interaction the player gets with nebula
@@ -732,7 +737,7 @@ export class PhysicsSystem {
     // off-frames is what makes the slider visibly move `coll` ms.
     // Both passes share the same `tCol` window so the perf timer
     // reports total collision cost (main + shard-pair).
-    const tCol = performance.now();
+    const tCol = nowMs();
     if (this.collisionsEnabled) {
       this.handleEntityCollisions(entities, timeScale, onDamage, onDeath, onShake, onHit);
       if (this.shouldRunShardPairsThisStep()) {
@@ -761,9 +766,9 @@ export class PhysicsSystem {
       // same helper inline.
       this.resolvePassthroughShatterPairs(asteroids, onDamage, onDeath, onShake, onHit);
     }
-    this.lastCollisionsMs = performance.now() - tCol;
+    this.lastCollisionsMs = nowMs() - tCol;
 
-    this.lastUpdateMs = performance.now() - t0;
+    this.lastUpdateMs = nowMs() - t0;
   }
 
   /**
@@ -1026,7 +1031,7 @@ export class PhysicsSystem {
                     entity.velocity.x = vx * out;
                     entity.velocity.y = vy * out;
                     entity.rotationSpeed = (entity.rotationSpeed ?? 0)
-                        + (Math.random() - 0.5) * E.SPIN;
+                        + (sim.combat() - 0.5) * E.SPIN;
                     // The same immunity the transit debris gets, and for the
                     // same reason: without it the well it just cleared would
                     // haul it straight back down.
@@ -1389,7 +1394,7 @@ export class PhysicsSystem {
       if (isProgressiveFracture(target.shardVariant)) return;
       const ceiling = target.maxHealth ?? ROCK_BREAK.MIN_HITS;
       const hitsTaken = ceiling - target.health;
-      if (Math.random() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
+      if (sim.combat() < rockBreakChance(hitsTaken, ceiling)) target.health = 0;
   }
 
   // ── PENETRATION: THE BORE TRACK ─────────────────────────────────────
@@ -1672,7 +1677,7 @@ export class PhysicsSystem {
 
       const spread = opts?.spread;
       if (spread !== undefined && spread > 0) {
-          const ang = (Math.random() - 0.5) * spread;
+          const ang = (sim.combat() - 0.5) * spread;
           const c = Math.cos(ang), sn = Math.sin(ang);
           const tx = rx * c - ry * sn;
           ry = rx * sn + ry * c;
@@ -2020,7 +2025,7 @@ export class PhysicsSystem {
           let available = pullCount - 1;
           for (let i = 0; i < pullCount && remaining > 0; i++) {
               if (i === half) continue;
-              if (Math.random() * available < remaining) {
+              if (sim.combat() * available < remaining) {
                   deepMask |= 1 << i;
                   remaining--;
               }
@@ -2033,7 +2038,7 @@ export class PhysicsSystem {
           const idx = ((bestIdx + offset) % N + N) % N;
           const isDeep = (deepMask & (1 << i)) !== 0;
           const jitterMag = dent.vertexJitter * (isDeep ? centerMul : 1);
-          const k = Math.max(K_MIN, 1 - Math.random() * jitterMag);
+          const k = Math.max(K_MIN, 1 - sim.combat() * jitterMag);
           pts[idx].x *= k;
           pts[idx].y *= k;
       }

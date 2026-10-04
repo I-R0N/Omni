@@ -146,7 +146,7 @@ test.describe('death screen', () => {
     watch.assertClean();
   });
 
-  test('all three exit paths do what they say', async ({ page }) => {
+  test('both exit paths do what they say', async ({ page }) => {
     const watch = await boot(page);
 
     // ── RESPAWN: refill at the map's spawn, the run CONTINUES ────────────
@@ -154,7 +154,7 @@ test.describe('death screen', () => {
     await engine(page, e => { e.awardScore(5000); e.addDebugCredits(40_000); });
     await engine(page, e => e.startExplosion(e.player));
     await waitForStats(page, s => !!s.runSummary, 'summary 1');
-    const balanceAfterPenalty = await engine(page, e => e.credits as number);
+    const balanceAtDeath = await engine(page, e => e.credits as number);
 
     await engine(page, e => e.respawnFromDeath());
     await waitForStats(page, s => !s.runSummary, 'summary 1 to clear');
@@ -167,37 +167,13 @@ test.describe('death screen', () => {
     }));
     expect(respawned.exploding).toBe(false);
     expect(respawned.health).toBe(respawned.maxHealth);
-    // The RUN survives — score and the post-penalty balance carry.
+    // The RUN survives — score and the balance carry (no death penalty).
     expect(respawned.score).toBeGreaterThanOrEqual(5000);
-    expect(respawned.credits).toBe(balanceAfterPenalty);
-
-    // ── RESTART RUN: wipe and drop straight back into play ───────────────
-    await engine(page, e => e.startExplosion(e.player));
-    await waitForStats(page, s => !!s.runSummary, 'summary 2');
-    await engine(page, e => e.restartRun());
-    const restarted = await waitForStats(page, s => s.gameState === 'PLAYING' && !s.runSummary, 'a fresh run');
-    const zeroed = await engine(page, e => ({
-      score: e.score, credits: e.credits, kills: e.runKills,
-      earned: e.runCreditsEarned, lost: e.runCreditsLost,
-      waves: e.runWavesCleared, bosses: e.bossesKilled,
-      exploding: !!e.player.isExploding,
-    }));
-    // EVERY run counter is back to zero — the thing a stale-state leak in
-    // resetAndLoadSelectedMap would break, and did once before.
-    expect(zeroed).toEqual({
-      score: 0, credits: 0, kills: 0, earned: 0, lost: 0,
-      waves: 0, bosses: 0, exploding: false,
-    });
-    // And it lands in PLAY, not in the menu.
-    expect(restarted.gameState).toBe('PLAYING');
-    // Back at the hub: restartRun reloads the map the run STARTED on
-    // (selectedMapType — the hub here); it is quitting to the menu
-    // (restartGame) that resets a DBG map override.
-    expect(restarted.currentMapType).toBe('OVERWORLD');
+    expect(respawned.credits).toBe(balanceAtDeath);
 
     // ── MAIN MENU: wipe and return to the menu ───────────────────────────
     await engine(page, e => e.startExplosion(e.player));
-    await waitForStats(page, s => !!s.runSummary, 'summary 3');
+    await waitForStats(page, s => !!s.runSummary, 'summary 2');
     await engine(page, e => e.quitToMenu());
     const menu = await waitForStats(page, s => s.gameState === 'MENU', 'the main menu');
     expect(menu.runSummary).toBeUndefined();

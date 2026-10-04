@@ -18,6 +18,7 @@
 //   - shard→tile snap (plastic / glass), rigid metal assembly, hotspot /
 //     large-shard collapse, and the grain + plastic dent recovery ticks.
 
+import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry, NebulaColorStop } from '../../types';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
 import {
@@ -74,6 +75,7 @@ import {
   MergeRule,
   ShardAdapter,
 } from './ShardSystem.types';
+import { nowMs } from '../ports';
 
 /**
  * Resolve an entity's variant id from `shardVariant` (set at every
@@ -557,7 +559,7 @@ export class ShardSystem {
     physics: PhysicsSystem,
     runMergePass: boolean = true,
   ): void {
-    const t0 = performance.now();
+    const t0 = nowMs();
     this.tickDentRecovery(entities, dt);
     // DBG bonding toggle is destructive — when off, any bonds left
     // over from the previous frame are dropped here so cohesion
@@ -586,7 +588,7 @@ export class ShardSystem {
     // gates the broadphase passes; recovery is independent of that
     // cadence and runs every sim step so the lerp is smooth).
     this.tickPlasticDentRecovery(entities, dt);
-    this.lastUpdateMs = performance.now() - t0;
+    this.lastUpdateMs = nowMs() - t0;
   }
 
   /**
@@ -1052,7 +1054,7 @@ export class ShardSystem {
       let densityTier: number | undefined = undefined;
       let childMass = childSpawn.sizeToMass(newSize);
       if (isRockParent && childVariant.id === 'rock-shard') {
-        const offset = Math.floor(Math.random() * 5) - 2;
+        const offset = Math.floor(sim.shards() * 5) - 2;
         densityTier = Math.max(0, Math.min(maxTier, parentTier + offset));
         childMass *= ROCK_CONDENSE.DENSITY_MULT[densityTier];
       }
@@ -1076,10 +1078,10 @@ export class ShardSystem {
         rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
         rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
       } else {
-        const a = Math.random() * Math.PI * 2;
+        const a = sim.shards() * Math.PI * 2;
         rdx = Math.cos(a); rdy = Math.sin(a);
       }
-      const rSpeed = radialSpeed * (0.7 + Math.random() * 0.6);
+      const rSpeed = radialSpeed * (0.7 + sim.shards() * 0.6);
 
       // Shared forward term from the killing hit — same magnitude curve
       // and cap as the powerlaw path, with a narrower per-child cone
@@ -1088,8 +1090,8 @@ export class ShardSystem {
       let vy = parent.velocity.y + rdy * rSpeed;
       if (impactAngle !== null) {
         const fwd = profImpulse * Math.min(SHATTER_SCATTER_SPEED_CAP,
-          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
-        const fa = impactAngle + (Math.random() - 0.5) * HALF_CONE * 0.5;
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + sim.shards() * 1.2);
+        const fa = impactAngle + (sim.shards() - 0.5) * HALF_CONE * 0.5;
         vx += Math.cos(fa) * fwd;
         vy += Math.sin(fa) * fwd;
       }
@@ -1114,7 +1116,7 @@ export class ShardSystem {
         velocity:      { x: vx, y: vy },
         size:          { x: newSize, y: newSize },
         rotation:      parent.rotation,
-        rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+        rotationSpeed: (sim.shards() - 0.5) * 2 * maxSpin,
         // Plastic re-rolls its shade per child (the powerlaw path's
         // rule) so each generation keeps visible variation; every other
         // material inherits the parent body colour.
@@ -1233,10 +1235,10 @@ export class ShardSystem {
       rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
       rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
     } else {
-      const a = Math.random() * Math.PI * 2;
+      const a = sim.shards() * Math.PI * 2;
       rdx = Math.cos(a); rdy = Math.sin(a);
     }
-    const rSpeed = f.radialSpeed * (1.0 + Math.random() * 0.6);
+    const rSpeed = f.radialSpeed * (1.0 + sim.shards() * 0.6);
     let vx = parent.velocity.x + rdx * rSpeed;
     let vy = parent.velocity.y + rdy * rSpeed;
     const iv = parent.lastImpactVelocity;
@@ -1244,7 +1246,7 @@ export class ShardSystem {
       const s = Math.hypot(iv.x, iv.y);
       if (s > 1e-3) {
         const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
-          s * parentVariant.shatter.forwardDrag + 0.3 + Math.random() * 0.8);
+          s * parentVariant.shatter.forwardDrag + 0.3 + sim.shards() * 0.8);
         vx += (iv.x / s) * fwd;
         vy += (iv.y / s) * fwd;
       }
@@ -1291,7 +1293,7 @@ export class ShardSystem {
       velocity:      { x: vx, y: vy },
       size:          { x: newSize, y: newSize },
       rotation:      parent.rotation,
-      rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+      rotationSpeed: (sim.shards() - 0.5) * 2 * maxSpin,
       color:         parent.color || COLORS.ROCK_SHARD,
       active:        true,
       health:        hp,
@@ -1358,8 +1360,8 @@ export class ShardSystem {
     // Discrete options take priority over the continuous Min/Max range
     // (used by rock-shard / metal-shard to snap to specific counts).
     const numPoints = polyVerticesOptions !== undefined && polyVerticesOptions.length > 0
-      ? polyVerticesOptions[Math.floor(Math.random() * polyVerticesOptions.length)]
-      : polyVerticesMin + Math.floor(Math.random() * (polyVerticesMax - polyVerticesMin + 1));
+      ? polyVerticesOptions[Math.floor(sim.shards() * polyVerticesOptions.length)]
+      : polyVerticesMin + Math.floor(sim.shards() * (polyVerticesMax - polyVerticesMin + 1));
     // Fill reused numeric scratch (no intermediate {angle,r} objects) then
     // sort indices by angle in place — an insertion sort (numPoints is ~6-8)
     // that reproduces the old `.sort((a,b)=>a.angle-b.angle)` order exactly.
@@ -1367,9 +1369,9 @@ export class ShardSystem {
     const ang = this._polyAngle, rad = this._polyRadius, idx = this._polyIdx;
     for (let j = 0; j < numPoints; j++) {
       const baseAngle = (j / numPoints) * Math.PI * 2;
-      const jitterAmt = (Math.random() - 0.5) * (Math.PI / numPoints) * angleJitter;
+      const jitterAmt = (sim.shards() - 0.5) * (Math.PI / numPoints) * angleJitter;
       ang[j] = baseAngle + jitterAmt;
-      rad[j] = baseR * (radiusMin + Math.random() * radiusRange);
+      rad[j] = baseR * (radiusMin + sim.shards() * radiusRange);
       idx[j] = j;
     }
     for (let a = 1; a < numPoints; a++) {
@@ -1452,11 +1454,11 @@ export class ShardSystem {
     const isRockShatter = parent.shardVariant === 'rock-shard';
     if (isRockShatter) {
       const sizeBased = Math.min(30, Math.max(2, Math.floor(parent.size.x / 40)));
-      const wobble = merges > 1 ? Math.floor(Math.random() * 3) - 1 : 0;
+      const wobble = merges > 1 ? Math.floor(sim.shards() * 3) - 1 : 0;
       const mergeBased = merges > 1 ? Math.max(2, merges + wobble) : 2;
       count = Math.max(mergeBased, sizeBased);
     } else if (merges > 1) {
-      const wobble = Math.floor(Math.random() * 3) - 1; // -1, 0, +1
+      const wobble = Math.floor(sim.shards() * 3) - 1; // -1, 0, +1
       count = Math.max(2, merges + wobble);
     } else if (sizeLevels && sizeLevels.length > 0) {
       const parentSize = parent.size.x;
@@ -1492,7 +1494,7 @@ export class ShardSystem {
     } else if (useFraction) {
       const span = fMax! - fMin!;
       for (let i = 0; i < count; i++) {
-        sizes.push(parent.size.x * (fMin! + Math.random() * span));
+        sizes.push(parent.size.x * (fMin! + sim.shards() * span));
       }
     } else {
       const parentArea = parent.size.x * parent.size.x;
@@ -1501,7 +1503,7 @@ export class ShardSystem {
       rawAreas.length = 0;
       let rawSum = 0;
       for (let i = 0; i < count; i++) {
-        const a = Math.pow(Math.random(), alpha);
+        const a = Math.pow(sim.shards(), alpha);
         rawAreas.push(a);
         rawSum += a;
       }
@@ -1537,7 +1539,7 @@ export class ShardSystem {
       childDensityTiers = this._shDensity; // reused scratch (values copied below)
       childDensityTiers.length = 0;
       for (let i = 0; i < sizes.length; i++) {
-        const offset = Math.floor(Math.random() * 5) - 2; // -2..+2
+        const offset = Math.floor(sim.shards() * 5) - 2; // -2..+2
         childDensityTiers.push(Math.max(0, Math.min(maxTier, parentTier + offset)));
       }
     }
@@ -1563,15 +1565,15 @@ export class ShardSystem {
       let scatterAngle: number;
       let scatterSpeed: number;
       if (impactAngle !== null) {
-        scatterAngle = impactAngle + (Math.random() - 0.5) * 2 * HALF_CONE;
+        scatterAngle = impactAngle + (sim.shards() - 0.5) * 2 * HALF_CONE;
         // Cap the impactor-speed contribution so a fast weapon (Sniper /
         // Lightning at speed 30) can't fling the fragments — pieces should
         // pop apart and drift, not launch.  forwardDrag already damps it.
         scatterSpeed = Math.min(SHATTER_SCATTER_SPEED_CAP,
-          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + Math.random() * 1.2);
+          impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + sim.shards() * 1.2);
       } else {
-        scatterAngle = Math.random() * Math.PI * 2;
-        scatterSpeed = 1 + Math.random() * 2;
+        scatterAngle = sim.shards() * Math.PI * 2;
+        scatterSpeed = 1 + sim.shards() * 2;
       }
       const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
       const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
@@ -1609,8 +1611,8 @@ export class ShardSystem {
         position:     { x: parent.position.x + offsetX, y: parent.position.y + offsetY },
         velocity:     { x: vx, y: vy },
         size:         { x: newSize, y: newSize },
-        rotation:      Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 2 * maxSpin,
+        rotation:      sim.shards() * Math.PI * 2,
+        rotationSpeed: (sim.shards() - 0.5) * 2 * maxSpin,
         color:         childColor,
         active:        true,
         health:        hp,
@@ -1666,10 +1668,10 @@ export class ShardSystem {
 
     const { countMin, countMax, alphaMin } = parentVariant.shatter;
     const countRange = countMax - countMin + 1;
-    const count = countMin + Math.floor(Math.random() * countRange);
+    const count = countMin + Math.floor(sim.shards() * countRange);
     const alpha = alphaMin; // nebula uses uniform alphaMin === alphaMax
 
-    const rawAreas = Array.from({ length: count }, () => Math.pow(Math.random(), alpha));
+    const rawAreas = Array.from({ length: count }, () => Math.pow(sim.shards(), alpha));
     const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
     const radii: number[] = rawAreas
       .map(a => Math.sqrt((a / rawSum) * parentArea))
@@ -1739,7 +1741,7 @@ export class ShardSystem {
       const cross = fx * dy - fy * dx;
       const spinSign = cross > 0.01 ? 1
                       : cross < -0.01 ? -1
-                      : (Math.random() < 0.5 ? 1 : -1);
+                      : (sim.shards() < 0.5 ? 1 : -1);
       const rotationSpeed = spinSign * spinK;
 
       // "Dragged along" velocity model.
@@ -1765,7 +1767,7 @@ export class ShardSystem {
         position:       { x: spawnPos.x, y: spawnPos.y },
         velocity:       { x: velX, y: velY },
         size:           { x: size, y: size },
-        rotation:        Math.random() * Math.PI * 2,
+        rotation:        sim.shards() * Math.PI * 2,
         rotationSpeed,
         color:           composition ? blendCompositionToHex(composition) : (parent.color || NEBULA_CONSTANTS.DEFAULT_HEX),
         active:          true,
@@ -2810,8 +2812,8 @@ export class ShardSystem {
     const baseR = (size / 2) * 0.8;
     const idPrefix = variant === 'plastic-shard' ? 'plastic_snap_debris' : 'glass_snap_debris';
     for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
-      const speed = 1.0 + Math.random() * 1.5;
+      const angle = (i / count) * Math.PI * 2 + sim.shards() * 0.4;
+      const speed = 1.0 + sim.shards() * 1.5;
       const points = this.generateShardPolygon(
         baseR,
         childSpawn.polyVerticesMin,
@@ -2828,8 +2830,8 @@ export class ShardSystem {
         position:      { x: pos.x + Math.cos(angle) * size * 0.5, y: pos.y + Math.sin(angle) * size * 0.5 },
         velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
         size:          { x: size, y: size },
-        rotation:      Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 2,
+        rotation:      sim.shards() * Math.PI * 2,
+        rotationSpeed: (sim.shards() - 0.5) * 2,
         color:         variant === 'plastic-shard' ? randomPlasticShardShade() : COLORS.STRUCTURE,
         active:        true,
         health:        variant === 'glass-shard' ? GLASS_SHARD_HP : 1,
@@ -3162,7 +3164,7 @@ export class ShardSystem {
     const remainder = total - tier * METAL_HEX_SIZE;
     const R = comp.metalLatticeR ?? (HEX_SIZE / Math.sqrt(3));
     for (let i = 0; i < remainder; i++) {
-      const ang = Math.random() * Math.PI * 2;
+      const ang = sim.shards() * Math.PI * 2;
       const wx = comp.position.x + Math.cos(ang) * R;
       const wy = comp.position.y + Math.sin(ang) * R;
       this.spawnLooseMetalTriangle(
@@ -3200,8 +3202,8 @@ export class ShardSystem {
       position: pos,
       velocity: { x: vx + (dx / d) * POP, y: vy + (dy / d) * POP },
       size: { x: triSize, y: triSize },
-      rotation: Math.random() * Math.PI * 2,
-      rotationSpeed: (Math.random() - 0.5) * 1.0,
+      rotation: sim.shards() * Math.PI * 2,
+      rotationSpeed: (sim.shards() - 0.5) * 1.0,
       color: color,
       active: true,
       health,
@@ -3348,7 +3350,7 @@ export class ShardSystem {
       const dx = wx - parent.position.x;
       const dy = wy - parent.position.y;
       const scatterMag = Math.sqrt(dx * dx + dy * dy);
-      const scatterSpeed = 1.0 + Math.random() * 1.5;
+      const scatterSpeed = 1.0 + sim.shards() * 1.5;
       const sx = scatterMag > 0.001 ? (dx / scatterMag) * scatterSpeed : Math.cos(i) * scatterSpeed;
       const sy = scatterMag > 0.001 ? (dy / scatterMag) * scatterSpeed : Math.sin(i) * scatterSpeed;
       // Clone the equilateral template so each loose triangle owns
@@ -3364,7 +3366,7 @@ export class ShardSystem {
         velocity:      { x: parent.velocity.x + sx, y: parent.velocity.y + sy },
         size:          { x: triDiameter, y: triDiameter },
         rotation:      parent.rotation,
-        rotationSpeed: (Math.random() - 0.5) * 2,
+        rotationSpeed: (sim.shards() - 0.5) * 2,
         color:         parent.color,
         active:        true,
         health:        hpEach,
@@ -3493,7 +3495,7 @@ export class ShardSystem {
     // shard, not just off-centre merges.  Damping bleeds it off as the
     // composite settles (see METAL_ASSEMBLY); the clamp caps total spin.
     const spin = Math.max(-2.5, Math.min(2.5,
-      momentumSpin + (Math.random() - 0.5) * 2 * METAL_ASSEMBLY.SPAWN_SPIN));
+      momentumSpin + (sim.shards() - 0.5) * 2 * METAL_ASSEMBLY.SPAWN_SPIN));
 
     a.position.x += wdx * 0.5;
     a.position.y += wdy * 0.5;
@@ -3738,17 +3740,17 @@ export class ShardSystem {
       let rMin: number;
       let rRange: number;
       if (isTile) {
-        numPts = 4 + Math.floor(Math.random() * 3);
+        numPts = 4 + Math.floor(sim.shards() * 3);
         jitterK = 0.25; rMin = 0.60; rRange = 0.55;
       } else if (isPlasticS) {
         const ps = dominantDef.spawn;
         numPts = ps.polyVerticesMin
-               + Math.floor(Math.random() * (ps.polyVerticesMax - ps.polyVerticesMin + 1));
+               + Math.floor(sim.shards() * (ps.polyVerticesMax - ps.polyVerticesMin + 1));
         jitterK = ps.angleJitter;
         rMin    = ps.radiusMin;
         rRange  = ps.radiusRange;
       } else {
-        numPts = 7 + Math.floor(Math.random() * 4);
+        numPts = 7 + Math.floor(sim.shards() * 4);
         jitterK = 0.7; rMin = 0.60; rRange = 0.65;
       }
       const baseR   = (newDiam / 2) * 0.82;

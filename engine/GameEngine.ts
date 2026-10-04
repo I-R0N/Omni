@@ -1,10 +1,10 @@
 
 
-import { InputSystem } from './systems/InputSystem';
+import { sim, fxRng, seedRng } from './systems/rng';
+import { resetIdCounter } from './systems/IdAllocator';
+import { installClock, installViewport, nowMs, viewport, clock } from './ports';
+import type { Platform, AudioPort, InputPort, RendererPort, Storage, Lifecycle, LifecycleEvent } from './ports';
 import { PhysicsSystem } from './systems/PhysicsSystem';
-import { RenderSystem } from './systems/RenderSystem';
-import type { Renderer } from './systems/Renderer';
-import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 import { AISystem } from './systems/AISystem';
 import { ParticleSystem } from './systems/ParticleSystem';
 import { TrailSystem } from './systems/TrailSystem';
@@ -18,16 +18,17 @@ import { ShardVariantId } from './systems/ShardSystem.types';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
-import { AudioSystem } from './systems/AudioSystem';
-import { registerSfx } from './systems/SfxRegistry';
 import { nextId } from './systems/IdAllocator';
-import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS } from './maps/MapDescriptors';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
 import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
+import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
+import { stampArenaWave, arenaWaveFor } from './arenaWaves';
+import { leaveWreck, spawnWreckEntity, updateWreck, updateWreckGuide, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
@@ -227,7 +228,7 @@ export class GameEngine {
    *  and the Playwright suites drive the pad mapping through it (CLAUDE.md
    *  §8 — `private` is compile-time only, so the suites could read it either
    *  way; this just stops the compiler disagreeing with the debug menu). */
-  input: InputSystem;
+  input: InputPort;
   physics: PhysicsSystem;
   /* Typed by the SEAM, not the class (gauntlet WebGPU stage 3): the engine
      depends on what a renderer must provide, and `new RenderSystem()` below
@@ -237,7 +238,7 @@ export class GameEngine {
      `RendererDiagnostics` is the debug/perf surface that grows with the
      renderer and is not part of that contract. Split because 15 of the last
      15 additions were diagnostics — see engine/systems/Renderer.ts. */
-  renderer: Renderer & RendererDiagnostics;
+  renderer: RendererPort;
   private ai: AISystem;
   private particles: ParticleSystem;
   trails: TrailSystem;
@@ -260,7 +261,7 @@ export class GameEngine {
   // simulation state, so there is nothing to protect.  See
   // docs/SFX_INVENTORY.md for the id contract and
   // engine/systems/AudioSystem.ts for the voice budget.
-  public audio: AudioSystem;
+  public audio: AudioPort;
   // Salvage-pickup streak: consecutive collections inside
   // SALVAGE_STREAK_WINDOW_MS step the pickup chime up a semitone, so a
   // magnetised cluster climbs a scale instead of rattling.  Audio-only
@@ -365,8 +366,6 @@ export class GameEngine {
   } | null = null;
   // Salvage forfeited to the CURRENT death (shown on the summary) and across
   // the whole run (so repeated deaths read as a running cost).
-  private lastDeathCreditsLost: number = 0;
-  private runCreditsLost: number = 0;
   // ── Progression ─────────────────────────────────────────────────────────
   // Spendable Salvage currency — earned ONLY by collecting salvage drops in
   // the field (the score 1:1 mirror is gone).  Spent on module ITEMS at
@@ -837,6 +836,11 @@ export class GameEngine {
   private lastReportedCombat: boolean | undefined;
   /** `simClock` when a hostile was last in range — the linger's only state. */
   private lastHostileNearAt = -Infinity;
+  /** The adaptive score's threat picture, refreshed by `hostileNearPlayer`
+   *  and reported every frame (see the audio block in `loop`). */
+  private musicAlert = false;
+  private musicBoss = false;
+  private musicPressure = 0;
   // ── React reconciliation cost, reported IN by the UI layer ────────────
   //
   // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
@@ -990,23 +994,27 @@ export class GameEngine {
 
   private onStatsUpdate: (stats: EngineStats) => void;
 
-  constructor(onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
+  /** The outside world: clock, viewport, storage, lifecycle, entropy, and the
+   *  audio / input / renderer adapters (engine/ports.ts).  Everything the sim
+   *  reads from outside arrives through here. */
+  public readonly platform: Platform;
+  public readonly storage: Storage;
+
+  constructor(platform: Platform, onStatsUpdate: (stats: EngineStats) => void, difficultyLevel: number = 3) {
+    this.platform = platform;
+    this.storage = platform.storage;
+    this.activatePlatform();
     this.onStatsUpdate = onStatsUpdate;
     const clamped = Math.min(3, Math.max(0, Math.round(difficultyLevel)));
     this.difficultyLevel = clamped;
     this.enemyScale = DIFFICULTY_SCALES[clamped] ?? 1;
     
-    this.input = new InputSystem();
-    // Audio: the AudioContext is NOT created here.  Mobile browsers
-    // refuse to start audio outside a user gesture, so the manager only
-    // arms one-shot window listeners and builds its graph on the first
-    // real tap/click/keypress (including a menu tap, which on phones is
-    // usually the first gesture there is).
-    this.audio = new AudioSystem();
-    registerSfx(this.audio);
+    this.input = platform.input;
+    this.audio = platform.audio;
     this.audio.armGestureUnlock();
+    this.lifecycleOff = platform.lifecycle.subscribe((e) => this.onLifecycle(e));
     this.physics = new PhysicsSystem();
-    this.renderer = new RenderSystem();
+    this.renderer = platform.renderer;
     // Wire physics into the renderer so the material-tile branch can
     // suppress edge strokes on edges that are cleanly butted against
     // a neighbour tile (queried via hasStaticTileNear).
@@ -1109,7 +1117,137 @@ export class GameEngine {
       shakeOffset: { x: 0, y: 0 }
     };
 
-    this.loadMap(this.buildMap(this.selectedMapType));
+    // The character comes off disk BEFORE the first map loads, so a wreck
+    // left in the hub is spawned with it (`loadMapSeeded` ends in
+    // `spawnWreckEntity`).
+    this.loadSave();
+    this.loadMapSeeded(this.selectedMapType);
+  }
+
+  // ── Persistence (plan D20; engine/save.ts) ──────────────────────────────
+
+  /** Read the save through the Storage port and apply it.  A save this build
+   *  cannot read (corrupt, or from a NEWER build) is parked under
+   *  `SAVE_BACKUP_KEY` rather than overwritten — a downgrade must not eat a
+   *  newer player's file. */
+  private loadSave(): void {
+    const raw = this.storage.get(SAVE_KEY);
+    const parsed = parseSave(raw);
+    this.saveStatus = parsed.status;
+    if (raw !== null && (parsed.status === 'unreadable' || parsed.status === 'future')) {
+      this.storage.set(SAVE_BACKUP_KEY, raw);
+    }
+    const save = parsed.save;
+    this.records = save.records;
+    this.wreck = save.wreck;
+    this.arenaWaves = save.arenaWaves;
+    this.applyCharacter(save.character);
+    const st = save.settings;
+    this.audio.setVolume(st.volume);
+    this.audio.setSfxVolume(st.sfxVolume);
+    this.audio.setMusicVolume(st.musicVolume);
+    if (this.audio.muted !== st.muted) this.audio.toggleMute();
+    if (st.controlScheme !== null) this.input.setControlScheme(st.controlScheme);
+    this.difficultyLevel = st.difficulty;
+    this.enemyScale = DIFFICULTY_SCALES[st.difficulty] ?? 1;
+    // What was just read is what is on disk: not dirty until something changes.
+    this.lastSavedJson = serializeSave(this.snapshotSave());
+  }
+
+  /** The character: what survives a death and a relaunch (D4/D6/D11, D14). */
+  public applyCharacter(c: CharacterSave): void {
+    this.credits = c.credits;
+    this.inventory = c.inventory.slice();
+    this.shipSlots = c.shipSlots.slice();
+    this.weaponSlots = c.weaponSlots.slice();
+    this.shipSlotsUnlocked = c.shipSlotsUnlocked;
+    this.weaponSlotsUnlocked = c.weaponSlotsUnlocked;
+    this.player.currentWeapon = 'projectile';
+    this.currentWeaponIndex = 0;
+    syncLoadoutFromSlots(this);
+    this.player.health = this.player.maxHealth;
+    this.player.shield = this.player.maxShield;
+  }
+
+  /** A brand-new character: no credits, empty cargo, the free hull and
+   *  Projector.  The replay entry uses it (a replay must not depend on a
+   *  save); the DBG "Erase save" row uses it. */
+  public resetCharacter(): void {
+    this.applyCharacter(emptyCharacter());
+  }
+
+  public snapshotSave(): SaveFile {
+    return {
+      version: 1,
+      character: {
+        credits: this.credits,
+        inventory: this.inventory.slice(),
+        shipSlots: this.shipSlots.slice(),
+        weaponSlots: this.weaponSlots.slice(),
+        shipSlotsUnlocked: this.shipSlotsUnlocked,
+        weaponSlotsUnlocked: this.weaponSlotsUnlocked,
+      },
+      wreck: this.wreck,
+      arenaWaves: this.arenaWaves,
+      records: this.records,
+      settings: {
+        volume: this.audio.volume,
+        sfxVolume: this.audio.sfxVolume,
+        musicVolume: this.audio.musicVolume,
+        muted: this.audio.muted,
+        controlScheme: this.input.getControlScheme(),
+        difficulty: this.difficultyLevel,
+      },
+    };
+  }
+
+  /** Write the save if it changed.  Cheap to call: one small JSON string
+   *  compared with the last one written. */
+  public saveNow(): void {
+    stampArenaWave(this);
+    // Lifetime bests are max()es of live counters — fold them in at write time.
+    if (this.score > this.records.highScore) this.records.highScore = Math.floor(this.score);
+    if (this.runHighestWave > this.records.bestWave) this.records.bestWave = this.runHighestWave;
+    if (this.runBestCombo > this.records.bestCombo) this.records.bestCombo = this.runBestCombo;
+    const json = serializeSave(this.snapshotSave());
+    if (json === this.lastSavedJson) return;
+    this.lastSavedJson = json;
+    this.storage.set(SAVE_KEY, json);
+  }
+
+  /** Once a second of wall time (frame level, not sim: settings change while
+   *  the world is frozen, and saving must not touch the replay's clock). */
+  private autosaveTick(frameSec: number): void {
+    this.saveAccumSec += frameSec;
+    if (this.saveAccumSec < 1) return;
+    this.saveAccumSec = 0;
+    this.saveNow();
+  }
+
+  /** Erase the save and start a new character (DBG ▸ Economy ▸ Erase save). */
+  public eraseSave(): void {
+    this.wreck = null;
+    this.arenaWaves = {};
+    if (this.wreckEntity) { this.wreckEntity.active = false; this.wreckEntity = null; }
+    this.records = emptyRecords();
+    this.resetCharacter();
+    this.saveNow();
+  }
+
+  /** The player's ship has just been destroyed (health reached 0).
+   *
+   *  Does the three things a fall owes, in the order that matters: counts it,
+   *  leaves the wreck for what was MOUNTED (D10 — which also replaces any older
+   *  wreck, D-S2-d2), and strips the loadout NOW, then saves.  Doing the strip
+   *  here and not at the respawn tap is what stops a player who quits the app
+   *  on the death screen from keeping the loadout they just lost. */
+  private onPlayerFell(): void {
+    this.deathNewHighScore = this.score > this.records.highScore;
+    this.records.deaths++;
+    this.lostWreckOnDeath = this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null;
+    leaveWreck(this);
+    this.resetOutfit(true);
+    this.saveNow();
   }
 
   /**
@@ -1156,7 +1294,9 @@ export class GameEngine {
   public setMapType(type: MapType) {
     this.selectedMapType = type;
     if (this.gameState === GameState.MENU) {
-      this.loadMap(this.buildMap(type));
+      this.loadMapSeeded(type);
+      this.announceMusicArea(type);
+      this.audio.cueEncounter('map');
       // Recentre the player on the newly-loaded map's spawn so the
       // menu backdrop renders the new map at frame 0 instead of the
       // previous map's viewport.
@@ -1181,18 +1321,128 @@ export class GameEngine {
   public start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    this.lastTime = performance.now();
+    this.lastTime = nowMs();
     this.simAccumulator = 0;
     this.prepareFrameEntities();
-    requestAnimationFrame(this.loop);
+    clock().requestFrame(this.loop);
   }
 
   public stop() {
     this.isRunning = false;
+    this.saveNow();
     this.input.cleanup();
+    this.lifecycleOff?.();
+    this.lifecycleOff = null;
+  }
+
+  private lifecycleOff: (() => void) | null = null;
+
+  /** Make this engine's clock and viewport THE ones the sim reads.  They are
+   *  module-level (engine/ports.ts), so the engine constructed last owns them;
+   *  a process that holds two engines (the browser parity test, a headless
+   *  suite) calls this on the one it is about to drive — `runReplay` does. */
+  public activatePlatform(): void {
+    installClock(this.platform.clock);
+    installViewport(this.platform.viewport);
+  }
+
+  /** The app went to the background / came back (engine/ports.ts `Lifecycle`).
+   *
+   *  BACKGROUND pauses live play — a phone call or an app switch must not cost
+   *  the player their ship — and lets go of every held key, because a hidden
+   *  page is never told a key came up.  The pause is SILENT: the audio layer
+   *  is already being suspended, and a "back" blip queued on a suspended
+   *  context would play on return.  Docked, dead, stage-clear and menu states
+   *  are left alone (each is already a screen; `pauseGame` refuses them).
+   *
+   *  FOREGROUND never resumes by itself — the player taps resume — but it
+   *  always re-anchors the frame clock.  The accumulator drain clamps a long
+   *  frame (`MAX_FRAME_TIME`), so a stale `lastTime` could never cost more than
+   *  one clamped frame; re-anchoring makes it cost NONE, in every state
+   *  including the ones that keep running (the death screen). */
+  public onLifecycle(e: LifecycleEvent): void {
+    if (e === 'background') {
+      this.input.releaseAll();
+      this.pauseGame(true);
+      this.saveNow(); // the OS may not give another chance
+    } else {
+      this.lastTime = nowMs();
+      this.simAccumulator = 0;
+    }
   }
 
   // --- STATE MANAGEMENT ---
+  /** Root seed the random streams were last started from (engine-core S1).
+   *  Read it, with the input log, to replay.  Changes on every map load. */
+  public runSeed = 1;
+  /** The seed of the ARENA the player is in, or null in the hub (D8: the hub
+   *  is persistent and carries no seed).  This is what the run summary shows. */
+  public arenaSeed: number | null = null;
+  /** A seed the NEXT map load must use instead of a fresh one (replay / tests). */
+  private pendingRunSeed: number | null = null;
+  /** True while a replay is driving the sim by hand: the rAF loop then only
+   *  draws, and `stepSim` is the one thing that advances the world. */
+  public replayHold = false;
+  /** The PerfController's sim-time load term while a replay holds the loop
+   *  (ms per substep).  Set by `runReplay` from the log; 0 = no time term. */
+  public replayLoadMs = 0;
+
+  // ── Persistence (plan D20; engine/save.ts) ──────────────────────────────
+  /** The outstanding death wreck, or null (D10).  A record, so it can be saved;
+   *  `wreckEntity` is its view in the loaded map (engine/wreck.ts). */
+  public wreck: WreckRecord | null = null;
+  /** Held wave state per arena (engine/arenaWaves.ts). */
+  public arenaWaves: Record<string, ArenaWaveMemory> = {};
+  public wreckEntity: GameEntity | null = null;
+  /** The contact currently carrying `wreckGuide` (engine/wreck.ts). */
+  public wreckGuideEntity: GameEntity | null = null;
+  /** The wreck an older death left that THIS death destroyed (D-S2-d2) — the
+   *  death screen says so.  Null when there was none. */
+  public lostWreckOnDeath: { mapName: string; modules: number } | null = null;
+  /** Lifetime bests and counters (D-S2-a). */
+  public records: Records = emptyRecords();
+  /** What loading the save found: fresh / loaded / migrated / unreadable / future. */
+  public saveStatus: SaveStatus = 'fresh';
+  private lastSavedJson = '';
+  private saveAccumSec = 0;
+  /** Did the life that just ended set a new high score? (the death summary) */
+  private deathNewHighScore = false;
+
+  /** Begin a NEW run on `mapType` from `seed` and hold the loop so `stepSim`
+   *  drives it.  The replay harness's entry point (engine/replay.ts).  `seed`
+   *  seeds an ARENA; the hub's terrain is fixed and the seed then only pins
+   *  what happens in it. */
+  public beginSeededRun(seed: number, mapType: MapType) {
+    this.pendingRunSeed = seed;
+    this.selectedMapType = mapType;
+    // A replay must not depend on a save: a fresh character, no wreck.
+    this.wreck = null;
+    this.arenaWaves = {};
+    this.resetCharacter();
+    this.deathPending = false;
+    this.deathDelay = 0;
+    this.deathSummary = null;
+    this.resetAndLoadSelectedMap();
+    this.startGame();
+    // A replay starts from a DEFINED state, not from wherever the last run left
+    // the ship pointing: map load re-places the player but leaves its heading
+    // (the next step re-derives it from the aim), so the step-0 hash used to
+    // depend on the previous replay.  Pinned here, in the replay entry only —
+    // the in-game respawn path is untouched.
+    this.player.rotation = 0;
+    this.replayHold = true;
+    this.simAccumulator = 0;
+    this.prepareFrameEntities();
+  }
+
+  /** Advance the world by exactly `n` fixed substeps, now, with no rAF and no
+   *  wall clock.  The unit the rAF loop's accumulator drain is made of. */
+  public stepSim(n: number) {
+    const dt = getSimDt();
+    for (let i = 0; i < n; i++) this.simStep(dt);
+    this.prepareFrameEntities();
+  }
+
   public startGame() {
     this.gameState = GameState.PLAYING;
     this.initWaveSystem();
@@ -1412,7 +1662,7 @@ export class GameEngine {
     });
   }
 
-  public pauseGame() {
+  public pauseGame(silent = false) {
     // The docked station UI, the death/run-summary screen and the stage-clear
     // screen are already up; stacking the pause menu on top would double up
     // two full-screen overlays.  (Docked and stage-clear freeze the sim; the
@@ -1421,7 +1671,7 @@ export class GameEngine {
         && !this.deathPending && !this.stageClearPending) {
         this.gameState = GameState.PAUSED;
         this.audio.setActive(false);
-        this.audio.play('ui.back');
+        if (!silent) this.audio.play('ui.back');
     }
   }
 
@@ -1429,7 +1679,7 @@ export class GameEngine {
     if (this.gameState === GameState.PAUSED) {
         this.gameState = GameState.PLAYING;
         this.audio.play('ui.confirm');
-        this.lastTime = performance.now(); // Prevent physics jump
+        this.lastTime = nowMs(); // Prevent physics jump
         this.simAccumulator = 0;           // Drop stale accumulated time from pause
     }
   }
@@ -1492,10 +1742,14 @@ export class GameEngine {
    *  alongside them) is deliberately NOT touched — resetAndLoadSelectedMap
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
-  private loadMapFresh(type: MapType) {
+  private loadMapFresh(type: MapType, viaPortal = false) {
+      // Leaving an arena (portal, respawn, quit): stamp the wave it was at and
+      // when, before the map is torn down — the held wave decays from here.
+      stampArenaWave(this);
       this.shards.reset();
       this.energy.reset();
       this.perfController.reset();
+      this.ai.reset();
       this.activeDrops = [];
       this.portalTransit.length = 0;
       this.trailEmitAccumulator = 0;
@@ -1541,22 +1795,74 @@ export class GameEngine {
       // leaving the layer down.  Both move together or neither does.
       this.lastReportedCombat = false;
       this.audio.setCombat(false);
-      // A NEW ARENA IS A NEW ENCOUNTER, SO IT GETS A NEW SONG (user report:
-      // re-entering an arena resumed the previous one mid-phrase).  The
-      // continuous-playlist rule exists for a WAVE LADDER — one arena's fight
-      // is one encounter and a lull inside it must not cut the song — and a
-      // map change is the boundary that rule is drawn around, not an
-      // exception to it.
+      // A NEW ARENA IS A NEW ENCOUNTER, SO IT OPENS A NEW PHRASE (user
+      // report: re-entering an arena resumed the previous music mid-phrase).
+      // The score returns to bar 1 at the next bar line; inside one arena's
+      // wave ladder it never does, and a lull only lowers the intensity.
       //
-      // ORDER IS LOAD-BEARING: the cue is silent only because combat went
-      // down on the two lines above it.  `cueBattleTrack` plays the new track
-      // immediately when the layer is audible, so cueing first would start a
-      // fresh song at full level over the warp beat and then fade it out.
-      // Standing down first takes the documented hand-off instead — the
-      // successor waits, paused at 0, for the destination's own first
-      // engagement.
-      this.audio.cueBattleTrack();
+      // ORDER STILL MATTERS: combat went down on the lines above, so the
+      // combat layers are already leaving when the phrase restarts, and the
+      // destination's own first engagement brings them back on a downbeat.
+      // The area picks its theme (the music director's plan — see MUSIC_PLAN
+      // in AdaptiveMusic); a different song comes in seamlessly on a bar line.
+      this.announceMusicArea(type);
+      this.audio.cueEncounter(viaPortal ? 'portal' : 'map');
+      this.loadMapSeeded(type);
+  }
+
+  /** Tell the music director which area is being entered, so it picks that
+   *  area's theme.  Every map load announces it: `loadMapFresh` (a run, a
+   *  portal, a death return) and the menu backdrop swap in `setMapType`, which
+   *  loads through `loadMapSeeded` alone and would otherwise start a run on a
+   *  picked arena with the hub's song. */
+  private announceMusicArea(type: MapType) {
+      const area = descriptorForMapType(type);
+      this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
+  }
+
+  /** Seed for the map's kind and load it.  SEEDING IS PER MAP, NOT PER RUN
+   *  (user call D8) — see the notes inside.  Every map load goes through
+   *  here: a run start, a portal, the death return, the constructor and the
+   *  menu backdrop. */
+  private loadMapSeeded(type: MapType) {
+      // The hub is a
+      // persistent world generated from one fixed seed, so it is the same
+      // place every visit; an ARENA is a fresh mini-game and carries its own
+      // seed — random unless a replay pinned one — which the run summary
+      // shows.  Ids and the sim clock restart with the map: both are state a
+      // seed has to determine, and every cache keyed by either was rebuilt
+      // or cleared above.  (Debris carried through a portal is re-id'd at
+      // capture so it cannot collide with the new map's ids.)
+      const kind = descriptorForMapType(type)?.kind;
+      if (kind === 'hub') {
+        seedRng(HUB_WORLD_SEED);
+        this.arenaSeed = null;
+      } else {
+        // A wreck PINS its arena's seed (D-S2-d1) so S1's seeded generation
+        // rebuilds the terrain the ship fell in.  A replay's pinned seed wins.
+        const pinned = wreckSeedFor(this, descriptorForMapType(type)?.id);
+        const seed = (this.pendingRunSeed ?? pinned ?? this.platform.entropy.seed()) >>> 0;
+        this.pendingRunSeed = null;
+        seedRng(seed);
+        this.arenaSeed = seed;
+      }
+      resetIdCounter();
+      this.simClock = 0;
       this.loadMap(this.buildMap(type));
+      if (kind === 'hub') {
+        // The hub's terrain is fixed; what happens IN it afterwards (ambient
+        // fauna, drops, rivals) is not, and must not repeat every visit.
+        // The streams continue from a pinned seed (replay / tests) or a fresh
+        // one.
+        const live = (this.pendingRunSeed ?? this.platform.entropy.seed()) >>> 0;
+        this.pendingRunSeed = null;
+        seedRng(live);
+        this.runSeed = live;
+      } else {
+        this.runSeed = this.arenaSeed!;
+      }
+      // The wreck is a view of `this.wreck`: rebuild it if this map holds it.
+      spawnWreckEntity(this);
   }
 
   /** Park the player (and the camera) at the freshly-loaded map's declared
@@ -1612,13 +1918,12 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
       this.lastStageClear = null;
-      this.lastDeathCreditsLost = 0;
-      this.runCreditsLost = 0;
 
-      // Per-run progression reset — must precede the health/shield refill
-      // below so maxHealth/maxShield are back at base before they're topped.
-      this.credits = 0;
-      this.resetOutfit(); // back to lean (Base Hull on the centre hex, empty inventory, Projector on W1)
+      // THE CHARACTER PERSISTS (D4/D14).  Credits, cargo, the installed
+      // loadout and the purchased hex slots belong to the character, not to a
+      // run, so a new run — quit to menu, a DBG map switch — keeps them; a new
+      // CHARACTER is `resetCharacter()` (the replay entry, DBG Erase save).
+      // What is run-scoped is everything counted above.
 
       // Clear the WRECK state too (A1).  Before the run-summary screen the
       // player could never be mid-explosion at a run reset — the auto-respawn
@@ -1731,6 +2036,10 @@ export class GameEngine {
           if (captured.length > transitCfg.MAX_ENTITIES) {
               captured.length = transitCfg.MAX_ENTITIES;
           }
+          // Ids restart with the destination map, so carried debris takes a
+          // prefix that no `nextId` ever produces — two bodies must never
+          // share an id.
+          for (const c of captured) c.e.id = 'xfer_' + c.e.id;
       }
 
       if (opts?.descend) this.stageIndex++;
@@ -1739,7 +2048,7 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
 
-      this.loadMapFresh(dest.mapType);
+      this.loadMapFresh(dest.mapType, true);
       // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
       // back at the map just left — which is exactly the hub's per-arena
       // portal — surface beside that rift rather than at the map's declared
@@ -1807,7 +2116,7 @@ export class GameEngine {
               this.portalTransit.push({
                   entity: e,
                   delay: transitCfg.DELAY_MIN
-                      + Math.random() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
+                      + sim.engine() * (transitCfg.DELAY_MAX - transitCfg.DELAY_MIN),
               });
           }
       }
@@ -1839,7 +2148,7 @@ export class GameEngine {
       // Called from inside the substep loop, the pending decrement takes
       // this one step negative, which simply drops a single sim step
       // across the load hitch — the right answer for a stall.
-      this.lastTime = performance.now();
+      this.lastTime = nowMs();
       this.simAccumulator = 0;
       return true;
   }
@@ -1872,28 +2181,37 @@ export class GameEngine {
   // economy tuning pass (roadmap step 6), so RESPAWN is byte-for-byte the
   // auto-respawn that used to fire when the wreck finished.
 
-  /** Primary action: continue the run from the current map's spawn. */
+  /** Primary action (user call D4): death sends the player back to their
+   *  STATION in the hub and strips everything INSTALLED on the ship.  Salvage
+   *  is untouched (D6 — no penalty), and so is cargo, purchased hex slots,
+   *  score and the run's counters: the character persists, the loadout does
+   *  not.  The ship is left with the lean start (free Base Hull + Projector),
+   *  which is what keeps it flyable. */
   public respawnFromDeath() {
       if (!this.deathPending) return;
       this.deathPending = false;
       this.deathDelay = 0;
       this.deathSummary = null;
-      this.respawnPlayer();
+      this.returnToStation();
       this.prepareFrameEntities();
   }
 
-  /** Wipe the run and drop straight back into play on the same map — the
-   *  main menu's START path (resetAndLoadSelectedMap + startGame) without the
-   *  round trip through the menu. */
-  public restartRun() {
-      this.deathPending = false;
-      this.deathDelay = 0;
-      this.deathSummary = null;
-      this.resetAndLoadSelectedMap();
-      this.startGame();
-      this.lastTime = performance.now();
+  /** The death reset: hub, home station, installed modules gone. */
+  private returnToStation() {
+      this.resetOutfit(true);
+      this.player.maxShield = 0;
+      if (this.currentMap?.type !== HUB_DESCRIPTOR.mapType) {
+          this.stageIndex = 0;
+          this.stageClearPending = false;
+          this.stageClearDelay = 0;
+          this.portalWarpTimer = 0;
+          this.loadMapFresh(HUB_DESCRIPTOR.mapType);
+          this.initWaveSystem();
+          seedAmbientBubbles(this);
+      }
+      this.respawnPlayer();
+      this.lastTime = nowMs();
       this.simAccumulator = 0;
-      this.prepareFrameEntities();
   }
 
   /** Dismiss the stage-clear screen and resume the fight-cleared arena.  The
@@ -1903,7 +2221,7 @@ export class GameEngine {
       if (!this.stageClearPending) return;
       this.stageClearPending = false;
       // Same stale-time hygiene resumeGame() uses after a freeze.
-      this.lastTime = performance.now();
+      this.lastTime = nowMs();
       this.simAccumulator = 0;
       this.prepareFrameEntities();
   }
@@ -2200,6 +2518,8 @@ export class GameEngine {
     this.player.visualPitch = pitch;
   }
 
+  public getDifficulty(): number { return this.difficultyLevel; }
+
   public setDifficulty(level: number) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
       this.difficultyLevel = clamped;
@@ -2304,7 +2624,7 @@ export class GameEngine {
     // it on any screen; Escape only ever closes it.
     if (this.input.consumeDebugKeyPress()) this.toggleDebugPanel('key');
     if (this.input.consumePadDebugPress()) this.toggleDebugPanel('pad');
-    if (this.input.consumeEscapePress() && this.debugPanelOpen) this.setDebugPanelOpen(false);
+    if (this.input.consumeEscapePress()) this.escapePressed();
 
     if (this.input.consumePausePress()) {
       // pauseGame() is already a no-op while docked (one full-screen overlay
@@ -2324,6 +2644,22 @@ export class GameEngine {
     if (cycle && !frozen && !captured) this.cycleWeapon();
     if ((frozen && !this.dockedAtStation) || captured) this.input.consumeInteractPress();
     if (captured) while (this.input.consumeScanPress()) { /* drained, not banked */ }
+  }
+
+  /** ESCAPE (keyboard).  The pause key, and the keyboard's BACK:
+   *  - the debug panel is open → close it (it floats above everything, so it
+   *    is always the first thing dismissed);
+   *  - the station UI or the pause menu is up → what BACK does there;
+   *  - live play → pause.
+   *  Nothing on the death and stage-clear screens, for `menuBack`'s reason:
+   *  those are decisions, and a key that quietly picks one is worse than none.
+   *  The menu is not live play, so Escape there does nothing either. */
+  public escapePressed(): void {
+    if (this.debugPanelOpen || this.dockedAtStation || this.gameState === GameState.PAUSED) {
+      this.menuBack();
+      return;
+    }
+    if (this.gameState === GameState.PLAYING) this.pauseGame();
   }
 
   /**
@@ -2361,7 +2697,7 @@ export class GameEngine {
   private tickJoystick(frameTime: number) {
     this.input.tickJoystick(frameTime);
 
-    const mm = computeMinimapRect(window.innerHeight, this.minimapExpanded);
+    const mm = computeMinimapRect(viewport().height, this.minimapExpanded);
     this.input.setStickExclusion(mm.x, mm.y, mm.size, mm.size);
   }
 
@@ -2372,7 +2708,7 @@ export class GameEngine {
    *  wave the ring just placed. */
   viewportHalfDiagonal(): number {
     const zoom = this.camera.zoom || 1;
-    return Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
+    return Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
   }
 
   /**
@@ -2398,8 +2734,17 @@ export class GameEngine {
       ? AUDIO_CONSTANTS.MUSIC_RELEASE_SCREENS
       : AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS);
     const reach2 = reach * reach;
+    // THE SAME WALK MEASURES THE SCORE'S THREAT.  It used to return on the
+    // first hostile in range; the adaptive score also wants to know HOW MUCH
+    // is near (pressure), whether anything is approaching (alert) and whether
+    // a boss is up, so it walks the whole enemy index once.  A handful of
+    // multiplies per enemy, on an index `prepareFrameEntities` already built.
+    const alertR = screens * AUDIO_CONSTANTS.MUSIC_ALERT_SCREENS;
+    const alert2 = alertR * alertR;
+    const closeR = screens * AUDIO_CONSTANTS.MUSIC_CLOSE_SCREENS;
     const px = this.player.position.x, py = this.player.position.y;
     const enemies = this.entityIndex.enemies;
+    let near = false, alert = false, boss = false, pressure = 0;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (e.isExploding) continue;
@@ -2407,7 +2752,11 @@ export class GameEngine {
       // than ambient wave fighting, and it warps in on the OFFSCREEN ring —
       // so a distance test would duck the track its own entrance cue just
       // started, and would duck it again every time the fight opened up.
-      if (e.isBoss === true) return true;
+      if (e.isBoss === true) {
+        near = alert = boss = true;
+        pressure += AUDIO_CONSTANTS.MUSIC_BOSS_WEIGHT;
+        continue;
+      }
       if (e.thirdParty === true || e.isRival === true) {
         // Conditionally hostile — the same "hunting the PLAYER specifically"
         // test the off-screen indicators blink red on.
@@ -2415,9 +2764,20 @@ export class GameEngine {
           || (e.provoked === true && e.aggroTargetId === 'player'))) continue;
       }
       const dx = wrapDeltaX(px, e.position.x), dy = wrapDeltaY(py, e.position.y);
-      if (dx * dx + dy * dy <= reach2) return true;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= reach2) near = true;
+      if (d2 > alert2) continue;
+      alert = true;
+      const d = Math.sqrt(d2);
+      const falloff = d <= closeR ? 1 : 1 - (d - closeR) / Math.max(1, alertR - closeR);
+      const w = Math.min(AUDIO_CONSTANTS.MUSIC_WEIGHT_MAX, Math.max(AUDIO_CONSTANTS.MUSIC_WEIGHT_MIN,
+        Math.sqrt(Math.max(1, e.maxHealth) / AUDIO_CONSTANTS.MUSIC_WEIGHT_REF_HP)));
+      pressure += w * falloff;
     }
-    return false;
+    this.musicAlert = alert;
+    this.musicBoss = boss;
+    this.musicPressure = pressure;
+    return near;
   }
 
   /** The battle layer's ducking signal: a hostile is near, or was recently
@@ -2433,12 +2793,58 @@ export class GameEngine {
     return this.simClock - this.lastHostileNearAt < AUDIO_CONSTANTS.MUSIC_LINGER_SEC;
   }
 
+  /** ONE fixed sim substep: refresh the working set, decide which periodic
+   *  tasks run, then physics and game logic.  Extracted from `loop` so the
+   *  replay harness steps the world by the same code the frame does.
+   *  Returns the substep's wall time in ms (perf bookkeeping only). */
+  private simStep(dt: number): number {
+        // Refresh working set for physics/AI before each sim step so
+        // entities spawned during the previous step are visible to this one.
+        this.prepareFrameEntities();
+        // Sample load + precompute every skippable task's run decision
+        // for this substep.  Manual DBG overrides (which still live on
+        // the systems that own their cycle buttons) are synced in first
+        // so `0 = AUTO` delegates to the controller and a manual pin
+        // wins.  Signals: current total entities, previous step's peak
+        // collision-cell density, and the previous substep's sim time.
+        this.perfController.setManual('shardPair', this.physics.shardPairFrameInterval);
+        this.perfController.setManual('shardTilePair', this.physics.shardTilePairFrameInterval);
+        this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
+        this.perfController.beginStep(
+            this.perfCounts.totalEntities,
+            this.physics.lastDynamicCount,
+            this.physics.lastMaxCellDensity,
+            // The load signal's TIME term is wall-clock, so a held replay does
+            // not measure it: it is an INPUT of the log (`ReplayInput.simMs`,
+            // latched like the held keys; 0 until a log says otherwise), so a
+            // replay can reproduce the skip tiers of a heavy real scene, and a
+            // log that never mentions it sees entity count and cell density
+            // alone, as before.
+            this.replayHold ? this.replayLoadMs : this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
+        );
+        // Wall-clock the two top-level sim phases so the perf overlay
+        // can show the gap between summed sub-timers and total sim
+        // time.  Untimed work (entity compaction, flow-field nudge,
+        // weapon ticks, drop scan, etc.) shows up as the difference.
+        const tPhys0 = nowMs();
+        try { this.updatePhysics(dt); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
+        this.lastUpdatePhysicsMs = nowMs() - tPhys0;
+        const tLogic0 = nowMs();
+        try { this.updateGameLogic(dt); } catch (e) { console.error('[GameLogic] update error:', e); }
+        this.lastUpdateGameLogicMs = nowMs() - tLogic0;
+        // Push per-substep perf samples.  Every timed sub-phase was written
+        // to instance fields on its owning system during the two calls above;
+        // the recorder just reads and ring-buffers them in one shot.
+        this.recordSimPerf();
+        return this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs;
+  }
+
   private loop = (time: number) => {
     if (!this.isRunning) return;
 
     // NEVER NEGATIVE.  `time` is the rAF frame timestamp, which is the moment
     // the frame STARTED — so any code that stamps `lastTime` from
-    // `performance.now()` mid-frame (transitionToMap does, to keep the map
+    // `nowMs()` mid-frame (transitionToMap does, to keep the map
     // load out of the sim clock) can leave lastTime AHEAD of the next frame's
     // timestamp.  The delta then comes back negative, and everything
     // downstream that subtracts it runs BACKWARDS: measured -0.16s, which
@@ -2450,6 +2856,7 @@ export class GameEngine {
 
     this.pollGamepad();
     this.tickJoystick(frameTime);
+    this.autosaveTick(frameTime);
 
     // HUD score ticker — roll the displayed total up toward the true
     // score by integer steps (≥1, ≤ a fraction of the gap) so awards
@@ -2530,7 +2937,7 @@ export class GameEngine {
         this.renderer.lastTintMisses,
       );
     }
-    const tStats0 = performance.now();
+    const tStats0 = nowMs();
     if (pushStats) this.onStatsUpdate({
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
@@ -2588,6 +2995,7 @@ export class GameEngine {
         },
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
+      savedGame: (this.gameState === GameState.MENU || this.debugPanelOpen) ? this.savedGameSnapshot() : undefined,
       runSummary: this.deathPending ? (this.deathSummary ?? undefined) : undefined,
       stageClear: this.stageClearPending && this.lastStageClear
           ? { ...this.lastStageClear, mapName: this.currentMap?.name ?? '' }
@@ -2761,6 +3169,17 @@ export class GameEngine {
         unmatched: this.audio.unmatchedFiles,
         loopFiles: this.audio.loopSampleFilenames,
         latencyMs: this.audio.latencyMs,
+        music: this.audio.music ? {
+          intensity: this.audio.music.intensity,
+          target: this.audio.music.targetIntensity,
+          forced: this.audio.music.forcedIntensity,
+          layers: this.audio.music.activeLayers,
+          bar: this.audio.music.bar,
+          song: this.audio.music.song.title,
+          songPinned: this.audio.music.songMode !== 'auto',
+          songMode: this.audio.music.songMode,
+          pending: this.audio.music.pendingSong?.title ?? null,
+        } : null,
       },
     });
     // Cost of SCHEDULING the React update — not of performing it.  The
@@ -2769,7 +3188,7 @@ export class GameEngine {
     // number this line produces is ~0 whatever the tree costs.  The measured
     // cost is `lastUiActualMs`, reported in by the `<Profiler>` in App.tsx.
     // Kept as the control that demonstrates the point.
-    this.lastStatsScheduleMs = pushStats ? performance.now() - tStats0 : 0;
+    this.lastStatsScheduleMs = pushStats ? nowMs() - tStats0 : 0;
 
     // Audio follows the camera, and goes quiet whenever the sim does.  Two
     // number writes and a boolean per frame, plus one early-outing walk of
@@ -2791,12 +3210,26 @@ export class GameEngine {
       this.lastReportedCombat = combat;
       this.audio.setCombat(combat);
     }
+    // The adaptive score's per-frame threat.  Outside live play the scan is
+    // not run, so the picture is reported empty and the score sits at its
+    // exploration / menu level whatever was last measured.
+    const live = this.gameState === GameState.PLAYING && !this.dockedAtStation && !debugFrozen;
+    const maxEhp = Math.max(1, this.player.maxHealth + (this.player.maxShield ?? 0));
+    this.audio.setMusicThreat({
+      alert: live && this.musicAlert,
+      pressure: live ? this.musicPressure : 0,
+      boss: live && this.musicBoss,
+      hull: Math.max(0, Math.min(1, this.player.health / Math.max(1, this.player.maxHealth))),
+      ehp: Math.max(0, Math.min(1, (Math.max(0, this.player.health) + Math.max(0, this.player.shield ?? 0)) / maxEhp)),
+    });
 
-    if (this.gameState !== GameState.PLAYING) {
-        // If paused or in menu, still draw (static frame) but skip updates
+    if (this.gameState !== GameState.PLAYING || this.replayHold) {
+        // If paused or in menu, still draw (static frame) but skip updates.
+        // A replay in progress holds the sim the same way: `stepSim` is the
+        // only thing that advances it.
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2811,7 +3244,7 @@ export class GameEngine {
         this.dockKeyHeld = eDown;
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2821,7 +3254,7 @@ export class GameEngine {
     if (this.stageClearPending) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2833,7 +3266,7 @@ export class GameEngine {
         this.portalWarpTimer = Math.max(0, this.portalWarpTimer - frameTime);
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2846,7 +3279,7 @@ export class GameEngine {
     if (debugFrozen) {
         try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
         this.recordRenderPerf();
-        requestAnimationFrame(this.loop);
+        clock().requestFrame(this.loop);
         return;
     }
 
@@ -2903,39 +3336,7 @@ export class GameEngine {
         // transit warp; the rest of this frame's substeps would otherwise
         // simulate the destination while the player is still in the tunnel.
         if (this.portalWarpTimer > 0) { this.simAccumulator = 0; break; }
-        // Refresh working set for physics/AI before each sim step so
-        // entities spawned during the previous step are visible to this one.
-        this.prepareFrameEntities();
-        // Sample load + precompute every skippable task's run decision
-        // for this substep.  Manual DBG overrides (which still live on
-        // the systems that own their cycle buttons) are synced in first
-        // so `0 = AUTO` delegates to the controller and a manual pin
-        // wins.  Signals: current total entities, previous step's peak
-        // collision-cell density, and the previous substep's sim time.
-        this.perfController.setManual('shardPair', this.physics.shardPairFrameInterval);
-        this.perfController.setManual('shardTilePair', this.physics.shardTilePairFrameInterval);
-        this.perfController.setManual('colorBlend', this.nebulas.colorBlendFrameInterval);
-        this.perfController.beginStep(
-            this.perfCounts.totalEntities,
-            this.physics.lastDynamicCount,
-            this.physics.lastMaxCellDensity,
-            this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs,
-        );
-        // Wall-clock the two top-level sim phases so the perf overlay
-        // can show the gap between summed sub-timers and total sim
-        // time.  Untimed work (entity compaction, flow-field nudge,
-        // weapon ticks, drop scan, etc.) shows up as the difference.
-        const tPhys0 = performance.now();
-        try { this.updatePhysics(FIXED_DT); }   catch (e) { console.error('[PhysicsSystem] update error:', e); }
-        this.lastUpdatePhysicsMs = performance.now() - tPhys0;
-        const tLogic0 = performance.now();
-        try { this.updateGameLogic(FIXED_DT); } catch (e) { console.error('[GameLogic] update error:', e); }
-        this.lastUpdateGameLogicMs = performance.now() - tLogic0;
-        frameSimMs += this.lastUpdatePhysicsMs + this.lastUpdateGameLogicMs;
-        // Push per-substep perf samples.  Every timed sub-phase was written
-        // to instance fields on its owning system during the two calls above;
-        // the recorder just reads and ring-buffers them in one shot.
-        this.recordSimPerf();
+        frameSimMs += this.simStep(FIXED_DT);
         this.simAccumulator -= FIXED_DT;
         steps++;
     }
@@ -2964,7 +3365,7 @@ export class GameEngine {
     try { this.draw(); } catch (e) { console.error('[RenderSystem] draw error:', e); }
     this.recordRenderPerf();
 
-    requestAnimationFrame(this.loop);
+    clock().requestFrame(this.loop);
   };
 
   private prepareFrameEntities() {
@@ -3003,8 +3404,8 @@ export class GameEngine {
       // padding (CAMERA_CONSTANTS.CULL_MARGIN) keeps shards that are
       // about-to-enter-frame on the on-screen side of the partition.
       const zoom = this.camera.zoom || 1;
-      const halfW = (window.innerWidth / 2) / zoom;
-      const halfH = (window.innerHeight / 2) / zoom;
+      const halfW = (viewport().width / 2) / zoom;
+      const halfH = (viewport().height / 2) / zoom;
       const margin = CAMERA_CONSTANTS.CULL_MARGIN;
       this._viewportRect.left   = this.camera.position.x - halfW - margin;
       this._viewportRect.right  = this.camera.position.x + halfW + margin;
@@ -3090,7 +3491,7 @@ export class GameEngine {
       // thereafter); the perpendicular of (fx, fy) is (-fy, fx).
       let fxDir = flow.x, fyDir = flow.y;
       if (laneJitter > 0) {
-          if (e.flowLane === undefined) e.flowLane = Math.random() * 2 - 1;
+          if (e.flowLane === undefined) e.flowLane = sim.engine() * 2 - 1;
           const off = e.flowLane * laneJitter;
           const px = -flow.y, py = flow.x;
           const nx = flow.x + px * off;
@@ -3304,7 +3705,7 @@ export class GameEngine {
               const flow = this.flowField.sampleShardFlow(d.position.x, d.position.y);
               let fxDir = flow.x, fyDir = flow.y;
               if (laneJitter > 0) {
-                  if (d.flowLane === undefined) d.flowLane = Math.random() * 2 - 1;
+                  if (d.flowLane === undefined) d.flowLane = sim.engine() * 2 - 1;
                   const off = d.flowLane * laneJitter;
                   const px = -flow.y, py = flow.x;
                   let nx = flow.x + px * off;
@@ -3594,6 +3995,7 @@ export class GameEngine {
               entity.position,
           );
       }
+      if (entity.type === EntityType.PLAYER) this.onPlayerFell();
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
       }
@@ -3754,8 +4156,8 @@ export class GameEngine {
               for (let nb = 0; nb < 1; nb++) {
                   const jitter = baseSize * 0.2;
                   const puffPos = {
-                      x: entity.position.x + (Math.random() - 0.5) * jitter,
-                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                      x: entity.position.x + (sim.engine() - 0.5) * jitter,
+                      y: entity.position.y + (sim.engine() - 0.5) * jitter,
                   };
                   const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
@@ -3763,7 +4165,7 @@ export class GameEngine {
                       puffPos,
                       baseSize,
                       comp[0].hex,
-                      0.45 + Math.random() * 0.2,
+                      0.45 + sim.engine() * 0.2,
                       entity.lastImpactVelocity ?? entity.velocity,
                       comp,
                       0.5,
@@ -3781,12 +4183,12 @@ export class GameEngine {
               && variant === 'rock-tile'
               && entity.mass === Infinity) {
               const baseSize = this.deformedDiameter(entity);
-              const count = 3 + Math.floor(Math.random() * 3);
+              const count = 3 + Math.floor(sim.engine() * 3);
               for (let nb = 0; nb < count; nb++) {
                   const jitter = baseSize * 0.4;
                   const puffPos = {
-                      x: entity.position.x + (Math.random() - 0.5) * jitter,
-                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                      x: entity.position.x + (sim.engine() - 0.5) * jitter,
+                      y: entity.position.y + (sim.engine() - 0.5) * jitter,
                   };
                   const comp = randomRockNebulaComposition();
                   this.drops.spawnColoredNebulaShard(
@@ -3794,7 +4196,7 @@ export class GameEngine {
                       puffPos,
                       baseSize,
                       comp[0].hex,
-                      0.4 + Math.random() * 0.3,
+                      0.4 + sim.engine() * 0.3,
                       entity.lastImpactVelocity,
                       comp,
                       0.5,
@@ -3835,13 +4237,13 @@ export class GameEngine {
               const ec = entity.color || '#f87171';
               const baseSize = Math.max(entity.size.x, entity.size.y);
               const span = ENEMY_NEBULA_BURST.MAX_COUNT - ENEMY_NEBULA_BURST.MIN_COUNT + 1;
-              const count = ENEMY_NEBULA_BURST.MIN_COUNT + Math.floor(Math.random() * span);
+              const count = ENEMY_NEBULA_BURST.MIN_COUNT + Math.floor(sim.engine() * span);
               const inheritVel = entity.lastImpactVelocity ?? entity.velocity;
               for (let nb = 0; nb < count; nb++) {
                   const jitter = baseSize * ENEMY_NEBULA_BURST.SPREAD_JITTER;
                   const puffPos = {
-                      x: entity.position.x + (Math.random() - 0.5) * jitter,
-                      y: entity.position.y + (Math.random() - 0.5) * jitter,
+                      x: entity.position.x + (sim.engine() - 0.5) * jitter,
+                      y: entity.position.y + (sim.engine() - 0.5) * jitter,
                   };
                   this.drops.spawnColoredNebulaShard(
                       this.currentMap.entities,
@@ -3879,7 +4281,7 @@ export class GameEngine {
                  && !isShardFamily) {
           // Generic fallback for anything outside the classification
           // (misc structures) — unchanged from before.
-          const numParticles = 4 + Math.floor(Math.random() * 3);
+          const numParticles = 4 + Math.floor(fxRng.particles() * 3);
           const { LIFETIME_MIN, LIFETIME_MAX, SPEED_MIN, SPEED_MAX, SIZE_MIN, SIZE_MAX } = PARTICLE_CONSTANTS;
           this.spawnParticles(entity.position, numParticles, entity.color || '#facc15', {
               speedMin: SPEED_MIN, speedMax: SPEED_MAX,
@@ -3928,8 +4330,8 @@ export class GameEngine {
       // Collect POIs once outside the placement-attempt loop.
       const pois = this.currentMap?.entities.filter(e => e.type === EntityType.INTERACTABLE) || [];
       for (let i=0; i<5; i++) {
-          const angle = Math.random() * Math.PI * 2;
-          const dist = 500 + Math.random() * (config.radius - 500);
+          const angle = sim.engine() * Math.PI * 2;
+          const dist = 500 + sim.engine() * (config.radius - 500);
           const x = Math.cos(angle) * dist;
           const y = Math.sin(angle) * dist;
 
@@ -3945,7 +4347,7 @@ export class GameEngine {
 
           if (safe && this.currentMap) {
                const newAst = this.currentMap.createRockShard(x, y,
-                  config.minSize + Math.random() * (config.maxSize - config.minSize),
+                  config.minSize + sim.engine() * (config.maxSize - config.minSize),
                   config.speedMultiplier
                );
                this.currentMap.entities.push(newAst);
@@ -4029,11 +4431,11 @@ export class GameEngine {
             const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
             const along = mag * osc;
             const jitter = mag * S.DIR_JITTER;
-            this.camera.shakeOffset.x = this.shakeDirX * along + (Math.random() - 0.5) * jitter;
-            this.camera.shakeOffset.y = this.shakeDirY * along + (Math.random() - 0.5) * jitter;
+            this.camera.shakeOffset.x = this.shakeDirX * along + (fxRng.render() - 0.5) * jitter;
+            this.camera.shakeOffset.y = this.shakeDirY * along + (fxRng.render() - 0.5) * jitter;
         } else {
-            this.camera.shakeOffset.x = (Math.random() - 0.5) * mag * 2;
-            this.camera.shakeOffset.y = (Math.random() - 0.5) * mag * 2;
+            this.camera.shakeOffset.x = (fxRng.render() - 0.5) * mag * 2;
+            this.camera.shakeOffset.y = (fxRng.render() - 0.5) * mag * 2;
         }
     }
 
@@ -4121,9 +4523,9 @@ export class GameEngine {
     // Stage 4: nests birth swarm brood on their timers.
     this.updateNests(dt);
 
-    const tRings = performance.now();
+    const tRings = nowMs();
     updateExplosionRings(this);
-    this.lastExplosionRingsMs = performance.now() - tRings;
+    this.lastExplosionRingsMs = nowMs() - tRings;
 
     // Death handling
     if (this.player.health <= 0 && !this.player.isExploding) {
@@ -4143,24 +4545,8 @@ export class GameEngine {
                 // A1: the wreck finishing no longer respawns on its own — it
                 // arms the beat that raises the run-summary screen.
                 this.player.explosionTimer = 0;
-                // Death penalty (user call): forfeit a fraction of UNSPENT
-                // Salvage, charged HERE — once, on the transition into the
-                // summary — so the screen can report exactly what it cost and
-                // so neither respawning nor restarting can double-charge.
-                // Money already spent on modules is untouched.
-                // Whichever is HIGHER — the percentage or the flat floor —
-                // clamped to what the player actually holds, so a broke pilot
-                // is zeroed rather than driven negative.
-                const lost = Math.min(
-                    this.credits,
-                    Math.max(
-                        Math.floor(this.credits * SALVAGE_CONSTANTS.DEATH_PENALTY_FRACTION),
-                        SALVAGE_CONSTANTS.DEATH_PENALTY_MIN,
-                    ),
-                );
-                this.credits -= lost;
-                this.lastDeathCreditsLost = lost;
-                this.runCreditsLost += lost;
+                // No salvage penalty (user call D6): dying costs the equipment
+                // (`returnToStation`), never the money.
                 // Close out this life's income tally for the summary, then
                 // start the next life at zero.
                 this.lastLifeCreditsEarned = this.lifeCreditsEarned;
@@ -4205,6 +4591,8 @@ export class GameEngine {
     // in place from here; everything below re-reads `currentMap`, so the
     // rest of this step runs against the destination.
     this.updateInteractables();
+    updateWreck(this);
+    updateWreckGuide(this);
     this.updatePortalTransit(dt);
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
@@ -4216,7 +4604,7 @@ export class GameEngine {
             this.overworldDragonTimer -= dt;
             if (this.overworldDragonTimer <= 0) {
                 const types: (StructureVariant | 'mixed')[] = ['glass', 'rock', 'plastic', 'metal', 'mixed'];
-                spawnDragon(this, types[Math.floor(Math.random() * types.length)]);
+                spawnDragon(this, types[Math.floor(sim.engine() * types.length)]);
                 this.overworldDragonTimer = OVERWORLD_CONSTANTS.DRAGON_RESPAWN_SEC;
             }
         }
@@ -4359,8 +4747,8 @@ export class GameEngine {
     this.spawnGlitterTrail();
 
     const mousePos = this.input.getMousePosition();
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
+    const cx = viewport().width / 2;
+    const cy = viewport().height / 2;
     this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
 
     // Banking roll — after the rotation update so the lateral decomposition
@@ -4370,7 +4758,7 @@ export class GameEngine {
     const fireEvents = this.input.getFireEvents();
     fireEvents.forEach(evt => {
         const { x: mapX, y: mapY, size: currentSize } =
-            computeMinimapRect(window.innerHeight, this.minimapExpanded);
+            computeMinimapRect(viewport().height, this.minimapExpanded);
 
         if (evt.x >= mapX && evt.x <= mapX + currentSize &&
             evt.y >= mapY && evt.y <= mapY + currentSize) {
@@ -4386,7 +4774,7 @@ export class GameEngine {
         // Loadout HUD slot selection — intercept taps on the 2 equip slots.
         const { SLOT_H } = LOADOUT_HUD_CONSTANTS;
         const { startY: slotStartY, slotW, slotXs } =
-            computeLoadoutHUDLayout(window.innerWidth, window.innerHeight);
+            computeLoadoutHUDLayout(viewport().width, viewport().height);
 
         if (evt.y >= slotStartY && evt.y <= slotStartY + SLOT_H) {
             for (let i = 0; i < slotXs.length; i++) {
@@ -4480,11 +4868,11 @@ export class GameEngine {
 
     // Tick the weapon cooldown via WeaponSystem — frozen while EMP-disabled
     // (Stage 3c).
-    const tWeapons = performance.now();
+    const tWeapons = nowMs();
     if (this.currentMap && !this.player.systemsDisabled) {
         this.weapons.tickPlayerCooldown(this.player, dt);
     }
-    this.lastWeaponsMs = performance.now() - tWeapons;
+    this.lastWeaponsMs = nowMs() - tWeapons;
 
     // Refresh the candidate index before projectile post-processing: the
     // physics / AI / burst pass above may have spawned new projectiles or
@@ -4545,7 +4933,7 @@ export class GameEngine {
     // coast toward its last-aimed point until the next re-aim.  The
     // compaction below still runs every step so drops expired elsewhere
     // drop out promptly.
-    const tDrops = performance.now();
+    const tDrops = nowMs();
     if (!this.player.isExploding && this.perfController.shouldRun('dropScan')) {
       const collectRadSq = DROP_CONFIG.COLLECT_RADIUS * DROP_CONFIG.COLLECT_RADIUS;
       const magnetRangeSq = DROP_CONFIG.MAGNET_RANGE * DROP_CONFIG.MAGNET_RANGE;
@@ -4596,7 +4984,7 @@ export class GameEngine {
         if (this.activeDrops[i].active) this.activeDrops[dropWriteIdx++] = this.activeDrops[i];
     }
     this.activeDrops.length = dropWriteIdx;
-    this.lastDropsMs = performance.now() - tDrops;
+    this.lastDropsMs = nowMs() - tDrops;
 
 
     this.camera.position.x = this.player.position.x;
@@ -4605,7 +4993,7 @@ export class GameEngine {
 
   // ── Player HUD messages ─────────────────────────────────────────────────────
 
-  private pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
+  public pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
     this.playerMessages.push({
       id: nextId('hud'),
       text,
@@ -4841,12 +5229,14 @@ export class GameEngine {
   /** Run reset + DBG relock: back to the lean start — empty inventory,
    *  the free Base Hull on the center ship hex (adjacency root) and the
    *  starter Projector (`dlv_projectile`) on gun hex W1. */
-  public resetOutfit() {
+  public resetOutfit(keepInventory = false) {
       this.shipSlots.fill(null);
       this.weaponSlots.fill(null);
-      this.inventory.fill(null);
-      this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
-      this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+      if (!keepInventory) {
+          this.inventory.fill(null);
+          this.shipSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+          this.weaponSlotsUnlocked = MODULE_SLOT_UNLOCK.START;
+      }
       this.shipSlots[0] = 'hull_base';
       this.weaponSlots[0] = 'dlv_projectile';
       this.player.currentWeapon = 'projectile';
@@ -4922,7 +5312,7 @@ export class GameEngine {
     // intended usage.
     this.audio.loop('status.disable.loop', this.player.systemsDisabled === true);
     // Occasional acid drip on the ship while corroding (throttled).
-    if (acidParticle && Math.random() < 0.4) {
+    if (acidParticle && fxRng.particles() < 0.4) {
       this.spawnParticles(this.player.position, 1, CORROSION.COLOR, {
         speedMin: 0.5, speedMax: 2, sizeMin: 1, sizeMax: 2.2,
         lifetimeMin: 0.3, lifetimeMax: 0.6,
@@ -5118,7 +5508,7 @@ export class GameEngine {
     this.audio.play('poi.undock');
     this.dockedAtStation = false;
     this.dockedStation = null;
-    this.lastTime = performance.now();
+    this.lastTime = nowMs();
     this.simAccumulator = 0;
   }
 
@@ -5142,6 +5532,30 @@ export class GameEngine {
    *  and then republished verbatim while `deathPending` (the sim keeps running
    *  behind the screen, so a live rebuild would drift).  Every field is a
    *  counter that already exists on the engine; nothing is recomputed here. */
+  /** Does the save hold anything worth saying "continue" about? */
+  public hasSavedProgress(): boolean {
+    return this.credits > 0 || this.inventory.some(Boolean) || this.wreck !== null
+      || this.shipSlots.some((id, i) => id !== null && (moduleDef(id)?.cost ?? 0) > 0)
+      || this.weaponSlots.some((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0)
+      || this.records.deaths > 0 || this.records.highScore > 0;
+  }
+
+  /** The save's contents for the main menu's CONTINUE panel and the debug
+   *  panel's records (published only while one of them is up). */
+  private savedGameSnapshot() {
+    const modules = this.inventory.filter(Boolean).length
+      + this.shipSlots.filter((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0).length
+      + this.weaponSlots.filter((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0).length;
+    return {
+      progress: this.hasSavedProgress(),
+      credits: this.credits,
+      modules,
+      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
+      arenaWaves: Object.entries(this.arenaWaves).map(([id, m]) => ({ mapName: mapDescriptor(id)?.name ?? id, wave: m.wave, progress: m.progress, awaySec: Math.max(0, Math.round((clock().wallMs() - m.leftAt) / 1000)) })),
+      records: { ...this.records, highScore: Math.max(this.records.highScore, Math.floor(this.score)) },
+    };
+  }
+
   private runSummarySnapshot() {
     return {
       score: this.score,
@@ -5154,10 +5568,17 @@ export class GameEngine {
       credits: this.credits,
       creditsEarned: this.runCreditsEarned,
       creditsEarnedLife: this.lastLifeCreditsEarned,
-      creditsLost: this.lastDeathCreditsLost,
-      creditsLostRun: this.runCreditsLost,
+      arenaSeed: this.arenaSeed,
       timeSec: Math.floor(this.runTimeSec),
       mapName: this.currentMap?.name ?? '',
+      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
+      lostWreck: this.lostWreckOnDeath,
+      records: {
+        highScore: Math.max(this.records.highScore, Math.floor(this.score)),
+        bestWave: Math.max(this.records.bestWave, this.runHighestWave),
+        newHighScore: this.deathNewHighScore,
+        deaths: this.records.deaths,
+      },
     };
   }
 
@@ -5619,7 +6040,7 @@ export class GameEngine {
           return;
       }
 
-      const vx = (Math.random() - 0.5) * 10;
+      const vx = (fxRng.render() - 0.5) * 10;
       const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
       const popup = this._damageTextPool.pop() ?? ({
           id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
@@ -5667,7 +6088,7 @@ export class GameEngine {
       // dent tiles.  (rock-tile is already a dent entity; name the shard.)
       const suppressNumber = isDent || target?.shardVariant === 'rock-shard';
       if (target && target.health > 0 && !suppressNumber) {
-          const vx = (Math.random() - 0.5) * 10;
+          const vx = (fxRng.render() - 0.5) * 10;
           const vy = -DAMAGE_TEXT_CONSTANTS.SPEED;
           const popup = this._damageTextPool.pop() ?? ({
               id: '', position: { x: 0, y: 0 }, velocity: { x: 0, y: 0 },
@@ -5720,7 +6141,7 @@ export class GameEngine {
                   // selling the brittle fracture as both shrapnel and
                   // dust.  Only rock today; other dent variants want
                   // the cleaner solid-shard-only readout.
-                  if (target.shardVariant === 'rock-tile' && Math.random() < ROCK_HIT_NEBULA_PUFF_CHANCE) {
+                  if (target.shardVariant === 'rock-tile' && sim.engine() < ROCK_HIT_NEBULA_PUFF_CHANCE) {
                       // Occasional puff per hit (probability gated above)
                       // at a varied size + small jitter on spawn position
                       // so it doesn't overlap exactly.  Without the gate
@@ -5730,8 +6151,8 @@ export class GameEngine {
                       const baseSize = this.deformedDiameter(target);
                       const jitter = baseSize * 0.15;
                       const puffPos = {
-                          x: impactWorldPos.x + (Math.random() - 0.5) * jitter,
-                          y: impactWorldPos.y + (Math.random() - 0.5) * jitter,
+                          x: impactWorldPos.x + (sim.engine() - 0.5) * jitter,
+                          y: impactWorldPos.y + (sim.engine() - 0.5) * jitter,
                       };
                       const comp = randomRockNebulaComposition();
                       this.drops.spawnColoredNebulaShard(
@@ -5739,7 +6160,7 @@ export class GameEngine {
                           puffPos,
                           baseSize,
                           comp[0].hex,
-                          0.45 + Math.random() * 0.2,
+                          0.45 + sim.engine() * 0.2,
                           target.lastImpactVelocity,
                           comp,
                           0.5,
@@ -5804,13 +6225,13 @@ export class GameEngine {
       if (!this.currentMap) return;
       // Perf: most non-killing hits just crack (the overlay) — only some shed
       // a chip entity.  Thins the chip stream that drives render/sim cost.
-      if (Math.random() >= ROCK_CHIP.CHIP_CHANCE) return;
+      if (sim.engine() >= ROCK_CHIP.CHIP_CHANCE) return;
       const entities = this.currentMap.entities;
       const diam = this.deformedDiameter(parent);
       // Solid chunks only come off reasonably-sized rock — a tiny shard would
       // shed a useless sliver, so it puffs dust until it breaks.
       const solid = diam >= ROCK_CHIP.SOLID_MIN_PARENT_DIAM
-          && Math.random() < ROCK_CHIP.ROCK_FRACTION;
+          && sim.engine() < ROCK_CHIP.ROCK_FRACTION;
       let chipDiam: number;
       if (solid) {
           // Solid rock-shard chunk flung from the impact point (sized +
@@ -5826,19 +6247,19 @@ export class GameEngine {
           // accumulates (no lifetime), so only actually puff some of the
           // time.  No puff this hit → nothing chips (the crack already
           // telegraphed the damage); skip the conservation shrink too.
-          if (Math.random() >= ROCK_CHIP.DUST_CHANCE) return;
+          if (sim.engine() >= ROCK_CHIP.DUST_CHANCE) return;
           // Pulverised dust — a tinted nebula puff drifting off the impact.
           chipDiam = diam * ROCK_CHIP.NEBULA_SIZE_FRAC;
           const jitter = diam * 0.15;
           const puffPos = {
-              x: impactPos.x + (Math.random() - 0.5) * jitter,
-              y: impactPos.y + (Math.random() - 0.5) * jitter,
+              x: impactPos.x + (sim.engine() - 0.5) * jitter,
+              y: impactPos.y + (sim.engine() - 0.5) * jitter,
           };
           const comp = randomRockNebulaComposition();
           this.drops.spawnColoredNebulaShard(
               entities, puffPos, diam, comp[0].hex,
               ROCK_CHIP.NEBULA_SIZE_FRAC, parent.lastImpactVelocity, comp,
-              0.45 + Math.random() * 0.2, true, // fromRock — condenses back to rock-shard
+              0.45 + sim.engine() * 0.2, true, // fromRock — condenses back to rock-shard
           );
       }
       // Conservation: slim a mobile asteroid by the chip's footprint (dust
@@ -6427,8 +6848,8 @@ export class GameEngine {
 
       // Convert screen-space target to world coords once; the rest of the
       // firing flow lives in WeaponSystem.
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 2;
+      const cx = viewport().width / 2;
+      const cy = viewport().height / 2;
       const worldX = this.player.position.x + (target.x - cx) / this.camera.zoom;
       const worldY = this.player.position.y + (target.y - cy) / this.camera.zoom;
 
@@ -7027,10 +7448,11 @@ export class GameEngine {
       // WaveSystem.haltForBoss.
       this.waves.haltForBoss();
       this.audio.play('boss.intro');
-      // The score joins the entrance beat.  One of the two places a track is
-      // cut short (the other is a map change, in `loadMapFresh`); everywhere
-      // INSIDE an encounter a track runs to its own end.
-      this.audio.cueBattleTrack();
+      // The score joins the entrance beat: at the next bar line it returns
+      // to bar 1 with an impact on the downbeat, and the boss stem comes in
+      // there.  The only other phrase restart is a map change (in
+      // `loadMapFresh`); inside an encounter the score never jumps.
+      this.audio.cueEncounter('boss');
       this.openPortal(boss.position, {
           color: boss.color || '#f87171',
           radius: BOSS_CONSTANTS.PORTAL_RADIUS,
@@ -7135,17 +7557,17 @@ export class GameEngine {
           if (item.delay > 0) continue;
           this.portalTransit.splice(i, 1);
           const e = item.entity;
-          const scatterA = Math.random() * Math.PI * 2;
-          const scatterR = Math.random() * cfg.SCATTER;
+          const scatterA = sim.engine() * Math.PI * 2;
+          const scatterR = sim.engine() * cfg.SCATTER;
           e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
           e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
           wrapPosition(e.position);
-          const heading = Math.random() * Math.PI * 2;
-          const speed = cfg.SPEED_MIN + Math.random() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
+          const heading = sim.engine() * Math.PI * 2;
+          const speed = cfg.SPEED_MIN + sim.engine() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
           e.velocity.x = Math.cos(heading) * speed;
           e.velocity.y = Math.sin(heading) * speed;
           if (e.rotationSpeed !== undefined) {
-              e.rotationSpeed += (Math.random() - 0.5) * 1.5;
+              e.rotationSpeed += (sim.engine() - 0.5) * 1.5;
           }
           e.portalGraceTimer = cfg.GRACE_SEC;
           e.active = true;
@@ -7173,8 +7595,8 @@ export class GameEngine {
       if (!ctx) return;
       const subtype = (id in EnemySubtype && BOSS_DEFS[id as EnemySubtype])
           ? (id as EnemySubtype) : BOSS_ROTATION[0];
-      const spread = 420 + Math.random() * 260;
-      const a = Math.random() * Math.PI * 2;
+      const spread = 420 + sim.engine() * 260;
+      const a = sim.engine() * Math.PI * 2;
       const pos = {
           x: this.player.position.x + Math.cos(a) * spread,
           y: this.player.position.y + Math.sin(a) * spread,
@@ -7218,8 +7640,8 @@ export class GameEngine {
     // (it is never despawned at a wave end), so don't touch it here.
     const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
     if ((clearedIndex + 1) % healthInterval === 0) {
-      const hAngle = Math.random() * Math.PI * 2;
-      const hDist  = 20 + Math.random() * 80; // 20–100 units from player
+      const hAngle = sim.engine() * Math.PI * 2;
+      const hDist  = 20 + sim.engine() * 80; // 20–100 units from player
       const hPos   = {
         x: this.player.position.x + Math.cos(hAngle) * hDist,
         y: this.player.position.y + Math.sin(hAngle) * hDist,
@@ -7234,8 +7656,8 @@ export class GameEngine {
     // above stays score-only.  This spray + the grace timer is the
     // between-wave breather now that the card modal no longer pauses the sim.
     for (let i = 0; i < SALVAGE_CONSTANTS.WAVE_CLEAR_DROPS; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = 40 + Math.random() * 80;
+      const a = sim.engine() * Math.PI * 2;
+      const d = 40 + sim.engine() * 80;
       this.spawnSalvageDrop({
         x: this.player.position.x + Math.cos(a) * d,
         y: this.player.position.y + Math.sin(a) * d,
@@ -7350,8 +7772,8 @@ export class GameEngine {
    *  numbers were measured at (a wide desktop FOV draws more than a tablet). */
   public perfRecExport(): string {
     return this.perfRecorder.report({
-      viewportW: typeof window !== 'undefined' ? window.innerWidth : 0,
-      viewportH: typeof window !== 'undefined' ? window.innerHeight : 0,
+      viewportW: viewport().width,
+      viewportH: viewport().height,
       // The EFFECTIVE ratio — what the frame was actually rasterised at, and
       // therefore what the render numbers below correspond to.  The raw device
       // ratio is recoverable from the `set` line's rscale entry.
@@ -7396,7 +7818,11 @@ export class GameEngine {
     // Depth carries the difficulty curve and the boss rotation forward; the
     // arena's own wave counter still restarts at 1 for the HUD.
     this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
-    this.waves.init(ctx, this.wavesEnabled);
+    // An arena remembers where its wave script stood (engine/arenaWaves.ts):
+    // exactly, for a few minutes after the player left, then from the top of
+    // an ever earlier wave.
+    const held = arenaWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id);
+    this.waves.init(ctx, this.wavesEnabled, held.wave, held.progress);
     if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
 
@@ -7414,7 +7840,7 @@ export class GameEngine {
     // pauses.
     const pos = entity.position;
     if (entity.dropType === 'salvage') {
-        const now = performance.now();
+        const now = nowMs();
         this.salvageStreak = (now - this.salvageStreakAt < SALVAGE_STREAK_WINDOW_MS)
             ? Math.min(this.salvageStreak + 1, SALVAGE_STREAK_MAX) : 0;
         this.salvageStreakAt = now;
