@@ -79,6 +79,9 @@ const App: React.FC = () => {
         (window as any).__omniStats = newStats;
     }, difficultyRef.current);
 
+    // The save may carry a different difficulty than the menu's default.
+    setDifficulty(engine.getDifficulty());
+
     // Debug handle.  The game already ships a full in-game debug menu (the DBG
     // button, on every screen), so the engine is deliberately reachable from the console
     // too: it is what the Playwright suites in tests/ drive, and it costs one

@@ -26,6 +26,9 @@ import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot
 import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
+import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
+import { stampArenaWave, arenaWaveFor } from './arenaWaves';
+import { leaveWreck, spawnWreckEntity, updateWreck, updateWreckGuide, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
 import { ASSETS } from '../assets';
 import { invalidateCollisionR } from './entityCache';
 import { ensureFractureCells, ensureFractureEdges, fractureRevealedEdgeCount, ensureBoundaryModel, edgeIsBroken, stampLocalImpact, applyBoundaryDamage, dentStruckGrain } from './systems/fractureCache';
@@ -1109,7 +1112,137 @@ export class GameEngine {
       shakeOffset: { x: 0, y: 0 }
     };
 
+    // The character comes off disk BEFORE the first map loads, so a wreck
+    // left in the hub is spawned with it (`loadMapSeeded` ends in
+    // `spawnWreckEntity`).
+    this.loadSave();
     this.loadMapSeeded(this.selectedMapType);
+  }
+
+  // ── Persistence (plan D20; engine/save.ts) ──────────────────────────────
+
+  /** Read the save through the Storage port and apply it.  A save this build
+   *  cannot read (corrupt, or from a NEWER build) is parked under
+   *  `SAVE_BACKUP_KEY` rather than overwritten — a downgrade must not eat a
+   *  newer player's file. */
+  private loadSave(): void {
+    const raw = this.storage.get(SAVE_KEY);
+    const parsed = parseSave(raw);
+    this.saveStatus = parsed.status;
+    if (raw !== null && (parsed.status === 'unreadable' || parsed.status === 'future')) {
+      this.storage.set(SAVE_BACKUP_KEY, raw);
+    }
+    const save = parsed.save;
+    this.records = save.records;
+    this.wreck = save.wreck;
+    this.arenaWaves = save.arenaWaves;
+    this.applyCharacter(save.character);
+    const st = save.settings;
+    this.audio.setVolume(st.volume);
+    this.audio.setSfxVolume(st.sfxVolume);
+    this.audio.setMusicVolume(st.musicVolume);
+    if (this.audio.muted !== st.muted) this.audio.toggleMute();
+    if (st.controlScheme !== null) this.input.setControlScheme(st.controlScheme);
+    this.difficultyLevel = st.difficulty;
+    this.enemyScale = DIFFICULTY_SCALES[st.difficulty] ?? 1;
+    // What was just read is what is on disk: not dirty until something changes.
+    this.lastSavedJson = serializeSave(this.snapshotSave());
+  }
+
+  /** The character: what survives a death and a relaunch (D4/D6/D11, D14). */
+  public applyCharacter(c: CharacterSave): void {
+    this.credits = c.credits;
+    this.inventory = c.inventory.slice();
+    this.shipSlots = c.shipSlots.slice();
+    this.weaponSlots = c.weaponSlots.slice();
+    this.shipSlotsUnlocked = c.shipSlotsUnlocked;
+    this.weaponSlotsUnlocked = c.weaponSlotsUnlocked;
+    this.player.currentWeapon = 'projectile';
+    this.currentWeaponIndex = 0;
+    syncLoadoutFromSlots(this);
+    this.player.health = this.player.maxHealth;
+    this.player.shield = this.player.maxShield;
+  }
+
+  /** A brand-new character: no credits, empty cargo, the free hull and
+   *  Projector.  The replay entry uses it (a replay must not depend on a
+   *  save); the DBG "Erase save" row uses it. */
+  public resetCharacter(): void {
+    this.applyCharacter(emptyCharacter());
+  }
+
+  public snapshotSave(): SaveFile {
+    return {
+      version: 1,
+      character: {
+        credits: this.credits,
+        inventory: this.inventory.slice(),
+        shipSlots: this.shipSlots.slice(),
+        weaponSlots: this.weaponSlots.slice(),
+        shipSlotsUnlocked: this.shipSlotsUnlocked,
+        weaponSlotsUnlocked: this.weaponSlotsUnlocked,
+      },
+      wreck: this.wreck,
+      arenaWaves: this.arenaWaves,
+      records: this.records,
+      settings: {
+        volume: this.audio.volume,
+        sfxVolume: this.audio.sfxVolume,
+        musicVolume: this.audio.musicVolume,
+        muted: this.audio.muted,
+        controlScheme: this.input.getControlScheme(),
+        difficulty: this.difficultyLevel,
+      },
+    };
+  }
+
+  /** Write the save if it changed.  Cheap to call: one small JSON string
+   *  compared with the last one written. */
+  public saveNow(): void {
+    stampArenaWave(this);
+    // Lifetime bests are max()es of live counters — fold them in at write time.
+    if (this.score > this.records.highScore) this.records.highScore = Math.floor(this.score);
+    if (this.runHighestWave > this.records.bestWave) this.records.bestWave = this.runHighestWave;
+    if (this.runBestCombo > this.records.bestCombo) this.records.bestCombo = this.runBestCombo;
+    const json = serializeSave(this.snapshotSave());
+    if (json === this.lastSavedJson) return;
+    this.lastSavedJson = json;
+    this.storage.set(SAVE_KEY, json);
+  }
+
+  /** Once a second of wall time (frame level, not sim: settings change while
+   *  the world is frozen, and saving must not touch the replay's clock). */
+  private autosaveTick(frameSec: number): void {
+    this.saveAccumSec += frameSec;
+    if (this.saveAccumSec < 1) return;
+    this.saveAccumSec = 0;
+    this.saveNow();
+  }
+
+  /** Erase the save and start a new character (DBG ▸ Economy ▸ Erase save). */
+  public eraseSave(): void {
+    this.wreck = null;
+    this.arenaWaves = {};
+    if (this.wreckEntity) { this.wreckEntity.active = false; this.wreckEntity = null; }
+    this.records = emptyRecords();
+    this.resetCharacter();
+    this.saveNow();
+  }
+
+  /** The player's ship has just been destroyed (health reached 0).
+   *
+   *  Does the three things a fall owes, in the order that matters: counts it,
+   *  leaves the wreck for what was MOUNTED (D10 — which also replaces any older
+   *  wreck, D-S2-d2), and strips the loadout NOW, then saves.  Doing the strip
+   *  here and not at the respawn tap is what stops a player who quits the app
+   *  on the death screen from keeping the loadout they just lost. */
+  private onPlayerFell(): void {
+    this.deathNewHighScore = this.score > this.records.highScore;
+    this.records.deaths++;
+    this.lostWreckOnDeath = this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null;
+    leaveWreck(this);
+    this.resetOutfit(true);
+    this.saveNow();
   }
 
   /**
@@ -1189,6 +1322,7 @@ export class GameEngine {
 
   public stop() {
     this.isRunning = false;
+    this.saveNow();
     this.input.cleanup();
     this.lifecycleOff?.();
     this.lifecycleOff = null;
@@ -1223,6 +1357,7 @@ export class GameEngine {
     if (e === 'background') {
       this.input.releaseAll();
       this.pauseGame(true);
+      this.saveNow(); // the OS may not give another chance
     } else {
       this.lastTime = nowMs();
       this.simAccumulator = 0;
@@ -1245,6 +1380,27 @@ export class GameEngine {
    *  (ms per substep).  Set by `runReplay` from the log; 0 = no time term. */
   public replayLoadMs = 0;
 
+  // ── Persistence (plan D20; engine/save.ts) ──────────────────────────────
+  /** The outstanding death wreck, or null (D10).  A record, so it can be saved;
+   *  `wreckEntity` is its view in the loaded map (engine/wreck.ts). */
+  public wreck: WreckRecord | null = null;
+  /** Held wave state per arena (engine/arenaWaves.ts). */
+  public arenaWaves: Record<string, ArenaWaveMemory> = {};
+  public wreckEntity: GameEntity | null = null;
+  /** The contact currently carrying `wreckGuide` (engine/wreck.ts). */
+  public wreckGuideEntity: GameEntity | null = null;
+  /** The wreck an older death left that THIS death destroyed (D-S2-d2) — the
+   *  death screen says so.  Null when there was none. */
+  public lostWreckOnDeath: { mapName: string; modules: number } | null = null;
+  /** Lifetime bests and counters (D-S2-a). */
+  public records: Records = emptyRecords();
+  /** What loading the save found: fresh / loaded / migrated / unreadable / future. */
+  public saveStatus: SaveStatus = 'fresh';
+  private lastSavedJson = '';
+  private saveAccumSec = 0;
+  /** Did the life that just ended set a new high score? (the death summary) */
+  private deathNewHighScore = false;
+
   /** Begin a NEW run on `mapType` from `seed` and hold the loop so `stepSim`
    *  drives it.  The replay harness's entry point (engine/replay.ts).  `seed`
    *  seeds an ARENA; the hub's terrain is fixed and the seed then only pins
@@ -1252,6 +1408,10 @@ export class GameEngine {
   public beginSeededRun(seed: number, mapType: MapType) {
     this.pendingRunSeed = seed;
     this.selectedMapType = mapType;
+    // A replay must not depend on a save: a fresh character, no wreck.
+    this.wreck = null;
+    this.arenaWaves = {};
+    this.resetCharacter();
     this.deathPending = false;
     this.deathDelay = 0;
     this.deathSummary = null;
@@ -1576,6 +1736,9 @@ export class GameEngine {
    *  resets that on top; transitionToMap preserves it.  That split is
    *  what makes run state carry across a portal (decision #39d). */
   private loadMapFresh(type: MapType) {
+      // Leaving an arena (portal, respawn, quit): stamp the wave it was at and
+      // when, before the map is torn down — the held wave decays from here.
+      stampArenaWave(this);
       this.shards.reset();
       this.energy.reset();
       this.perfController.reset();
@@ -1661,7 +1824,10 @@ export class GameEngine {
         seedRng(HUB_WORLD_SEED);
         this.arenaSeed = null;
       } else {
-        const seed = (this.pendingRunSeed ?? this.platform.entropy.seed()) >>> 0;
+        // A wreck PINS its arena's seed (D-S2-d1) so S1's seeded generation
+        // rebuilds the terrain the ship fell in.  A replay's pinned seed wins.
+        const pinned = wreckSeedFor(this, descriptorForMapType(type)?.id);
+        const seed = (this.pendingRunSeed ?? pinned ?? this.platform.entropy.seed()) >>> 0;
         this.pendingRunSeed = null;
         seedRng(seed);
         this.arenaSeed = seed;
@@ -1681,6 +1847,8 @@ export class GameEngine {
       } else {
         this.runSeed = this.arenaSeed!;
       }
+      // The wreck is a view of `this.wreck`: rebuild it if this map holds it.
+      spawnWreckEntity(this);
   }
 
   /** Park the player (and the camera) at the freshly-loaded map's declared
@@ -1737,10 +1905,11 @@ export class GameEngine {
       this.stageClearDelay = 0;
       this.lastStageClear = null;
 
-      // Per-run progression reset — must precede the health/shield refill
-      // below so maxHealth/maxShield are back at base before they're topped.
-      this.credits = 0;
-      this.resetOutfit(); // back to lean (Base Hull on the centre hex, empty inventory, Projector on W1)
+      // THE CHARACTER PERSISTS (D4/D14).  Credits, cargo, the installed
+      // loadout and the purchased hex slots belong to the character, not to a
+      // run, so a new run — quit to menu, a DBG map switch — keeps them; a new
+      // CHARACTER is `resetCharacter()` (the replay entry, DBG Erase save).
+      // What is run-scoped is everything counted above.
 
       // Clear the WRECK state too (A1).  Before the run-summary screen the
       // player could never be mid-explosion at a run reset — the auto-respawn
@@ -2335,6 +2504,8 @@ export class GameEngine {
     this.player.visualPitch = pitch;
   }
 
+  public getDifficulty(): number { return this.difficultyLevel; }
+
   public setDifficulty(level: number) {
       const clamped = Math.min(3, Math.max(0, Math.round(level)));
       this.difficultyLevel = clamped;
@@ -2647,6 +2818,7 @@ export class GameEngine {
 
     this.pollGamepad();
     this.tickJoystick(frameTime);
+    this.autosaveTick(frameTime);
 
     // HUD score ticker — roll the displayed total up toward the true
     // score by integer steps (≥1, ≤ a fraction of the gap) so awards
@@ -2785,6 +2957,7 @@ export class GameEngine {
         },
       } : undefined,
       outfitting: menuOpen ? this.outfittingSnapshot() : undefined,
+      savedGame: (this.gameState === GameState.MENU || this.debugPanelOpen) ? this.savedGameSnapshot() : undefined,
       runSummary: this.deathPending ? (this.deathSummary ?? undefined) : undefined,
       stageClear: this.stageClearPending && this.lastStageClear
           ? { ...this.lastStageClear, mapName: this.currentMap?.name ?? '' }
@@ -3761,6 +3934,7 @@ export class GameEngine {
               entity.position,
           );
       }
+      if (entity.type === EntityType.PLAYER) this.onPlayerFell();
       if (entity.type === EntityType.PLAYER || entity.type === EntityType.ENEMY) {
           this.startExplosion(entity);
       }
@@ -4356,6 +4530,8 @@ export class GameEngine {
     // in place from here; everything below re-reads `currentMap`, so the
     // rest of this step runs against the destination.
     this.updateInteractables();
+    updateWreck(this);
+    updateWreckGuide(this);
     this.updatePortalTransit(dt);
     // Overworld roaming dragon — keep one alive: first spawn shortly after
     // run start, then a fresh rift a while after the previous one dies or
@@ -4756,7 +4932,7 @@ export class GameEngine {
 
   // ── Player HUD messages ─────────────────────────────────────────────────────
 
-  private pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
+  public pushPlayerMessage(text: string, color: string, lifetime = 2.5) {
     this.playerMessages.push({
       id: nextId('hud'),
       text,
@@ -5295,6 +5471,30 @@ export class GameEngine {
    *  and then republished verbatim while `deathPending` (the sim keeps running
    *  behind the screen, so a live rebuild would drift).  Every field is a
    *  counter that already exists on the engine; nothing is recomputed here. */
+  /** Does the save hold anything worth saying "continue" about? */
+  public hasSavedProgress(): boolean {
+    return this.credits > 0 || this.inventory.some(Boolean) || this.wreck !== null
+      || this.shipSlots.some((id, i) => id !== null && (moduleDef(id)?.cost ?? 0) > 0)
+      || this.weaponSlots.some((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0)
+      || this.records.deaths > 0 || this.records.highScore > 0;
+  }
+
+  /** The save's contents for the main menu's CONTINUE panel and the debug
+   *  panel's records (published only while one of them is up). */
+  private savedGameSnapshot() {
+    const modules = this.inventory.filter(Boolean).length
+      + this.shipSlots.filter((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0).length
+      + this.weaponSlots.filter((id) => id !== null && (moduleDef(id)?.cost ?? 0) > 0).length;
+    return {
+      progress: this.hasSavedProgress(),
+      credits: this.credits,
+      modules,
+      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
+      arenaWaves: Object.entries(this.arenaWaves).map(([id, m]) => ({ mapName: mapDescriptor(id)?.name ?? id, wave: m.wave, progress: m.progress, awaySec: Math.max(0, Math.round((clock().wallMs() - m.leftAt) / 1000)) })),
+      records: { ...this.records, highScore: Math.max(this.records.highScore, Math.floor(this.score)) },
+    };
+  }
+
   private runSummarySnapshot() {
     return {
       score: this.score,
@@ -5310,6 +5510,14 @@ export class GameEngine {
       arenaSeed: this.arenaSeed,
       timeSec: Math.floor(this.runTimeSec),
       mapName: this.currentMap?.name ?? '',
+      wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
+      lostWreck: this.lostWreckOnDeath,
+      records: {
+        highScore: Math.max(this.records.highScore, Math.floor(this.score)),
+        bestWave: Math.max(this.records.bestWave, this.runHighestWave),
+        newHighScore: this.deathNewHighScore,
+        deaths: this.records.deaths,
+      },
     };
   }
 
@@ -7548,7 +7756,11 @@ export class GameEngine {
     // Depth carries the difficulty curve and the boss rotation forward; the
     // arena's own wave counter still restarts at 1 for the HUD.
     this.waves.waveOffset = this.stageIndex * STAGE_WAVE_COUNT;
-    this.waves.init(ctx, this.wavesEnabled);
+    // An arena remembers where its wave script stood (engine/arenaWaves.ts):
+    // exactly, for a few minutes after the player left, then from the top of
+    // an ever earlier wave.
+    const held = arenaWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id);
+    this.waves.init(ctx, this.wavesEnabled, held.wave, held.progress);
     if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
 

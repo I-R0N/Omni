@@ -103,7 +103,7 @@ export class WaveSystem {
    *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no
    *  wave 1 banner, no grace-period cycling, no enemies. */
-  public init(ctx: WaveSpawnContext, enabled: boolean = true) {
+  public init(ctx: WaveSpawnContext, enabled: boolean = true, startIndex: number = 0, progress: number = 0) {
     this.halted = false;
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
@@ -117,7 +117,28 @@ export class WaveSystem {
     this.nextSpawnIdx = 0;
     this.lastSpawnAtSec = -Infinity;
     if (!enabled || ctx.enemyScale <= 0) return;
-    this.startWave(0, ctx);
+    this.startWave(startIndex, ctx);
+    this.fastForward(progress);
+  }
+
+  /** Enemies of the ACTIVE wave already spawned and killed — the fidelity an
+   *  arena keeps for a few minutes after the player leaves (arenaWaves.ts).
+   *  0 for a capstone: its boss is the fight, and it starts over. */
+  public progressDone(entities: GameEntity[]): number {
+    if (this.waveState !== 'active' || this.capstoneWave) return 0;
+    return Math.max(0, this.nextSpawnIdx - this.countLiveTracked(entities));
+  }
+
+  /** Resume a wave `done` kills in: the stream carries on from the next slot
+   *  as if those enemies had come and died.  Never skips the whole budget, so
+   *  a resumed wave still has something to clear. */
+  private fastForward(done: number) {
+    if (done <= 0 || this.waveState !== 'active' || this.capstoneWave) return;
+    const n = Math.min(Math.floor(done), Math.max(0, this.spawnList.length - 1));
+    if (n <= 0) return;
+    this.nextSpawnIdx = n;
+    this.elapsedSec = this.spawnTimesSec[n - 1] ?? 0;
+    this.lastSpawnAtSec = this.elapsedSec;
   }
 
   /**
@@ -182,25 +203,39 @@ export class WaveSystem {
 
     this.waveState = 'active';
     this.capstoneWave = !!boss;
-    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    const roster = this.rosterOf(this.spawnList, boss);
+    const rosterLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     if (boss) {
       this.spawnBoss(boss, ctx);
       this.announcements.push({
         text: BOSS_DEFS[boss]?.name ?? 'BOSS',
         subtext: `WAVE ${index + 1}  ·  CAPSTONE`,
         color: '#f87171',
-        lifetime: totalLife,
-        maxLifetime: totalLife,
+        lifetime: rosterLife,
+        maxLifetime: rosterLife,
+        roster,
       });
     } else {
       this.announcements.push({
         text: `WAVE ${index + 1}`,
         subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
         color: '#ffffff',
-        lifetime: totalLife,
-        maxLifetime: totalLife,
+        lifetime: rosterLife,
+        maxLifetime: rosterLife,
+        roster,
       });
     }
+  }
+
+  /** Per-subtype counts of what this wave must kill — the spawn list plus the
+   *  capstone's boss — in first-appearance order (boss first). */
+  private rosterOf(list: EnemySubtype[], boss: EnemySubtype | null): { subtype: EnemySubtype; count: number }[] {
+    const counts = new Map<EnemySubtype, number>();
+    if (boss) counts.set(boss, 1);
+    for (const s of list) counts.set(s, (counts.get(s) ?? 0) + 1);
+    const out: { subtype: EnemySubtype; count: number }[] = [];
+    counts.forEach((count, subtype) => out.push({ subtype, count }));
+    return out;
   }
 
   /**

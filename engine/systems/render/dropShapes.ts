@@ -16,7 +16,7 @@
  *  rotation itself.
  */
 import { GameEntity, EntityType, Vector2 } from '../../../types';
-import { STATION_CONSTANTS, portalHorizonRadius } from '../../../constants';
+import { STATION_CONSTANTS, WRECK_CONSTANTS, portalHorizonRadius } from '../../../constants';
 import { wrapDeltaX, wrapDeltaY } from '../../toroidal';
 import { hexToRgb } from './drawUtils';
 
@@ -263,6 +263,25 @@ export function drawDropShape(
         ctx.arc(0, 0, holeR, 0, Math.PI * 2);
         ctx.fillStyle = '#000000';
         ctx.fill();
+
+        // THE WRECK IS THROUGH HERE (user call): the rift that leads toward
+        // the player's wreck wears an amber pulsing ring and a tag, in the
+        // world as well as on the edge arrow and the minimap.
+        if (entity.wreckGuide === true) {
+            const pulse = 0.5 + 0.5 * Math.sin(nowSec * 3.2);
+            ctx.globalAlpha = 0.35 + 0.5 * pulse;
+            ctx.strokeStyle = WRECK_CONSTANTS.COLOR;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(0, 0, holeR + 10 + 8 * pulse, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 0.95;
+            ctx.fillStyle = WRECK_CONSTANTS.COLOR;
+            ctx.font = 'bold 13px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('\u25c6 WRECK THIS WAY', 0, holeR + 44);
+            ctx.globalAlpha = 1.0;
+        }
 
         // Destination tag — the portal always says where it goes.  Kept
         // clear of the mouth by the disc's own radius, so it does not

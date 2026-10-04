@@ -1669,7 +1669,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {row('Salvage held', `◈${rs.credits.toLocaleString()}`, 'kept')}
                 {rs.arenaSeed !== null && row('Arena seed', rs.arenaSeed.toString(16).toUpperCase().padStart(8, '0'))}
                 {row('Run time', `${mm}:${String(ss).padStart(2, '0')}`)}
+                {row('Best score', rs.records.highScore.toLocaleString(),
+                     rs.records.newHighScore ? 'new best!' : undefined)}
+                {rs.wavesEnabled && rs.records.bestWave > 0 && row('Best wave', rs.records.bestWave)}
               </div>
+
+              {/* The wreck (D10): what was mounted is left where the ship fell. */}
+              {rs.wreck && (
+                <div className={`${panelAccent('border-amber-600/40')} text-center`} data-testid="death-wreck">
+                  <div className={`text-amber-300 ${HEADING}`}>Wreck</div>
+                  <div className={`text-slate-200 ${T_ROW}`}>
+                    {rs.wreck.modules} module{rs.wreck.modules === 1 ? '' : 's'} left in {rs.wreck.mapName}
+                  </div>
+                  <div className={`text-slate-500 ${T_NOTE} mt-0.5`}>
+                    Fly back and touch it to recover them into your cargo. Dying again first loses them.
+                  </div>
+                </div>
+              )}
+              {/* A second death destroys the older wreck (D-S2-d2): say so. */}
+              {rs.lostWreck && (
+                <div className={`${panelAccent('border-rose-700/40')} text-center`} data-testid="death-wreck-lost">
+                  <div className={`text-rose-300 ${HEADING}`}>Previous wreck lost</div>
+                  <div className={`text-slate-300 ${T_ROW}`}>
+                    The {rs.lostWreck.modules} module{rs.lostWreck.modules === 1 ? '' : 's'} left in {rs.lostWreck.mapName} are gone for good.
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col gap-2">
                 <button
@@ -1680,7 +1705,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                   Respawn at Home Station
                 </button>
                 <p className={`text-slate-500 ${T_NOTE} text-center -mt-1`}>
-                  You return to your station with the equipment you had installed stripped away. Salvage, cargo and score are kept.
+                  You return to your station. What you had installed stays with the wreck; salvage, cargo and score are kept.
                 </p>
                 <button
                   onClick={onQuitToMenu}
@@ -1731,6 +1756,9 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
 
             <div className="w-full flex flex-col items-center gap-3">
               <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
+              <span className={`text-slate-500 ${T_NOTE} -mt-2 text-center`}>
+                How hard arena waves hit. Saved with your character; the hub has no waves.
+              </span>
               {/* A 4-up grid rather than a flex row: the buttons then divide
                   the column's width instead of setting it, so the row can
                   never overflow a narrow screen. */}
@@ -1764,6 +1792,26 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               {renderAdaptiveTriggers()}
             </div>
 
+            {/* A returning player sees that their game is there (user call:
+                a reload used to look like a fresh start). */}
+            {stats.savedGame?.progress && (
+              <div className={`${panelAccent('border-emerald-600/40')} w-full text-center`} data-testid="menu-saved">
+                <div className={`text-emerald-300 ${HEADING}`}>Saved game</div>
+                <div className={`text-slate-200 ${T_ROW}`}>
+                  ◈{stats.savedGame.credits.toLocaleString()} · {stats.savedGame.modules} module{stats.savedGame.modules === 1 ? '' : 's'}
+                  {stats.savedGame.records.deaths > 0 ? ` · ${stats.savedGame.records.deaths} death${stats.savedGame.records.deaths === 1 ? '' : 's'}` : ''}
+                </div>
+                {stats.savedGame.records.highScore > 0 && (
+                  <div className={`text-slate-500 ${T_NOTE}`}>Best score {stats.savedGame.records.highScore.toLocaleString()}</div>
+                )}
+                {stats.savedGame.wreck && (
+                  <div className={`text-amber-300 ${T_NOTE} mt-0.5`}>
+                    Wreck waiting in {stats.savedGame.wreck.mapName} ({stats.savedGame.wreck.modules} module{stats.savedGame.wreck.modules === 1 ? '' : 's'})
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               data-testid="menu-start"
               onClick={onStart}
@@ -1775,7 +1823,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                  Kept indigo and rounded-full; the tap floor is shared. */
               className={`w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xl font-bold py-4 rounded-full ${TAP} shadow-2xl transition-all transform hover:scale-105 active:scale-95`}
             >
-              START
+              {stats.savedGame?.progress ? 'CONTINUE' : 'START'}
             </button>
 
             {/* Controls & basics — the same widget the pause menu shows.

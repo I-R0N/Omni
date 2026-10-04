@@ -754,6 +754,21 @@ export function drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity
     }
 }
 
+/** A flat, flame-free silhouette of an archetype for HUD lists (the wave
+ *  roster): the same path the world draws, filled in the archetype colour
+ *  with a nose pip, at the origin facing +x.  Allocates nothing. */
+export function drawEnemyIcon(ctx: CanvasRenderingContext2D, shape: string, color: string, r: number) {
+    buildEnemyPath(ctx, shape, r);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(r * 0.35, 0, r * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha *= 0.75;
+    ctx.fill();
+    ctx.globalAlpha /= 0.75;
+}
+
 function buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {
     ctx.beginPath();
     switch (shape) {

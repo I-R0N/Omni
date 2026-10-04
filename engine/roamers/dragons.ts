@@ -412,6 +412,7 @@ g.audio.play('destroy.dragon',
     // Payout doubles per kill this run: 3000, 6000, 12000, …
     g.awardScore(DRAGON_CONSTANTS.SCORE * Math.pow(2, g.dragonsKilled), d.position);
     g.dragonsKilled++;
+    g.records.dragonsKilled++;
     openDragonPortal(g, d.position);
     g.spawnParticles(d.position, 24, DRAGON_CONSTANTS.COLOR, { // Tier 2b: 40 → 24
         speedMin: 3, speedMax: 14, sizeMin: 2, sizeMax: 5, lifetimeMin: 0.4, lifetimeMax: 1.0,

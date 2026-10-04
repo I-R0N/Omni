@@ -22,6 +22,7 @@ import {
 
 export const browserClock: Clock = {
   now: () => performance.now(),
+  wallMs: () => Date.now(),
   requestFrame: (cb) => { requestAnimationFrame(cb); },
 };
 

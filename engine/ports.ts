@@ -45,6 +45,11 @@ import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 export interface Clock {
   /** Monotonic milliseconds.  Differences are meaningful; the origin is not. */
   now(): number;
+  /** Wall-clock milliseconds since the Unix epoch.  Unlike `now()` it MEANS
+   *  the same thing across launches, which is the only reason it exists: the save
+   *  file stamps when the player left a wreck's arena (engine/wreck.ts).  Never
+   *  read by the sim's step — only by saves and the wreck's wave decay. */
+  wallMs(): number;
   /** Ask for `cb` before the next frame, like requestAnimationFrame: `cb` gets
    *  a timestamp on THIS clock's timeline.  A headless clock never calls it —
    *  nothing there runs a frame loop — and a test steps the sim by hand. */
@@ -58,6 +63,8 @@ export interface Clock {
 export class ManualClock implements Clock {
   private t = 0;
   now(): number { return this.t; }
+  /** A fixed epoch plus the manual time, so a test moves wall time by `advance`. */
+  wallMs(): number { return 1_700_000_000_000 + this.t; }
   advance(ms: number): void { this.t += ms; }
   set(ms: number): void { this.t = ms; }
   requestFrame(): void { /* a manual clock runs no frames */ }

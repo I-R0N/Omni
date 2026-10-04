@@ -89,6 +89,8 @@ scripts/build-cinematic-audio.py
                           prep-sfx.mjs are WAV-take tooling
 
 tests/sim/                HEADLESS SIM SUITES (node:test, engine-core S2):
+                          persistence.test.ts (the save file, relaunch,
+                          the wreck — over a shared MemoryStorage),
                           headless.test.ts (determinism, order-independence,
                           the replay format's inputs), lifecycle.test.ts
                           (Escape, backgrounding), guard.test.ts (no
@@ -147,7 +149,7 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           whatever happened next), replay (the REPLAY HARNESS: same seed + same
                           inputs ⇒ identical sim hashes across maps, the
                           cosmetic streams cannot reach the sim, and no
-                          `Math.random` survives in the game code).  527 tests.  All run at
+                          `Math.random` survives in the game code).  532 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts (six sizes plus
                           a mid-session resize) and two starfield tests
                           that resize mid-test
@@ -226,6 +228,14 @@ engine/
                           so a divergence names its first step and section.
                           Dev-only — no player-facing surface (D-S1-g).
                           Published as `window.__omniReplay`
+  save.ts                 THE SAVE FILE, pure: `SaveFile` (character + wreck +
+                          records + settings), validation field by field,
+                          the `MIGRATIONS` chain, `parseSave` /
+                          `serializeSave`.  No storage access — the engine
+                          reads and writes through the `Storage` port.  §8
+  wreck.ts                THE DEATH WRECK: leave it, spawn its view in the
+                          map, recover it, pin its arena's seed.  Free
+                          functions over `g: GameEngine`.  §8
   energyEffects.ts        ENERGY MODULES, the side-effect half: the
                           bounded heated set (cooling, burn latch, glass
                           thermal failure, plastic bond release,
@@ -582,11 +592,13 @@ state on the way).
 `loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
 — and differ only in what they layer on top:
 
-- `resetAndLoadSelectedMap()` (new run: menu start / restart / mid-game
-  map switch) adds the RUN-SCOPED reset — credits, outfit
-  (`resetOutfit()`), score + combo, hull/shield refill, status effects,
-  camera zoom, and the per-run counters (`snitchCatchCount`,
-  `dragonsKilled`, `nextRivalScore`).
+- `resetAndLoadSelectedMap()` (new run: quit to menu / mid-game map
+  switch) adds the RUN-SCOPED reset — score + combo, hull/shield refill,
+  status effects, camera zoom, and the per-run counters (`snitchCatchCount`,
+  `dragonsKilled`, `nextRivalScore`).  It does NOT touch the CHARACTER —
+  credits, cargo, the installed loadout and the purchased hex slots persist
+  (§8, persistence); `resetCharacter()` is a new character, used by the
+  replay entry and DBG ▸ Economy ▸ Erase save.
 - `transitionToMap(descriptorId)` (portal travel) adds NOTHING of the
   sort — that is the whole point.  Run state CARRIES: credits, score
   (+ `displayScore`), `shipSlots` / `weaponSlots` / `inventory`, owned +
@@ -669,14 +681,28 @@ state on the way).
   `loadMapFresh` clears it, so a restart or second hop mid-drain means
   the wormhole kept the stragglers.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
-  Wave progress is FRESH per entry — `WaveSystem.init` zeroes
-  `waveIndex`, so leaving an arena abandons the ladder; there is NO
-  per-map run state.
+  Wave progress is REMEMBERED per arena for a while (`engine/arenaWaves.ts`,
+  user call): `g.arenaWaves[arenaId]` = wave + enemies already down + the
+  wall-clock time the player was last there (`Clock.wallMs()`, the one epoch
+  read; stamped by every save while in the arena and just before any map
+  unloads).  Within `ARENA_WAVE_MEMORY.GRACE_SEC` (5 min) the wave comes back
+  EXACTLY (`WaveSystem.init(…, startIndex, progress)` fast-forwards the spawn
+  stream past the kills already scored; live enemies are not restored); after
+  that it restarts from the top of the same wave, and from a wave EARLIER for
+  every `DECAY_SEC` (1 h) away, down to wave 1.  A finished ladder (boss dead)
+  is forgotten.  It is saved (`SaveFile.arenaWaves`, optional) but is only the
+  WAVE SCRIPT — an arena's world still regenerates per entry, except that a wreck
+  pins its arena's seed (§8).  That is the whole per-map state there is.
 
-Death (user calls D4/D6, engine-core S1): the RESPAWN button runs
+Death (user calls D4/D6/D10/D11, engine-core S1 + S2): THE MOMENT THE SHIP
+FALLS (`onPlayerFell`, from `handleEntityDeath`) the engine counts the death,
+leaves a WRECK of what was mounted (`engine/wreck.ts`, §8) — replacing any older
+one — strips the loadout (`resetOutfit(true)`) and saves.  Doing that here and
+not at the respawn tap is what stops quitting the app on the death screen from
+keeping the loadout.  The RESPAWN button then runs
 `returnToStation()` — the player goes back to their STATION in the persistent
 hub (reloading it if they died in an arena, `stageIndex` back to 0), the hull
-and shield refill, and everything INSTALLED on the ship is stripped
+and shield refill, and everything INSTALLED on the ship is already stripped
 (`resetOutfit(true)`): the hex slots fall back to the free lean start (Base
 Hull + Projector), which keeps the ship flyable.  What SURVIVES is the
 character, not the loadout: salvage (there is NO credit penalty any more —
@@ -2914,6 +2940,55 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   every number at the last place.  The libm probe in the test says which
   functions disagree on the machine running it; exact world equality is
   required exactly where it reports none.
+- **THE SAVE FILE AND THE WRECK** (plan D10, D14, D20–D24; `engine/save.ts`,
+  `engine/wreck.ts`).  What persists, through the `Storage` port under one key
+  (`omni.save`): the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
+  hex-slot counts — the outstanding WRECK, lifetime RECORDS (high score, best
+  wave / combo, bosses, dragons, deaths) and SETTINGS (audio volumes + mute,
+  control scheme, difficulty).  NOT saved: any arena's world (arenas regenerate
+  per entry, D8), the hub's terrain (a fixed `HUB_WORLD_SEED` regenerates it
+  identically — destroyed hub terrain does not survive a relaunch), the sim's or
+  the rng's state, a replay.  Suspending a run is PAUSE ONLY (D21): a replay is
+  bit-exact only within one JS engine (§8, ports), so it is not a safe save
+  format; an OS kill resumes the character at the hub.  Rules:
+  (1) **A new run keeps the character.**  `resetAndLoadSelectedMap` no longer
+  zeroes credits / outfit; `resetCharacter()` does, and `beginSeededRun` calls it
+  so a replay never reads the save.  A fresh Playwright context has empty storage,
+  so every suite still starts on a new character.
+  (2) **Saves are written, not scheduled by the sim**: `autosaveTick` runs in
+  `loop()` once per second of FRAME time (settings change while the world is
+  frozen), and `saveNow()` also runs at death, on backgrounding, on `stop()` and on
+  recovery.  It compares one small JSON string with the last write, so it is cheap
+  to call.  Lifetime bests are max()ed in at write time.
+  (3) **Version policy is MIGRATE**: a `version` integer and `MIGRATIONS[n]`
+  (n → n + 1, plain JSON, chained).  A bad field costs that field; an unknown
+  module id is dropped.  A save from a NEWER build or one that will not parse is
+  never overwritten: its text is parked under `omni.save.unreadable` first.
+  S6's world state arrives as a migration, not a wipe.
+  (4) **THE WRECK IS A RECORD WITH A VIEW.**  `g.wreck` = `{arenaId, seed, x, y,
+  ship[], weapon[]}` — the mounted modules, minus the free cost-0 ones; `g.wreckEntity`
+  is a non-drop INTERACTABLE rebuilt from it at the end of every map load
+  (`loadMapSeeded`), so it survives relaunches and map hops with nothing
+  serialized but the record.  `loadMapSeeded` reads `wreckSeedFor`, so re-entering
+  that arena PINS its seed and S1's seeded generation rebuilds the same terrain
+  (a replay's own pinned seed still wins).  A pinned arena also repeats its wave
+  script, since a seed covers everything.  A hub death leaves a hub wreck (no seed).
+  (5) **LOST ON A SECOND DEATH, never on a clock** — read literally: any death
+  before recovery replaces the record, so a bare second death also destroys the
+  old wreck, and a second death with gear leaves one new wreck, never two.
+  (6) **Recovery is flying into it** (`WRECK_CONSTANTS.RECOVER_RANGE`) and gives
+  the modules back TO CARGO ONLY (user call) — nothing is re-installed, the player
+  refits at a station; a module that finds the hold full pays resale, so a recovery
+  never destroys one.
+  (7) **The wreck is drawn by the generic POI path** (a disc in `WRECK_CONSTANTS
+  .COLOR` and the word WRECK), `found` from birth (`isRetainedContact`).  Finding
+  it again is guided: `updateWreckGuide` stamps `wreckGuide` on the wreck, or from
+  another map on the rift toward it, which draws a permanent amber edge arrow
+  (budget-exempt), a clamped, pulsing minimap beacon and, on that rift in the
+  world, an amber ring + "WRECK THIS WAY" tag — no scan needed.  The
+  death screen names a wreck the death destroyed (`runSummary.lostWreck`), and
+  the main menu says CONTINUE with the saved credits / modules / wreck when the
+  save holds progress (`EngineStats.savedGame`, menu and debug panel only).
 - **ESCAPE PAUSES; BACKGROUNDING PAUSES** (engine-core S2).
   `GameEngine.escapePressed()` (spent in `pollGamepad`, above every freeze, so
   it works from inside the paused state): debug panel open → close it; docked
@@ -6199,6 +6274,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
      and teal on the map is two contacts as far as the player is
      concerned.  Drops stay excluded entirely.
 
+- **A wave start is a ROSTER DIALOGUE, not a banner** (`WaveAnnouncement.roster`, set by `WaveSystem.startWave` from the spawn list plus a capstone's boss): ONE panel above centre (`renderWaveRosterDialogue`, `render/hud.ts`, middle at 30% of the height) that leads with the enemies — each subtype that must die as its flat silhouette (`drawEnemyIcon`, `render/enemyShapes.ts`) and a large "xN" — under a small "WAVE n · DESTROY N" heading.  It holds `WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD` (3.2 s) rather than the banner's 1 s, so `renderWaveAnnouncements` reads each announcement's own `maxLifetime` for its hold.  Cells shrink to fit the width; a wave resumed from the arena memory shows its full roster.  Announcements without a roster (clears, snitch, boss phases) are still the plain banner.
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
   width isn't known at design time, and the game is played on a 390px-wide

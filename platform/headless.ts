@@ -130,6 +130,9 @@ export interface HeadlessOptions {
   /** Seed `Entropy.seed()` counts up from, so "a fresh run seed" is itself
    *  reproducible in a test. */
   entropySeed?: number;
+  /** Share a storage between engines to model a RELAUNCH: the second engine
+   *  reads what the first one wrote. */
+  storage?: MemoryStorage;
 }
 
 export interface HeadlessPlatform extends Platform {
@@ -149,7 +152,7 @@ export function createHeadlessPlatform(opts: HeadlessOptions = {}): HeadlessPlat
   return {
     clock: new ManualClock(),
     viewport: () => vp,
-    storage: new MemoryStorage(),
+    storage: opts.storage ?? new MemoryStorage(),
     lifecycle: new ManualLifecycle(),
     entropy,
     audio: new NullAudio(),
