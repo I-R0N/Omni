@@ -7298,6 +7298,54 @@ export const AUDIO_CONSTANTS = {
   MUSIC_WEIGHT_MIN: 0.5,
   MUSIC_WEIGHT_MAX: 3,
   MUSIC_BOSS_WEIGHT: 3,
+
+  /** LAYER VARIANTS (AdaptiveMusic, docs/MUSIC_PIPELINE.md).  The CONTEXT
+   *  TAGS — `station`, `portal`, `rare-item`, `danger`, `deep-space` — are
+   *  measured in SCREENS like the rest of this block (see MusicContext.ts for
+   *  the signal behind each).  Each has an ENTER radius and a wider LEAVE
+   *  radius, so hovering at an edge cannot flip it.  PREFETCH_MULT is how much
+   *  wider than ENTER a context counts as "warm" — close enough that the
+   *  director pre-decodes its variants. */
+  MUSIC_STATION_ENTER_SCREENS: 1.6,
+  MUSIC_STATION_LEAVE_SCREENS: 2.2,
+  MUSIC_PORTAL_ENTER_SCREENS: 1.2,
+  MUSIC_PORTAL_LEAVE_SCREENS: 1.7,
+  MUSIC_RARE_ENTER_SCREENS: 1.0,
+  MUSIC_RARE_LEAVE_SCREENS: 1.4,
+  MUSIC_DANGER_ENTER_SCREENS: 0.8,
+  MUSIC_DANGER_LEAVE_SCREENS: 1.2,
+  MUSIC_PREFETCH_MULT: 1.5,
+  /** Sim seconds with no other context before `deep-space` is claimed. */
+  MUSIC_DEEP_SPACE_DWELL_SEC: 20,
+  /** A salvage drop is a RARE ITEM from this many units up (merges sum). */
+  MUSIC_RARE_DROP_VALUE: 6,
+  /** Once a slot changes variant it holds it for this many PHRASES. */
+  MUSIC_VARIANT_DWELL_PHRASES: 2,
+  /** A combat slot LOCKS its variant to the enemy family present when it
+   *  enters, and re-picks only if another family's weight has exceeded the
+   *  locked one's by this factor (and at least `FAMILY_MIN_WEIGHT`) for a whole
+   *  phrase. */
+  MUSIC_FAMILY_MARGIN: 1.5,
+  MUSIC_FAMILY_MIN_WEIGHT: 0.5,
+  /** Decoded-PCM ceiling for the score (default stems + variant cache), MB.
+   *  Only non-active variant buffers are evicted (least recently wanted
+   *  first); a variant that would not fit is simply not loaded. */
+  MUSIC_DECODE_BUDGET_MB: 110,
+  /** ENEMY FAMILIES — the musical grouping of the roster, and the contract
+   *  `enemy:<family>` variant tags are composed against.  `swarm`: many
+   *  cheap, fast bodies that crowd the player; `heavy`: slow, high-health
+   *  bodies that must be ground down; `ranged`: things that hold off and
+   *  shoot.  A subtype missing here falls to `MUSIC_FAMILY_DEFAULT`; a rival
+   *  (a player-like privateer, which has no archetype of its own) is `ranged`. */
+  MUSIC_FAMILIES: ['swarm', 'heavy', 'ranged'] as readonly string[],
+  MUSIC_FAMILY_DEFAULT: 'heavy',
+  MUSIC_FAMILY_RIVAL: 'ranged',
+  MUSIC_ENEMY_FAMILY: {
+    RAMMER_1: 'swarm', RAMMER_2: 'swarm', KAMIKAZE: 'swarm', SWARM: 'swarm', NEST: 'swarm',
+    RAMMER_3: 'heavy', BULWARK: 'heavy', BUBBLE: 'heavy', DRAGON: 'heavy',
+    SHOOTER_1: 'ranged', SHOOTER_2: 'ranged', SHOOTER_3: 'ranged', TURRET: 'ranged',
+    BOSS_WARDEN: 'heavy', BOSS_SCATTER: 'swarm', BOSS_SIEGE: 'ranged',
+  } as Readonly<Record<string, string>>,
 } as const;
 
 // ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────

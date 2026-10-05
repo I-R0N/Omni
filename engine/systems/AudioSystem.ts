@@ -17,7 +17,7 @@ const BANK_OF_ID: Map<string, string> = (() => {
  *  title screen is usually the gesture that unlocked the context and it has
  *  to be heard.  Every other bank waits for an id in it to be asked for. */
 const MENU_BANK = 'interface.mp3';
-import { AdaptiveMusic, type MusicThreat } from './AdaptiveMusic';
+import { AdaptiveMusic, MUSIC_CONTEXT_TAGS, type MusicContextSnapshot, type MusicThreat } from './AdaptiveMusic';
 import { finishVoice } from './SfxVoicing';
 import { AUDIO_MIX, AudioBus, busFor, survivesPause, ducksWorld } from './AudioMix';
 import SFX_MANIFEST from 'virtual:sfx-manifest';
@@ -213,6 +213,7 @@ export class AudioSystem implements AudioPort {
   private _musicVolume = 1;
   private _combat = false;
   private _threat: MusicThreat | null = null;
+  private _ctxSnap: MusicContextSnapshot | null = null;
   private _area: { id: string; kind: 'hub' | 'arena' } | null = null;
   private live = new Set<LiveVoice>();
   private synthesized = new Map<string, { bufs: (AudioBuffer | null)[]; next: number }>();
@@ -437,6 +438,7 @@ export class AudioSystem implements AudioPort {
     this.music.setEnabled(!this._muted && this._musicVolume > 0);
     this.music.setActive(this._active);
     this.music.setCombat(this._combat);
+    if (this._ctxSnap) this.music.setContext(this._ctxSnap);
     if (this._threat) this.music.setThreat(this._threat);
 
     // Shared white noise — one buffer for every noise-based voice in the
@@ -770,6 +772,21 @@ export class AudioSystem implements AudioPort {
   public setMusicThreat(threat: MusicThreat) {
     this._threat = threat;
     this.music?.setThreat(threat);
+  }
+  /** The per-frame context snapshot (where the player is, which enemy family
+   *  is near) the score's layer variants are chosen from.  Kept so a score
+   *  created later starts from the current picture. */
+  public setMusicContext(c: MusicContextSnapshot) {
+    this._ctxSnap = c;
+    this.music?.setContext(c);
+  }
+  /** Debug: AUTO → each context tag → AUTO. */
+  public cycleMusicContextForce() {
+    const m = this.music;
+    if (!m) return;
+    const modes: (string | null)[] = [null, ...MUSIC_CONTEXT_TAGS];
+    const i = modes.indexOf(m.forcedContext);
+    m.setForcedContext(modes[(i + 1) % modes.length]);
   }
   /** A new encounter begins — a map change, or a capstone reaching the
    *  field: the score returns to bar 1 at the next bar line (a boss also

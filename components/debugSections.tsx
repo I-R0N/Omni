@@ -1216,6 +1216,20 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
           })),
         ];
       }),
+      stat('Music context', c => {
+        const m = c.s.audio?.music;
+        return m ? (m.contexts.join(' · ') || '—') : '—';
+      }, 'The situation tags layer variants are picked from: station, portal, rare-item, danger, deep-space, enemy:<family>.'),
+      stat('Variants', c => {
+        const m = c.s.audio?.music;
+        if (!m) return '—';
+        const v = Object.entries(m.variants).map(([k, n]) => `${k}:${n}`).join(' · ');
+        return v ? `${v} · ${m.decodedMB.toFixed(0)} MB` : 'none declared';
+      }, 'The variant sounding in each slot that has any (default = <slot>.mp3), and the score\u2019s decoded MB. Changes land on phrase boundaries.'),
+      ctrl('Music context force', dbg(e => e.audio.cycleMusicContextForce()),
+        c => c.s.audio?.music?.contextForced ?? 'auto',
+        'Pin one context tag to audition its variants.',
+        'AUTO follows the game. Each step pins one tag (station, portal, rare-item, danger, deep-space, enemy:swarm, enemy:heavy, enemy:ranged) in place of the real ones; an enemy tag also pins that family as the only one present.'),
       stat('Music bar', c => c.s.audio?.music?.bar ?? '—', 'Bar 1–32 of the 60-second score loop.'),
       ctrl('Music force', dbg(e => e.audio.cycleMusicDebugIntensity()),
         c => { const f = c.s.audio?.music?.forced; return f === null || f === undefined ? 'game' : f.toFixed(2); },
