@@ -350,7 +350,7 @@ export function staticTables() {
     });
   }
   const modules = MODULE_DEFS.filter((m) => m.cost > 0).map((m) => ({
-    id: m.id, label: m.label, family: m.family, mark: m.mark, cost: m.cost, units: m.cost / SALVAGE_CONSTANTS.CREDITS_PER_DROP,
+    id: m.id, label: m.label, family: m.family, mark: m.mark, cost: m.cost, rewardOnly: !!m.rewardOnly, units: m.cost / SALVAGE_CONSTANTS.CREDITS_PER_DROP,
   }));
   const enemies = Object.entries(ENEMY_VARIANTS).map(([k, v]: [string, any]) => ({
     subtype: k, health: v.health, tier: v.tier ?? v.enemyTier, ambient: !!v.ambient,

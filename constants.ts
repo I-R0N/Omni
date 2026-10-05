@@ -6692,6 +6692,9 @@ export interface ModuleDef {
   label: string;
   desc: string;
   cost: number;
+  /** Never sold in a shop: found only as an arena reward (boss drop, and later
+   *  mazes).  Marks past `SHOP_MAX_MARK` are rewardOnly by rule. */
+  rewardOnly?: boolean;
   weapon?: Delivery;       // family 'gun' only — the delivery it fires
   // Module mass.  Adds to the SHIP's total weight, which drags acceleration
   // via the SHIP_WEIGHT curve — no gun mounted = a slight accel boost.  Only
@@ -6810,20 +6813,33 @@ export const HEX_ADJACENCY: readonly (readonly number[])[] = [
   [0, 2, 6], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 6], [0, 5, 1],
 ];
 
-// Mk pricing ≈ the CUMULATIVE cost of the old per-level curve at that
-// level (rounded) so the salvage economy is unchanged in total: reaching
-// "Mk III power" costs about what L3 used to.
+// MK PRICING IS A FACTORIAL (user call, D-S3-f): a mark costs its own number
+// times the mark below it, so Mk II = 2 x Mk I, Mk III = 3 x Mk II (= 6 x Mk I),
+// Mk IV = 4 x Mk III (= 24 x), Mk V = 5 x Mk IV (= 120 x).  Each family states
+// only its Mk I price.  The shop stops at Mk III: a higher mark is a rare find
+// that only an arena reward hands out (`rewardOnly`), and at 24x / 120x it is
+// priced out of any shop run anyway.
 const MK = ['', ' Mk I', ' Mk II', ' Mk III', ' Mk IV', ' Mk V'];
+/** The highest mark a shop will sell. */
+export const SHOP_MAX_MARK = 3;
+/** Price of mark `mk` (1-based) from the Mk I price: mk! x mk1. */
+export const markCost = (mk1Cost: number, mk: number): number => {
+  let c = mk1Cost;
+  for (let m = 2; m <= mk; m++) c *= m;
+  return c;
+};
 /** `mk1Weight` is the Mk I mass; Mk II/III scale linearly with the mark, the
- *  same way their effects and prices do — a bigger plate is a heavier plate. */
+ *  same way their effects do — a bigger plate is a heavier plate.  `marks` is
+ *  how many marks the family has (3 unless stated). */
 const statMks = (
   family: ModuleFamily, group: ModuleGroup, kind: ModuleKind, label: string,
-  descOf: (mk: number) => string, costs: number[], effOf: (mk: number) => ModuleEffect,
-  mk1Weight: number,
-): ModuleDef[] => costs.map((cost, i) => ({
+  descOf: (mk: number) => string, mk1Cost: number, effOf: (mk: number) => ModuleEffect,
+  mk1Weight: number, marks: number = 3,
+): ModuleDef[] => Array.from({ length: marks }, (_, i) => ({
   id: `${family}_mk${i + 1}`, family, mark: i + 1, group, kind,
-  label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost, effect: effOf(i + 1),
+  label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost: markCost(mk1Cost, i + 1), effect: effOf(i + 1),
   weight: +(mk1Weight * (i + 1)).toFixed(1),
+  ...(i + 1 > SHOP_MAX_MARK ? { rewardOnly: true } : {}),
 }));
 
 // ── SCANNER — a TOOL the player operates (rework, user call 2026-09-06) ───
@@ -7021,18 +7037,18 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // but is the adjacency ROOT the whole ship-module tree chains from, so
   // bought modules work out of the box.  cost 0 keeps it out of the shop.
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
-  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
+  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, 4000, mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
   { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
   // FIVE marks (rework).  Prices climb steeply because marks STACK now:
   // a second Mk I is a real range purchase, so the high marks have to be
   // priced against buying several low ones rather than against each other.
   ...statMks('scanner', 'ship', 'ship', 'Scanner', mk => SCANNER_MK_DESC[mk],
-    [7000, 17500, 32000, 55000, 90000], mk => ({ scannerMk: mk }), 0.25),
-  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
-  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
-  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
-  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk }), 0.4),
+    7000, mk => ({ scannerMk: mk }), 0.25, SCANNER.MAX_MARK),
+  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, 4000, mk => ({ maxShield: 15 * mk }), 0.5),
+  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, 5000, mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
+  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, 6000, mk => ({ speedFrac: 0.08 * mk }), 0.6),
+  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, 6000, mk => ({ accelFrac: 0.12 * mk }), 0.4),
   // ── Weapon group: guns (gun hexes only) ──
   // DELIVERY modules (the guns).  Each fires plain, weak kinetic energy on its
   // own; an ENERGY MODIFIER touching it (below) decides what it really is.
@@ -7057,8 +7073,8 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // carries further, which under the energy model is the same statement.
   // Penetration existed to sell depth separately; depth is no longer a
   // separate thing to sell.
-  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% shot mass`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
-  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% shot mass`, 8000, mk => ({ damageFrac: 0.12 * mk }), 0.2),
+  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, 10000, mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
   { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 

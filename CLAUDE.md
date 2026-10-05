@@ -1979,8 +1979,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `MODULE_REQUIREMENTS` / `HEX_ADJACENCY` — the hex-slot outfitting
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
-  Mk I/II/III varieties (own price ≈ the cumulative old level-curve
-  cost, own fixed effect — no levels, no in-place upgrades), guns (the
+  Mk I/II/III varieties (price = mark! x the family's Mk I price, so Mk III is 6x; a mark past `SHOP_MAX_MARK` (3) is `rewardOnly`, never sold, and only the scanner has Mk IV/V today; own fixed effect — no levels, no in-place upgrades), guns (the
   five `dlv_*` deliveries), the three `nrg_*` energy modifiers and
   Shield/Overcharge/Light are single varieties.  The Mk families today
   are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**

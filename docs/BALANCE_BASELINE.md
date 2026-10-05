@@ -139,32 +139,32 @@ Cell = seconds · shots fired until dead. **Read the `spread+electric` and `spre
 - **mk3**: median **10.5 units per cleared wave**, **81.5 units per run** (runs ended as above).
 - Spec: 0.55 + 0.25 salvage rolls per enemy kill, +3 units per wave clear, +8 per snitch catch. Rivals vacuum drops within 150 units.
 
-**The `mk3` loadout the bot wears costs 469 units** in the shops (every Mk III, Shield, Mk V scanner, Beam, Thermal, Electric, Overcharge) — about 36 cleared waves, or 5.5 lean runs, of income. A death strips what was *installed* (cargo survives), so that figure is also what a bare death risks if nothing is in the hold.
+**The `mk3` loadout the bot wears costs 433 units** in the shops (every Mk III, Shield, Beam, Thermal, Electric, Overcharge; the Mk V scanner it also wears is a reward-only find and is not counted) — about 33 cleared waves, or 5.1 lean runs, of income. A death strips what was *installed* (cargo survives), so that figure is also what a bare death risks if nothing is in the hold.
 
 | Module | Mk | Price (units) | Cleared waves of lean income (13.0 u/wave) |
 |---|---|---|---|
 | Hull Mk I | 1 | 4 | 0.3 |
-| Hull Mk II | 2 | 10 | 0.8 |
-| Hull Mk III | 3 | 18 | 1.4 |
+| Hull Mk II | 2 | 8 | 0.6 |
+| Hull Mk III | 3 | 24 | 1.8 |
 | Shield | 1 | 30 | 2.3 |
 | Light | 1 | 9 | 0.7 |
 | Scanner Mk I | 1 | 7 | 0.5 |
-| Scanner Mk II | 2 | 17.5 | 1.3 |
-| Scanner Mk III | 3 | 32 | 2.5 |
-| Scanner Mk IV | 4 | 55 | 4.2 |
-| Scanner Mk V | 5 | 90 | 6.9 |
+| Scanner Mk II | 2 | 14 | 1.1 |
+| Scanner Mk III | 3 | 42 | 3.2 |
+| Scanner Mk IV _(reward only)_ | 4 | 168 | 12.9 |
+| Scanner Mk V _(reward only)_ | 5 | 840 | 64.6 |
 | Plating Mk I | 1 | 4 | 0.3 |
-| Plating Mk II | 2 | 10 | 0.8 |
-| Plating Mk III | 3 | 18 | 1.4 |
+| Plating Mk II | 2 | 8 | 0.6 |
+| Plating Mk III | 3 | 24 | 1.8 |
 | Capacitor Mk I | 1 | 5 | 0.4 |
-| Capacitor Mk II | 2 | 12.5 | 1.0 |
-| Capacitor Mk III | 3 | 23 | 1.8 |
+| Capacitor Mk II | 2 | 10 | 0.8 |
+| Capacitor Mk III | 3 | 30 | 2.3 |
 | Engine Mk I | 1 | 6 | 0.5 |
-| Engine Mk II | 2 | 15 | 1.2 |
-| Engine Mk III | 3 | 27.5 | 2.1 |
+| Engine Mk II | 2 | 12 | 0.9 |
+| Engine Mk III | 3 | 36 | 2.8 |
 | Thrusters Mk I | 1 | 6 | 0.5 |
-| Thrusters Mk II | 2 | 15 | 1.2 |
-| Thrusters Mk III | 3 | 27.5 | 2.1 |
+| Thrusters Mk II | 2 | 12 | 0.9 |
+| Thrusters Mk III | 3 | 36 | 2.8 |
 | Scatter | 1 | 25 | 1.9 |
 | Seeker | 1 | 32.5 | 2.5 |
 | Beam | 1 | 40 | 3.1 |
@@ -173,11 +173,11 @@ Cell = seconds · shots fired until dead. **Read the `spread+electric` and `spre
 | Electric | 1 | 30 | 2.3 |
 | Thermal | 1 | 30 | 2.3 |
 | Gunnery Mk I | 1 | 8 | 0.6 |
-| Gunnery Mk II | 2 | 20 | 1.5 |
-| Gunnery Mk III | 3 | 38 | 2.9 |
+| Gunnery Mk II | 2 | 16 | 1.2 |
+| Gunnery Mk III | 3 | 48 | 3.7 |
 | Autoloader Mk I | 1 | 10 | 0.8 |
-| Autoloader Mk II | 2 | 26 | 2.0 |
-| Autoloader Mk III | 3 | 51.5 | 4.0 |
+| Autoloader Mk II | 2 | 20 | 1.5 |
+| Autoloader Mk III | 3 | 60 | 4.6 |
 | Overcharge | 1 | 45 | 3.5 |
 
 ## 6. The tables the numbers come from

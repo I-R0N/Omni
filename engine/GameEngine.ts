@@ -5736,7 +5736,7 @@ export class GameEngine {
       if (!def || !svc) return false;
       if (def.group === 'ship' ? !svc.shipShop : !svc.weaponShop) return false;
       const price = this.modulePrice(def.cost);
-      if (def.cost <= 0 || this.credits < price) return false;
+      if (def.cost <= 0 || def.rewardOnly || this.credits < price) return false;
       const inv = this.inventory.indexOf(null);
       if (inv === -1) return false; // inventory full
       this.credits -= price;

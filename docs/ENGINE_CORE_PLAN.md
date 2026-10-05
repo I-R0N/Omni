@@ -558,6 +558,18 @@ recur rather than complete.
     higher mark or a rarer kind (Shield, Overcharge) is harder to find and
     dearer.  That is a per-station catalogue, not an unlock tree.
 
+**D-S3-f (user, settled): module pricing is a factorial, and rare finds are arena
+rewards only.**  A mark costs its number times the mark below (Mk II = 2x, Mk III
+= 6x, Mk IV = 24x, Mk V = 120x Mk I); each family keeps its current Mk I price.
+The shop stops at Mk III; Mk IV and up are `rewardOnly` (boss drops now, maze
+completion and other arena rewards later).  Landed in `constants.ts`
+(`markCost`, `SHOP_MAX_MARK`, `ModuleDef.rewardOnly`), pinned by
+`tests/sim/pricing.test.ts`.  Consequences to carry into the level design: a Mk
+III is now 24-60 units against ~85 per level-3 run (about half a run); the
+Scanner Mk IV / V cost 168 / 840 units, and because a sell-back is 90% of cost a
+rare drop is also a large payout (Mk V sells for 756 units) — whether sell-back
+of reward-only finds should be capped is OPEN.
+
 **BUILT in S3: the balance harness and today's baseline.**  Instruments:
 `tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
 `tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver

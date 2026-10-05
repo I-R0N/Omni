@@ -224,12 +224,12 @@ function render(d) {
   const leanWave = median(units(d.arenas.filter((r) => r.loadout === 'lean' && r.rivals))) || null;
   const leanRun = median(d.arenas.filter((r) => r.loadout === 'lean' && r.rivals).map((r) => r.salvageUnits)) || null;
   const MK3 = ['hull_mk3', 'shield', 'capacitor_mk3', 'plating_mk3', 'engine_mk3', 'thrusters_mk3', 'scanner_mk5', 'dlv_beam', 'gunnery_mk3', 'autoloader_mk3', 'overcharge', 'nrg_thermal', 'nrg_electric'];
-  const mk3Cost = st.modules.filter((m) => MK3.includes(m.id)).reduce((a, m) => a + m.units, 0);
-  P(`**The \`mk3\` loadout the bot wears costs ${f(mk3Cost, 0)} units** in the shops (every Mk III, Shield, Mk V scanner, Beam, Thermal, Electric, Overcharge) — about ${leanWave ? f(mk3Cost / leanWave, 0) : '—'} cleared waves, or ${leanRun ? f(mk3Cost / leanRun, 1) : '—'} lean runs, of income. A death strips what was *installed* (cargo survives), so that figure is also what a bare death risks if nothing is in the hold.`);
+  const mk3Cost = st.modules.filter((m) => MK3.includes(m.id) && !m.rewardOnly).reduce((a, m) => a + m.units, 0);
+  P(`**The \`mk3\` loadout the bot wears costs ${f(mk3Cost, 0)} units** in the shops (every Mk III, Shield, Beam, Thermal, Electric, Overcharge; the Mk V scanner it also wears is a reward-only find and is not counted) — about ${leanWave ? f(mk3Cost / leanWave, 0) : '—'} cleared waves, or ${leanRun ? f(mk3Cost / leanRun, 1) : '—'} lean runs, of income. A death strips what was *installed* (cargo survives), so that figure is also what a bare death risks if nothing is in the hold.`);
   P();
   P(`| Module | Mk | Price (units) | Cleared waves of lean income (${leanWave ? f(leanWave) : '—'} u/wave) |`);
   P('|---|---|---|---|');
-  for (const m of st.modules) P(`| ${m.label} | ${m.mark || '—'} | ${f(m.units, m.units % 1 ? 1 : 0)} | ${leanWave ? f(m.units / leanWave) : '—'} |`);
+  for (const m of st.modules) P(`| ${m.label}${m.rewardOnly ? ' _(reward only)_' : ''} | ${m.mark || '—'} | ${f(m.units, m.units % 1 ? 1 : 0)} | ${leanWave ? f(m.units / leanWave) : '—'} |`);
   P();
 
   // ── static
@@ -269,7 +269,11 @@ function render(d) {
 if (has('ladder')) {
   render(await ladder());
 } else if (has('report')) {
-  render(JSON.parse(fs.readFileSync(JSON_OUT, 'utf8')));
+  // Prices and tables are cheap to re-read, so a re-render never shows stale ones.
+  const d = JSON.parse(fs.readFileSync(JSON_OUT, 'utf8'));
+  d.static = await runJob(await bundle('tests/sim/balance-cli.ts', 'balance-cli'), { kind: 'static' });
+  fs.writeFileSync(JSON_OUT, JSON.stringify(d) + '\n');
+  render(d);
 } else {
   const d = await measure();
   render(d);
