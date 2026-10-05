@@ -342,6 +342,13 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.startGame();
   };
 
+  // NEW GAME: wipe the save (the menu already asked twice), then begin.
+  const handleNewGame = () => {
+      if (!engineRef.current) return;
+      engineRef.current.eraseSave();
+      engineRef.current.startGame();
+  };
+
   const handlePause = () => {
       if (engineRef.current) engineRef.current.pauseGame();
   };
@@ -517,6 +524,7 @@ const App: React.FC = () => {
         stats={stats}
         onCycleWeapon={handleCycleWeapon}
         onStart={handleStart}
+        onNewGame={handleNewGame}
         onPause={handlePause}
         onResume={handleResume}
         onRestart={handleRestart}

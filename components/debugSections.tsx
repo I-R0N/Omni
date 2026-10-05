@@ -605,6 +605,10 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
   {
     id: 'records', label: 'Save & Records', group: 'economy',
     rows: [
+      ctrl('Erase save', dbg(e => e.eraseSave()),
+        c => 'Erase',
+        'Erase the saved character: credits, cargo, loadout, hex slots, any wreck and the records — a brand-new start.',
+        'Wipes the save file back to a new character: no Salvage, empty cargo, the free Base Hull and Projector, every hex slot as shipped, no wreck, zeroed records. Settings (volume, control scheme, difficulty) are kept. The wiped state is written at once, so it survives a relaunch.'),
       stat('Saved game', c => c.s.savedGame ? (c.s.savedGame.progress ? 'yes' : 'new character') : '—', 'Whether the save holds a character worth continuing.'),
       stat('Deaths', c => String(c.s.savedGame?.records.deaths ?? '—'), 'Lifetime deaths, from the save file.'),
       stat('Best score', c => (c.s.savedGame?.records.highScore ?? 0).toLocaleString(), 'Lifetime high score, from the save file.'),
@@ -622,10 +626,6 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
       ctrl('+1M Salv', dbg(e => e.addDebugCredits(1_000_000)),
         c => 'Grant',
         'Grant 1,000,000 Salvage for testing the station shops.'),
-      ctrl('Erase save', dbg(e => e.eraseSave()),
-        c => 'Erase',
-        'Erase the saved character: credits, cargo, loadout, hex slots, any wreck and the records — a brand-new start.',
-        'Wipes the save file back to a new character: no Salvage, empty cargo, the free Base Hull and Projector, every hex slot as shipped, no wreck, zeroed records. Settings (volume, control scheme, difficulty) are kept. The wiped state is written at once, so it survives a relaunch.'),
       ctrl('Station', dbg(e => e.debugTeleportToStation()),
         c => 'Go',
         'Teleport the player to the station\'s doorstep (docking-test harness). Overworld only — no-op on maps without a station.'),

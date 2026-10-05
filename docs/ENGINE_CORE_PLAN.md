@@ -425,9 +425,11 @@ reviewable apart.  `engine/systems/dmath.ts` replaces every native libm call and
 agree on the WORLD bit for bit (`tests/headless.spec.ts` asserts it
 unconditionally), and replay hashes were rebaselined by construction (the suites
 compare runs to each other, no hash literals).  simbench before → after is in
-CLAUDE.md §8 and is within container noise.  Still open for the user: D-S3-d
-(more than the 4-level difficulty index?) and D-S3-e (balance targets, asked when
-the balance harness exists).  Two facts worth carrying forward: a table
+CLAUDE.md §8 and is within container noise.  D-S3-d and D-S3-e are
+answered (2026-10-05, below); the balance harness is next.  Also in this PR, at
+the user's request: a NEW GAME button on the main menu (two-tap confirm; hidden
+when there is no progress) and the debug "Erase save" row moved into Save &
+Records, where it is found.  Two facts worth carrying forward: a table
 NAME that does not resolve (a sprite key, a weapon `extends`, a subtype) fails at
 module load, so `test:sim` and the boot smoke catch it and `vite build` does not;
 and the golden is a one-time migration check that a deliberate rebalance
@@ -516,13 +518,52 @@ recur rather than complete.
   `sfxManifestPlugin` precedent), so the parser is a devDependency and ships
   zero runtime bytes.  See D32 for the three consumers that must all resolve
   it.
-- **D-S3-d — Does the player get more than the 4-level difficulty index?**
-  STILL OPEN; not reached (it belongs with the balance work, after `dmath`).
-- **D-S3-e — Balance targets, stated as numbers.**  STILL OPEN and the one
-  to put to the user at the moment the harness is built, not before.  How long should wave 5
-  take?  What is a healthy run length?  Consequence: without stated
-  targets the harness has nothing to measure against and the session
-  degenerates into taste.
+- ~~**D-S3-d — Does the player get more than the 4-level difficulty index?**~~
+  **SETTLED (user, 2026-10-05).**  Yes — and the model changes shape:
+  1. **Up to 20 levels, and the new levels EXTEND the range upward.**  Levels
+     1–4 stay what today's four are; 5–20 are harder than today, not a
+     re-spread of the current range.
+  2. **Difficulty belongs to the PORTAL, not the menu.**  Each portal carries
+     its own level, shown when the player arrives.  The start-of-game picker
+     goes away (it is a saved setting today, `settings.difficulty`, so the
+     save needs a migration — S2's file format).
+  3. **Separate dials for alternate arenas** where the enemies are present but
+     NOT the objective (mazes, timed courses).  So difficulty is a vector of
+     dials per arena (enemy count, toughness, income, …), not one scalar.
+  4. **RIVALS enter the difficulty calculation.**  They are currently very
+     prominent at every level (score-cadenced, `RIVAL_CONSTANTS.SCORE_INTERVAL`
+     1000, capped by `MAX_RIVALS`).  The harness must measure how much of a
+     run's pressure and loot-theft they account for before they are re-tuned.
+  5. **FUTURE (not this phase):** difficulty that scales with the player's
+     weapon loadout, harder for stronger loadouts.  Design the dial vector so
+     this is one more input, not a rewrite.
+  6. **Intended weapon bands:** basic weapons start to struggle above level
+     2–3; Mk III above level 10; the 10–20 range is meant for rare Mk IV+
+     modules (extremely rare in shops, rare as boss / maze rewards).
+- ~~**D-S3-e — Balance targets, stated as numbers.**~~  **SETTLED in part
+  (user, 2026-10-05).**  Method: **measure what the game does today and
+  report it first**; targets are then judged against the report.  Stated
+  targets so far (mobile is the design target):
+  - **Run length:** finding a local portal and completing a run takes about
+    **1.5–7.5 minutes**.
+  - **Wave time escalates** with the wave, because time tracks enemy count.
+    Timed arenas (the future mazes) use the same measure.
+  - **Basic weapons kill tier-1 enemies in one shot** today; keep that at the
+    low levels.
+  - **Arenas vary per wave** in difficulty and enemy variety.
+  - **Income is NOT settled** (the user finds it hard).  Constraints given:
+    modules are lost for good on a double death, so they must not be out of
+    reach, and they are powerful, so not cheap; **Mk I–III are never gated
+    behind unlocks**; instead each STATION stocks a different variety, and a
+    higher mark or a rarer kind (Shield, Overcharge) is harder to find and
+    dearer.  That is a per-station catalogue, not an unlock tree.
+
+**NEXT in S3 (the gameplay PR, after this one):** build the balance harness
+(headless, on the `tests/sim` kit) and report today's numbers — wave clear
+time by wave, run length, kills-to-clear by weapon, the rival share of
+pressure, salvage per wave against module prices — as a table the user judges
+against the targets above.  The portal-difficulty model, the level count and
+the per-station catalogues are DESIGNED from that report, not before it.
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
@@ -955,3 +996,12 @@ history stays readable.
   player only" caveat is retired); any new sim code must use `dmath.*` and avoid
   `**` or the guard fails; a deliberate change to dmath is a rebaseline.  *(S3,
   2026-10-04)*
+- **S3 → PM / S2 / S4 (difficulty moves to the portal).**  User call
+  2026-10-05: difficulty is per PORTAL (up to 20 levels, shown on arrival), the
+  start-of-game picker goes away, alternate arenas get their own dial vector,
+  rivals count in the calculation, and weapon-loadout scaling is a later input.
+  Consequences: the SAVE FILE's `settings.difficulty` needs a migration (S2);
+  `WaveSystem` / `ENEMY_SCALING` / `DIFFICULTY_*` read a per-arena level, not
+  `difficultyLevel`; the portal descriptor (`MAP_DESCRIPTORS`) gains a level;
+  the arrival UI needs a level readout (S4 if it owns the mobile HUD).  Not
+  built yet — S3 reports today's numbers first.  *(S3, 2026-10-05)*

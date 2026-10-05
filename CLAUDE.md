@@ -148,9 +148,11 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           overkill carry-through, the far side), audio,
                           headless (the ports are faithful: a headless-platform
                           engine and the live one replay to the same hashes,
-                          Node vs Chromium agree on the streams and the
-                          player but not the world — libm; Escape and the
-                          page-visibility pause),
+                          Node vs Chromium agree on streams, player AND
+                          world, bit for bit — dmath; Escape and the
+                          page-visibility pause), newgame (the main menu's
+                          NEW GAME: hidden without progress, two-tap
+                          confirm, erases the character, keeps settings),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 15
                           anti-flake rules — read 9, 12 and 13 before
