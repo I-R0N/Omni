@@ -2813,8 +2813,7 @@ export class GameEngine {
         px: this.player.position.x, py: this.player.position.y,
         screens: this.viewportHalfDiagonal(), now: this.simClock,
         stations: this.stations, portals: this.portals, drops: this.activeDrops,
-        snitch: this.snitch, dragons: this.dragons,
-        heated: this.energy.heated, energized: this.energy.energized,
+        snitch: this.snitch, enemies: this.entityIndex.enemies,
       });
       snap.tags = this.musicContext.tags;
       snap.warm = this.musicContext.warm;

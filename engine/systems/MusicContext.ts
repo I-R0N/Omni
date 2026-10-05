@@ -11,11 +11,12 @@
  *               drops sum their value, so this is a FAT pile — a snitch-catch
  *               spray, a boss payout), the golden SNITCH, or any POI that
  *               declares a `poiTier` at the scanner's rare rung or above
- *   danger      within `MUSIC_DANGER_*` screens of something that hurts and is
- *               not an engaged fight: a body hot enough to burn a hull
- *               (`HOT_BREAK_HEAT`), a charged body that arcs to ships
- *               (`energizedUntil`), or a dragon (a mini-boss that is passive
- *               until provoked — the game's one "high-threat area")
+ *   danger      within `MUSIC_DANGER_*` screens of something that reads as a
+ *               threat and is not an engaged fight: a PORTAL (a wormhole
+ *               gravity well), a BUBBLE (ambient fauna that latches and EMPs
+ *               once provoked), a RIVAL that is hunting the player, or a
+ *               DRAGON (a mini-boss, passive until provoked).  Portals also
+ *               raise `portal`; `danger` outranks it by default priority
  *   deep-space  none of the above for `MUSIC_DEEP_SPACE_DWELL_SEC`
  *
  * Radii are in SCREENS (`GameEngine.viewportHalfDiagonal`), like every other
@@ -29,9 +30,8 @@
  * the tag logic has no engine dependency.
  */
 import { AUDIO_CONSTANTS, DETECT_TIER } from '../../constants';
-import { HOT_BREAK_HEAT } from './energy';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
-import type { GameEntity } from '../../types';
+import { EnemySubtype, type GameEntity } from '../../types';
 
 export const CONTEXT_TAGS = ['danger', 'rare-item', 'station', 'portal', 'deep-space'] as const;
 
@@ -45,9 +45,8 @@ export interface MusicContextInputs {
   portals: readonly GameEntity[];
   drops: readonly GameEntity[];
   snitch: GameEntity | null;
-  dragons: readonly { head: GameEntity }[];
-  heated: readonly GameEntity[];
-  energized: readonly GameEntity[];
+  /** `EntityIndex.enemies` — bubbles, dragons and rivals are all in it. */
+  enemies: readonly GameEntity[];
 }
 
 const C = AUDIO_CONSTANTS;
@@ -113,25 +112,16 @@ export class MusicContextTracker {
       if ((s.poiTier ?? 0) >= DETECT_TIER.POI_RARE) dRare = Math.min(dRare, d2To(px, py, s));
     }
 
-    let dDanger = Infinity;
-    for (let k = 0; k < i.heated.length; k++) {
-      const e = i.heated[k];
-      if ((e.heat ?? 0) < HOT_BREAK_HEAT) continue;
-      const dx = wrapDeltaX(px, e.position.x), dy = wrapDeltaY(py, e.position.y);
-      const d2 = dx * dx + dy * dy;
+    // DANGER: a portal, a bubble, a rival hunting the player, a dragon.
+    let dDanger = dPortal;
+    const en = i.enemies;
+    for (let k = 0; k < en.length; k++) {
+      const e = en[k];
+      if (!e.active || e.isExploding) continue;
+      if (e.isRival === true) { if (e.huntingPlayer !== true) continue; }
+      else if (e.enemySubtype !== EnemySubtype.BUBBLE && e.enemySubtype !== EnemySubtype.DRAGON) continue;
+      const d2 = d2To(px, py, e);
       if (d2 < dDanger) dDanger = d2;
-    }
-    for (let k = 0; k < i.energized.length; k++) {
-      const e = i.energized[k];
-      if (!e.active || (e.energizedUntil ?? 0) <= now) continue;
-      const dx = wrapDeltaX(px, e.position.x), dy = wrapDeltaY(py, e.position.y);
-      const d2 = dx * dx + dy * dy;
-      if (d2 < dDanger) dDanger = d2;
-    }
-    for (let k = 0; k < i.dragons.length; k++) {
-      const h = i.dragons[k].head;
-      if (!h.active || h.isExploding) continue;
-      dDanger = Math.min(dDanger, d2To(px, py, h));
     }
 
     const o = this.on;

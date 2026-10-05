@@ -67,7 +67,7 @@ These names are what the music is composed against. They are exact strings.
 | `station` | within 1.6 screens of a space station (leaves past 2.2) |
 | `portal` | within 1.2 screens of a portal or rift (leaves past 1.7) |
 | `rare-item` | within 1.0 screen of a high-value pickup (leaves past 1.4): a salvage drop holding 6+ units (merged piles sum), the golden snitch, or a POI declaring a rare `poiTier` |
-| `danger` | within 0.8 screens of an environmental hazard that is not an engaged fight (leaves past 1.2): a body hot enough to burn a hull (`HOT_BREAK_HEAT`), a charged body that arcs to ships, or a dragon (passive until provoked) |
+| `danger` | within 0.8 screens of a threat that is not an engaged fight (leaves past 1.2): a portal (wormhole well), any bubble, a rival hunting the player, or a dragon. A portal raises `portal` too; `danger` outranks it in the default priority |
 | `deep-space` | none of the four above for 20 sim seconds |
 | `enemy:swarm` | swarm is the dominant enemy family |
 | `enemy:heavy` | heavy is the dominant enemy family |
