@@ -111,7 +111,10 @@ export function playArena(o: PlayOpts): RunReport {
   const { engine } = createHeadlessEngine({}, o.difficulty ?? 3);
   const g = engine as AnyEngine;
   g.activatePlatform();
+  // The constructor argument is overwritten by loadSave()'s default settings, so set it after.
+  g.setDifficulty(o.difficulty ?? 3);
   g.beginSeededRun(o.seed, o.map as MapType);
+  if (g.getDifficulty() !== (o.difficulty ?? 3)) throw new Error('balance: difficulty did not stick');
   wear(g, o.loadout);
   const withRivals = o.rivals !== false;
   if (!withRivals) g.nextRivalScore = Infinity;

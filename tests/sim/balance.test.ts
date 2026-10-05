@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { playArena, duel, hubTransit, staticTables } from './balance';
+import { MapType } from '../../types';
 
 test('the static tables read the live constants', () => {
   const s = staticTables();
@@ -49,4 +50,10 @@ test('an arena run is deterministic and records its waves, deaths and rivals', (
   assert.ok(a.endSec > 20 || a.endedBy !== 'timeout');
   const off = playArena({ map: 'POCKET', seed: 5, loadout: 'lean', rivals: false, maxSec: 25 });
   assert.equal(off.rivalsSeen, 0, 'rivals:false really switches them off');
+});
+
+test('a run at a lower difficulty actually spawns fewer enemies', () => {
+  const lo = playArena({ map: MapType.POCKET, seed: 1, loadout: 'lean', rivals: false, difficulty: 1, maxSec: 40 });
+  const hi = playArena({ map: MapType.POCKET, seed: 1, loadout: 'lean', rivals: false, difficulty: 3, maxSec: 40 });
+  assert.ok(lo.waves[0].spawned < hi.waves[0].spawned, `spawned ${lo.waves[0].spawned} vs ${hi.waves[0].spawned}`);
 });
