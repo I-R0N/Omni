@@ -25,7 +25,7 @@ import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, EnemySubtype, EngineStats, Vector2 } from '../types';
 import {
     BOSS_CONSTANTS, BOSS_DEFS, BossDef, ENEMY_VARIANTS, COLLISION_CONFIG,
-    WAVE_ANNOUNCE_CONSTANTS, MODULE_DEFS, PORTAL_CONSTANTS, HUB_PORTAL_SITES,
+    WAVE_ANNOUNCE_CONSTANTS, pickBossReward, PORTAL_CONSTANTS, HUB_PORTAL_SITES,
     SALVAGE_CONSTANTS,
 } from '../constants';
 import { MAP_DESCRIPTORS } from './maps/MapDescriptors';
@@ -299,16 +299,16 @@ g.audio.play('boss.death');
  *  inventory (user call — it replaced the timed shop discount, which asked
  *  the player to be near a shop within a countdown to collect anything).
  *
- *  Uniform over the catalog, which is PROVISIONAL: it can hand a Mk III on
- *  stage 1.  Weighting by stage depth is a tuning-pass question.
+ *  Weighted (`bossRewardTable`): shop modules are equally likely and a
+ *  reward-only mark (Mk IV+) is rare.  It can still hand a Mk III on stage 1;
+ *  weighting by stage depth is a tuning-pass question.
  *
  *  If the inventory is full there is nowhere to put it, so the reward pays
  *  its catalog value in Salvage instead — the player is never simply denied
  *  the drop for having full cargo. */
 function grantBossModule(g: GameEngine): { label?: string; desc?: string; credits?: number } {
-    const catalog = MODULE_DEFS.filter(d => d.cost > 0);
-    if (catalog.length === 0) return {};
-    const def = catalog[Math.floor(sim.roamers() * catalog.length)];
+    const def = pickBossReward(sim.roamers());
+    if (!def) return {};
     const slot = g.inventory.indexOf(null);
     if (slot === -1) {
         const paid = g.modulePrice(def.cost);

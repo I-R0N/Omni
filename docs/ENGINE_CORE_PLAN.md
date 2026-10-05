@@ -570,6 +570,21 @@ Scanner Mk IV / V cost 168 / 840 units, and because a sell-back is 90% of cost a
 rare drop is also a large payout (Mk V sells for 756 units) — whether sell-back
 of reward-only finds should be capped is OPEN.
 
+**D-S3-g (user, settled): the shape of difficulty, and what stays put.**
+(1) **Sell-back stays at 90% for every mark**, reward-only finds included.
+(2) **A boss drops a reward-only mark far more rarely than a uniform draw
+would** (it was 1 in 18, "5% is too high"): `BOSS_REWARD_WEIGHT` makes it about
+1 boss in 200 (`bossRewardTable` / `pickBossReward`).  (3) **The starter gun
+stays relatively hard against the boss, and beatable.**  The bot clears the
+boss 1 time in 12 at level 1 and never at level 3; the user has beaten level 3
+with the starter gun, so that gap is the bot, not the game — no retune.
+(4) **Difficulty adjusts enemy HEALTH and DAMAGE more than it adjusts how many
+spawn** (today the levels move spawn count 3x and HP/damage 1.4x), **and it
+changes the VARIETY of enemies**: the Bulwark is a hard archetype and is placed
+as one, so it belongs to higher levels rather than appearing at every level.
+(5) **Stronger enemy AI is a later difficulty axis** and is parked
+(PARKING_LOT: "Enemy AI as a difficulty axis"), not designed here.
+
 **BUILT in S3: the balance harness and today's baseline.**  Instruments:
 `tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
 `tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver

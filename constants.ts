@@ -9323,6 +9323,37 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
 // spend is worse than a thing you carry away, and removing it also removed
 // the buy/sell money-pump the discount created.  There is still deliberately
 // NO weapon-unlock plumbing: weapons stay purely purchased.
+/** What a boss kill can hand over (D-S3-f).  Every shop-sold module weighs 1;
+ *  a reward-only mark (Mk IV and up) weighs far less, so a rare find is rare
+ *  where it is meant to be found.  `BASE` is the weight of the first
+ *  reward-only mark (IV) and each mark above it is `FALLOFF` times the one
+ *  below.  Today that is 0.15 + 0.03 against ~35 shop modules — about one boss
+ *  in 200, where a uniform draw had it at 1 in 18 (user call: "5% is too
+ *  high"). */
+export const BOSS_REWARD_WEIGHT = { BASE: 0.15, FALLOFF: 0.2 } as const;
+
+export function bossRewardTable(): Array<{ def: ModuleDef; weight: number }> {
+  return MODULE_DEFS.filter(d => d.cost > 0).map(def => ({
+    def,
+    weight: def.rewardOnly
+      ? BOSS_REWARD_WEIGHT.BASE * Math.pow(BOSS_REWARD_WEIGHT.FALLOFF, Math.max(0, def.mark - (SHOP_MAX_MARK + 1)))
+      : 1,
+  }));
+}
+
+/** One weighted pick from a single uniform draw `u` in [0, 1). */
+export function pickBossReward(u: number): ModuleDef | undefined {
+  const table = bossRewardTable();
+  let total = 0;
+  for (const row of table) total += row.weight;
+  let at = u * total;
+  for (const row of table) {
+    at -= row.weight;
+    if (at < 0) return row.def;
+  }
+  return table.length ? table[table.length - 1].def : undefined;
+}
+
 export const BOSS_CONSTANTS = {
   /** NORMAL waves per stage, BEFORE the capstone.  The boss then gets its OWN
    *  wave on top (user call) — a stage is `WAVE_INTERVAL` ordinary waves and

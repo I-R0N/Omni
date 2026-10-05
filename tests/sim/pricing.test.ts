@@ -30,3 +30,20 @@ test('marks past the shop are reward-only, and nothing else is', () => {
   }
   assert.ok(MODULE_DEFS.some((d) => d.rewardOnly), 'the scanner has Mk IV and V');
 });
+
+test('a boss drops a reward-only mark rarely, and every shop module still drops', async () => {
+  const { bossRewardTable, pickBossReward } = await import('../../constants');
+  const table = bossRewardTable();
+  const total = table.reduce((a, r) => a + r.weight, 0);
+  const rare = table.filter((r) => r.def.rewardOnly).reduce((a, r) => a + r.weight, 0);
+  assert.ok(rare > 0, 'reward-only marks are still obtainable');
+  assert.ok(rare / total < 0.01, `reward-only share ${(100 * rare / total).toFixed(2)}% is under 1%`);
+  // Walk the draw across [0,1): every shop module is reachable, and the observed share matches the weights.
+  const seen = new Set<string>(); let hitRare = 0; const N = 20000;
+  for (let i = 0; i < N; i++) {
+    const d = pickBossReward((i + 0.5) / N)!;
+    seen.add(d.id); if (d.rewardOnly) hitRare++;
+  }
+  for (const r of table) if (!r.def.rewardOnly) assert.ok(seen.has(r.def.id), r.def.id);
+  assert.ok(Math.abs(hitRare / N - rare / total) < 0.002);
+});

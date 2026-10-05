@@ -110,6 +110,21 @@ async function ladder() {
   return d;
 }
 
+// CALIBRATION: how hard can enemies get (HP and damage x k at level 3) before a loadout
+// stops beating the boss?  mk3 is the "strongest thing wearable today"; lean is the starter gun.
+async function calibrate() {
+  const cliPath = await bundle('tests/sim/balance-cli.ts', 'balance-cli');
+  const d = JSON.parse(fs.readFileSync(JSON_OUT, 'utf8'));
+  const ks = String(flag('ks', '1.5,2,3')).split(',').map(Number);
+  const maps = ['POCKET', 'RING'];
+  const jobs = [];
+  for (const statScale of ks) for (const loadout of ['mk3']) for (const map of maps) for (let seed = 1; seed <= 3; seed++)
+    jobs.push({ kind: 'arena', map, loadout, rivals: true, seed, statScale, maxSec: d.maxSec });
+  d.calibration = await pool(cliPath, jobs, 'calibrate');
+  fs.writeFileSync(JSON_OUT, JSON.stringify(d) + '\n');
+  return d;
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 function render(d) {
   const L = [];
@@ -263,10 +278,25 @@ function render(d) {
     for (const map of d.maps) P(`| ${map} | ${[1, 2, 3].map((lvl) => f(median(rowsAt(lvl).filter((r) => r.map === map).map((r) => r.wavesCleared)), 0)).join(' | ')} |`);
     P();
   }
+  if (d.calibration) {
+    P('## 8. How hard can enemies get? (calibration for the level curve)');
+    P();
+    P('Enemy HP **and** damage multiplied by k at today\'s full spawn budget, POCKET + RING, 3 seeds, rivals on. k = 1 is section 1 (`mk3`, same two maps).');
+    P();
+    P('| k (HP and damage) | Loadout | Boss dead (of N) | Waves cleared (median) | Run length (median) | Hull lost / run |');
+    P('|---|---|---|---|---|---|');
+    const base = d.arenas.filter((r) => r.loadout === 'mk3' && r.rivals && ['POCKET', 'RING'].includes(r.map));
+    const rowOf = (k, rs) => `| ${k} | mk3 | ${rs.filter((r) => r.endedBy === 'boss-dead').length} (of ${rs.length}) | ${f(median(rs.map((r) => r.wavesCleared)), 0)} | ${mins(median(rs.map((r) => r.endSec)))} | ${f(median(rs.map((r) => r.hullLost)), 0)} |`;
+    P(rowOf(1, base));
+    for (const k of [...new Set(d.calibration.map((r) => r.statScale))].sort((a, b) => a - b)) P(rowOf(k, d.calibration.filter((r) => r.statScale === k)));
+    P();
+  }
   fs.writeFileSync(MD_OUT, L.join('\n') + '\n');
 }
 
-if (has('ladder')) {
+if (has('calibrate')) {
+  render(await calibrate());
+} else if (has('ladder')) {
   render(await ladder());
 } else if (has('report')) {
   // Prices and tables are cheap to re-read, so a re-render never shows stale ones.
