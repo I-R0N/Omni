@@ -193,3 +193,22 @@ Cell = seconds · shots fired until dead. **Read the `spread+electric` and `spre
 
 Difficulty today (index → spawn budget ×, enemy health / speed / damage ×): **0**: 0× · 1/1/1 · **1**: 0.35× · 0.7/0.8/0.7 · **2**: 0.65× · 0.85/0.9/0.85 · **3**: 1× · 1/1/1
 
+## 7. Where the starter gun stops being enough (difficulty ladder)
+
+The lean start (Base Hull + Projector, nothing bought), rivals on as shipped, same maps and seeds at each level. Level 3 is the section-1 data. Enemy multipliers are the `DIFFICULTY_*` tables in section 6.
+
+| Level | spawn × | enemy HP / dmg × | Boss dead (of N) | Waves cleared (median) | Run length (median) | Hull lost / run | Salvage / run |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.35× | 0.7 / 0.7 | 1 (of 12) | 5 | 4:43 | 144 | 54.5 |
+| 2 | 0.65× | 0.85 / 0.85 | 0 (of 12) | 5 | 6:08 | 191 | 82.0 |
+| 3 | 1× | 1 / 1 | 0 (of 12) | 4 | 4:13 | 207 | 84.5 |
+
+Per map (waves cleared by the lean start, median over seeds; the boss is wave 6):
+
+| Map | L1 | L2 | L3 |
+|---|---|---|---|
+| POCKET | 4 | 5 | 3 |
+| UNIVERSE | 5 | 5 | 5 |
+| RING | 5 | 5 | 4 |
+| SEVEN_RINGS | 5 | 3 | 2 |
+

@@ -561,7 +561,7 @@ recur rather than complete.
 **BUILT in S3: the balance harness and today's baseline.**  Instruments:
 `tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
 `tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver
-`scripts/balance.mjs` (`--seeds N --jobs N`, `--report` re-renders from the
+`scripts/balance.mjs` (`--seeds N --jobs N`, `--ladder` adds the lean start at difficulty 1-2, `--report` re-renders from the
 JSON).  Output: `docs/BALANCE_BASELINE.md` (the table the user judges) and
 `docs/balance-baseline.json` (raw).  Not part of `npm test`/CI (about an hour
 at 3 seeds).  The bot is a YARDSTICK, not a player (perfect aim, fixed kite,
