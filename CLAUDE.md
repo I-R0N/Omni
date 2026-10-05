@@ -90,6 +90,10 @@ scripts/sim-test.mjs      `npm run test:sim` — esbuilds tests/sim/*.test.ts
                           them under `node --test`; `bundle()` is shared by
                           sim-hash.mjs, which prints the Node hash series
                           the browser parity test compares against
+scripts/balance.mjs       BALANCE HARNESS driver (engine-core S3): runs
+                          tests/sim/balance*.ts jobs across processes and
+                          writes docs/BALANCE_BASELINE.md + balance-baseline.json.
+                          A measurement, not a gate: not in npm test or CI
 scripts/inline-build.mjs  Bundles dist/ + audio into omniverse-standalone.html
 scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
                           authoring angle table, --placeholder renders

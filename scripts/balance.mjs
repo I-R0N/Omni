@@ -159,12 +159,12 @@ function render(d) {
   P();
   P('Same maps and seeds with and without rival warp-ins (`nextRivalScore = ∞`). Rivals warp in every 1,000 score; 34 % hostile, 30 % ally, 36 % neutral.');
   P();
-  P('| Loadout | Rivals | rivals seen | first rival at (s) | hits taken: enemies / rivals | kills stolen | hull lost | run length |');
-  P('|---|---|---|---|---|---|---|---|');
+  P('| Loadout | Rivals | rivals seen | first rival at (s) | hits taken: enemies / rivals | kills stolen | salvage units / cleared wave | hull lost | run length |');
+  P('|---|---|---|---|---|---|---|---|---|');
   for (const loadout of ['lean', 'mk3']) for (const rivals of [true, false]) {
     const rs = d.arenas.filter((r) => r.loadout === loadout && r.rivals === rivals);
     if (!rs.length) continue;
-    P(`| ${loadout} | ${rivals ? 'on' : 'off'} | ${f(median(rs.map((r) => r.rivalsSeen)), 0)} | ${f(median(rs.map((r) => r.firstRivalSec)), 0)} | ${f(median(rs.map((r) => r.hitsFromEnemies)), 0)} / ${f(median(rs.map((r) => r.hitsFromRivals)), 0)} | ${f(median(rs.map((r) => r.killsStolenByRivals)), 0)} | ${f(median(rs.map((r) => r.hullLost)), 0)} | ${mins(median(rs.map((r) => r.endSec)))} |`);
+    P(`| ${loadout} | ${rivals ? 'on' : 'off'} | ${f(median(rs.map((r) => r.rivalsSeen)), 0)} | ${f(median(rs.map((r) => r.firstRivalSec)), 0)} | ${f(median(rs.map((r) => r.hitsFromEnemies)), 0)} / ${f(median(rs.map((r) => r.hitsFromRivals)), 0)} | ${f(median(rs.map((r) => r.killsStolenByRivals)), 0)} | ${f(median(rs.flatMap((r) => r.waves.filter((w) => w.durationSec != null).map((w) => w.salvageUnits))))} | ${f(median(rs.map((r) => r.hullLost)), 0)} | ${mins(median(rs.map((r) => r.endSec)))} |`);
   }
   P();
   const on = d.arenas.filter((r) => r.rivals), tot = (k) => on.reduce((a, r) => a + r[k], 0);
@@ -192,7 +192,7 @@ function render(d) {
     }
     P();
   }
-  P('Cell = seconds · shots fired until dead.');
+  P('Cell = seconds · shots fired until dead. **Read the `spread+electric` and `spread+thermal` rows with suspicion**: a 1-HP target taking 40–180 shots means those pellets (which curl and weave, or need a chain/heat to land) mostly miss a *pinned stationary* target at 250 units — either a real weakness of those two guns or an artifact of the duel setup; this baseline does not decide which. `no kill` = still alive after 30 s.');
   P();
 
   // ── income
@@ -207,10 +207,15 @@ function render(d) {
   }
   P(`- Spec: ${st.dropChances.enemyPrimary} + ${st.dropChances.enemySecondary} salvage rolls per enemy kill, +${st.waveClearDrops} units per wave clear, +${st.snitchCatchDrops} per snitch catch. Rivals vacuum drops within ${150} units.`);
   P();
-  const leanPerRun = median(d.arenas.filter((r) => r.loadout === 'lean' && r.rivals).map((r) => r.salvageUnits)) || null;
-  P('| Module | Mk | Price (units) | Runs of salvage (lean income) |');
+  const leanWave = median(units(d.arenas.filter((r) => r.loadout === 'lean' && r.rivals))) || null;
+  const leanRun = median(d.arenas.filter((r) => r.loadout === 'lean' && r.rivals).map((r) => r.salvageUnits)) || null;
+  const MK3 = ['hull_mk3', 'shield', 'capacitor_mk3', 'plating_mk3', 'engine_mk3', 'thrusters_mk3', 'scanner_mk5', 'dlv_beam', 'gunnery_mk3', 'autoloader_mk3', 'overcharge', 'nrg_thermal', 'nrg_electric'];
+  const mk3Cost = st.modules.filter((m) => MK3.includes(m.id)).reduce((a, m) => a + m.units, 0);
+  P(`**The \`mk3\` loadout the bot wears costs ${f(mk3Cost, 0)} units** in the shops (every Mk III, Shield, Mk V scanner, Beam, Thermal, Electric, Overcharge) — about ${leanWave ? f(mk3Cost / leanWave, 0) : '—'} cleared waves, or ${leanRun ? f(mk3Cost / leanRun, 1) : '—'} lean runs, of income. A death strips what was *installed* (cargo survives), so that figure is also what a bare death risks if nothing is in the hold.`);
+  P();
+  P(`| Module | Mk | Price (units) | Cleared waves of lean income (${leanWave ? f(leanWave) : '—'} u/wave) |`);
   P('|---|---|---|---|');
-  for (const m of st.modules) P(`| ${m.label} | ${m.mark || '—'} | ${f(m.units, m.units % 1 ? 1 : 0)} | ${leanPerRun ? f(m.units / leanPerRun) : '—'} |`);
+  for (const m of st.modules) P(`| ${m.label} | ${m.mark || '—'} | ${f(m.units, m.units % 1 ? 1 : 0)} | ${leanWave ? f(m.units / leanWave) : '—'} |`);
   P();
 
   // ── static

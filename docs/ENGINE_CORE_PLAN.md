@@ -558,12 +558,18 @@ recur rather than complete.
     higher mark or a rarer kind (Shield, Overcharge) is harder to find and
     dearer.  That is a per-station catalogue, not an unlock tree.
 
-**NEXT in S3 (the gameplay PR, after this one):** build the balance harness
-(headless, on the `tests/sim` kit) and report today's numbers — wave clear
-time by wave, run length, kills-to-clear by weapon, the rival share of
-pressure, salvage per wave against module prices — as a table the user judges
-against the targets above.  The portal-difficulty model, the level count and
-the per-station catalogues are DESIGNED from that report, not before it.
+**BUILT in S3: the balance harness and today's baseline.**  Instruments:
+`tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
+`tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver
+`scripts/balance.mjs` (`--seeds N --jobs N`, `--report` re-renders from the
+JSON).  Output: `docs/BALANCE_BASELINE.md` (the table the user judges) and
+`docs/balance-baseline.json` (raw).  Not part of `npm test`/CI (about an hour
+at 3 seeds).  The bot is a YARDSTICK, not a player (perfect aim, fixed kite,
+no dodging, no charged shots); beams are pulled not held; hit attribution
+counts projectile hits only; rival loot theft is inferred from salvage per
+wave.  **NEXT in S3:** the user judges the baseline against the targets
+above; the portal-difficulty model, the level count and the per-station
+catalogues are DESIGNED from that, not before it.
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
