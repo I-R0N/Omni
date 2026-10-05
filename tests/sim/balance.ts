@@ -79,7 +79,7 @@ export interface WaveRow {
 }
 
 export interface RunReport {
-  map: string; seed: number; loadout: Loadout; rivals: boolean;
+  map: string; seed: number; loadout: Loadout; rivals: boolean; difficulty: number;
   endedBy: 'boss-dead' | 'death' | 'timeout';
   endSec: number;
   endWave: number;           // wave in progress when the run ended (1-based)
@@ -102,11 +102,13 @@ export interface PlayOpts {
   map: MapType | string; seed: number; loadout: Loadout;
   /** false = no rival ever warps in (the control for D-S3-d's rival question). */
   rivals?: boolean;
+  /** DIFFICULTY_SCALES / DIFFICULTY_STAT_SCALES index; default 3, today's highest. */
+  difficulty?: number;
   maxSec?: number;
 }
 
 export function playArena(o: PlayOpts): RunReport {
-  const { engine } = createHeadlessEngine();
+  const { engine } = createHeadlessEngine({}, o.difficulty ?? 3);
   const g = engine as AnyEngine;
   g.activatePlatform();
   g.beginSeededRun(o.seed, o.map as MapType);
@@ -119,7 +121,7 @@ export function playArena(o: PlayOpts): RunReport {
   const creditsPerUnit = SALVAGE_CONSTANTS.CREDITS_PER_DROP;
 
   const r: RunReport = {
-    map: String(o.map), seed: o.seed, loadout: o.loadout, rivals: withRivals,
+    map: String(o.map), seed: o.seed, loadout: o.loadout, rivals: withRivals, difficulty: o.difficulty ?? 3,
     endedBy: 'timeout', endSec: 0, endWave: 0, wavesCleared: 0, waves: [], kills: 0, salvageUnits: 0,
     hullLost: 0, hitsFromEnemies: 0, hitsFromRivals: 0, hitDamageFromEnemies: 0, hitDamageFromRivals: 0,
     rivalsSeen: 0, rivalDispositions: {}, killsStolenByRivals: 0, firstRivalSec: null,

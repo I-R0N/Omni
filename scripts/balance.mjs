@@ -96,6 +96,20 @@ async function measure() {
   return out;
 }
 
+// The difficulty ladder: the lean start at the levels below today's top, rivals on
+// (as shipped), merged into the existing JSON so the baseline is not re-run.
+async function ladder() {
+  const cliPath = await bundle('tests/sim/balance-cli.ts', 'balance-cli');
+  const d = JSON.parse(fs.readFileSync(JSON_OUT, 'utf8'));
+  const levels = [1, 2];
+  const jobs = [];
+  for (const difficulty of levels) for (const map of d.maps) for (let seed = 1; seed <= d.seeds; seed++)
+    jobs.push({ kind: 'arena', map, loadout: 'lean', rivals: true, seed, difficulty, maxSec: d.maxSec });
+  d.ladder = await pool(cliPath, jobs, 'ladder');
+  fs.writeFileSync(JSON_OUT, JSON.stringify(d) + '\n');
+  return d;
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 function render(d) {
   const L = [];
@@ -228,10 +242,33 @@ function render(d) {
   P('Difficulty today (index → spawn budget ×, enemy health / speed / damage ×): ' +
     Object.keys(st.difficulty.spawn).map((k) => `**${k}**: ${st.difficulty.spawn[k]}× · ${st.difficulty.stats[k].health}/${st.difficulty.stats[k].speed}/${st.difficulty.stats[k].damage}`).join(' · '));
   P();
+  if (d.ladder) {
+    P('## 7. Where the starter gun stops being enough (difficulty ladder)');
+    P();
+    P('The lean start (Base Hull + Projector, nothing bought), rivals on as shipped, same maps and seeds at each level. Level 3 is the section-1 data. Enemy multipliers are the `DIFFICULTY_*` tables in section 6.');
+    P();
+    P('| Level | spawn × | enemy HP / dmg × | Boss dead (of N) | Waves cleared (median) | Run length (median) | Hull lost / run | Salvage / run |');
+    P('|---|---|---|---|---|---|---|---|');
+    const rowsAt = (lvl) => lvl === 3 ? d.arenas.filter((r) => r.loadout === 'lean' && r.rivals) : d.ladder.filter((r) => r.difficulty === lvl);
+    for (const lvl of [1, 2, 3]) {
+      const rs = rowsAt(lvl);
+      const dead = rs.filter((r) => r.endedBy === 'boss-dead').length;
+      P(`| ${lvl} | ${st.difficulty.spawn[lvl]}× | ${st.difficulty.stats[lvl].health} / ${st.difficulty.stats[lvl].damage} | ${dead} (of ${rs.length}) | ${f(median(rs.map((r) => r.wavesCleared)), 0)} | ${mins(median(rs.map((r) => r.endSec)))} | ${f(median(rs.map((r) => r.hullLost)), 0)} | ${f(median(rs.map((r) => r.salvageUnits)))} |`);
+    }
+    P();
+    P('Per map (waves cleared by the lean start, median over seeds; the boss is wave 6):');
+    P();
+    P('| Map | L1 | L2 | L3 |');
+    P('|---|---|---|---|');
+    for (const map of d.maps) P(`| ${map} | ${[1, 2, 3].map((lvl) => f(median(rowsAt(lvl).filter((r) => r.map === map).map((r) => r.wavesCleared)), 0)).join(' | ')} |`);
+    P();
+  }
   fs.writeFileSync(MD_OUT, L.join('\n') + '\n');
 }
 
-if (has('report')) {
+if (has('ladder')) {
+  render(await ladder());
+} else if (has('report')) {
   render(JSON.parse(fs.readFileSync(JSON_OUT, 'utf8')));
 } else {
   const d = await measure();
