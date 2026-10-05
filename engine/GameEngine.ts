@@ -15,6 +15,8 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { ShardVariantId } from './systems/ShardSystem.types';
+import { MusicContextTracker } from './systems/MusicContext';
+import type { MusicContextSnapshot } from './systems/AdaptiveMusic';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
@@ -222,6 +224,10 @@ function grainOverrideCountSnapshot(): number {
   }
   return n;
 }
+
+/** What the score is told outside live play: no context at all. */
+const EMPTY_TAGS: readonly string[] = [];
+const EMPTY_FAMILIES: Readonly<Record<string, number>> = {};
 
 export class GameEngine {
   /** Not `private`: DebugControls reaches it for the joystick DBG toggle,
@@ -841,6 +847,12 @@ export class GameEngine {
   private musicAlert = false;
   private musicBoss = false;
   private musicPressure = 0;
+  /** The same pressure, split by ENEMY FAMILY (AUDIO_CONSTANTS.MUSIC_ENEMY_FAMILY)
+   *  — the keys are fixed, so it is rewritten in place every frame. */
+  private readonly musicFamilies: Record<string, number> = {};
+  /** Where the player is, as context tags (`station`, `portal`, …). */
+  private readonly musicContext = new MusicContextTracker();
+  private readonly musicSnapshot: MusicContextSnapshot = { tags: [], warm: [], families: {} };
   // ── React reconciliation cost, reported IN by the UI layer ────────────
   //
   // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
@@ -1848,6 +1860,7 @@ export class GameEngine {
       }
       resetIdCounter();
       this.simClock = 0;
+      this.musicContext.reset();     // its distances were to the old map's entities
       this.loadMap(this.buildMap(type));
       if (kind === 'hub') {
         // The hub's terrain is fixed; what happens IN it afterwards (ambient
@@ -2745,6 +2758,8 @@ export class GameEngine {
     const px = this.player.position.x, py = this.player.position.y;
     const enemies = this.entityIndex.enemies;
     let near = false, alert = false, boss = false, pressure = 0;
+    const fam = this.musicFamilies;
+    for (const f of AUDIO_CONSTANTS.MUSIC_FAMILIES) fam[f] = 0;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (e.isExploding) continue;
@@ -2755,6 +2770,7 @@ export class GameEngine {
       if (e.isBoss === true) {
         near = alert = boss = true;
         pressure += AUDIO_CONSTANTS.MUSIC_BOSS_WEIGHT;
+        fam[this.musicFamilyOf(e)] += AUDIO_CONSTANTS.MUSIC_BOSS_WEIGHT;
         continue;
       }
       if (e.thirdParty === true || e.isRival === true) {
@@ -2773,11 +2789,40 @@ export class GameEngine {
       const w = Math.min(AUDIO_CONSTANTS.MUSIC_WEIGHT_MAX, Math.max(AUDIO_CONSTANTS.MUSIC_WEIGHT_MIN,
         Math.sqrt(Math.max(1, e.maxHealth) / AUDIO_CONSTANTS.MUSIC_WEIGHT_REF_HP)));
       pressure += w * falloff;
+      fam[this.musicFamilyOf(e)] += w * falloff;
     }
     this.musicAlert = alert;
     this.musicBoss = boss;
     this.musicPressure = pressure;
     return near;
+  }
+
+  /** An enemy's musical family (`MUSIC_ENEMY_FAMILY`; a rival has no
+   *  archetype of its own and is `ranged`). */
+  private musicFamilyOf(e: GameEntity): string {
+    if (e.isRival === true) return AUDIO_CONSTANTS.MUSIC_FAMILY_RIVAL;
+    return AUDIO_CONSTANTS.MUSIC_ENEMY_FAMILY[e.enemySubtype ?? ''] ?? AUDIO_CONSTANTS.MUSIC_FAMILY_DEFAULT;
+  }
+
+  /** The player's surroundings as context tags, for the score's layer
+   *  variants.  Reported EMPTY outside live play, like the threat. */
+  private reportMusicContext(live: boolean) {
+    const snap = this.musicSnapshot;
+    if (live) {
+      this.musicContext.update({
+        px: this.player.position.x, py: this.player.position.y,
+        screens: this.viewportHalfDiagonal(), now: this.simClock,
+        stations: this.stations, portals: this.portals, drops: this.activeDrops,
+        snitch: this.snitch, dragons: this.dragons,
+        heated: this.energy.heated, energized: this.energy.energized,
+      });
+      snap.tags = this.musicContext.tags;
+      snap.warm = this.musicContext.warm;
+      snap.families = this.musicFamilies;
+    } else {
+      snap.tags = EMPTY_TAGS; snap.warm = EMPTY_TAGS; snap.families = EMPTY_FAMILIES;
+    }
+    this.audio.setMusicContext(snap);
   }
 
   /** The battle layer's ducking signal: a hostile is near, or was recently
@@ -3182,6 +3227,11 @@ export class GameEngine {
           // The LIVE song list (score/index.json), so songs added by
           // `npm run music:import` show up in the debug panel's Play song.
           songs: this.audio.music.songList.map(s => ({ id: s.id, title: s.title, bpm: s.bpm })),
+          contexts: this.audio.music.contexts,
+          contextForced: this.audio.music.forcedContext,
+          variants: this.audio.music.variantMap,
+          family: this.audio.music.dominantFamily,
+          decodedMB: this.audio.music.decodedBytes / (1024 * 1024),
         } : null,
       },
     });
@@ -3218,6 +3268,7 @@ export class GameEngine {
     // exploration / menu level whatever was last measured.
     const live = this.gameState === GameState.PLAYING && !this.dockedAtStation && !debugFrozen;
     const maxEhp = Math.max(1, this.player.maxHealth + (this.player.maxShield ?? 0));
+    this.reportMusicContext(live);
     this.audio.setMusicThreat({
       alert: live && this.musicAlert,
       pressure: live ? this.musicPressure : 0,
