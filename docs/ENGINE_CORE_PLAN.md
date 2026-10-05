@@ -653,7 +653,20 @@ banks (D31), so it composes with them rather than reverting any.
 `S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
 Do not "unify" them.
 
-### W2 — Layer variants  (landed 2026-10-05, `67e8d7c`)
+### W2 — Layer variants  (landed 2026-10-05, `67e8d7c`; BACKED OUT
+`ae222f4`, same day, for a dedicated branch)
+
+**THIS DID NOT STAY.**  The whole variants layer was reverted hours after
+it landed — 1,390 deletions, `MusicContext.ts` deleted, every
+`AUDIO_CONSTANTS.MUSIC_*` it added gone, and `engine/ports.ts` +
+`platform/headless.ts` byte-identical to their pre-W2 state (verified).
+W1 is UNTOUCHED by the revert: songs-as-data, `music:import` and the index
+all survive, so the two are cleanly separable and only the variants layer
+went.  The entry is kept rather than deleted because what it ESTABLISHED is
+what a dedicated branch will meet again — and because the one durable
+lesson is the port rule below, which held this time and is the reason the
+revert was clean.  Read the rest as a description of that branch's starting
+point, not of this one's contents.
 
 The score gained ALTERNATIVE STEMS per slot.  The intensity model still
 decides which slots are ON; a DIRECTOR now decides which variant fills a
@@ -975,7 +988,9 @@ history stays readable.
 - **S2 → S3 (knob triage input).**  Persisted settings are only audio volumes
   + mute, control scheme and difficulty (D20).  Every other DBG cycle is
   per-session by construction.  *(S2, 2026-10-03)*
-- **W2 → S3 (`constants.ts` surface).**  Layer variants added ~48 lines of
+- ~~**W2 → S3 (`constants.ts` surface).**~~  *(MOOT, `ae222f4`: those ~48
+  lines were reverted with the variants layer, so there is no rebase surface
+  for `S3` here after all.  Live again only if that branch lands.)*    Layer variants added ~48 lines of
   `AUDIO_CONSTANTS.MUSIC_*` to `constants.ts` — tag radii, hysteresis, the
   family margin, the dwell, the decode budget and the family table.  `S3`
   extracts tables from that same file, so this is a REBASE surface, not a
@@ -983,7 +998,10 @@ history stays readable.
   tuning for a subsystem whose data already lives in `score/index.json`
   (D33 — the index is generator-written JSON, these are hand-authored
   numbers that belong beside the code that reads them).  *(PM, 2026-10-05)*
-- **W2 → the audio-memory decision (D31).**  `MUSIC_DECODE_BUDGET_MB` is
+- ~~**W2 → the audio-memory decision (D31).**~~  *(MOOT, `ae222f4`:
+  `MUSIC_DECODE_BUDGET_MB` went with the revert, so D31's measured figures
+  stand unchallenged.  The re-measure below becomes a REAL decision the day a
+  variants branch lands AND a song declares variants — both, not either.)*    `MUSIC_DECODE_BUDGET_MB` is
   **110**, and it is a ceiling on the score's TOTAL decoded PCM (default
   stems plus the variant cache), not a variant-only allowance.  D31 cut the
   decode rate to 25 kHz on a MEASURED 70.9 → 55.4 MB for the score, with
