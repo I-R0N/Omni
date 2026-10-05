@@ -2506,12 +2506,6 @@ export interface EngineStats {
       songs: { id: string; title: string; bpm: number }[];
       /** 'auto' follows the music plan; a number pins that SONGS index. */
       songMode: 'auto' | number;
-      /** Layer variants: the active context tags (+ `enemy:<family>`), the
-       *  forced one, the variant sounding in each slot that declares any
-       *  ('default' = `<slot>.mp3`), the dominant enemy family, and the score's
-       *  decoded PCM in MB. */
-      contexts: string[]; contextForced: string | null;
-      variants: Record<string, string>; family: string | null; decodedMB: number;
     } | null;
   };
 }

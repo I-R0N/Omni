@@ -47,13 +47,11 @@ export class NullAudio implements AudioPort {
   // voice here — the sim must behave identically with no audio.
   cueEncounter(): void {}
   setMusicThreat(): void {}
-  setMusicContext(): void {}
   setMusicArea(): void {}
   musicBossDefeated(): void {}
   cycleMusicSong(): void {}
   setMusicSong(): void {}
   cycleMusicDebugIntensity(): void {}
-  cycleMusicContextForce(): void {}
   /** There is no score here, so there is nothing to read out. */
   readonly music = null;
   setListener(): void {}
