@@ -653,6 +653,36 @@ banks (D31), so it composes with them rather than reverting any.
 `S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
 Do not "unify" them.
 
+### W2 — Layer variants  (landed 2026-10-05, `67e8d7c`)
+
+The score gained ALTERNATIVE STEMS per slot.  The intensity model still
+decides which slots are ON; a DIRECTOR now decides which variant fills a
+slot that is on — atmos from CONTEXT TAGS (station / portal / rare-item /
+danger / deep-space, `engine/systems/MusicContext.ts`), a combat slot from
+the dominant ENEMY FAMILY, locked on entry.  Changes commit on phrase
+boundaries with a centred crossfade; variant buffers live in an LRU cache
+under a decode budget; a missing file falls back to the default silently.
+
+**What it established, in the order a later session will meet it:**
+- **`AudioPort` grew again** — `setMusicContext`, `cycleMusicContextForce`,
+  and five `music` readout fields.  `platform/headless.ts` was updated in
+  the SAME commit, which is the thing that broke twice while PR 110 was
+  being integrated: a port method added without its `NullAudio` stub is a
+  typecheck break for whoever merges next, not for whoever wrote it.
+- **A NEW ENGINE FILE IS SIM-GUARDED BY DEFAULT, and this one passes.**
+  `MusicContext.ts` reads arrays the engine already owns and names no
+  platform global, so it needed NO `guard.test.ts` allow-list entry.
+  Verified: `test:sim` 47/47 on the merge.  Anything later that gives it a
+  clock or a `performance.now` has to earn an allow-list line instead.
+- **`constants.ts` grew ~48 lines of `AUDIO_CONSTANTS.MUSIC_*`.**  That is
+  `S3`'s file, so see the §8 hand-up below before rebasing.
+- **THE FEATURE IS LATENT TODAY.**  No shipped song declares `variants`
+  (all three carry the eight default stems and nothing else), and a song
+  without them takes none of these paths — so the director, the cache and
+  the budget are all live code over content that does not exist yet.  That
+  is the right order to build it in, and it is also why none of it is
+  visible in a play-test.
+
 ---
 
 ## 5. Branch and CI conventions
@@ -945,3 +975,26 @@ history stays readable.
 - **S2 → S3 (knob triage input).**  Persisted settings are only audio volumes
   + mute, control scheme and difficulty (D20).  Every other DBG cycle is
   per-session by construction.  *(S2, 2026-10-03)*
+- **W2 → S3 (`constants.ts` surface).**  Layer variants added ~48 lines of
+  `AUDIO_CONSTANTS.MUSIC_*` to `constants.ts` — tag radii, hysteresis, the
+  family margin, the dwell, the decode budget and the family table.  `S3`
+  extracts tables from that same file, so this is a REBASE surface, not a
+  conflict of intent.  None of it is a candidate for extraction: it is
+  tuning for a subsystem whose data already lives in `score/index.json`
+  (D33 — the index is generator-written JSON, these are hand-authored
+  numbers that belong beside the code that reads them).  *(PM, 2026-10-05)*
+- **W2 → the audio-memory decision (D31).**  `MUSIC_DECODE_BUDGET_MB` is
+  **110**, and it is a ceiling on the score's TOTAL decoded PCM (default
+  stems plus the variant cache), not a variant-only allowance.  D31 cut the
+  decode rate to 25 kHz on a MEASURED 70.9 → 55.4 MB for the score, with
+  total audio ~105-117 MB in play, because iOS Safari kills a tab on peak
+  RSS.  So the ceiling sits at about twice the measured base, and if
+  variants ever fill it the score roughly doubles and total audio lands
+  near ~170 MB.  **Today that cost is zero** — no song declares variants —
+  so nothing is regressed and nothing needs undoing.  What needs doing is
+  re-measuring when the first variant stems are authored, rather than
+  inheriting 110 as a settled number: it was chosen ahead of the content,
+  and CLAUDE.md already carries the general form of this lesson from the
+  nebula goo step ("a cost measured against one population does not
+  survive a change to that population").  A decision for the user when
+  variants exist, not now.  *(PM, 2026-10-05)*
