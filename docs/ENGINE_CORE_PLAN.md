@@ -477,7 +477,10 @@ recur rather than complete.
   time through a Vite virtual-manifest plugin (the `nebulaManifestPlugin` /
   `sfxManifestPlugin` precedent), so the parser is a devDependency and ships
   zero runtime bytes.  See D32 for the three consumers that must all resolve
-  it.
+  it.  **And see D33 before you read W1's `score/index.json` as a conflict:**
+  the format follows who WRITES the file — a generator's output is JSON, a
+  hand-authored table is TOML — so the two formats are deliberate and
+  neither is to be unified into the other.
 - **D-S3-d — Does the player get more than the 4-level difficulty index?**
 - **D-S3-e — Balance targets, stated as numbers.**  STILL OPEN and the one
   to put to the user at the moment the harness is built, not before.  How long should wave 5
@@ -613,12 +616,60 @@ from `S2`.
 
 ---
 
+## 4a. Workstreams (not sessions)
+
+Work that landed in this phase without being one of `S1`–`S4`.  Recorded
+rather than briefed: each entry says what it established, because a later
+session inherits that whether it knows it or not.
+
+### W1 — The music pipeline  (landed 2026-10-04, `6b98a25`)
+
+Songs became DATA and gained an import tool.  Ported onto the integration
+branch deliberately keeping S2's ports, the 25 kHz decode and the lazy SFX
+banks (D31), so it composes with them rather than reverting any.
+
+**What it established, in the order a later session will meet it:**
+- **Songs are a folder plus an index.**  `public/assets/audio/score/<id>/`
+  holds the six synchronised stems (plus optional `riser` / `victory`), and
+  `public/assets/audio/score/index.json` lists the songs AND the music plan
+  (which song plays in the hub, a field map, an arena, a boss fight).
+  `AdaptiveMusic` loads the index; `scripts/inline-build.mjs` inlines it, so
+  the single-file standalone still plays the score.
+- **`npm run music:import -- <kit>`** takes a GarageBand export, checks
+  length against tempo, folds the tail into the loop, applies ONE loudness
+  gain across all layers, encodes, and adds or replaces that song in the
+  index (`--check` validates only).  `scripts/score/kit.py` builds the
+  GarageBand kits.  `docs/MUSIC_PIPELINE.md` is the how-to.
+- **One devDependency** (`ffmpeg-static`), so no manual install.  Runtime
+  dependencies are still exactly two (`react`, `react-dom`) — the pipeline
+  ships no bytes to the player.
+- **`AudioPort` grew `music.songList`**, read by the debug panel's "Play
+  song" row so an imported song appears without a code change.  That is an
+  extension of S2's port surface, consistent with it.
+- **It set the GENERATED-DATA format precedent** that D33 then stated as a
+  rule for the whole project.  See D33 before extracting any table.
+
+**Consequence for `S3`.**  `index.json` is a second data format alongside
+`S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
+Do not "unify" them.
+
+---
+
 ## 5. Branch and CI conventions
 
-**One integration branch off `main`** holds all of `S1`–`S4`:
+**One integration branch off `main`** holds all of `S1`–`S4`, **and the
+named WORKSTREAMS in §4a**:
 **`claude/steam-game-publishing-xhnui2`** (user call, 2026-10-03, replacing
 `claude/engine-core`).  Work sessions branch from it and PR back into it; it
 merges to `main` when the PM session judges a phase coherent.
+
+This used to read "holds all of `S1`–`S4`" and nothing else, which stopped
+being true the moment work arrived that is not one of the four sessions (the
+music pipeline, W1).  The branch is the PHASE's branch, not the sessions'
+— so anything landing in this phase belongs to a session in §4 or a
+workstream in §4a, and PR #108 is as wide as both.  A workstream is work
+with no open gameplay decisions of its own: it needs a RECORD so a later
+session can see what it established, not a brief.
 
 The two branches were the SAME COMMIT when this was decided (`af3c8ba`), so
 the switch moved no code — `claude/engine-core` is simply abandoned at that
@@ -756,6 +807,7 @@ who made it, and the consequences for other sessions.
 | D30 | PM | 2026-10-04 | **`dmath` goes to `S3`, in its GAMEPLAY-tier PR** (user call), placing S2's D17 hand-up.  The finding: JS engines' libm differs in the last place (`Math.pow`, Node 22 vs Chromium 141, ~10% of non-trivial inputs; `atan2` / `hypot` / `exp` / `log` / `sqrt` agree only by two V8s sharing fdlibm), and iOS is JavaScriptCore — a third libm — so replay is bit-exact WITHIN an engine and not across them.  Options weighed: **S3, as S2 recommended** (it already touches every constant and is next) / its own session before S3 / defer past the mobile release / drop it and narrow D0b to within-engine determinism. | §4's `S3` brief now carries it, with four things stated up front: it is a BEHAVIOUR change so it rides the gameplay PR; it invalidates every hash ONCE and must re-baseline `tests/replay.spec.ts` in the same commit; it needs a `perf/` number either side because `pow` sits in the collision resolver; and it does NOT block the mobile release — replay is dev-only (D7) and the save is not replay-based (D21), so what JSC costs today is reproducing an iPhone bug report on a dev machine.  What it DOES unblock is cross-device replay and §1/D0b's port-verification premise, which stays UNBACKED until this lands — the honest cost of choosing S3 over a session of its own.  Tightening D17's restated parity assertion back up is a consequence of this landing, not separate work. |
 | D31 | PM | 2026-10-04 | **Audio memory: the score decodes at 25 kHz, and the SFX banks decode LAZILY** (user call), after PR #110's adaptive score landed and the resident figure was MEASURED at ~133 MB (70.9 music + ~62 sliced cue buffers) against a mobile-first phase.  Options put to the user: drop the music decode rate / hold fewer layers / decode the banks lazily instead of all four at unlock.  **Call: 25 kHz and lazy.** | Music: `SCORE.DECODE_RATE` 32 → 25 kHz, measured 70.9 → **55.4 MB**; linear, and nothing about the bar grid is rate-dependent.  Banks: only the MENU bank decodes at unlock; `requestBank` starts the others FIRE-AND-FORGET from `play()` / `loop()`, so CLAUDE.md §8's "never a decode inside a frame" rule is kept — the asking trigger plays its procedural draft and returns, which is what every id already did while the eager preload was in flight.  Measured: title screen **4.7 MB** of banks (was ~62), a run that never fires **49.3**, audio in total ~105 MB in play and 16.5 at the title against 133 / ~77.  **Stated honestly: lazy decoding DEFERS rather than reduces** — impacts and world are asked for within seconds of a run, so a few seconds in the steady state is close to what it was; the reduction is the rate cut, and what laziness buys is the PEAK (the whole-bank buffer no longer stacks against the score's decode at unlock) and the menu.  Two consequences were load-bearing and are documented in §8: the WAV pass and the procedural pre-render had to switch from `hasSample` to the MANIFEST, or a not-yet-decoded bank id gets a WAV fetched AND three Offline takes rendered — costing more than the eager decode saved; and a live LOOP is dropped when its bank lands, or `move.thrust` keeps its draft for the whole run.  `tests/audio.spec.ts` gained a laziness regression (verified to FAIL against the eager build) and its whole-manifest test now asks for every bank via `decodeAllBanks()` — the claim is unchanged, only its trigger moved.  **Not a work-session payload:** done here, in the phase branch, because it is a two-constant change plus its guards and it blocked nothing in S3's brief. |
 | D32 | PM | 2026-10-04 | **S3's four pre-flight calls, settled before the brief was written** (user).  (a) **FORMAT: TOML.**  Options weighed: TOML / JSON + a TS schema / data-only TS modules.  The decider was COMMENTS — this repo's tables carry the reasoning behind each number (the grain table's "neither is visible in the row", the bank divisor's two factors), and that commentary is a large part of their value, so JSON would either lose it or scatter it into sibling files.  (b) **FIRST TABLES: `MAP_POPULATION` + `ENEMY_VARIANTS` + `BOSS_DEFS`** — ~560 measured lines, all three DESCRIPTIONS rather than derivations, one small / one medium / one nested-shape, and exactly what a balance harness needs to vary.  (c) **ORDER: tables before `dmath`** (D30 placed dmath in S3; this settles its position WITHIN the session, and does not reopen D30).  (d) **KNOB TRIAGE: only the extracted tables' knobs**, riding each extraction. | **The format choice is cheap here only because of an existing precedent, and that is the brief's load-bearing constraint.**  `vite.config.ts` already resolves two BUILD-TIME virtual manifests (`virtual:nebula-manifest`, `virtual:sfx-manifest`), so a TOML table parses at build time into a typed module: the parser is a devDependency, the bundle ships zero parser bytes, and `scripts/inline-build.mjs`'s single-file standalone — which cannot fetch anything — works for free because the data is already in the module.  THREE consumers must all resolve the new virtual ids or the gates break, and the second is the one that gets forgotten: (1) `vite.config.ts`; (2) `scripts/sim-test.mjs`, whose esbuild shim hardcodes `/^virtual:(nebula\|sfx)-manifest$/`, so `npm run test:sim` fails the moment a table becomes virtual; (3) `playwright.config.ts`'s webServer, which builds, so it is covered by (1).  ORDER rationale: extraction is the session's stated payoff and the lower-risk half, so if `dmath` sprawls (~150 call sites plus a `perf/` number either side) the valuable work has landed, and `dmath` explicitly does not block the mobile release.  The honest cost of that order: `dmath` later shifts the extraction's derived-value assertions in the LAST PLACE, so those assertions need tolerances rather than equality — the brief says so, since discovering it as a red suite is how it turns into a day.  MEASURED AND CORRECTED in §4 while settling these: `constants.ts` is 11,359 lines (the brief said ~1000) and there are 59 `*_CYCLE` tables (it said ~90). |
+| D33 | PM | 2026-10-05 | **THE FORMAT FOLLOWS WHO WRITES THE FILE, NOT WHO READS IT** (user call, after W1's `score/index.json` landed beside D32's TOML and the two could have read as drift).  **A file a GENERATOR rewrites is JSON.  A file only HUMANS write is TOML.**  So W1's song index stays JSON and `S3`'s tuning tables are TOML, and neither is to be "unified" into the other. | The rule is phrased on the WRITER because that is the property that actually decides it: TOML's one advantage here is COMMENTS, and a comment cannot survive a generator rewriting the file — `npm run music:import` adds or replaces songs in `index.json` on every run, so any commentary in it would be destroyed on the next import.  Phrasing the rule on the reader ("engine data is X") would have given the wrong answer for both files.  **THE INDEX IS HONESTLY A MIXED CASE, and it is the exception that proves the rule rather than a counter-example:** its `songs[]` array is generator-written, but its `plan` block (which song plays in the hub, a field map, an arena, a boss fight) is a HAND-AUTHORED editorial choice — and the file pays for being JSON exactly where you would expect, with an `"about"` STRING KEY doing a comment's job at the top.  That is the cost, it is small, and splitting four lines of `plan` into a separate TOML file to satisfy the rule would be churn for nothing.  If `plan` ever grows into real editorial reasoning, THAT is the moment to split it, and this row is the argument for doing so.  Recorded in CLAUDE.md §8 as well as here, so a session that reads only the master spec still sees it. |
 
 ---
 
