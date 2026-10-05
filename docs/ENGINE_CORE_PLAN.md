@@ -585,6 +585,19 @@ as one, so it belongs to higher levels rather than appearing at every level.
 (5) **Stronger enemy AI is a later difficulty axis** and is parked
 (PARKING_LOT: "Enemy AI as a difficulty axis"), not designed here.
 
+**PROPOSED (not settled) — the level curve, for the user to confirm.**
+Calibration (baseline report §8, mk3 on POCKET + RING, n = 6 a cell): enemy HP
+and damage x1.0 -> the fully outfitted bot beats the boss 4 times in 6; x1.5 ->
+1 in 6; x2 -> 0; x3 -> 1 (noisy).  The bot is harsher than a person, so
+"Mk III struggles" is placed higher than the bot's x1.5.  Shape: levels 1-3 are
+today's 1-3 unchanged (spawn 0.35 / 0.65 / 1.0, HP and damage 0.7 / 0.85 / 1.0);
+from level 4 the spawn budget grows only gently (about x1.03 a level, capped
+x1.5) while HP and damage grow x1.14 a level — x2.5 at level 10, x9 at level
+20.  Roster: the Bulwark moves from "every stage's wave 5" to "level 3 and up"
+(levels 1-2 put a Shooter 2 there), one Bulwark at level 3 as today, two from
+level 6, three from level 10; Kamikaze, Turret and Nest follow the same idea
+(introduced by level, then more of them).  Portal difficulty is shown on arrival.
+
 **BUILT in S3: the balance harness and today's baseline.**  Instruments:
 `tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
 `tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver

@@ -212,3 +212,14 @@ Per map (waves cleared by the lean start, median over seeds; the boss is wave 6)
 | RING | 5 | 5 | 4 |
 | SEVEN_RINGS | 5 | 3 | 2 |
 
+## 8. How hard can enemies get? (calibration for the level curve)
+
+Enemy HP **and** damage multiplied by k at today's full spawn budget, POCKET + RING, 3 seeds, rivals on. k = 1 is section 1 (`mk3`, same two maps).
+
+| k (HP and damage) | Loadout | Boss dead (of N) | Waves cleared (median) | Run length (median) | Hull lost / run |
+|---|---|---|---|---|---|
+| 1 | mk3 | 4 (of 6) | 6 | 4:18 | 226 |
+| 1.5 | mk3 | 1 (of 6) | 5 | 3:54 | 287 |
+| 2 | mk3 | 0 (of 6) | 4 | 3:08 | 284 |
+| 3 | mk3 | 1 (of 6) | 4 | 3:40 | 261 |
+
