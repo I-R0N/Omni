@@ -11,12 +11,10 @@
  *               drops sum their value, so this is a FAT pile — a snitch-catch
  *               spray, a boss payout), the golden SNITCH, or any POI that
  *               declares a `poiTier` at the scanner's rare rung or above
- *   danger      within `MUSIC_DANGER_*` screens of something that reads as a
- *               threat and is not an engaged fight: a PORTAL (a wormhole
- *               gravity well), a BUBBLE (ambient fauna that latches and EMPs
- *               once provoked), a RIVAL that is hunting the player, or a
- *               DRAGON (a mini-boss, passive until provoked).  Portals also
- *               raise `portal`; `danger` outranks it by default priority
+ *   danger      within `MUSIC_DANGER_*` screens of a threat that is not an
+ *               engaged fight: a RIVAL that is hunting the player, or a DRAGON
+ *               (a mini-boss, passive until provoked).  Portals have their own
+ *               tag and bubbles raise nothing
  *   deep-space  none of the above for `MUSIC_DEEP_SPACE_DWELL_SEC`
  *
  * Radii are in SCREENS (`GameEngine.viewportHalfDiagonal`), like every other
@@ -112,14 +110,14 @@ export class MusicContextTracker {
       if ((s.poiTier ?? 0) >= DETECT_TIER.POI_RARE) dRare = Math.min(dRare, d2To(px, py, s));
     }
 
-    // DANGER: a portal, a bubble, a rival hunting the player, a dragon.
-    let dDanger = dPortal;
+    // DANGER: a rival hunting the player, or a dragon.
+    let dDanger = Infinity;
     const en = i.enemies;
     for (let k = 0; k < en.length; k++) {
       const e = en[k];
       if (!e.active || e.isExploding) continue;
       if (e.isRival === true) { if (e.huntingPlayer !== true) continue; }
-      else if (e.enemySubtype !== EnemySubtype.BUBBLE && e.enemySubtype !== EnemySubtype.DRAGON) continue;
+      else if (e.enemySubtype !== EnemySubtype.DRAGON) continue;
       const d2 = d2To(px, py, e);
       if (d2 < dDanger) dDanger = d2;
     }
