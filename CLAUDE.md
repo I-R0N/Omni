@@ -5467,6 +5467,36 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   the game has no binding (there is no keyboard weapon-cycle key), the panel
   says nothing rather than inventing one.  (Escape IS bound — it pauses —
   and the keyboard group lists it.)
+- **DATA FILES: THE FORMAT FOLLOWS WHO WRITES THE FILE, NOT WHO READS IT**
+  (user call; docs/ENGINE_CORE_PLAN.md D33).  **A file a GENERATOR rewrites
+  is JSON.  A file only HUMANS write is TOML.**  The deciding property is
+  COMMENTS: this repo's hand-authored tables carry the reasoning behind
+  each number — the grain table's "neither is visible in the row", the bank
+  divisor's two factors — and that commentary is a large part of their
+  value, while a comment cannot survive a generator rewriting the file.
+  So the SCORE INDEX (`public/assets/audio/score/index.json`, rewritten by
+  `npm run music:import` on every run) is JSON, and extracted TUNING TABLES
+  are TOML.  Neither is to be "unified" into the other.  Phrasing the rule
+  on the READER instead ("engine data is X") gives the wrong answer for
+  both files, which is why it is phrased on the writer.
+  THE SCORE INDEX IS A MIXED CASE and is the exception that proves the
+  rule: its `songs[]` is generator-written while its `plan` block (which
+  song plays in the hub, a field map, an arena, a boss fight) is a
+  HAND-AUTHORED editorial choice — and the file pays for being JSON exactly
+  where you would expect, with an `"about"` STRING KEY doing a comment's
+  job at the top.  That cost is small and splitting four lines out to
+  satisfy the rule would be churn; if `plan` ever grows into real editorial
+  reasoning, that is the moment to split it.
+  A TOML table is parsed at BUILD time through a Vite virtual-manifest
+  plugin (the `nebulaManifestPlugin` / `sfxManifestPlugin` precedent, §6),
+  so the parser is a devDependency shipping zero runtime bytes and the
+  single-file standalone keeps working because the data is already in the
+  module.  Three consumers must resolve a new virtual id or a gate breaks,
+  and the second is the one that gets forgotten: `vite.config.ts`,
+  `scripts/sim-test.mjs` (its esbuild shim hardcodes the two existing ids,
+  so `npm run test:sim` fails the moment a table becomes virtual), and
+  `playwright.config.ts`'s webServer, which builds and so is covered by the
+  first.
 - **Sound goes through one id, and the id is the contract.**  Every
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
