@@ -24,7 +24,7 @@ import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS, H
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, levelScales, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
@@ -1611,6 +1611,8 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      arenaLevel: this.arenaLevel(),
+      arenaLevelForced: this.dbgArenaLevel !== null,
       portalWarpName: getPortalWarpName(),
       portalSizeName: getPortalSizeName(),
       portalGravityName: getPortalGravityName(),
@@ -3107,6 +3109,8 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      arenaLevel: this.arenaLevel(),
+      arenaLevelForced: this.dbgArenaLevel !== null,
       portalWarpName: getPortalWarpName(),
       portalSizeName: getPortalSizeName(),
       portalGravityName: getPortalGravityName(),
@@ -7126,6 +7130,19 @@ export class GameEngine {
 
   // --- WAVE SYSTEM ---
 
+  /** DBG ▸ World & Maps ▸ "Arena level": force every arena to this level
+   *  (1..20) from its NEXT wave on; null = each portal's own level. */
+  dbgArenaLevel: number | null = null;
+
+  /** The level the current map's waves run at: the debug override, else the
+   *  map's own descriptor level (each portal is its own dial), else the old
+   *  1-3 setting for a map that has none. */
+  arenaLevel(): number {
+    if (this.dbgArenaLevel !== null) return this.dbgArenaLevel;
+    const d = descriptorForMapType(this.currentMap?.type);
+    return d?.level ?? Math.max(1, this.difficultyLevel);
+  }
+
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
    *  tiny helper so every wave entry point (init / update tick / skip)
    *  goes through the same factory. */
@@ -7138,8 +7155,10 @@ export class GameEngine {
       entities: this.currentMap.entities,
       player: this.player,
       physics: this.physics,
-      enemyScale: this.enemyScale,
-      difficultyLevel: this.difficultyLevel,
+      // The legacy menu "None" (difficulty 0, saved) still switches waves off;
+      // otherwise the ARENA LEVEL sets the spawn amount and the enemy stats.
+      enemyScale: this.enemyScale <= 0 ? 0 : levelScales(this.arenaLevel()).spawn,
+      difficultyLevel: this.arenaLevel(),
       viewportHalfDiagonal,
       forcedEnemy: this.forcedTestEnemy,
       onBossSpawn: this.handleBossSpawn,
@@ -7639,7 +7658,7 @@ export class GameEngine {
     // The snitch is wave bookkeeping only in that it pays out + ends the
     // wave on catch; the entity itself persists across wave boundaries
     // (it is never despawned at a wave end), so don't touch it here.
-    const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
+    const healthInterval = HEALTH_DROP_INTERVAL[Math.min(3, this.arenaLevel())] ?? 20;
     if ((clearedIndex + 1) % healthInterval === 0) {
       const hAngle = sim.engine() * Math.PI * 2;
       const hDist  = 20 + sim.engine() * 80; // 20–100 units from player

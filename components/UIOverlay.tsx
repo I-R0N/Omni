@@ -1761,30 +1761,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
-            <div className="w-full flex flex-col items-center gap-3">
-              <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
-              <span className={`text-slate-500 ${T_NOTE} -mt-2 text-center`}>
-                How hard arena waves hit. Saved with your character; the hub has no waves.
-              </span>
-              {/* A 4-up grid rather than a flex row: the buttons then divide
-                  the column's width instead of setting it, so the row can
-                  never overflow a narrow screen. */}
-              <div className="w-full grid grid-cols-4 gap-2">
-                {[0, 1, 2, 3].map(level => (
-                  <button
-                    key={level}
-                    onClick={() => onSetDifficulty && onSetDifficulty(level)}
-                    className={`${CHIP_BASE} ${
-                      difficulty === level
-                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                        : `${CHIP_OFF} hover:border-indigo-400`
-                    }`}
-                  >
-                    {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* No difficulty picker: each portal carries its own LEVEL, shown in the
+                wave banner on arrival (D-S3-d).  The saved `difficulty` setting
+                survives only so old saves load, and "None" (0) still switches
+                waves off. */}
 
             {/* Controls — the choice made at game start (user directive).
                 Sits with DIFFICULTY because it is the same kind of thing: a

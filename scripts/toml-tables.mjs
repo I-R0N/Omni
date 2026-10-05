@@ -31,6 +31,7 @@ export const TABLES = {
   'map-population': 'map-population.toml',
   enemies: 'enemies.toml',
   bosses: 'bosses.toml',
+  'enemy-difficulty': 'enemy-difficulty.toml',
 };
 
 export const TABLE_PREFIX = 'virtual:table/';

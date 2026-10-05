@@ -585,6 +585,21 @@ as one, so it belongs to higher levels rather than appearing at every level.
 (5) **Stronger enemy AI is a later difficulty axis** and is parked
 (PARKING_LOT: "Enemy AI as a difficulty axis"), not designed here.
 
+**D-S3-h (user, settled as a starting point; confirmed by playtest only): enemy
+mix is driven by per-enemy ratings and the arena level.**  (1) Provisional,
+awaiting playtest.  (2) A level-3 wave no longer carries Bulwarks in numbers:
+the wave-5 spike (~49 points against 8-12 elsewhere) is gone; the Tank
+(RAMMER_3) stands where the Bulwark was.  (3) Every enemy has a `rating`
+(`data/enemy-difficulty.toml`); a wave is a POINT budget; the level sets a
+roster CEILING (the hardest rating allowed) and the mix is picked at random
+(seeded, `sim.waves`) with evenly split points, 2-4 types a wave, never the
+previous wave's mix.  So kamikaze, turret, nest, swarm and the rest vary by
+arena and wave.  Difficulty is the PORTAL's (`MapDescriptor.level`: Pocket 2,
+Universe 3, Ring 4, Seven Rings 6, field maps 3); the menu picker is gone.
+Levels 1-3 are the old Low/Med/High rows; above that HP and damage grow 1.14x a
+level and spawn 1.03x (capped 1.5x).  Playtest handle: DBG > World & Maps >
+Portals > "Arena level".  Baseline report predates this generator: re-run it.
+
 **PROPOSED (not settled) — the level curve, for the user to confirm.**
 Calibration (baseline report §8, mk3 on POCKET + RING, n = 6 a cell): enemy HP
 and damage x1.0 -> the fully outfitted bot beats the boss 4 times in 6; x1.5 ->

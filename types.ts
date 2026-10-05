@@ -2343,6 +2343,10 @@ export interface EngineStats {
   controlScheme?: ControlScheme;
   // DBG snitch-speed multiplier step name (SNITCH_SPEED_CYCLE, e.g. "1×").
   snitchSpeedName?: string;
+  // The ARENA LEVEL (1..20) the current map's waves run at, and whether the
+  // DBG override is forcing it (DBG ▸ World & Maps ▸ Arena level).
+  arenaLevel?: number;
+  arenaLevelForced?: boolean;
   // DBG portal tuning (DBG ▸ World & Maps ▸ Portals) — the transit-warp
   // length and six live multipliers over PORTAL_CONSTANTS, plus a readout of
   // what they resolve to.

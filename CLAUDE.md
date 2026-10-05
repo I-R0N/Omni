@@ -605,7 +605,7 @@ swaps the menu backdrop, or switches-and-plays mid-game (below).
 returning to the menu returns to the default — map choice is a DEBUG
 override that lasts the run it starts, never a preference that sticks to
 the front door.  The main menu correspondingly offers no map choice:
-DIFFICULTY and START, with the controls picker and help beside them.  The
+START (difficulty is the portal's level, not a menu choice), with the controls picker and help beside them.  The
 map picker is a DEBUG row — World & Maps ▸ Maps (the showcases sit under
 ▸ Material Field Maps) in the debug panel, whose
 launcher floats in the menu's corner as it does over every screen — so
@@ -2674,7 +2674,7 @@ and `DIFFICULTY_STAT_SCALES`.
 Every map is named by a row in the **`MAP_DESCRIPTORS` registry**
 (`engine/maps/MapDescriptors.ts`) — a THIN typed layer of stable string
 ids over the MapType plumbing (roadmap step (k), strategy guardrail #3).
-A descriptor carries exactly five fields, all with live consumers:
+A descriptor carries five fields with live consumers plus an optional `level` (the arena's difficulty, 1..20; `ENEMY_RATING` / `buildLevelWave` in constants.ts turn it into a wave mix, `data/enemy-difficulty.toml`):
 `id` (portal targets + `transitionToMap`), `name` (portal tag + entry
 affordance), `mapType` (what `buildMap` instantiates), `kind`
 (`'hub' | 'arena'` — `HUB_DESCRIPTOR` is where a run starts and where

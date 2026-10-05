@@ -1002,6 +1002,15 @@ export class DebugControls {
     cycleVelGain();
   }
 
+  /** DBG "Arena level": force the arena difficulty level for playtesting —
+   *  portal's own → 1 → 2 → 3 → 4 → 5 → 6 → 8 → 10 → 13 → 16 → 20 → portal's own.
+   *  Takes effect from the NEXT wave (a wave already streaming keeps its mix). */
+  cycleArenaLevel() {
+    const steps: Array<number | null> = [null, 1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20];
+    const i = steps.indexOf(this.g.dbgArenaLevel);
+    this.g.dbgArenaLevel = steps[(i + 1) % steps.length];
+  }
+
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
    *  both AI speed states live so the chase feel can be tuned in-game. */
   cycleSnitchSpeed() {

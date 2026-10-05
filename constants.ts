@@ -23,6 +23,7 @@ import { viewport } from './engine/ports';
 import RAW_ENEMIES from 'virtual:table/enemies';
 import RAW_BOSSES from 'virtual:table/bosses';
 import RAW_MAP_POPULATION from 'virtual:table/map-population';
+import RAW_DIFFICULTY from 'virtual:table/enemy-difficulty';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -7119,9 +7120,6 @@ export const TIMED_WAVE_CONFIG = {
   // BACKLOG_MIN_GAP_SEC so a freed cap never dumps a clump at once.
   MAX_CONCURRENT_ENEMIES: 10,
   BACKLOG_MIN_GAP_SEC: 0.4,
-  // Wave-index → tier-weight row mapping for the weighted-random mix
-  // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
-  TIER_SET_LENGTH: 3,
 };
 
 // ── Audio ─────────────────────────────────────────────────────────────────────
@@ -8782,7 +8780,7 @@ export function calmBubble(entity: GameEntity) {
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
 // Three tiers per role — each tier is strictly faster/tougher than the last.
 // To add a new enemy type: add entries to EnemySubtype, EnemyRole, ENEMY_ROLE,
-// and ENEMY_VARIANTS, then reference the new subtype in WAVE_DEFINITIONS.
+// and ENEMY_VARIANTS, then give it a [rating] in data/enemy-difficulty.toml.
 
 // Enemy archetype table.  EVERY enemy is now a shooter (`shoots`); variety
 // comes from the movement role (RAMMING = rush in close, SHOOTING = keep
@@ -9336,7 +9334,7 @@ export function bossRewardTable(): Array<{ def: ModuleDef; weight: number }> {
   return MODULE_DEFS.filter(d => d.cost > 0).map(def => ({
     def,
     weight: def.rewardOnly
-      ? BOSS_REWARD_WEIGHT.BASE * Math.pow(BOSS_REWARD_WEIGHT.FALLOFF, Math.max(0, def.mark - (SHOP_MAX_MARK + 1)))
+      ? BOSS_REWARD_WEIGHT.BASE * dmath.pow(BOSS_REWARD_WEIGHT.FALLOFF, Math.max(0, def.mark - (SHOP_MAX_MARK + 1)))
       : 1,
   }));
 }
@@ -9500,46 +9498,14 @@ export function buildBossWaveSpawnList(boss: EnemySubtype, budget: number): Enem
   return list;
 }
 
-// ── Wave definitions ──────────────────────────────────────────────────────────
-// Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each
-// enemy role gets a clean introduction (ram-only → shoot-only → mixed).  The
-// composition is cycled to fill the timed wave's spawn budget, so counts
-// express the mix ratio, not the absolute spawn total.  Waves 4+ roll a
-// weighted-random mix instead — see buildWaveSpawnList().
+// ── Wave composition ──────────────────────────────────────────────────────────
+// A wave is a number of POINTS to spend, an enemy costs its rating, and the
+// arena LEVEL decides which enemies are for sale (data/enemy-difficulty.toml).
+// There is no scripted roster any more: every arena and every wave rolls its
+// own mix from the seeded `waves` stream, so two arenas of one level differ.
 //
 // (The old per-wave `powerup` field was dead code — powerup drops were removed
 // from DropSystem — and is gone; weapon unlocks return with the (h) bosses.)
-export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[] }[] = [
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }] },                                                // W1  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }] },                                                // W2  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
-  { enemies: [{ subtype: EnemySubtype.KAMIKAZE,  count: 3 }, { subtype: EnemySubtype.RAMMER_1,  count: 1 }] }, // W4  Kamikaze intro
-  { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
-  { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
-  { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
-  // NOTE: BUBBLE is ambient fauna (always-present, never a wave enemy) — it's
-  // maintained by `maintainAmbientBubbles` (engine/roamers/bubbles.ts), not
-  // spawned by waves.
-];
-
-// Tier-weight progression for the weighted-random waves (index
-// WAVE_DEFINITIONS.length and up).  Row =
-// min(floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH), last), so the blend
-// walks L1 → ½L1+½L2 → L2 → ⅓ each → ½L2+½L3 → L3 over the first 18 waves
-// and stays pure tier-3 from then on.  Shape: [w_tier1, w_tier2, w_tier3].
-const WAVE_TIER_WEIGHTS: [number, number, number][] = [
-  [1, 0, 0],
-  [0.5, 0.5, 0],
-  [0, 1, 0],
-  [1 / 3, 1 / 3, 1 / 3],
-  [0, 0.5, 0.5],
-  [0, 0, 1],
-];
-
-const SUBTYPE_BY_ROLE_TIER: Record<EnemyRole, EnemySubtype[]> = {
-  [EnemyRole.RAMMING]:  [EnemySubtype.RAMMER_1,  EnemySubtype.RAMMER_2,  EnemySubtype.RAMMER_3],
-  [EnemyRole.SHOOTING]: [EnemySubtype.SHOOTER_1, EnemySubtype.SHOOTER_2, EnemySubtype.SHOOTER_3],
-};
 
 /** Length of the timed window for a 0-based wave index, in seconds. */
 export function getWaveDurationSec(index: number): number {
@@ -9561,57 +9527,108 @@ export function getWaveSpawnBudget(index: number): number {
   );
 }
 
-/** Roll a 0-based tier from a [w1, w2, w3] weight row. */
-function rollTier(weights: [number, number, number]): number {
-  const r = sim.waves() * (weights[0] + weights[1] + weights[2]);
-  if (r < weights[0]) return 0;
-  if (r < weights[0] + weights[1]) return 1;
-  return 2;
+/** The enemies that can appear in a level's waves, keyed by NAME in the file. */
+export const ENEMY_RATING: Readonly<Partial<Record<EnemySubtype, number>>> = (() => {
+  const out: Partial<Record<EnemySubtype, number>> = {};
+  const known = new Set<string>(Object.values(EnemySubtype));
+  for (const [name, v] of Object.entries(RAW_DIFFICULTY.rating as Record<string, number>)) {
+    if (!known.has(name)) throw new Error(`data/enemy-difficulty.toml: [rating] ${name} is not an EnemySubtype`);
+    out[name as EnemySubtype] = v;
+  }
+  return out;
+})();
+
+const WAVE_RULES = RAW_DIFFICULTY.wave as { points: number[]; variety: number[]; maxPerType: number };
+const CEILING_RULES = RAW_DIFFICULTY.ceiling as { base: number; waveBias: number; slope: number; slopePerLevel: number };
+const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number };
+
+export const ARENA_LEVEL_MAX = 20;
+
+/** Spawn amount and enemy stats for an arena level (1..20).  Levels 1-3 are the
+ *  old Low / Med / High rows, unchanged; above that health and damage grow much
+ *  faster than the spawn amount (D-S3-g). */
+export function levelScales(level: number): { spawn: number; health: number; speed: number; damage: number } {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  if (L <= 3) {
+    return { spawn: DIFFICULTY_SCALES[L] ?? 1, ...(DIFFICULTY_STAT_SCALES[L] ?? DIFFICULTY_STAT_SCALES[3]) };
+  }
+  const g = dmath.pow(LEVEL_RULES.hpDmgGrowth, L - 3);
+  return {
+    spawn: Math.min(LEVEL_RULES.spawnCap, dmath.pow(LEVEL_RULES.spawnGrowth, L - 3)),
+    health: g, speed: 1, damage: g,
+  };
+}
+
+/** The highest-rated enemy a level's wave `index` (0-based) may contain. */
+export function rosterCeiling(level: number, index: number): number {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  return CEILING_RULES.base + (index + CEILING_RULES.waveBias) * (CEILING_RULES.slope + CEILING_RULES.slopePerLevel * (L - 1));
+}
+
+/** Points a level's wave `index` spends. */
+export function waveTargetPoints(level: number, index: number): number {
+  const w = Math.min(index, WAVE_RULES.points.length - 1);
+  return WAVE_RULES.points[w] * levelScales(level).spawn;
 }
 
 /**
- * Build the ordered subtype list a timed wave will spawn (length = budget).
+ * The ordered subtype list an ordinary wave spawns.
  *
- * Scripted waves (index < WAVE_DEFINITIONS.length) cycle their authored
- * composition to fill the budget.  Later waves roll each slot independently:
- * 50/50 ram/shoot role, tier from the WAVE_TIER_WEIGHTS row for the wave's
- * set.  A variety guarantee re-rolls one slot's role when a random wave with
- * budget ≥ 3 lands all-rammer or all-shooter, so every such wave mixes types.
+ *  1. POOL — every enemy rated at or under the roster ceiling for (level, wave).
+ *  2. TYPES — `variety[wave]` distinct ones: one ANCHOR from the top third of
+ *     the pool (so the ceiling is actually used and waves climb) and the rest
+ *     at random; types the previous wave used go to the back of the line, so
+ *     consecutive waves differ.
+ *  3. COUNTS — the wave's points are split EVENLY across the chosen types, so a
+ *     cheap enemy comes in numbers and an expensive one comes alone; then
+ *     nudged until the total is within half the cheapest unit of the target.
+ *  4. SHUFFLE — so the types stream in mixed, not in blocks.
+ * Every draw is the seeded `waves` stream, so an arena's seed fixes its waves.
  */
-export function buildWaveSpawnList(index: number, budget: number, forced?: EnemySubtype | null): EnemySubtype[] {
-  // DBG enemy-test override: spawn ONLY the forced subtype (ignores the
-  // scripted/weighted mix) so a specific enemy/trait can be tested in isolation.
-  if (forced) return new Array(budget).fill(forced);
+export function buildLevelWave(level: number, index: number, prev: readonly EnemySubtype[] = []): EnemySubtype[] {
+  const rate = (s: EnemySubtype) => ENEMY_RATING[s] ?? 1;
+  const target = waveTargetPoints(level, index);
+  const ceiling = rosterCeiling(level, index);
+  const all = (Object.keys(ENEMY_RATING) as EnemySubtype[]).sort((a, b) => rate(b) - rate(a) || (a < b ? -1 : 1));
+  let pool = all.filter(s => rate(s) <= ceiling + 1e-9);
+  if (pool.length === 0) pool = [all[all.length - 1]];
+
+  const shuffle = <T,>(arr: T[]): T[] => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(sim.waves() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  const freshFirst = (arr: EnemySubtype[]) => [...arr.filter(s => !prev.includes(s)), ...arr.filter(s => prev.includes(s))];
+
+  const k = Math.min(pool.length, WAVE_RULES.variety[Math.min(index, WAVE_RULES.variety.length - 1)]);
+  const top = pool.slice(0, Math.max(1, Math.ceil(pool.length / 3)));
+  const anchor = freshFirst(shuffle([...top]))[0];
+  const rest = freshFirst(shuffle(pool.filter(s => s !== anchor)));
+  const chosen = [anchor, ...rest.slice(0, k - 1)];
+
+  const per = target / chosen.length;
+  const counts = chosen.map(s => Math.min(WAVE_RULES.maxPerType, Math.max(1, Math.round(per / rate(s)))));
+  const points = () => counts.reduce((a, c, i) => a + c * rate(chosen[i]), 0);
+  const cheapest = Math.min(...chosen.map(rate));
+  for (let guard = 0; guard < 64; guard++) {
+    const total = points();
+    if (total < target - cheapest / 2) {
+      let best = -1, gap = -Infinity;
+      counts.forEach((c, i) => { if (c < WAVE_RULES.maxPerType && per - c * rate(chosen[i]) > gap) { gap = per - c * rate(chosen[i]); best = i; } });
+      if (best < 0) break;
+      counts[best]++;
+    } else if (total > target + cheapest / 2) {
+      let best = -1, over = -Infinity;
+      counts.forEach((c, i) => { if (c > 1 && c * rate(chosen[i]) - per > over) { over = c * rate(chosen[i]) - per; best = i; } });
+      if (best < 0) break;
+      counts[best]--;
+    } else break;
+  }
   const list: EnemySubtype[] = [];
-  if (index < WAVE_DEFINITIONS.length) {
-    const flat: EnemySubtype[] = [];
-    for (const g of WAVE_DEFINITIONS[index].enemies) {
-      for (let i = 0; i < g.count; i++) flat.push(g.subtype);
-    }
-    for (let i = 0; i < budget; i++) list.push(flat[i % flat.length]);
-    return list;
-  }
-
-  const set = Math.min(
-    Math.floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH),
-    WAVE_TIER_WEIGHTS.length - 1,
-  );
-  const weights = WAVE_TIER_WEIGHTS[set];
-  for (let i = 0; i < budget; i++) {
-    const role = sim.waves() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
-    list.push(SUBTYPE_BY_ROLE_TIER[role][rollTier(weights)]);
-  }
-
-  if (budget >= 3) {
-    const hasRam   = list.some(s => ENEMY_ROLE[s] === EnemyRole.RAMMING);
-    const hasShoot = list.some(s => ENEMY_ROLE[s] === EnemyRole.SHOOTING);
-    if (!hasRam || !hasShoot) {
-      const k = Math.floor(sim.waves() * budget);
-      const tier = SUBTYPE_BY_ROLE_TIER[ENEMY_ROLE[list[k]]].indexOf(list[k]);
-      list[k] = SUBTYPE_BY_ROLE_TIER[hasRam ? EnemyRole.SHOOTING : EnemyRole.RAMMING][tier];
-    }
-  }
-  return list;
+  chosen.forEach((s, i) => { for (let n = 0; n < counts[i]; n++) list.push(s); });
+  return shuffle(list);
 }
 
 /**

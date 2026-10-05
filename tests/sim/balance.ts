@@ -119,9 +119,10 @@ export function playArena(o: PlayOpts): RunReport {
     const base = DIFFICULTY_STAT_SCALES[o.difficulty ?? 3];
     DIFFICULTY_STAT_SCALES[o.difficulty ?? 3] = { health: base.health * o.statScale, speed: base.speed, damage: base.damage * o.statScale };
   }
-  g.setDifficulty(o.difficulty ?? 3);
+  g.setDifficulty(Math.min(3, o.difficulty ?? 3));
+  g.dbgArenaLevel = o.difficulty ?? 3; // the arena LEVEL (1..20) drives waves + enemy scale
   g.beginSeededRun(o.seed, o.map as MapType);
-  if (g.getDifficulty() !== (o.difficulty ?? 3)) throw new Error('balance: difficulty did not stick');
+  if (g.arenaLevel() !== (o.difficulty ?? 3)) throw new Error('balance: arena level did not stick');
   wear(g, o.loadout);
   const withRivals = o.rivals !== false;
   if (!withRivals) g.nextRivalScore = Infinity;
