@@ -932,8 +932,26 @@ planning session's own branch, named for the Steam question that opened that
 conversation before D0 settled on mobile — so it describes this phase
 BADLY, and that was accepted deliberately as the price of keeping one branch
 instead of two.  And it means the plan doc has lived on this branch from the
-start, which is why `main` does not carry it yet (PR #108): a work session
-must take the plan from the integration branch, not from the default one.
+start: a work session must take the plan from the integration branch, not
+from the default one.
+
+**`main` NOW CARRIES A STALE COPY, AND THAT IS WORSE THAN CARRYING NONE**
+(2026-10-06).  It used not to carry the doc at all — PR #108 was to be its
+first arrival — but `S3`'s accidental merge took it to `main` along with
+everything else, frozen at **D32**.  So `main`'s copy is missing D33 (data
+formats), D34, D35, D36 and D37 — including the rule about where to open a
+PR, which is the one a session reads this file to learn.  A session that
+pulls `main` therefore gets a plan that looks complete and authoritative and
+silently predates the correction to the mistake that put it there.  THE
+INTEGRATION BRANCH IS THE ONLY LIVE COPY; `main`'s is a snapshot, and the
+check is one line:
+
+```
+git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D3[3-9] '
+```
+
+Non-zero means you are reading the live one.  This resolves when the phase
+promotes; until then, every brief says which branch the plan comes from.
 
 ~~**This plan doc must reach `main` early**, because fresh work sessions
 clone the default branch and would otherwise not see it.~~  **OVERTAKEN by
