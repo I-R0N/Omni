@@ -49,6 +49,15 @@ phase is coherent enough to merge to `main`.
 2. **The gameplay PR** — small, built on top, and the only one that needs
    judging by playing it through the preview link.
 
+**BOTH are based on `claude/steam-game-publishing-xhnui2`, never on `main`**
+(user call D37).  State the base when you open them —
+`gh pr create --base claude/steam-game-publishing-xhnui2` — because the
+default is `main` and a PR opened without it goes to the wrong place even
+from a correctly branched session.  That is not hypothetical: it is how
+`S3`'s work reached `main` (§5, D37).  Everything in this phase accumulates
+on the integration branch, is tested there as a whole, and rolls into `main`
+once.
+
 ---
 
 ## 1. The goal, sharpened
@@ -898,6 +907,26 @@ git fetch origin claude/steam-game-publishing-xhnui2
 git checkout -B <my-work-branch> origin/claude/steam-game-publishing-xhnui2
 ```
 
+**AND THE PR IS OPENED AGAINST THAT BRANCH, EXPLICITLY** (user call D37).
+Branching from the integration branch is NOT enough, because the PR BASE is a
+separate choice and its default is wrong: `gh pr create` bases on the
+repository's DEFAULT branch, i.e. `main`.  That is exactly how `S3`'s 62-commit
+PR #113 reached `main` — the session branched correctly and opened its PR at
+the default, doing nothing wrong.  So every brief states the base, and states
+it as a flag rather than as prose:
+
+```
+gh pr create --base claude/steam-game-publishing-xhnui2 --head <my-work-branch>
+```
+
+A PR already open at the wrong base is RETARGETED, not reopened — GitHub's
+"Edit" beside the base branch, or `gh pr edit <n> --base
+claude/steam-game-publishing-xhnui2` — which keeps the review history and the
+preview link.  **The PM session checks the base of every open PR in this
+phase** rather than trusting that the brief was followed, for the same reason
+the branch-point mitigation lives with the PM: it does not depend on a work
+session noticing anything.
+
 Two things about the NAME, so nobody reads meaning into it.  It is the
 planning session's own branch, named for the Steam question that opened that
 conversation before D0 settled on mobile — so it describes this phase
@@ -913,7 +942,9 @@ promotes once, so the plan will NOT reach `main` early and this requirement
 is withdrawn rather than left standing as an unmet one.
 
 What replaces it is **brief hygiene, and it is the PM session's
-responsibility, not a work session's**.  The hazard is real and has already
+responsibility, not a work session's** — now in TWO parts, the branch point
+below and the PR BASE above (D37), because covering only the first is what let
+`S3`'s work reach `main`.  The hazard is real and has already
 fired once: the `S1` brief said `git checkout -B <branch> origin/main`, and
 because the plan lived only on this branch that command would have DELETED
 `docs/ENGINE_CORE_PLAN.md` from the working tree of a session whose first
@@ -935,6 +966,13 @@ Note the push list is now the ONLY way a run reaches full scope besides the
 `full-tests` label: a PR's BASE stopped picking the scope (user call,
 2026-09-29), so a PR against `main` runs smoke like any other.  Do not
 expect a plain PR into this branch, or out of it, to run the whole suite.
+That shape is what D37's model RUNS ON: a PR into the integration branch pays
+only the ~2-minute smoke per push, and the FULL suite runs once, on the merge,
+against everything accumulated so far — "merge to this branch and test before
+rolling into `main`" is already the wiring rather than something to build.
+Two consequences worth stating: the full verdict belongs to the merge COMMIT
+and not to the PR (§7's push-burst rule — name the commit), and a PR that
+wants the whole net BEFORE merging asks for it with the `full-tests` label.
 
 **A work session's own gate** is therefore CLAUDE.md §7's rule verbatim:
 typecheck + build + `npm test` (smoke) + the suites the change touches, per
@@ -1028,6 +1066,7 @@ who made it, and the consequences for other sessions.
 | D34 | PM | 2026-10-06 | **D33's RULE STANDS; ITS "MIXED CASE" CAVEAT IS RETIRED** (PM reconciliation after `6558b71`, not a new call).  The index is NOT a mixed case: `music:import` writes its `plan` block too, so `index.json` is a wholly generator-written file and the rule's own answer for it — JSON — is now the clean case rather than the exception.  Read D33's rule as written and ignore only its mixed-case paragraph. | D33 argued the index "pays for being JSON exactly where you would expect" because `plan` was HAND-AUTHORED editorial choice sitting in generated output.  That was true of the file when D33 was written and is not true of the code: `scripts/music-import.mjs` ends with `for (const role of use) index.plan[role] = meta.id`, so each song's own `use` array decides which roles it claims and the importer stamps them into the index.  **The editorial choice did not disappear — it moved UPSTREAM**, into the kit's hand-authored `song.json`, which is exactly where D33's deciding property says it belongs.  So the rule did better than its own footnote: the one file that looked like a counter-example turned out to obey it.  Two consequences.  (1) `plan` is still hand-EDITABLE (the importer never clears a role), so a human pin survives until a song claims that role — it is generator-written, not generator-owned.  (2) It puts a NEW question where the old caveat was, and that one is the user's, not mine: the kit's `song.json` is hand-written and read by a generator, so comments WOULD survive in it and D33's rule points at TOML — see §8.  Appended rather than editing D33, per §0: the log is append-only, and a correction that rewrites the row it corrects destroys the evidence that the rule was tested. |
 | D35 | PM | 2026-10-06 | **THE KIT'S `song.json` STAYS JSON, AND D33 CARRIES THE EXEMPTION** (user call, taking the PM's recommendation (a) on D34's §8 hand-up).  D33's rule points a hand-written file at TOML; the GarageBand kit's `song.json` is hand-written, read only by `music:import`, and stays JSON.  The rule is not weakened — it gains a stated boundary: **a file small enough that its fields need no explanation does not need a format that can explain them.**  The moment a kit carries reasoning worth a comment — WHY a song claims `boss`, why a tempo was chosen — that is the moment to split it, which is D33's own test applied one level up. | Options weighed were (a) leave it JSON and write the exemption into the rule, (b) move it to TOML for the sake of commentary, (c) TOML upstream with the generator's copy staying JSON.  (b) buys a comment nobody has yet wanted to write, against a change to W1's authoring surface and `docs/MUSIC_PIPELINE.md`; (c) is the most honest about the two files having different writers and the least worth its cost, since it means two formats for one shape.  The deciding fact is that the file is FIVE live fields (`id`, `title`, `bpm`, `bars`, `use`), four of which the importer validates by name, plus two inert ones — nothing in it is a judgement that needs defending.  Recorded in CLAUDE.md §8 beside D33, since that is where the rule is read. |
 | D36 | PM | 2026-10-06 | **D15 NO LONGER DESCRIBES THE BRANCH TOPOLOGY: `S3` PROMOTED TO `main` ON ITS OWN** (PM reconciliation of what happened, not a new call).  PR #113 (`claude/s3-numbers` → `main`, merged 2026-10-06) carried 62 commits and 155 files — `dmath`, the TOML content tables, the balance harness, factorial pricing, per-arena difficulty and the hub layout — so `main` is now AHEAD of the phase branch, which D15 said would not happen until the phase ended.  The user reports the merge was PREMATURE and that `S3` still has work in flight, so this is a topology change to absorb, not a phase completion. | **What is true now:** `main` holds `S1` + `S2` + `S3`; the phase branch holds W1 (the music pipeline), the W2 revert, the Critical Mass import and this plan's own commits — 14 commits `main` lacks.  The two diverged at `33ac6f3`.  **What was done:** `main` was merged INTO the phase branch (three conflicts: this doc twice, `package.json`, `package-lock.json`), so PR #108 is mergeable again and carries the music work forward rather than stranding it.  Both devDependencies survive — W1's `ffmpeg-static` and `S3`'s `smol-toml` — and the lockfile was REGENERATED with npm rather than hand-merged.  **What this costs:** D15's guarantee was that the phase lands as one reviewable promotion; that is gone and cannot be recovered by anything written here.  What replaces it is weaker and worth stating plainly — the phase branch is now a FOLLOWER of `main`, so every session on it must merge `main` before pushing, and a second premature promotion is now the likely failure rather than a hypothetical one.  **Not decided here:** whether the phase branch should keep accumulating at all, or whether the remaining work should go to `main` in PRs the way `S3`'s did.  That is the user's, and it is the one question this topology actually raises. |
+| D37 | PM | 2026-10-06 | **EVERY FUTURE PR IN THIS PHASE IS BASED ON `claude/steam-game-publishing-xhnui2`, AND THE BASE IS NOW A STATED PART OF EVERY BRIEF** (user call, settling D36's open question).  `S3`'s work was always INTENDED for the integration branch — the merge to `main` was a mistake, not a change of plan — so D15's model stands: the phase branch accumulates every session and workstream, is tested whole, and rolls into `main` once.  What is new is the mechanism that failed. | **WHY IT HAPPENED, because it will recur otherwise:** §5's brief hygiene covered the BRANCH POINT (`git checkout -B <branch> origin/claude/steam-game-publishing-xhnui2`, carried verbatim in every brief after the `S1` near-miss) and said NOTHING about the PR BASE — and `gh pr create` defaults the base to the repository's DEFAULT branch, which is `main`.  So a session that branched correctly still opened its PR at `main` by doing nothing wrong, and PR #113 (62 commits, 155 files) merged there.  A convention that depends on a tool's default being what you want is not a convention; §5 now carries the base as its own hygiene item, with `--base` written out.  **WHAT IS ALREADY TRUE AND NEEDS NO WIRING:** the phase branch sits in `pr-checks.yml`'s `push.branches`, so a merge INTO it runs the FULL suite while each PR push into it runs the cheap smoke — which is exactly the user's "merge these changes to this branch and test before rolling into main".  And the branch is a sound base again: `227afc5` merged `main` into it, so it now CONTAINS every commit `main` has (verified: 0 commits main-ahead, 15 phase-ahead) and a PR based on it carries `S3`'s work as well as the music work.  **WHAT THIS COSTS, stated plainly:** `main` already carries `S1`–`S3`, so the phase no longer promotes as one reviewable diff — D15's original guarantee is spent and D36 records that.  The model from here is the one the user asked for and it is the weaker, workable version: the phase branch stays the integration point and the place the whole net runs, and what eventually reaches `main` is the remainder. |
 
 ---
 
