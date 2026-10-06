@@ -17,7 +17,10 @@
  *      the exactly-periodic file the engine needs (0.5 s lead-in + loop +
  *      1.5 s run-out), so it loops without a seam;
  *   4. sets loudness with ONE gain for every layer (the full stack lands at
- *      -13 LUFS, never above a 0.97 peak), so your mix balance is kept;
+ *      -13 LUFS), capped only so the loudest single FILE (any layer, variant
+ *      or one-shot) peaks at or below 0.97 — the layers are summed only in
+ *      the game's audio graph, well under unity, so the sum is not capped.
+ *      Your mix balance is kept; a line says so when the cap binds;
  *   5. encodes 32 kHz MP3 (mono when a layer is mono) into
  *      public/assets/audio/score/<id>/ and adds or updates the song — and any
  *      plan roles song.json asks for — in public/assets/audio/score/index.json.
@@ -195,22 +198,32 @@ const stack = [new Float32Array(L), new Float32Array(L)];
 for (const n of LAYERS) for (let c = 0; c < 2; c++) for (let i = 0; i < L; i++) stack[c][i] += loops[n][c][i];
 const stackLufs = integrated(stack);
 if (!Number.isFinite(stackLufs)) die('could not measure loudness (is the export silent?)');
-let gain = Math.pow(10, (STACK_LUFS - stackLufs) / 20);
-let peak = 0;
-for (let c = 0; c < 2; c++) for (let i = 0; i < L; i++) peak = Math.max(peak, Math.abs(stack[c][i]));
-for (const n of [...LAYERS, ...ONE_SHOTS]) if (audio[n]) for (const ch of (loops[n] ?? audio[n])) for (const v of ch) peak = Math.max(peak, Math.abs(v));
-if (peak * gain > PEAK_CEIL) gain = PEAK_CEIL / peak;
-// The gain comes from the DEFAULT stack alone (a variant is a swap for its
-// slot, never an addition to the stack); a variant that would clip under it is
-// reported rather than allowed to change the balance.
-for (const [k, st] of Object.entries(variantLoops)) {
-  let vp = 0;
-  for (const ch of st) for (const v of ch) vp = Math.max(vp, Math.abs(v));
-  if (vp * gain > 1) console.log(`  ⚠ variant ${k.replace('/', '-')} peaks at ${(vp * gain).toFixed(2)} after the gain — it will clip; lower it in the mix`);
-}
+const targetGain = Math.pow(10, (STACK_LUFS - stackLufs) / 20);
+let gain = targetGain;
+// THE CAP IS PER FILE, NOT PER SUM.  The layers are only ever summed inside the
+// game's audio graph, after the score's output gain and the music bus (together
+// about 0.4), so the sum cannot clip; what must stay under the ceiling is each
+// FILE that gets encoded.  The loudest file of any layer, variant or one-shot
+// therefore limits the one shared gain, and the target itself comes from the
+// stack of DEFAULT stems alone (a variant is a swap for its slot, never an
+// addition to the stack).
+const filePeak = (chs) => { let m = 0; for (const ch of chs) for (const v of ch) m = Math.max(m, Math.abs(v)); return m; };
+const fileList = [
+  ...LAYERS.map(n => [`${n}.mp3`, loops[n]]),
+  ...Object.entries(variantLoops).map(([k, st]) => [`${k.replace('/', '-')}.mp3`, st]),
+  ...ONE_SHOTS.filter(n => audio[n]).map(n => [`${n}.mp3`, audio[n]]),
+];
+let loudest = ['', 0];
+for (const [name, chs] of fileList) { const m = filePeak(chs); if (m > loudest[1]) loudest = [name, m]; }
+const capped = loudest[1] * targetGain > PEAK_CEIL;
+if (capped) gain = PEAK_CEIL / loudest[1];
 const atmosLufs = integrated(loops.atmos) + 20 * Math.log10(gain);
 console.log(`  full stack ${stackLufs.toFixed(1)} LUFS → gain ${(20 * Math.log10(gain)).toFixed(1)} dB `
   + `(stack ${(stackLufs + 20 * Math.log10(gain)).toFixed(1)} LUFS, atmos alone ${atmosLufs.toFixed(1)} LUFS)`);
+if (capped) {
+  console.log(`  ⚠ gain capped by ${loudest[0]}: its peak would reach ${(loudest[1] * targetGain).toFixed(2)} at the −13 LUFS target, `
+    + `so it is held to ${PEAK_CEIL} — the full stack lands at ${(stackLufs + 20 * Math.log10(gain)).toFixed(1)} LUFS instead of ${STACK_LUFS}`);
+}
 if (atmosLufs > -14) console.log('  ⚠ the exploration bed (atmos) is nearly as loud as the full fight — the layers will not build much');
 
 // ── build the periodic files ─────────────────────────────────────────────────

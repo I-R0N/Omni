@@ -34,8 +34,14 @@ standalone build inlines it. **Adding or replacing a song needs no code.**
   pass's echoes), then writes the exactly-periodic file the engine needs:
   0.5 s lead-in + loop + 1.5 s run-out. Any loop window inside that margin is
   seamless, whatever the MP3 decoder's delay.
-- One gain for all layers: the full stack at −13 LUFS (never above a 0.97
-  peak). The balance between layers is the GarageBand mix's.
+- One gain for all layers: the full stack of the six default layers lands at
+  −13 LUFS. The only cap is per FILE: the loudest single file of any layer,
+  variant or one-shot is held to a 0.97 peak. The layers are summed only inside
+  the game's audio graph, after the score's output gain and the music bus
+  (together about 0.4), so the sum is not capped. When the cap binds, the import
+  prints a line naming the file and the stack loudness it leaves, so a dense mix
+  that ends up quiet is visible. The balance between layers is the GarageBand
+  mix's.
 - 32 kHz MP3, mono when a layer is mono. Writes `song.json` beside the stems.
 - Adds or replaces the song in `index.json`; each role in song.json's `use`
   (`hub`, `field`, `arena`, `boss`) points the plan at it.
@@ -67,7 +73,7 @@ These names are what the music is composed against. They are exact strings.
 | `station` | within 1.6 screens of a space station (leaves past 2.2) |
 | `portal` | within 1.2 screens of a portal or rift (leaves past 1.7) |
 | `rare-item` | within 1.0 screen of a high-value pickup (leaves past 1.4): a salvage drop holding 6+ units (merged piles sum), the golden snitch, or a POI declaring a rare `poiTier` |
-| `danger` | within 0.8 screens of a threat that is not an engaged fight (leaves past 1.2): a rival hunting the player, or a dragon. Portals have their own tag; bubbles raise nothing |
+| `danger` | within 0.8 screens of a threat that is not an engaged fight (leaves past 1.2): a rival hunting the player, or a dragon. Portals have their own tag; bubbles raise nothing. Tune with `MUSIC_DANGER_ENTER_SCREENS` / `MUSIC_DANGER_LEAVE_SCREENS` |
 | `deep-space` | none of the four above for 20 sim seconds |
 | `enemy:swarm` | swarm is the dominant enemy family |
 | `enemy:heavy` | heavy is the dominant enemy family |
@@ -94,9 +100,12 @@ The table is `AUDIO_CONSTANTS.MUSIC_ENEMY_FAMILY`.
 
 - **atmos** follows the context tags. Tags are tried in `contextPriority` order
   (default `danger`, `rare-item`, `station`, `portal`, `deep-space`, then the
-  enemy tags); the first tag that some variant of the slot claims wins, and the
-  first variant in list order that claims it is used. If none claims an active
-  tag, the default `atmos.mp3` plays.
+  enemy tags); the first active tag that some variant of the slot claims wins,
+  and the first variant in list order that claims it is used. **A tag the slot
+  has no variant for is passed over, and the next-priority active tag is tried**;
+  only when no active tag is claimed does the default `atmos.mp3` play. For
+  example, a song with no `danger` variant still gets its `station` variant
+  while both `danger` and `station` are active.
 - **Combat slots** (`pulse`, `groove`, `heavy`, `apex`, `boss`) look only at the
   enemy family. A slot picks its variant when it ENTERS, from the dominant
   family, and locks it. It re-picks at a phrase boundary only if another family
@@ -104,7 +113,9 @@ The table is `AUDIO_CONSTANTS.MUSIC_ENEMY_FAMILY`.
 - **Timing.** Changes commit only on phrase boundaries (`phraseBars` bars from
   the start of the song, default 8), as a crossfade centred on the bar line:
   about one bar for `atmos`, one beat for the rhythmic slots. After a change a
-  slot holds its variant for 2 phrases. A song change starts every slot on its
+  slot holds its variant for 2 phrases
+  (`AUDIO_CONSTANTS.MUSIC_VARIANT_DWELL_PHRASES`; lower it if variant changes
+  feel slow). A song change starts every slot on its
   appropriate variant at bar 1 (if it has decoded by then).
 - **Loading.** Variants are decoded on demand: the sounding one, the one the
   slot would pick now, and warm candidates (a context within 1.5× its enter
@@ -152,9 +163,10 @@ project tempo, Auto Normalize off) and name it `<slot>-<variant>`, e.g.
 - warns about, and ignores, a file that looks like a variant song.json does not
   declare;
 - folds and encodes each variant like its default, under the SAME single gain —
-  the gain is measured from the stack of the six DEFAULT stems only, so adding
-  variants never changes the loudness balance (it warns if a variant would clip
-  under that gain);
+  the target is measured from the stack of the six DEFAULT stems only, so adding
+  variants never changes the loudness balance, but every variant file counts
+  toward the per-file 0.97 peak cap (the loudest file limits the shared gain, and
+  a line says so);
 - writes `<slot>-<variant>.mp3` into the song folder, removes variant files a
   re-import no longer declares, and records `variants`, `phraseBars` and
   `contextPriority` in `score/index.json`.
