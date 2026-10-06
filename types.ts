@@ -1829,6 +1829,9 @@ export interface EngineStats {
   /** Enemies left to destroy this wave (unspawned remainder + alive).
    *  Completion model: the wave ends only when this reaches 0. */
   enemiesRemaining?: number;
+  /** The same count split by archetype (first-appearance order) — what the
+   *  HUD's wave strip draws.  Present only while a wave is active. */
+  enemyRoster?: { subtype: EnemySubtype; count: number }[];
   /** Live boss readout ((h)) — present only while a capstone boss is alive,
    *  so the HUD can show a named bar with its phase pips.  `healthFrac` /
    *  `shieldFrac` are 0..1; `phase` is the 0-based BOSS_DEFS phase index. */

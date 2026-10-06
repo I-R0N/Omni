@@ -103,6 +103,29 @@ export class WaveSystem {
     return (this.spawnList.length - this.nextSpawnIdx) + this.countLiveTracked(entities);
   }
 
+  /** What is still left to kill, per subtype: the unspawned remainder of the
+   *  spawn list plus the live tracked enemies — the same two terms
+   *  `enemiesRemaining` sums, split by archetype for the HUD's wave strip.
+   *  First-appearance order; empty outside the active phase.  Allocates one
+   *  small array per call, which the stats push already does per frame. */
+  public remainingRoster(entities: GameEntity[]): { subtype: EnemySubtype; count: number }[] {
+    const out: { subtype: EnemySubtype; count: number }[] = [];
+    if (this.waveState !== 'active') return out;
+    const bump = (subtype: EnemySubtype) => {
+      for (let k = 0; k < out.length; k++) {
+        if (out[k].subtype === subtype) { out[k].count++; return; }
+      }
+      out.push({ subtype, count: 1 });
+    };
+    for (let i = this.nextSpawnIdx; i < this.spawnList.length; i++) bump(this.spawnList[i]);
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding
+          && e.countsTowardWave !== false && e.enemySubtype) bump(e.enemySubtype);
+    }
+    return out;
+  }
+
   /** Reset all wave state and start wave 0.  Skipped entirely when
    *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no

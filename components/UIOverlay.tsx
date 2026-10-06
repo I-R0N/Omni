@@ -1,15 +1,36 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EngineStats, MapType, GameState, ControlScheme } from '../types';
-import { CONTROL_SCHEMES, controlSchemeDef } from '../constants';
+import { CONTROL_SCHEMES, controlSchemeDef, ENEMY_VARIANTS } from '../constants';
+import { drawEnemyIcon } from '../engine/systems/render/enemyShapes';
 import type { GameEngine } from '../engine/GameEngine';
 import DebugMenu, { DebugLauncher } from './DebugMenu';
 import {
-  OVERLAY_SCRIM, PANEL_OPAQUE, OVERLAY_FADE_IN, OVERLAY_KEYFRAMES,
+  OVERLAY_SCRIM, PANEL_GLASS, OVERLAY_FADE_IN, OVERLAY_KEYFRAMES,
   T_MICRO, T_NOTE, T_BODY, T_ROW, PANEL, PANEL_ROW, panelAccent, HEADING,
   SCREEN_TITLE, OUTCOME_TITLE, TAP, BTN_PRIMARY, BTN_SECONDARY, BTN_COMPACT,
   CHIP_BASE, CHIP_OFF, HUD_CHIP, SECTION_TOGGLE, OVERLAY_FAB_CLEARANCE,
 } from './uiClasses';
+
+
+/** One archetype's flat silhouette at HUD size, drawn once per (shape, colour)
+ *  rather than per stats push — the strip re-renders every frame, the icon
+ *  does not change.  The canvas is backed at device resolution. */
+const WaveStripIcon: React.FC<{ shape: string; color: string; px: number }> = ({ shape, color, px }) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    const ctx = c?.getContext('2d');
+    if (!c || !ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    c.width = Math.round(px * dpr);
+    c.height = Math.round(px * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, px * dpr / 2, px * dpr / 2);
+    ctx.clearRect(-px, -px, px * 2, px * 2);
+    drawEnemyIcon(ctx, shape, color, px * 0.42);
+  }, [shape, color, px]);
+  return <canvas ref={ref} style={{ width: px, height: px }} aria-hidden />;
+};
 
 interface UIOverlayProps {
   stats: EngineStats;
@@ -1187,6 +1208,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
                   )}
                 </span>
+                {/* The wave strip: what is still left to kill, by archetype —
+                    the roster dialogue's information, kept on screen in
+                    miniature.  Counts fall as they die and a type drops off
+                    at zero. */}
+                {stats.enemyRoster && stats.enemyRoster.length > 0 && (
+                  <div data-testid="hud-wave-strip" className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    {stats.enemyRoster.map(r => {
+                      const v = ENEMY_VARIANTS[r.subtype];
+                      return (
+                        <span key={r.subtype} data-subtype={r.subtype} className={`flex items-center gap-0.5 text-slate-200 ${T_MICRO} font-bold`}>
+                          <WaveStripIcon shape={v.shape} color={v.color} px={13} />
+                          {r.count}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
                 {isGrace && (
                   <p className={`text-emerald-400 ${T_NOTE} font-bold mt-0.5 animate-pulse`}>
                     Next in {stats.waveGraceTimer}s · tap to skip
@@ -1864,7 +1902,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 Controls &amp; Basics {collapsed.menuhelp ? '▸' : '▾'}
               </button>
               {!collapsed.menuhelp && (
-                <div className={`mt-2 w-full ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                <div className={`mt-2 w-full ${PANEL_GLASS} border border-sky-500/30 rounded-lg px-3 py-3`}>
                   {renderHelpPanel()}
                 </div>
               )}
@@ -2011,7 +2049,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 Controls &amp; Basics {collapsed.pausehelp ? '▸' : '▾'}
               </button>
               {!collapsed.pausehelp && (
-                <div className={`mt-2 mx-auto w-full max-w-xs ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                <div className={`mt-2 mx-auto w-full max-w-xs ${PANEL_GLASS} border border-sky-500/30 rounded-lg px-3 py-3`}>
                   {renderHelpPanel()}
                 </div>
               )}

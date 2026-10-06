@@ -6476,6 +6476,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
      and teal on the map is two contacts as far as the player is
      concerned.  Drops stay excluded entirely.
 
+- **THE WAVE STRIP**: the wave chip carries a miniature of the roster — `EngineStats.enemyRoster` (`WaveSystem.remainingRoster`: unspawned + live, per archetype, first-appearance order) drawn as a flat silhouette + count (`WaveStripIcon` in UIOverlay, `drawEnemyIcon`).  Counts fall as enemies die; a type drops off at zero.  `tests/wavestrip.spec.ts`.
 - **A wave start is a ROSTER DIALOGUE, not a banner** (`WaveAnnouncement.roster`, set by `WaveSystem.startWave` from the spawn list plus a capstone's boss): ONE panel above centre (`renderWaveRosterDialogue`, `render/hud.ts`, middle at 30% of the height) that leads with the enemies — each subtype that must die as its flat silhouette (`drawEnemyIcon`, `render/enemyShapes.ts`) and a large "xN" — under a small "WAVE n · DESTROY N" heading.  It holds `WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD` (3.2 s) rather than the banner's 1 s, so `renderWaveAnnouncements` reads each announcement's own `maxLifetime` for its hold.  Cells shrink to fit the width; a wave resumed from the arena memory shows its full roster.  Announcements without a roster (clears, snitch, boss phases) are still the plain banner.
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
@@ -6528,8 +6529,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   beside it because the band is width-bound: a column costs the chips
   nothing, and costs the arrows only `CONTROL_COLUMN_INSET`.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
-  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/55` +
-  `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
+  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/35` + the
+  debug panel's text outline, NO blur — user call: every menu reads like the
+  debug panel) is used by all five — main menu, pause, station,
   death, stage-clear — so the game never has two ideas of how much world
   shows through (user call: menus keep displaying the dynamic map).  Two
   things about it are load-bearing rather than taste: the ALPHA is a

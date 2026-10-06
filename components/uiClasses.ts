@@ -31,7 +31,8 @@
  * Note this does NOT track whether the sim is running: the pause menu freezes
  * the world and still shows it, which is exactly what was asked for.
  */
-export const OVERLAY_SCRIM = 'bg-slate-950/55 backdrop-blur-[3px]';
+export const OVERLAY_SCRIM =
+  'bg-slate-950/35 [text-shadow:0_1px_2px_rgb(0_0_0/0.95),0_0_1px_rgb(0_0_0/0.9)]';
 
 /**
  * Backing for content that must stay readable REGARDLESS of what is on the
@@ -42,6 +43,14 @@ export const OVERLAY_SCRIM = 'bg-slate-950/55 backdrop-blur-[3px]';
  * Nearly opaque plus its own blur, so it reads like a panel sitting ON the
  * scrim rather than more transparency stacked on transparency.
  */
+/**
+ * A panel ON a full-screen overlay — the debug menu's see-through look (user
+ * call: every menu reads like the debug panel): a light fill, the same text
+ * outline, no blur.  Replaces `PANEL_OPAQUE` for the Controls & Basics help.
+ */
+export const PANEL_GLASS =
+  'bg-slate-950/45 [text-shadow:0_1px_2px_rgb(0_0_0/0.95),0_0_1px_rgb(0_0_0/0.9)]';
+
 export const PANEL_OPAQUE = 'bg-slate-950/95 backdrop-blur-md';
 
 /**
@@ -147,15 +156,15 @@ export const T_ROW   = 'text-xs';      // 12px — data rows, button labels
 /** The neutral information PANEL.  Sixteen of the nineteen panels in the
  *  overlay already wanted exactly this; the other three said the same thing
  *  in slightly different slate. */
-export const PANEL = 'bg-slate-800/60 border border-slate-600/40 rounded-lg p-3';
+export const PANEL = 'bg-slate-800/40 border border-slate-600/40 rounded-lg p-3';
 /** Same panel, tighter — for a single-row strip rather than a stack. */
-export const PANEL_ROW = 'bg-slate-800/60 border border-slate-600/40 rounded-lg px-3 py-2';
+export const PANEL_ROW = 'bg-slate-800/40 border border-slate-600/40 rounded-lg px-3 py-2';
 /** An ACCENT panel keeps the neutral body and swaps only the border, so the
  *  accent reads as a label on a familiar shape rather than a different
  *  component.  Today: amber (commerce), rose (repair), sky (outfitting),
  *  emerald (reward). */
 export const panelAccent = (border: string) =>
-  `bg-slate-800/60 border ${border} rounded-lg p-3`;
+  `bg-slate-800/40 border ${border} rounded-lg p-3`;
 
 /** SECTION HEADING — the 11px uppercase rule the overlay already follows in
  *  every panel; named so the colour is the only thing a call site varies. */
