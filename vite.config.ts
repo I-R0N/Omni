@@ -4,6 +4,7 @@ import { execSync } from 'child_process';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { isTableId, loadTableModule, tableFile, TABLE_FILES, DATA_DIR } from './scripts/toml-tables.mjs';
 
 // Short git SHA of HEAD at build time, surfaced on the title screen so
 // it's obvious which commit a deployed preview is actually running.
@@ -119,6 +120,41 @@ function sfxManifestPlugin(): Plugin {
   };
 }
 
+
+/**
+ * Content tables — `data/*.toml` parsed at BUILD time into
+ * `virtual:table/<name>` modules (engine-core S3, plan D32).  See
+ * scripts/toml-tables.mjs, which owns the list and the parser and is shared
+ * with the Node sim harness (scripts/sim-test.mjs) so the two cannot disagree
+ * about what a table id resolves to.  The parser is a devDependency and ships
+ * no runtime bytes; the standalone single-file build gets the data because it
+ * is inside the module.
+ */
+function tomlTablesPlugin(): Plugin {
+  const RESOLVED = (id: string) => '\0' + id;
+  return {
+    name: 'toml-tables',
+    resolveId(id) { if (isTableId(id)) return RESOLVED(id); },
+    load(id) {
+      if (!id.startsWith('\0') || !isTableId(id.slice(1))) return;
+      const table = id.slice(1);
+      this.addWatchFile(tableFile(table));
+      return loadTableModule(table);
+    },
+    configureServer(server) {
+      const reload = (file: string) => {
+        if (!TABLE_FILES.includes(path.basename(file))) return;
+        for (const mod of server.moduleGraph.idToModuleMap.values()) {
+          if (mod.id && mod.id.startsWith('\0virtual:table/')) server.moduleGraph.invalidateModule(mod);
+        }
+        server.ws.send({ type: 'full-reload' });
+      };
+      server.watcher.add(DATA_DIR);
+      server.watcher.on('change', reload);
+    },
+  };
+}
+
 export default defineConfig(() => {
     return {
       define: {
@@ -129,7 +165,7 @@ export default defineConfig(() => {
         port: 3000,
         host: '0.0.0.0',
       },
-      plugins: [react(), tailwindcss(), nebulaManifestPlugin(), sfxManifestPlugin()],
+      plugins: [react(), tailwindcss(), nebulaManifestPlugin(), sfxManifestPlugin(), tomlTablesPlugin()],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

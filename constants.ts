@@ -1,5 +1,6 @@
 
 
+import * as dmath from './engine/systems/dmath';
 import { sim, fxRng } from './engine/systems/rng';
 import { WeaponConfig, WeaponType, MapType, EnemySubtype, EnemyRole, EntityType, EffectPayload, EnemyShape, DropType, GameEntity, ConsumeConfig, SpawnerConfig, PoiseConfig, ControlScheme } from './types';
 import {
@@ -18,6 +19,11 @@ import {
   MATERIALS, registerVariantMaterials,
 } from './engine/systems/energy';
 import { viewport } from './engine/ports';
+// Content tables: data/*.toml parsed at build time (scripts/toml-tables.mjs).
+import RAW_ENEMIES from 'virtual:table/enemies';
+import RAW_BOSSES from 'virtual:table/bosses';
+import RAW_MAP_POPULATION from 'virtual:table/map-population';
+import RAW_DIFFICULTY from 'virtual:table/enemy-difficulty';
 
 export const CHUNK_SIZE = 16; // 16x16 tiles
 export const SPATIAL_GRID_SIZE = 120; // Physics optimization bucket size
@@ -3085,7 +3091,7 @@ export const HOTSPOT_COLLAPSE = {
 // the piece size.
 //
 // DAMPING values are velocity/spin RETENTION factors per 60 Hz step
-// (applied as Math.pow(value, timeScale) in PhysicsSystem): 1.0 = lossless
+// (applied as dmath.pow(value, timeScale) in PhysicsSystem): 1.0 = lossless
 // inertial drift, < 1.0 bleeds motion.  A gentle bleed (≈0.99 ≈ 30 %/s) lets
 // a freed composite drift visibly for several seconds, then coast to rest
 // and SLEEP — so it stops driving the PerfController's dynamic-load signal
@@ -4556,7 +4562,7 @@ export function rockBreakChance(hitsTaken: number, ceiling: number): number {
   if (hitsTaken <= 1) return 0;
   if (hitsTaken >= ceiling) return 1;
   const frac = (hitsTaken - 1) / (ceiling - 1);
-  return Math.pow(frac, ROCK_BREAK.CURVE);
+  return dmath.pow(frac, ROCK_BREAK.CURVE);
 }
 
 // ── Rock chipping (conservation of mass) ───────────────────────────────────
@@ -4737,7 +4743,7 @@ export const NEBULA_CONSTANTS = {
   FADE_RATE_REFERENCE_SPEED: 1.0,
   FADE_RATE_MAX_SCALE: 3.0,
   // Per-frame damping (60Hz reference).  Applied as
-  //   velocity *= Math.pow(damping, dt * 60)
+  //   velocity *= dmath.pow(damping, dt * 60)
   // so behaviour is framerate-independent.  Values closer to 1.0 = less
   // damping = shards drift longer.  LINEAR at 0.97 → velocity halves
   // in ~23 frames (~0.38 s).  Nebula shards already skip the flow-
@@ -6687,6 +6693,9 @@ export interface ModuleDef {
   label: string;
   desc: string;
   cost: number;
+  /** Never sold in a shop: found only as an arena reward (boss drop, and later
+   *  mazes).  Marks past `SHOP_MAX_MARK` are rewardOnly by rule. */
+  rewardOnly?: boolean;
   weapon?: Delivery;       // family 'gun' only — the delivery it fires
   // Module mass.  Adds to the SHIP's total weight, which drags acceleration
   // via the SHIP_WEIGHT curve — no gun mounted = a slight accel boost.  Only
@@ -6805,20 +6814,33 @@ export const HEX_ADJACENCY: readonly (readonly number[])[] = [
   [0, 2, 6], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 6], [0, 5, 1],
 ];
 
-// Mk pricing ≈ the CUMULATIVE cost of the old per-level curve at that
-// level (rounded) so the salvage economy is unchanged in total: reaching
-// "Mk III power" costs about what L3 used to.
+// MK PRICING IS A FACTORIAL (user call, D-S3-f): a mark costs its own number
+// times the mark below it, so Mk II = 2 x Mk I, Mk III = 3 x Mk II (= 6 x Mk I),
+// Mk IV = 4 x Mk III (= 24 x), Mk V = 5 x Mk IV (= 120 x).  Each family states
+// only its Mk I price.  The shop stops at Mk III: a higher mark is a rare find
+// that only an arena reward hands out (`rewardOnly`), and at 24x / 120x it is
+// priced out of any shop run anyway.
 const MK = ['', ' Mk I', ' Mk II', ' Mk III', ' Mk IV', ' Mk V'];
+/** The highest mark a shop will sell. */
+export const SHOP_MAX_MARK = 3;
+/** Price of mark `mk` (1-based) from the Mk I price: mk! x mk1. */
+export const markCost = (mk1Cost: number, mk: number): number => {
+  let c = mk1Cost;
+  for (let m = 2; m <= mk; m++) c *= m;
+  return c;
+};
 /** `mk1Weight` is the Mk I mass; Mk II/III scale linearly with the mark, the
- *  same way their effects and prices do — a bigger plate is a heavier plate. */
+ *  same way their effects do — a bigger plate is a heavier plate.  `marks` is
+ *  how many marks the family has (3 unless stated). */
 const statMks = (
   family: ModuleFamily, group: ModuleGroup, kind: ModuleKind, label: string,
-  descOf: (mk: number) => string, costs: number[], effOf: (mk: number) => ModuleEffect,
-  mk1Weight: number,
-): ModuleDef[] => costs.map((cost, i) => ({
+  descOf: (mk: number) => string, mk1Cost: number, effOf: (mk: number) => ModuleEffect,
+  mk1Weight: number, marks: number = 3,
+): ModuleDef[] => Array.from({ length: marks }, (_, i) => ({
   id: `${family}_mk${i + 1}`, family, mark: i + 1, group, kind,
-  label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost, effect: effOf(i + 1),
+  label: `${label}${MK[i + 1]}`, desc: descOf(i + 1), cost: markCost(mk1Cost, i + 1), effect: effOf(i + 1),
   weight: +(mk1Weight * (i + 1)).toFixed(1),
+  ...(i + 1 > SHOP_MAX_MARK ? { rewardOnly: true } : {}),
 }));
 
 // ── SCANNER — a TOOL the player operates (rework, user call 2026-09-06) ───
@@ -6961,7 +6983,7 @@ const SCANNER_MK_DESC: Record<number, string> = {
 
 /** One mark's OWN scan radius. */
 export function scannerMarkRange(mk: number): number {
-  return SCANNER.BASE_RANGE * Math.pow(SCANNER.MARK_RANGE_STEP, mk - 1);
+  return SCANNER.BASE_RANGE * dmath.pow(SCANNER.MARK_RANGE_STEP, mk - 1);
 }
 
 /** The ship's scan radius PER TIER, from the marks actually installed and
@@ -7016,18 +7038,18 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // but is the adjacency ROOT the whole ship-module tree chains from, so
   // bought modules work out of the box.  cost 0 keeps it out of the shop.
   { id: 'hull_base', family: 'hull', mark: 0, group: 'ship', kind: 'ship', label: 'Base Hull', desc: 'Integral hull frame — ship modules chain from hull contact', cost: 0, weight: 1.0 },
-  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, [4000, 10000, 18000], mk => ({ maxHp: 25 * mk }), 0.8),
+  ...statMks('hull', 'ship', 'ship', 'Hull', mk => `+${25 * mk} max HP`, 4000, mk => ({ maxHp: 25 * mk }), 0.8),
   { id: 'shield', family: 'shield', mark: 1, group: 'ship', kind: 'ship', label: 'Shield', desc: 'Deflector shield core', cost: 30000, effect: { shieldCore: true }, weight: 0.6 },
   { id: 'flashlight_kit', family: 'utility', mark: 1, group: 'ship', kind: 'ship', label: 'Light', desc: 'Ship light — tap your ship to cycle it off / medium / high', cost: 9000, effect: { flashlight: true }, weight: 0.3 },
   // FIVE marks (rework).  Prices climb steeply because marks STACK now:
   // a second Mk I is a real range purchase, so the high marks have to be
   // priced against buying several low ones rather than against each other.
   ...statMks('scanner', 'ship', 'ship', 'Scanner', mk => SCANNER_MK_DESC[mk],
-    [7000, 17500, 32000, 55000, 90000], mk => ({ scannerMk: mk }), 0.25),
-  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, [4000, 10000, 18000], mk => ({ maxShield: 15 * mk }), 0.5),
-  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, [5000, 12500, 23000], mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
-  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, [6000, 15000, 27500], mk => ({ speedFrac: 0.08 * mk }), 0.6),
-  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, [6000, 15000, 27500], mk => ({ accelFrac: 0.12 * mk }), 0.4),
+    7000, mk => ({ scannerMk: mk }), 0.25, SCANNER.MAX_MARK),
+  ...statMks('plating', 'ship', 'ship', 'Plating', mk => `+${15 * mk} max shield`, 4000, mk => ({ maxShield: 15 * mk }), 0.5),
+  ...statMks('capacitor', 'ship', 'ship', 'Capacitor', mk => `+${25 * mk}% shield regen`, 5000, mk => ({ shieldRegenFrac: 0.25 * mk }), 0.3),
+  ...statMks('engine', 'ship', 'ship', 'Engine', mk => `+${8 * mk}% top speed`, 6000, mk => ({ speedFrac: 0.08 * mk }), 0.6),
+  ...statMks('thrusters', 'ship', 'ship', 'Thrusters', mk => `+${12 * mk}% acceleration`, 6000, mk => ({ accelFrac: 0.12 * mk }), 0.4),
   // ── Weapon group: guns (gun hexes only) ──
   // DELIVERY modules (the guns).  Each fires plain, weak kinetic energy on its
   // own; an ENERGY MODIFIER touching it (below) decides what it really is.
@@ -7052,8 +7074,8 @@ export const MODULE_DEFS: readonly ModuleDef[] = [
   // carries further, which under the energy model is the same statement.
   // Penetration existed to sell depth separately; depth is no longer a
   // separate thing to sell.
-  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% shot mass`, [8000, 20000, 38000], mk => ({ damageFrac: 0.12 * mk }), 0.2),
-  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, [10000, 26000, 51500], mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
+  ...statMks('gunnery', 'weapon', 'weapon-mod', 'Gunnery', mk => `+${12 * mk}% shot mass`, 8000, mk => ({ damageFrac: 0.12 * mk }), 0.2),
+  ...statMks('autoloader', 'weapon', 'weapon-mod', 'Autoloader', mk => `-${8 * mk}% fire cooldown`, 10000, mk => ({ cooldownFrac: 0.08 * mk }), 0.3),
   { id: 'overcharge', family: 'overcharge', mark: 1, group: 'weapon', kind: 'weapon-mod', label: 'Overcharge', desc: 'Hold-to-charge shots', cost: 45000, effect: { overcharge: true }, weight: 0.5 },
 ];
 
@@ -7098,9 +7120,6 @@ export const TIMED_WAVE_CONFIG = {
   // BACKLOG_MIN_GAP_SEC so a freed cap never dumps a clump at once.
   MAX_CONCURRENT_ENEMIES: 10,
   BACKLOG_MIN_GAP_SEC: 0.4,
-  // Wave-index → tier-weight row mapping for the weighted-random mix
-  // (see WAVE_TIER_WEIGHTS next to WAVE_DEFINITIONS).
-  TIER_SET_LENGTH: 3,
 };
 
 // ── Audio ─────────────────────────────────────────────────────────────────────
@@ -7528,7 +7547,7 @@ export function portalHorizonRadius(e: GameEntity): number {
   const span = e.portalDestSpan;
   const scale = span && span > 0
     ? Math.min(H.MAX_SCALE, Math.max(H.MIN_SCALE,
-        Math.pow(span / H.REFERENCE_SPAN, H.EXPONENT)))
+        dmath.pow(span / H.REFERENCE_SPAN, H.EXPONENT)))
     : 1;
   return (e.size.x / 2) * H.BASE_FRACTION * scale * getPortalSizeMult();
 }
@@ -8026,15 +8045,62 @@ export const STATION_VARIANTS: Record<StationKind, { name: string; color: string
   armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true } },
   tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true } },
 };
+/** THE HUB LAYOUT — where every station and rift sits on the 12k Overworld.
+ *
+ *  Home station at the centre.  Around it, a tight ring of EIGHT debug rifts
+ *  (the material-field maps, `HUB_TEST_PORTAL_SITES`, no gravity).  Beyond
+ *  that, FIFTEEN slots spread at even angular steps around the home station
+ *  over three radii: the 12 arena rifts (4 maps x 3 difficulty varieties)
+ *  and the three shop stations.  Ring index = variety, so the easy variant
+ *  of every map is the inner ring and the hard one the outer — distance from
+ *  home reads as difficulty.  The map order rotates one place per ring, so
+ *  neighbouring angles are never the same map.  Positions are computed once
+ *  (dmath, so every JS engine agrees) and rounded to whole units; the sim
+ *  test `hublayout.test.ts` pins the minimum torus spacing. */
+export const HUB_LAYOUT = {
+  /** Debug-field ring radius (home station CLEARANCE is 520). */
+  FIELD_RADIUS: 1300,
+  /** Arena / shop ring radii, inner to outer = easy / mid / hard. */
+  RING_RADII: [2700, 3900, 5000] as readonly number[],
+  /** Slots around the home station. */
+  SLOTS: 15,
+  /** Angle of slot 0, radians (keeps nothing exactly on an axis). */
+  ANGLE0: 0.2,
+};
+
+/** Arena maps in rotation order, and their three varieties (easy / mid / hard).
+ *  The MID variety keeps the original descriptor id, so saves, wave memory and
+ *  wrecks keyed on it carry over. */
+export const HUB_ARENA_VARIETIES: readonly { base: string; ids: readonly [string, string, string] }[] = [
+  { base: 'pocket',      ids: ['arena_pocket_easy',      'arena_pocket',      'arena_pocket_hard'] },
+  { base: 'universe',    ids: ['arena_universe_easy',    'arena_universe',    'arena_universe_hard'] },
+  { base: 'ring',        ids: ['arena_ring_easy',        'arena_ring',        'arena_ring_hard'] },
+  { base: 'seven_rings', ids: ['arena_seven_rings_easy', 'arena_seven_rings', 'arena_seven_rings_hard'] },
+];
+const HUB_SHOPS: readonly StationKind[] = ['shipwright', 'armory', 'tradehub'];
+
+function hubSlotPos(slot: number): { x: number; y: number } {
+  const a = HUB_LAYOUT.ANGLE0 + slot * (2 * dmath.PI / HUB_LAYOUT.SLOTS);
+  const r = HUB_LAYOUT.RING_RADII[slot % 3];
+  return { x: Math.round(dmath.cos(a) * r), y: Math.round(dmath.sin(a) * r) };
+}
+
+const HUB_SLOT_CONTENT: { arena?: string; shop?: StationKind; x: number; y: number }[] = [];
+for (let slot = 0; slot < HUB_LAYOUT.SLOTS; slot++) {
+  const v = slot % 3, k = Math.floor(slot / 3), pos = hubSlotPos(slot);
+  if (k < HUB_ARENA_VARIETIES.length) {
+    HUB_SLOT_CONTENT.push({ arena: HUB_ARENA_VARIETIES[(k + v) % HUB_ARENA_VARIETIES.length].ids[v], ...pos });
+  } else {
+    HUB_SLOT_CONTENT.push({ shop: HUB_SHOPS[v], ...pos });
+  }
+}
+
 /** Overworld station placement (world units; map is 12k, torus).  The home
- *  station sits at the player-spawn center; the shop stations are spread
- *  well apart so finding each is a flight (chevrons + minimap dots point
- *  the way). */
+ *  station sits at the player-spawn center; the shop stations take their
+ *  slots in the hub layout above. */
 export const OVERWORLD_STATIONS: readonly { kind: StationKind; x: number; y: number }[] = [
-  { kind: 'home',       x: 0,     y: 0 },
-  { kind: 'shipwright', x: -3600, y: -2400 },
-  { kind: 'armory',     x: 3600,  y: 2400 },
-  { kind: 'tradehub',   x: 3800,  y: -2600 },
+  { kind: 'home', x: 0, y: 0 },
+  ...HUB_SLOT_CONTENT.filter(c => c.shop).map(c => ({ kind: c.shop as StationKind, x: c.x, y: c.y })),
 ];
 
 // ── Overworld map (wave-free home map, increment 1e) ────────────────────────
@@ -8376,38 +8442,24 @@ export const PORTAL_CONSTANTS = {
   INDICATOR_RANGE: 1500,
 };
 
-/** Hub portal placement (world units; the Overworld is 12k square, torus).
- *  One portal per full-game arena, spread well clear of the four stations
- *  at (0,0) / (-3600,-2400) / (3600,2400) / (3800,-2600) and of each other,
- *  so reaching one is a flight — chevrons + minimap dots point the way.
- *  Showcase maps are not in this list: they hang off the TEST RACK below. */
-export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
-  { targetId: 'arena_universe',    x: -3600, y:  2400 },
-  { targetId: 'arena_ring',        x:     0, y: -4200 },
-  { targetId: 'arena_seven_rings', x:     0, y:  4200 },
-  { targetId: 'arena_pocket',      x: -4400, y:     0 },
-];
+/** Hub portal placement: one rift per arena VARIETY (4 maps x 3 levels), in
+ *  the slots of `HUB_LAYOUT`.  Showcase maps are not in this list: they form
+ *  the debug field ring below. */
+export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] =
+  HUB_SLOT_CONTENT.filter(c => c.arena).map(c => ({ targetId: c.arena as string, x: c.x, y: c.y }));
 
-/** TEST PORTALS — a vertical rack beside the home station, one per showcase
- *  map, stepping the whole star-density range in order.
- *
- *  The column is the point: +Y is DOWN, so a portal further down the map leads
- *  to a LOWER-density sky.  Read as descending altitude — the top of the rack
- *  is deep space and the bottom is the closest thing the game has to a planet
- *  approach.  Densities are not repeated here; each target's value lives in
- *  STAR_DENSITY_BY_MAP, and `tests/starfield.spec.ts` asserts the two tables
- *  agree so they cannot drift apart.
- *
- *  Placed at x = +1400: clear of the home station's CLEARANCE (520) and of the
- *  player spawn, and spaced 600 apart so only one is ever inside USE_RANGE. */
-export const HUB_TEST_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
-  { targetId: 'field_asteroid', x: 1400, y: -1500 },   // densest sky
-  { targetId: 'field_glass',    x: 1400, y:  -900 },
-  { targetId: 'field_metal',    x: 1400, y:  -300 },
-  { targetId: 'field_plastic',  x: 1400, y:   300 },
-  { targetId: 'field_rock',     x: 1400, y:   900 },
-  { targetId: 'field_nebula',   x: 1400, y:  1500 },   // sparsest sky
-];
+/** DEBUG FIELD RIFTS — the material-field showcase maps (no varieties), in a
+ *  tight ring just outside the home station, clockwise from the densest sky.
+ *  They carry NO gravity well (`addPortal`'s `gravity: false`): they are for
+ *  debugging, and a well beside the home station would throw debris at the
+ *  player's base. */
+const HUB_FIELD_IDS = ['field_asteroid', 'field_glass', 'field_metal', 'field_plastic',
+  'field_rock', 'field_nebula', 'field_indestructible', 'field_tile_heavy'] as const;
+export const HUB_TEST_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] =
+  HUB_FIELD_IDS.map((targetId, i) => {
+    const a = (i + 0.5) * (2 * dmath.PI / HUB_FIELD_IDS.length);
+    return { targetId, x: Math.round(dmath.cos(a) * HUB_LAYOUT.FIELD_RADIUS), y: Math.round(dmath.sin(a) * HUB_LAYOUT.FIELD_RADIUS) };
+  });
 
 /** Where an arena's return portal sits relative to that map's playerSpawn.
  *  Close enough to be visible from the arrival point (the way home is never
@@ -8689,7 +8741,16 @@ export const ENEMY_SCALING = {
 // DBG global multiplier on the per-wave growth
 // (Enemies & Bosses ▸ Enemy Tuning ▸ "Enemy scale"):
 // 0 = no wave scaling, 1 = tuned, 2 = double growth.  Feel the margin live.
-export const ENEMY_SCALE_CYCLE: ReadonlyArray<number> = [1, 0, 0.5, 1.5, 2] as const;
+// The steps live in data/enemies.toml (`enemy_scale_cycle`), validated here:
+// non-empty numbers, and index 0 = 1 so the first click is always the A/B.
+function resolveEnemyScaleCycle(raw: unknown): ReadonlyArray<number> {
+  if (!Array.isArray(raw) || raw.length === 0 || !raw.every((n) => typeof n === 'number' && n >= 0)) {
+    throw new Error('data/enemies.toml: enemy_scale_cycle must be a non-empty array of numbers >= 0');
+  }
+  if (raw[0] !== 1) throw new Error('data/enemies.toml: enemy_scale_cycle[0] must be 1 (what ships)');
+  return raw;
+}
+export const ENEMY_SCALE_CYCLE: ReadonlyArray<number> = resolveEnemyScaleCycle(RAW_ENEMIES.enemy_scale_cycle);
 let activeEnemyScaleIndex = 0; // 1×
 export function getActiveEnemyScaleMult(): number { return ENEMY_SCALE_CYCLE[activeEnemyScaleIndex]; }
 export function getActiveEnemyScaleName(): string { return `${ENEMY_SCALE_CYCLE[activeEnemyScaleIndex]}×`; }
@@ -8800,14 +8861,14 @@ export function calmBubble(entity: GameEntity) {
 // Two roles: RAMMING (charge into player) and SHOOTING (keep distance, fire).
 // Three tiers per role — each tier is strictly faster/tougher than the last.
 // To add a new enemy type: add entries to EnemySubtype, EnemyRole, ENEMY_ROLE,
-// and ENEMY_VARIANTS, then reference the new subtype in WAVE_DEFINITIONS.
+// and ENEMY_VARIANTS, then give it a [rating] in data/enemy-difficulty.toml.
 
 // Enemy archetype table.  EVERY enemy is now a shooter (`shoots`); variety
 // comes from the movement role (RAMMING = rush in close, SHOOTING = keep
 // distance & strafe), the per-archetype `weapon` override on ENEMY_WEAPON,
 // `contactDamage` (rushers hurt on touch; ranged keep 0), and defenses
 // (ENEMY_TRAITS armor / ENEMY_ATTACK_EFFECTS corrosion).
-export const ENEMY_VARIANTS: Record<EnemySubtype, {
+export interface EnemyVariantDef {
   color: string; size: number; health: number;
   maxSpeed: number; accel: number; turnRate: number;
   sprite: string; mass: number; shape: EnemyShape;
@@ -8884,241 +8945,73 @@ export const ENEMY_VARIANTS: Record<EnemySubtype, {
   // against whoever attacks it — player OR enemy.  Absent → a normal enemy that
   // only fights the player and ignores enemy fire.
   thirdParty?: boolean;
-}> = {
-  // ── Rushers — close in and fire (rose → orange → amber) ──
-  // Drone: a frantic peashooter — tiny, fast, weak rose pellets while it
-  // dives at you.  High rate of fire, trivial per-shot damage.
-  [EnemySubtype.RAMMER_1]: {
-    color: '#ef4444', size: 28, health: 1,
-    maxSpeed: 5,   accel: 3.5, turnRate: 2.8,
-    sprite: ASSETS.ENEMY_DRONE,    mass: 10, shape: 'circle',
-    shoots: true, contactDamage: 8,
-    weapon: { cooldown: 0.7, damage: 5, speed: 9, size: 4, color: '#fb7185' },
-  },
-  // Charger: a strafing twin-cannon — fires a 2-shot orange fan on a longer
-  // beat as it lines up a dash.
-  [EnemySubtype.RAMMER_2]: {
-    color: '#f97316', size: 28, health: 2,
-    maxSpeed: 8,   accel: 5.5, turnRate: 3.2,
-    sprite: ASSETS.ENEMY_CHARGER,  mass: 8, shape: 'arrow',
-    shoots: true, contactDamage: 10,
-    weapon: { cooldown: 1.15, damage: 7, speed: 9, size: 5, count: 2, spread: 14, color: '#fb923c' },
-    telegraph: 0.3,
-  },
-  // Tank: a heavy siege slug — slow, big, solid amber shell that hits hard
-  // (no glow: it reads as a dense slug, not a plasma ball, and its impact is
-  // sold by the damage-scaled player shake/knockback, not brightness).  The
-  // armor trait + this lumbering cannon make it the "bring the right tool" enemy.
-  [EnemySubtype.RAMMER_3]: {
-    color: '#facc15', size: 32, health: 5,
-    maxSpeed: 4.5, accel: 3,   turnRate: 1.6,
-    sprite: ASSETS.ENEMY_TANK,     mass: 18, shape: 'hexagon',
-    shoots: true, contactDamage: 14,
-    weapon: { cooldown: 2.2, damage: 16, speed: 7, size: 10, color: '#fde047' },
-    telegraph: 0.9,
-  },
-  // ── Skirmishers — keep distance and fire (green → acid → blue) ──
-  // Skirmisher: the baseline kiter — steady, single green bolts on a calm beat.
-  [EnemySubtype.SHOOTER_1]: {
-    color: '#4ade80', size: 28, health: 1,
-    maxSpeed: 4,   accel: 2.5, turnRate: 1.3,
-    sprite: ASSETS.ENEMY_SKIRMISHER, mass: 12, shape: 'diamond',
-    shoots: true, contactDamage: 0,
-    weapon: { cooldown: 1.1, damage: 6, speed: 9, size: 5, color: '#4ade80' },
-  },
-  // Orbiter: an acid spitter — a glowing double-tap of corrosive rounds
-  // (colour forced to acid-green by the ENEMY_ATTACK_EFFECTS path) on a
-  // burst rhythm.  Low impact, nasty DoT.
-  [EnemySubtype.SHOOTER_2]: {
-    color: '#22d3ee', size: 28, health: 2,
-    maxSpeed: 5.5, accel: 3,   turnRate: 1.2,
-    sprite: ASSETS.ENEMY_ORBITER,  mass: 10, shape: 'pentagon',
-    shoots: true, contactDamage: 0,
-    weapon: { cooldown: 1.5, damage: 5, speed: 8, size: 6, glow: true },
-    burst: { size: 2, gap: 0.18 },
-  },
-  // Sniper: a camping railgun — mostly stationary, holds still and snaps a
-  // lock-on laser onto the player, then fires one thin, very fast, bright-blue
-  // high-damage tracer.  Slow to reposition (low maxSpeed) and slow to fire
-  // (long cooldown) so each shot is a deliberate, dodgeable event, not a
-  // stream.  Punishing if you stand in the laser.
-  [EnemySubtype.SHOOTER_3]: {
-    color: '#3b82f6', size: 26, health: 3,
-    maxSpeed: 4,   accel: 3,   turnRate: 1.8,
-    sprite: ASSETS.ENEMY_SNIPER,   mass: 9, shape: 'chevron',
-    shoots: true, contactDamage: 0,
-    weapon: { cooldown: 2.8, damage: 15, speed: 16, size: 4, color: '#60a5fa', glow: true },
-    telegraph: 0.75, aimLaser: true,
-  },
-  // ── Core-roster additions (Stage 0) ──
-  // Kamikaze: a frail magenta star that screams in on a hard, fast dive and
-  // self-destructs on contact — a modest contact bite plus a detonation AoE.
-  // Low HP + a readable pre-detonation tell make it a kill-early-or-peel-away
-  // threat: pop it before it reaches you, or boost clear of the blast.  Does
-  // not shoot.
-  [EnemySubtype.KAMIKAZE]: {
-    color: '#e879f9', size: 26, health: 2,
-    maxSpeed: 9, accel: 7, turnRate: 4.0,
-    sprite: ASSETS.ENEMY_DRONE, mass: 7, shape: 'star',
-    shoots: false, contactDamage: 10,
-    detonate: { radius: 170, damage: 34, knockback: 1.5 },
-  },
-  // Bulwark: a slow violet octagon fortress behind a regenerating shield,
-  // lobbing a 3-shot fan.  The shield soaks chip fire and recharges, so it
-  // demands burst-through / flanking — a soft counter, not a hard wall.
-  [EnemySubtype.BULWARK]: {
-    color: '#a78bfa', size: 34, health: 4,
-    maxSpeed: 3.5, accel: 2.2, turnRate: 1.1,
-    sprite: ASSETS.ENEMY_TANK, mass: 16, shape: 'octagon',
-    shoots: true, contactDamage: 0,
-    weapon: { cooldown: 1.8, damage: 3.5, speed: 8, size: 5, count: 3, spread: 22, color: '#c4b5fd' },
-    shield: 54, shieldRegen: 4, shieldArc: { deg: 150, slew: 2.8 },
-    telegraph: 0.5,
-  },
-  // ── Stage 1 ──
-  // Turret: a stationary steel emplacement (maxSpeed 0 → AISystem no-move
-  // branch) that rotates to track the player and lobs SLOW HOMING missiles on
-  // a long, telegraphed beat.  It can't chase, so it's a position-denial /
-  // priority-target threat: dodge the missiles by juking (their turn rate is
-  // gentle) or close in and destroy it.  Tanky + heavy so it reads as fixed.
-  [EnemySubtype.TURRET]: {
-    color: '#94a3b8', size: 36, health: 8,
-    maxSpeed: 0, accel: 0, turnRate: 1.8,
-    sprite: ASSETS.ENEMY_TANK, mass: 50, shape: 'cross',
-    shoots: true, contactDamage: 0,
-    weapon: { cooldown: 2.6, damage: 12, speed: 5, size: 7, color: '#fb7185',
-              homing: true, homingStrength: 0.5, glow: true },
-    telegraph: 0.7,
-  },
-  // ── Stage 4 ──
-  // Swarm: a cheap, weak, fast gnat (1 HP, tiny) that flocks toward the player
-  // with a light boids tick ('swarm' behavior — seek + separation + jitter), so
-  // a pack reads as a darting cloud rather than a clean line.  Low contact bite;
-  // the threat is numbers.  RAMMING role (rush in).
-  [EnemySubtype.SWARM]: {
-    color: '#2dd4bf', size: 16, health: 1,
-    maxSpeed: 7.5, accel: 7, turnRate: 4.5,
-    sprite: ASSETS.ENEMY_DRONE, mass: 4, shape: 'triangle',
-    shoots: false, contactDamage: 3, diesOnContact: true,
-  },
-  // Nest: a near-static fleshy hive (high HP, heavy, maxSpeed 0 → no-move
-  // branch; doesn't shoot) that periodically births SWARM brood until killed.
-  // A priority target — clear the nest to stop the bleeding.  Its brood don't
-  // gate wave completion (Stage 2b); killing the nest just stops new ones.
-  [EnemySubtype.NEST]: {
-    color: '#0d9488', size: 46, health: 14,
-    maxSpeed: 0, accel: 0, turnRate: 0.6,
-    sprite: ASSETS.ENEMY_TANK, mass: 60, shape: 'nest',
-    shoots: false, contactDamage: 0,
-    spawner: { subtype: EnemySubtype.SWARM, interval: 4.0, batch: 2, maxBrood: 10 },
-  },
-  // ── Stage 5 ──
-  // Bubble: a translucent soft-body blob.  PASSIVE by default — it drifts
-  // lazily, eats nearby mobile shards to grow (`consume`), and once fat enough
-  // SPLITS in two (`multiply`), so an ignored field of them quietly breeds.  It
-  // takes no notice of the player until SHOT: a hit sets `provoked` (Stage 3a),
-  // and from then on it homes in, latches onto the player on contact (Stage 3c
-  // attach), and EMPs weapon + shield ('disable' status) for a few seconds
-  // before releasing and popping.  Fragile (low HP) so you can shoot it off —
-  // but provoking the field stops the breeding and turns it on you.  RAMMING
-  // role (rush when provoked).  Cyan-violet membrane; no engine flame.
-  [EnemySubtype.BUBBLE]: {
-    color: '#67e8f9', size: 15, health: 50, // maxHealth then scales LINEARLY
-                                            // with size as it grows (updateBubbles.syncBubbleMaxHealth)
-    maxSpeed: 3.4, accel: 3.0, turnRate: 1.6,
-    sprite: ASSETS.ENEMY_DRONE, mass: 9, shape: 'bubble',
-    shoots: false, contactDamage: 0,
-    // growthPerEat / hpPerEat / the digest time are all SCALED per-eat by the
-    // shard's richness (mass/energy conserved — see shardRichness): denser/
-    // stronger shards take longer to digest and give more growth + health.
-    // `swallowMaxFrac: 1` — a bubble swallows a shard up to its OWN diameter
-    // and no more (user call: it used to engulf boulders several times its
-    // size in one action).  Anything bigger, tiles included, it BITES: a chip
-    // off through the shared grain-fracture path, which it can then eat.  So
-    // a small bubble works a big rock down instead of inhaling it, and the
-    // mouth grows with the bubble.
-    consume: {
-      eats: 'shard', range: 150, growthPerEat: 3, maxSize: 58, hpPerEat: 2, pull: 14,
-      swallowMaxFrac: 1,
-      bite: { damage: 3, interval: 1.2, reach: 8, tiles: true },
-    },
-    multiply: { atSize: 50, maxPopulation: 14 },
-    ambient: true, thirdParty: true,
-  },
-  // ── Stage 6 ──
-  // Dragon: a big segmented serpent mini-boss.  Enters via a portal, rides the
-  // flow field weaving across the map and DEVOURS the tiles in its path to grow
-  // longer (its own pass in engine/roamers/dragons.ts appends each one as a
-  // body segment — the `consume` row below never fires, since
-  // `updateConsumers` walks only MOBILE candidates), deals contact damage along
-  // its body, and leaves via portal if not killed.  Engine-managed
-  // (`updateDragons` / `spawnDragon`, engine/roamers/dragons.ts); the 'dragon'
-  // AI strategy is a no-op.  Tanky combat HP on the head.
-  [EnemySubtype.DRAGON]: {
-    color: '#34d399', size: 64, health: 500, // big boss HP (> the bubble's max)
-    maxSpeed: 6, accel: 4, turnRate: 1.2,
-    sprite: ASSETS.ENEMY_TANK, mass: 500, shape: 'dragon', // heavy: barely shoved
-    shoots: false, contactDamage: 16,
-    consume: { eats: 'tile', range: 90, growthPerEat: 4, maxSize: 150 },
-  },
-  // ── (h) Bosses ──
-  // Warden (BOSS_WARDEN): the CHASSIS boss — the plain capstone that proves the
-  // framework needs no new mechanics.  A huge, heavy bastion prow that holds
-  // mid-range and lobs slow, heavy siege bolts on a readable telegraph.  Its
-  // defence is layered rather than novel: a full barrier shield in phase 1
-  // (the generalized absorption path), ARMOR underneath it (the trait shipped
-  // with the Tank), and POISE so a stream of chip fire can neither stagger it
-  // nor push it off its line.  Phase 2 blows the barrier AND the plating off
-  // and calls a swarm escort — a pure damage race.  SHOOTING role: it keeps
-  // its distance and makes you come to it.
-  [EnemySubtype.BOSS_WARDEN]: {
-    color: '#38bdf8', size: 82, health: 120, // PROVISIONAL — see BOSS_CONSTANTS
-    maxSpeed: 3.2, accel: 2.0, turnRate: 1.0,
-    sprite: ASSETS.ENEMY_TANK, mass: 140, shape: 'warden',
-    shoots: true, contactDamage: 18,
-    weapon: { cooldown: 2.0, damage: 14, speed: 8, size: 12, color: '#7dd3fc', glow: true },
-    telegraph: 0.8,
-    poise: { stunDamage: 12, knockScale: 0.12 },
-  },
-  // Reaver (BOSS_SCATTER): the first WEAPON-boss.  A fast, forward-raked
-  // twin-prong brawler that wields a THEMED VARIANT OF THE PLAYER'S OWN
-  // SHOTGUN (BOSS_WEAPONS.SCATTER — same yellow pellet cone, enemy-tuned
-  // numbers), so the read is "that's MY shotgun" (WEAPONS_AMMO_PLAN §6).
-  // Its counterplay identity is the EVASIVE trait: it side-steps straight
-  // shots, so the Seeker (homing) is the designated answer while cones and
-  // chains still land.  RAMMING role — it closes to scattergun range and
-  // brawls, the opposite range band to the Warden.  Lighter poise than the
-  // Warden: it is a duellist, not a fortress, so a real hit still rocks it.
-  [EnemySubtype.BOSS_SCATTER]: {
-    color: '#fbbf24', size: 74, health: 105, // PROVISIONAL
-    maxSpeed: 6.2, accel: 5.0, turnRate: 2.4,
-    sprite: ASSETS.ENEMY_TANK, mass: 90, shape: 'talon',
-    shoots: true, contactDamage: 16,
-    weapon: BOSS_WEAPONS.SCATTER,
-    telegraph: 0.45,
-    poise: { stunDamage: 9, knockScale: 0.3 },
-  },
-  // Bastion (BOSS_SIEGE): the second WEAPON-boss and the Reaver's inverse on
-  // every axis — slow, huge and plated instead of fast and evasive, lobbing
-  // shells spread from the PLAYER'S OWN Cannon (BOSS_WEAPONS.SIEGE) in
-  // 2-shell salvos from a LONG stand-off (`preferredDistance`) instead of
-  // brawling.  Its counterplay identity is the pair of B3 traits: a permanent
-  // FRONT-SHIELD plate (face-tanking never becomes viable — flank it, or
-  // splash past the plate edge) over REGEN that only a
-  // genuine damage BURST shuts off.  SHOOTING role, and the only archetype
-  // that overrides the shared skirmisher stand-off.
-  [EnemySubtype.BOSS_SIEGE]: {
-    color: '#c084fc', size: 92, health: 150, // PROVISIONAL
-    maxSpeed: 2.4, accel: 1.6, turnRate: 0.8,
-    sprite: ASSETS.ENEMY_TANK, mass: 200, shape: 'bastion',
-    shoots: true, contactDamage: 20,
-    weapon: BOSS_WEAPONS.SIEGE,
-    burst: { size: 2, gap: 0.55 },
-    telegraph: 1.0,
-    preferredDistance: 620, // long stand-off — the third distinct range band
-    poise: { stunDamage: 14, knockScale: 0.08 },
-  },
-};
+  // Pin THIS row to one gnat steer ('swarm' behaviour only).  Absent → the DBG
+  // "Gnat move" cycle (`getActiveSwarmMove`), which is what every row follows
+  // today.  The seam for archetypes that wear a non-default flock — no row
+  // sets it yet.
+  swarmMove?: SwarmMove;
+}
+
+// ── Reading a content table ──────────────────────────────────────────────────
+// ENEMY_VARIANTS, BOSS_DEFS and MAP_POPULATION live in data/*.toml, parsed at
+// BUILD time (scripts/toml-tables.mjs).  The files hold NAMES where a value is
+// code (a sprite is an `ASSETS` key; a boss weapon is `{ extends = "SCATTER" }`;
+// a spawner's subtype is an EnemySubtype id), and these resolvers turn them into
+// the typed tables the engine has always read — throwing, with the file and row,
+// on a name they do not know, because a typo would otherwise ship as `undefined`.
+
+/** An EnemySubtype id from a table, or a thrown error naming where it was. */
+function tableSubtype(id: unknown, where: string): EnemySubtype {
+  if (typeof id !== 'string' || !Object.hasOwn(EnemySubtype, id)) {
+    throw new Error(`${where}: ${JSON.stringify(id)} is not an EnemySubtype`);
+  }
+  return EnemySubtype[id as keyof typeof EnemySubtype];
+}
+
+/** A table `weapon`: `{ extends = "SCATTER", ... }` spreads that BOSS_WEAPONS
+ *  entry and then the listed fields over it (bare `extends` returns the entry
+ *  itself); anything else is a Partial<WeaponConfig> as written. */
+function resolveTableWeapon(raw: Record<string, any>, where: string): Partial<WeaponConfig> {
+  const { extends: base, ...rest } = raw;
+  if (base === undefined) return rest;
+  if (typeof base !== 'string' || !Object.hasOwn(BOSS_WEAPONS, base)) {
+    throw new Error(`${where}: weapon extends ${JSON.stringify(base)}, which is not a BOSS_WEAPONS entry`);
+  }
+  const src = BOSS_WEAPONS[base as keyof typeof BOSS_WEAPONS];
+  return Object.keys(rest).length === 0 ? src : { ...src, ...rest };
+}
+
+function resolveEnemyVariants(raw: Record<string, any>): Record<EnemySubtype, EnemyVariantDef> {
+  const out = {} as Record<EnemySubtype, EnemyVariantDef>;
+  for (const [id, row] of Object.entries(raw)) {
+    // Top-level scalars/arrays (enemy_scale_cycle) are knobs, not archetype rows.
+    if (typeof row !== 'object' || row === null || Array.isArray(row)) continue;
+    const where = `data/enemies.toml [${id}]`;
+    const subtype = tableSubtype(id, where);
+    const { sprite, weapon, spawner, swarmMove, ...rest } = row;
+    if (typeof sprite !== 'string' || !Object.hasOwn(ASSETS, sprite)) {
+      throw new Error(`${where}: sprite ${JSON.stringify(sprite)} is not an ASSETS key`);
+    }
+    const def = { ...rest, sprite: (ASSETS as unknown as Record<string, string>)[sprite] } as EnemyVariantDef;
+    if (weapon !== undefined) def.weapon = resolveTableWeapon(weapon, where);
+    if (spawner !== undefined) def.spawner = { ...spawner, subtype: tableSubtype(spawner.subtype, `${where} spawner`) };
+    if (swarmMove !== undefined) {
+      if (!(SWARM_MOVE_MODES as readonly string[]).includes(swarmMove)) {
+        throw new Error(`${where}: swarmMove ${JSON.stringify(swarmMove)} is not one of ${SWARM_MOVE_MODES.join(' / ')}`);
+      }
+      def.swarmMove = swarmMove;
+    }
+    out[subtype] = def;
+  }
+  for (const s of Object.values(EnemySubtype)) {
+    if (!Object.hasOwn(out, s)) throw new Error(`data/enemies.toml: no [${s}] row`);
+  }
+  return out;
+}
+
+// Parsed from data/enemies.toml at BUILD time; every archetype's design note
+// lives there beside its numbers.  `EnemyVariantDef` (above) is the schema.
+export const ENEMY_VARIANTS: Record<EnemySubtype, EnemyVariantDef> = resolveEnemyVariants(RAW_ENEMIES);
 
 // Kamikaze proximity fuse (Stage 0): a bomber detonates this many world units
 // BEFORE its hull would actually touch the player (added on top of the two
@@ -9509,6 +9402,37 @@ export const ENEMY_BEHAVIOR: Record<EnemySubtype, EnemyBehaviorDef> = {
 // spend is worse than a thing you carry away, and removing it also removed
 // the buy/sell money-pump the discount created.  There is still deliberately
 // NO weapon-unlock plumbing: weapons stay purely purchased.
+/** What a boss kill can hand over (D-S3-f).  Every shop-sold module weighs 1;
+ *  a reward-only mark (Mk IV and up) weighs far less, so a rare find is rare
+ *  where it is meant to be found.  `BASE` is the weight of the first
+ *  reward-only mark (IV) and each mark above it is `FALLOFF` times the one
+ *  below.  Today that is 0.15 + 0.03 against ~35 shop modules — about one boss
+ *  in 200, where a uniform draw had it at 1 in 18 (user call: "5% is too
+ *  high"). */
+export const BOSS_REWARD_WEIGHT = { BASE: 0.15, FALLOFF: 0.2 } as const;
+
+export function bossRewardTable(): Array<{ def: ModuleDef; weight: number }> {
+  return MODULE_DEFS.filter(d => d.cost > 0).map(def => ({
+    def,
+    weight: def.rewardOnly
+      ? BOSS_REWARD_WEIGHT.BASE * dmath.pow(BOSS_REWARD_WEIGHT.FALLOFF, Math.max(0, def.mark - (SHOP_MAX_MARK + 1)))
+      : 1,
+  }));
+}
+
+/** One weighted pick from a single uniform draw `u` in [0, 1). */
+export function pickBossReward(u: number): ModuleDef | undefined {
+  const table = bossRewardTable();
+  let total = 0;
+  for (const row of table) total += row.weight;
+  let at = u * total;
+  for (const row of table) {
+    at -= row.weight;
+    if (at < 0) return row.def;
+  }
+  return table.length ? table[table.length - 1].def : undefined;
+}
+
 export const BOSS_CONSTANTS = {
   /** NORMAL waves per stage, BEFORE the capstone.  The boss then gets its OWN
    *  wave on top (user call) — a stage is `WAVE_INTERVAL` ordinary waves and
@@ -9588,120 +9512,33 @@ export interface BossDef {
   companions?: EnemySubtype[];
 }
 
-export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = {
-  // ── Warden — the chassis boss ──
-  // Phase 1  a barrier shield over armor plating: chip fire does almost
-  //          nothing, so you have to bring a big hit (or wear the shield down
-  //          and then bring one).
-  // Phase 2  barrier blown AND plating gone: it speeds up, shortens its beat
-  //          and calls a swarm escort — every weapon works now, the question is
-  //          whether you can out-damage the escort.
-  [EnemySubtype.BOSS_WARDEN]: {
-    name: 'WARDEN',
-    // Escort: an ARMOURED honour guard that restates the boss's own lesson —
-    // a Bulwark's arc shield and a Tank's armor both punish chip fire, so the
-    // whole wave asks the same question the Warden asks.
-    companions: [EnemySubtype.BULWARK, EnemySubtype.RAMMER_3, EnemySubtype.SHOOTER_2],
-    phases: [
-      {
-        atHealthFrac: 1,
-        color: '#38bdf8',
-        shield: { amount: 80, regen: 5 },
-        traits: { armor: { chipThreshold: 8, reduction: 0.65 } },
-      },
-      {
-        atHealthFrac: 0.5,
-        announce: 'WARDEN — BARRIER DOWN',
-        color: '#f97316',
-        speedMult: 1.35,
-        weapon: { cooldown: 1.2, damage: 11, speed: 9, size: 10, count: 2, spread: 12, color: '#fdba74', glow: true },
-        spawner: { subtype: EnemySubtype.SWARM, interval: 5.0, batch: 3, maxBrood: 9 },
-      },
-    ],
-  },
-  // ── Reaver — the scattergun boss (weapon-boss 1) ──
-  // Phase 1  brawls with the themed player Shotgun and JUKES straight shots:
-  //          the Seeker is the felt answer, everything else has to lead it.
-  // Phase 2  raises a TRACKING ARC SHIELD on top of the evasion — face-tanking
-  //          stops working and you have to flank (the Bulwark's soft counter at
-  //          boss scale).  Slower jukes, tighter/faster cone.
-  // Phase 3  shield gone, evasion TRADED for ARMOR, a wider point-blank cone
-  //          and a KAMIKAZE escort — the right answer flips from Seeker
-  //          (dodge) to a big-hit weapon (chip-resist) mid-fight.
-  [EnemySubtype.BOSS_SCATTER]: {
-    name: 'REAVER',
-    // Escort: a FAST pack.  The Reaver's problem is hitting something that
-    // jukes; the escort makes standing still to line a shot up expensive.
-    companions: [EnemySubtype.RAMMER_1, EnemySubtype.SWARM, EnemySubtype.KAMIKAZE],
-    phases: [
-      {
-        atHealthFrac: 1,
-        color: '#fbbf24',
-        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 0.85 } },
-      },
-      {
-        atHealthFrac: 0.66,
-        announce: 'REAVER RAISES ITS GUARD',
-        color: '#f59e0b',
-        speedMult: 1.1,
-        shield: { amount: 90, regen: 6, arc: { deg: 160, slew: 2.4 } },
-        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 1.25, spread: 16, count: 8 },
-        traits: { evasive: { sense: 340, missRadius: 46, impulse: 7.5, cooldown: 1.1 } },
-      },
-      {
-        atHealthFrac: 0.33,
-        announce: 'REAVER — ENRAGED',
-        color: '#ef4444',
-        speedMult: 1.25,
-        weapon: { ...BOSS_WEAPONS.SCATTER, cooldown: 0.95, spread: 30, count: 9, damage: 4 },
-        spawner: { subtype: EnemySubtype.KAMIKAZE, interval: 6.0, batch: 2, maxBrood: 4 },
-        traits: { armor: { chipThreshold: 6, reduction: 0.6 } },
-      },
-    ],
-  },
-  // ── Bastion — the siege boss (weapon-boss 2) ──
-  // Phase 1  a FRONT-SHIELD plate only: shooting it in the face barely
-  //          scratches it, so the lesson is "get behind it" (or splash /
-  //          chain past the plate, which bypass the projectile path entirely).
-  // Phase 2  plate PLUS regen — the hard part of the fight.  Note the
-  //          deliberate ORDERING in PhysicsSystem: the plate reduces damage
-  //          BEFORE the burst bucket sees it, so bursting a plated target
-  //          means bursting it FROM BEHIND.
-  // Phase 3  plate blown off, regen stronger, a TURRET escort pins you down:
-  //          a pure damage race in the open.
-  [EnemySubtype.BOSS_SIEGE]: {
-    name: 'BASTION',
-    // Escort: EMPLACEMENTS.  The Bastion's answer is to flank it; turrets and
-    // a nest make the flanking lane the thing you have to earn.
-    companions: [EnemySubtype.TURRET, EnemySubtype.NEST, EnemySubtype.SHOOTER_3],
-    phases: [
-      {
-        atHealthFrac: 1,
-        color: '#c084fc',
-        traits: { frontShield: { deg: 150, reduction: 0.75 } },
-      },
-      {
-        atHealthFrac: 0.7,
-        announce: 'BASTION — REPAIR SYSTEMS ONLINE',
-        color: '#a855f7',
-        weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 2.6 },
-        traits: {
-          frontShield: { deg: 150, reduction: 0.75 },
-          regen: { perSec: 3.5, burstDamage: 16, windowSec: 0.4, burnSec: 3.0 },
-        },
-      },
-      {
-        atHealthFrac: 0.35,
-        announce: 'BASTION — PLATING BREACHED',
-        color: '#f472b6',
-        speedMult: 1.3,
-        weapon: { ...BOSS_WEAPONS.SIEGE, cooldown: 2.1, explosionRadius: 160 },
-        spawner: { subtype: EnemySubtype.TURRET, interval: 8.0, batch: 1, maxBrood: 3 },
-        traits: { regen: { perSec: 5, burstDamage: 16, windowSec: 0.4, burnSec: 3.0 } },
-      },
-    ],
-  },
-};
+// Parsed from data/bosses.toml at BUILD time (scripts/toml-tables.mjs); the
+// per-boss phase commentary lives there beside the numbers.
+function resolveBossDefs(raw: Record<string, any>): Partial<Record<EnemySubtype, BossDef>> {
+  const out: Partial<Record<EnemySubtype, BossDef>> = {};
+  for (const [id, row] of Object.entries(raw)) {
+    const where = `data/bosses.toml [${id}]`;
+    const boss = tableSubtype(id, where);
+    const phases = (row.phases ?? []).map((ph: any, i: number): BossPhaseDef => {
+      const at = `${where} phase ${i}`;
+      const { weapon, spawner, ...rest } = ph;
+      const phase: BossPhaseDef = { ...rest };
+      if (weapon !== undefined) phase.weapon = resolveTableWeapon(weapon, at);
+      if (spawner !== undefined) phase.spawner = { ...spawner, subtype: tableSubtype(spawner.subtype, `${at} spawner`) };
+      return phase;
+    });
+    if (phases.length === 0 || phases[0].atHealthFrac !== 1) {
+      throw new Error(`${where}: phase 0 must exist and start at atHealthFrac = 1`);
+    }
+    const def: BossDef = { name: row.name, phases };
+    if (row.companions !== undefined) {
+      def.companions = row.companions.map((c: string) => tableSubtype(c, `${where} companions`));
+    }
+    out[boss] = def;
+  }
+  return out;
+}
+export const BOSS_DEFS: Partial<Record<EnemySubtype, BossDef>> = resolveBossDefs(RAW_BOSSES);
 
 /** Boss rotation — each boss wave takes the next entry, cycling.  Order is the
  *  intended teaching order (the plain chassis lesson first). */
@@ -9742,46 +9579,14 @@ export function buildBossWaveSpawnList(boss: EnemySubtype, budget: number): Enem
   return list;
 }
 
-// ── Wave definitions ──────────────────────────────────────────────────────────
-// Scripted teaching waves.  Waves 1–3 keep hand-authored compositions so each
-// enemy role gets a clean introduction (ram-only → shoot-only → mixed).  The
-// composition is cycled to fill the timed wave's spawn budget, so counts
-// express the mix ratio, not the absolute spawn total.  Waves 4+ roll a
-// weighted-random mix instead — see buildWaveSpawnList().
+// ── Wave composition ──────────────────────────────────────────────────────────
+// A wave is a number of POINTS to spend, an enemy costs its rating, and the
+// arena LEVEL decides which enemies are for sale (data/enemy-difficulty.toml).
+// There is no scripted roster any more: every arena and every wave rolls its
+// own mix from the seeded `waves` stream, so two arenas of one level differ.
 //
 // (The old per-wave `powerup` field was dead code — powerup drops were removed
 // from DropSystem — and is gone; weapon unlocks return with the (h) bosses.)
-export const WAVE_DEFINITIONS: { enemies: { subtype: EnemySubtype; count: number }[] }[] = [
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 4 }] },                                                // W1  Ramming
-  { enemies: [{ subtype: EnemySubtype.SHOOTER_1, count: 4 }] },                                                // W2  Shooting
-  { enemies: [{ subtype: EnemySubtype.RAMMER_1,  count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W3  Mixed
-  { enemies: [{ subtype: EnemySubtype.KAMIKAZE,  count: 3 }, { subtype: EnemySubtype.RAMMER_1,  count: 1 }] }, // W4  Kamikaze intro
-  { enemies: [{ subtype: EnemySubtype.BULWARK,   count: 2 }, { subtype: EnemySubtype.SHOOTER_1, count: 2 }] }, // W5  Bulwark intro
-  { enemies: [{ subtype: EnemySubtype.TURRET,    count: 2 }, { subtype: EnemySubtype.RAMMER_1,  count: 2 }] }, // W6  Turret intro
-  { enemies: [{ subtype: EnemySubtype.NEST,      count: 1 }, { subtype: EnemySubtype.SWARM,     count: 5 }] }, // W7  Nest + swarm intro (ratio is cycled to budget)
-  // NOTE: BUBBLE is ambient fauna (always-present, never a wave enemy) — it's
-  // maintained by `maintainAmbientBubbles` (engine/roamers/bubbles.ts), not
-  // spawned by waves.
-];
-
-// Tier-weight progression for the weighted-random waves (index
-// WAVE_DEFINITIONS.length and up).  Row =
-// min(floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH), last), so the blend
-// walks L1 → ½L1+½L2 → L2 → ⅓ each → ½L2+½L3 → L3 over the first 18 waves
-// and stays pure tier-3 from then on.  Shape: [w_tier1, w_tier2, w_tier3].
-const WAVE_TIER_WEIGHTS: [number, number, number][] = [
-  [1, 0, 0],
-  [0.5, 0.5, 0],
-  [0, 1, 0],
-  [1 / 3, 1 / 3, 1 / 3],
-  [0, 0.5, 0.5],
-  [0, 0, 1],
-];
-
-const SUBTYPE_BY_ROLE_TIER: Record<EnemyRole, EnemySubtype[]> = {
-  [EnemyRole.RAMMING]:  [EnemySubtype.RAMMER_1,  EnemySubtype.RAMMER_2,  EnemySubtype.RAMMER_3],
-  [EnemyRole.SHOOTING]: [EnemySubtype.SHOOTER_1, EnemySubtype.SHOOTER_2, EnemySubtype.SHOOTER_3],
-};
 
 /** Length of the timed window for a 0-based wave index, in seconds. */
 export function getWaveDurationSec(index: number): number {
@@ -9803,57 +9608,108 @@ export function getWaveSpawnBudget(index: number): number {
   );
 }
 
-/** Roll a 0-based tier from a [w1, w2, w3] weight row. */
-function rollTier(weights: [number, number, number]): number {
-  const r = sim.waves() * (weights[0] + weights[1] + weights[2]);
-  if (r < weights[0]) return 0;
-  if (r < weights[0] + weights[1]) return 1;
-  return 2;
+/** The enemies that can appear in a level's waves, keyed by NAME in the file. */
+export const ENEMY_RATING: Readonly<Partial<Record<EnemySubtype, number>>> = (() => {
+  const out: Partial<Record<EnemySubtype, number>> = {};
+  const known = new Set<string>(Object.values(EnemySubtype));
+  for (const [name, v] of Object.entries(RAW_DIFFICULTY.rating as Record<string, number>)) {
+    if (!known.has(name)) throw new Error(`data/enemy-difficulty.toml: [rating] ${name} is not an EnemySubtype`);
+    out[name as EnemySubtype] = v;
+  }
+  return out;
+})();
+
+const WAVE_RULES = RAW_DIFFICULTY.wave as { points: number[]; variety: number[]; maxPerType: number };
+const CEILING_RULES = RAW_DIFFICULTY.ceiling as { base: number; waveBias: number; slope: number; slopePerLevel: number };
+const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number };
+
+export const ARENA_LEVEL_MAX = 20;
+
+/** Spawn amount and enemy stats for an arena level (1..20).  Levels 1-3 are the
+ *  old Low / Med / High rows, unchanged; above that health and damage grow much
+ *  faster than the spawn amount (D-S3-g). */
+export function levelScales(level: number): { spawn: number; health: number; speed: number; damage: number } {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  if (L <= 3) {
+    return { spawn: DIFFICULTY_SCALES[L] ?? 1, ...(DIFFICULTY_STAT_SCALES[L] ?? DIFFICULTY_STAT_SCALES[3]) };
+  }
+  const g = dmath.pow(LEVEL_RULES.hpDmgGrowth, L - 3);
+  return {
+    spawn: Math.min(LEVEL_RULES.spawnCap, dmath.pow(LEVEL_RULES.spawnGrowth, L - 3)),
+    health: g, speed: 1, damage: g,
+  };
+}
+
+/** The highest-rated enemy a level's wave `index` (0-based) may contain. */
+export function rosterCeiling(level: number, index: number): number {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  return CEILING_RULES.base + (index + CEILING_RULES.waveBias) * (CEILING_RULES.slope + CEILING_RULES.slopePerLevel * (L - 1));
+}
+
+/** Points a level's wave `index` spends. */
+export function waveTargetPoints(level: number, index: number): number {
+  const w = Math.min(index, WAVE_RULES.points.length - 1);
+  return WAVE_RULES.points[w] * levelScales(level).spawn;
 }
 
 /**
- * Build the ordered subtype list a timed wave will spawn (length = budget).
+ * The ordered subtype list an ordinary wave spawns.
  *
- * Scripted waves (index < WAVE_DEFINITIONS.length) cycle their authored
- * composition to fill the budget.  Later waves roll each slot independently:
- * 50/50 ram/shoot role, tier from the WAVE_TIER_WEIGHTS row for the wave's
- * set.  A variety guarantee re-rolls one slot's role when a random wave with
- * budget ≥ 3 lands all-rammer or all-shooter, so every such wave mixes types.
+ *  1. POOL — every enemy rated at or under the roster ceiling for (level, wave).
+ *  2. TYPES — `variety[wave]` distinct ones: one ANCHOR from the top third of
+ *     the pool (so the ceiling is actually used and waves climb) and the rest
+ *     at random; types the previous wave used go to the back of the line, so
+ *     consecutive waves differ.
+ *  3. COUNTS — the wave's points are split EVENLY across the chosen types, so a
+ *     cheap enemy comes in numbers and an expensive one comes alone; then
+ *     nudged until the total is within half the cheapest unit of the target.
+ *  4. SHUFFLE — so the types stream in mixed, not in blocks.
+ * Every draw is the seeded `waves` stream, so an arena's seed fixes its waves.
  */
-export function buildWaveSpawnList(index: number, budget: number, forced?: EnemySubtype | null): EnemySubtype[] {
-  // DBG enemy-test override: spawn ONLY the forced subtype (ignores the
-  // scripted/weighted mix) so a specific enemy/trait can be tested in isolation.
-  if (forced) return new Array(budget).fill(forced);
+export function buildLevelWave(level: number, index: number, prev: readonly EnemySubtype[] = []): EnemySubtype[] {
+  const rate = (s: EnemySubtype) => ENEMY_RATING[s] ?? 1;
+  const target = waveTargetPoints(level, index);
+  const ceiling = rosterCeiling(level, index);
+  const all = (Object.keys(ENEMY_RATING) as EnemySubtype[]).sort((a, b) => rate(b) - rate(a) || (a < b ? -1 : 1));
+  let pool = all.filter(s => rate(s) <= ceiling + 1e-9);
+  if (pool.length === 0) pool = [all[all.length - 1]];
+
+  const shuffle = <T,>(arr: T[]): T[] => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(sim.waves() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+  const freshFirst = (arr: EnemySubtype[]) => [...arr.filter(s => !prev.includes(s)), ...arr.filter(s => prev.includes(s))];
+
+  const k = Math.min(pool.length, WAVE_RULES.variety[Math.min(index, WAVE_RULES.variety.length - 1)]);
+  const top = pool.slice(0, Math.max(1, Math.ceil(pool.length / 3)));
+  const anchor = freshFirst(shuffle([...top]))[0];
+  const rest = freshFirst(shuffle(pool.filter(s => s !== anchor)));
+  const chosen = [anchor, ...rest.slice(0, k - 1)];
+
+  const per = target / chosen.length;
+  const counts = chosen.map(s => Math.min(WAVE_RULES.maxPerType, Math.max(1, Math.round(per / rate(s)))));
+  const points = () => counts.reduce((a, c, i) => a + c * rate(chosen[i]), 0);
+  const cheapest = Math.min(...chosen.map(rate));
+  for (let guard = 0; guard < 64; guard++) {
+    const total = points();
+    if (total < target - cheapest / 2) {
+      let best = -1, gap = -Infinity;
+      counts.forEach((c, i) => { if (c < WAVE_RULES.maxPerType && per - c * rate(chosen[i]) > gap) { gap = per - c * rate(chosen[i]); best = i; } });
+      if (best < 0) break;
+      counts[best]++;
+    } else if (total > target + cheapest / 2) {
+      let best = -1, over = -Infinity;
+      counts.forEach((c, i) => { if (c > 1 && c * rate(chosen[i]) - per > over) { over = c * rate(chosen[i]) - per; best = i; } });
+      if (best < 0) break;
+      counts[best]--;
+    } else break;
+  }
   const list: EnemySubtype[] = [];
-  if (index < WAVE_DEFINITIONS.length) {
-    const flat: EnemySubtype[] = [];
-    for (const g of WAVE_DEFINITIONS[index].enemies) {
-      for (let i = 0; i < g.count; i++) flat.push(g.subtype);
-    }
-    for (let i = 0; i < budget; i++) list.push(flat[i % flat.length]);
-    return list;
-  }
-
-  const set = Math.min(
-    Math.floor(index / TIMED_WAVE_CONFIG.TIER_SET_LENGTH),
-    WAVE_TIER_WEIGHTS.length - 1,
-  );
-  const weights = WAVE_TIER_WEIGHTS[set];
-  for (let i = 0; i < budget; i++) {
-    const role = sim.waves() < 0.5 ? EnemyRole.RAMMING : EnemyRole.SHOOTING;
-    list.push(SUBTYPE_BY_ROLE_TIER[role][rollTier(weights)]);
-  }
-
-  if (budget >= 3) {
-    const hasRam   = list.some(s => ENEMY_ROLE[s] === EnemyRole.RAMMING);
-    const hasShoot = list.some(s => ENEMY_ROLE[s] === EnemyRole.SHOOTING);
-    if (!hasRam || !hasShoot) {
-      const k = Math.floor(sim.waves() * budget);
-      const tier = SUBTYPE_BY_ROLE_TIER[ENEMY_ROLE[list[k]]].indexOf(list[k]);
-      list[k] = SUBTYPE_BY_ROLE_TIER[hasRam ? EnemyRole.SHOOTING : EnemyRole.RAMMING][tier];
-    }
-  }
-  return list;
+  chosen.forEach((s, i) => { for (let n = 0; n < counts[i]; n++) list.push(s); });
+  return shuffle(list);
 }
 
 /**
@@ -11280,106 +11136,27 @@ export function breakYieldsNothing(variantId: ShardVariantId | undefined): boole
 // the legacy ASTEROID_GENERATION_CONFIG + NEBULA_CONSTANTS.CLUSTER_*
 // fields, both deleted in the shard-system overhaul.
 
-export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> = {
-  // Overworld (wave-free home map, 12k) — standard mixed terrain, read
-  // directly from this table by OverworldMap.init().  Since G7 every
-  // natural map reads its tile-variant mix from here; the table is the
-  // authority rather than a parallel description of one.
-  [MapType.OVERWORLD]: {
-    'rock-shard': { freeSpawn: { count: 120, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
-    'glass-tile':   { tileCluster: { clusterCount: 10, minClusterSize: 10, maxClusterSize: 30 } },
-    'plastic-tile': { tileCluster: { clusterCount:  4, minClusterSize:  8, maxClusterSize: 20 } },
-    'metal-tile':   { tileCluster: { clusterCount:  3, minClusterSize:  6, maxClusterSize: 14 } },
-    'nebula-tile':  { tileCluster: { clusterCount: 42, minClusterSize: 12, maxClusterSize: 36 } },
-  },
-  // Deep Space (16k arena).  These counts are what UniverseMap.init HAS
-  // been generating; before G7 the class hardcoded them and this entry
-  // said something else entirely (glass 14 / nebula 65+120), so the table
-  // documented a map that had not existed for a long time.  The numbers
-  // moved here unchanged — G7 was a data move, not a rebalance.
-  [MapType.UNIVERSE]: {
-    'rock-shard': { freeSpawn: { count: 140, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 6000 } },
-    // The old 42-cluster budget split 64 / 23 / 13 glass / plastic / metal.
-    // Written out as counts, because a percentage split of a budget is a
-    // second thing to keep in sync and the counts are what get generated.
-    'glass-tile':          { tileCluster: { clusterCount: 27, minClusterSize: 10, maxClusterSize: 34 } },
-    'plastic-tile':        { tileCluster: { clusterCount: 10, minClusterSize:  8, maxClusterSize: 22 } },
-    'metal-tile':          { tileCluster: { clusterCount:  5, minClusterSize:  6, maxClusterSize: 14 } },
-    // indestructible-tile intentionally absent — per decision #6,
-    // reserved for deliberate border/structure placement, not random
-    // clusters in the natural maps.  INDESTRUCTIBLE_FIELD showcase
-    // still spawns it for stress testing.
-    //
-    // The inner/outer split is gone rather than moved: UniverseMap stopped
-    // applying it long ago (its own comment records why — on smaller maps
-    // it visibly concentrated clusters in the centre) and merely AVERAGED
-    // the two size ranges into one pass.  Carrying a field no code reads is
-    // how the entry above came to be wrong in the first place.
-    'nebula-tile': {
-      tileCluster: { clusterCount: 75, minClusterSize: 11, maxClusterSize: 34 },
-    },
-  },
-  [MapType.RING]: {
-    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
-  },
-  // Seven Rings (12k arena).  A ring map's tile-variant "ratio" is WHICH
-  // RING is made of what, so it is expressed as ring indices rather than
-  // cluster counts — inner rings soft, outer wall indestructible, which is
-  // the map's whole readable-difficulty idea.  The ring GEOMETRY (count,
-  // radii, thinning) stays in SevenRingsMap: that is the map's shape.
-  // indestructible-tile appears here and nowhere else in the natural maps,
-  // which is exactly what decision #6 reserves it for — deliberate border
-  // placement, never a random cluster.
-  [MapType.SEVEN_RINGS]: {
-    'rock-shard': { freeSpawn: { count: 280, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 5000 } },
-    'glass-tile':          { tileRings: [0, 1] },
-    'plastic-tile':        { tileRings: [2, 3] },
-    'metal-tile':          { tileRings: [4, 5] },
-    'indestructible-tile': { tileRings: [6] },
-  },
-  // Pocket sandbox (4k).  The cluster COUNTS here already matched what
-  // PocketMap.init hardcoded; only the nebula SIZE range disagreed (the
-  // class generates 6–12, this said 6–20), so the table is corrected to
-  // the map that exists.
-  [MapType.POCKET]: {
-    'rock-shard': { freeSpawn: { count: 1, minSize: 20, maxSize: 80, speedMultiplier: 1.5, spawnRadius: 1600 } },
-    'glass-tile':          { tileCluster: { clusterCount: 8, minClusterSize: 6, maxClusterSize: 14 } },
-    'plastic-tile':        { tileCluster: { clusterCount: 5, minClusterSize: 5, maxClusterSize: 10 } },
-    'metal-tile':          { tileCluster: { clusterCount: 3, minClusterSize: 4, maxClusterSize:  8 } },
-    // indestructible-tile intentionally absent — see UNIVERSE entry
-    // above for the decision-#6 rationale.
-    'nebula-tile': {
-      tileCluster: { clusterCount: 12, minClusterSize: 6, maxClusterSize: 12 },
-    },
-  },
-  [MapType.ASTEROID_FIELD]: {
-    'rock-shard': { freeSpawn: { count: 1200, minSize: 20, maxSize: 160, speedMultiplier: 1.5, spawnRadius: 2500 } },
-  },
-  [MapType.GLASS_FIELD]: {
-    'glass-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
-  },
-  [MapType.PLASTIC_FIELD]: {
-    'plastic-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
-  },
-  [MapType.METAL_FIELD]: {
-    'metal-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
-  },
-  [MapType.INDESTRUCTIBLE_FIELD]: {
-    'indestructible-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
-  },
-  [MapType.NEBULA_FIELD]: {
-    'nebula-tile': {
-      tileCluster: { clusterCount: 65, minClusterSize: 14, maxClusterSize: 42 },
-    },
-  },
-  [MapType.ROCK_FIELD]: {
-    'rock-tile': { tileCluster: { clusterCount: 100, minClusterSize: 10, maxClusterSize: 30 } },
-  },
-  // Tile-heavy stress map — `TileHeavyMap.init()` populates the map
-  // directly with hardcoded counts (it doesn't read MAP_POPULATION),
-  // so this entry only exists to satisfy the Record<MapType, …> shape.
-  [MapType.TILE_HEAVY]: {},
-};
+// Parsed from data/map-population.toml at BUILD time (scripts/toml-tables.mjs),
+// which is where every row's reasoning now lives.  Rejects, naming the map and
+// variant, anything the engine could not use: an unknown map or variant, or a
+// MapType with no row (the Record<MapType, …> shape is still the contract).
+function resolveMapPopulation(raw: Record<string, any>): Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> {
+  const fail = (msg: string): never => { throw new Error(`data/map-population.toml: ${msg}`); };
+  const out = {} as Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>>;
+  for (const [map, variants] of Object.entries(raw)) {
+    if (!Object.hasOwn(MapType, map)) fail(`[${map}] is not a MapType`);
+    for (const v of Object.keys(variants)) {
+      if (!Object.hasOwn(SHARD_VARIANTS, v)) fail(`[${map}.${v}] is not a shard variant`);
+    }
+    out[map as MapType] = variants;
+  }
+  for (const m of Object.values(MapType)) {
+    if (!Object.hasOwn(out, m)) fail(`no [${m}] row (an empty [${m}] table is fine)`);
+  }
+  return out;
+}
+export const MAP_POPULATION: Record<MapType, Partial<Record<ShardVariantId, PerMapVariantSpawn>>> =
+  resolveMapPopulation(RAW_MAP_POPULATION);
 
 /**
  * Helper: read the rock-shard freeSpawn config for a map type.

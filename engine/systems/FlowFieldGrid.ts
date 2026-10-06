@@ -30,6 +30,7 @@
  *   tight memory layout (TypedArrays) which keeps BFS cache-friendly.
  */
 
+import * as dmath from './dmath';
 import { GameEntity, EntityType } from '../../types';
 import { sampleFlow, FlowVector as AnalyticalFlowVector } from './FlowField';
 import { MAP_WIDTH, MAP_HEIGHT, HALF_MAP_WIDTH, HALF_MAP_HEIGHT, onMapDimensionsChanged } from '../toroidal';
@@ -408,11 +409,11 @@ export class FlowFieldGrid {
     let baseX = base.x;
     let baseY = base.y;
     if (this.breatheAmp !== 0) {
-      const a = this.breatheAmp * Math.sin(
+      const a = this.breatheAmp * dmath.sin(
         2 * Math.PI * BREATHE_WAVES * (wx / MAP_WIDTH + wy / MAP_HEIGHT)
         + this.breathePhase,
       );
-      const ca = Math.cos(a), sa = Math.sin(a);
+      const ca = dmath.cos(a), sa = dmath.sin(a);
       const rx = baseX * ca - baseY * sa;
       const ry = baseX * sa + baseY * ca;
       baseX = rx; baseY = ry;

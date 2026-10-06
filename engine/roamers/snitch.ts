@@ -10,6 +10,7 @@
  *  the rival's do.  That asymmetry is deliberate and is why this file has no
  *  `SnitchInstance`.
  */
+import * as dmath from '../systems/dmath';
 import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType } from '../../types';
@@ -118,9 +119,9 @@ export function updateSnitch(g: GameEngine, dt: number) {
   // formula as the DBG thrust tooltip: acceleration/(1−friction),
   // clamped by maxSpeed) so the chase tracks thrust-mult changes.
   const flow = g.flowField.sampleShardFlow(s.position.x, s.position.y);
-  const wob = Math.sin(g.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
+  const wob = dmath.sin(g.snitchTime * SNITCH_CONSTANTS.WANDER_FREQ + (s.snitchWanderPhase ?? 0))
       * SNITCH_CONSTANTS.WANDER_AMPLITUDE;
-  const cosW = Math.cos(wob), sinW = Math.sin(wob);
+  const cosW = dmath.cos(wob), sinW = dmath.sin(wob);
   let dirX = flow.x * cosW - flow.y * sinW;
   let dirY = flow.x * sinW + flow.y * cosW;
   if (g.snitchDartAway) {
@@ -141,7 +142,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
   const alpha = Math.min(1, steerRate * dt * 60);
   s.velocity.x += (dirX * targetSpeed - s.velocity.x) * alpha;
   s.velocity.y += (dirY * targetSpeed - s.velocity.y) * alpha;
-  s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+  s.rotation = dmath.atan2(s.velocity.y, s.velocity.x);
 
   // Comet tail: decay + emit trail-strip points (rendered like a
   // projectile trail in gold) and sprinkle sparkle motes behind the core.
@@ -197,12 +198,12 @@ export function updateSnitch(g: GameEngine, dt: number) {
 function spawnSnitch(g: GameEngine) {
   if (!g.currentMap) return;
   const zoom = g.camera.zoom || 1;
-  const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+  const halfDiag = dmath.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
   const angle = sim.roamers() * Math.PI * 2;
   const dist = halfDiag + SNITCH_CONSTANTS.SPAWN_MARGIN;
   const pos = {
-    x: g.player.position.x + Math.cos(angle) * dist,
-    y: g.player.position.y + Math.sin(angle) * dist,
+    x: g.player.position.x + dmath.cos(angle) * dist,
+    y: g.player.position.y + dmath.sin(angle) * dist,
   };
   wrapPosition(pos);
   const s: GameEntity = {

@@ -16,3 +16,12 @@ declare module 'virtual:sfx-manifest' {
   const files: string[];
   export default files;
 }
+
+// Content tables: `data/*.toml`, parsed at build time (scripts/toml-tables.mjs).
+// The value is plain JSON; constants.ts resolves it into its typed table and
+// throws, naming the row, on anything it cannot.
+declare module 'virtual:table/*' {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const table: Record<string, any>;
+  export default table;
+}

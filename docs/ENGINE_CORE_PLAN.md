@@ -49,6 +49,15 @@ phase is coherent enough to merge to `main`.
 2. **The gameplay PR** — small, built on top, and the only one that needs
    judging by playing it through the preview link.
 
+**BOTH are based on `claude/steam-game-publishing-xhnui2`, never on `main`**
+(user call D37).  State the base when you open them —
+`gh pr create --base claude/steam-game-publishing-xhnui2` — because the
+default is `main` and a PR opened without it goes to the wrong place even
+from a correctly branched session.  That is not hypothetical: it is how
+`S3`'s work reached `main` (§5, D37).  Everything in this phase accumulates
+on the integration branch, is tested there as a whole, and rolls into `main`
+once.
+
 ---
 
 ## 1. The goal, sharpened
@@ -412,6 +421,29 @@ faithful, and is only checkable because `S1` landed.
 
 ### S3 — "The numbers"  (content as data + balance + knob triage)
 
+**STATUS (S3, 2026-10-04).**  PR 1, the invisible one, is BUILT: the three
+tables are `data/*.toml`, parsed at build time into `virtual:table/*` modules
+through ONE loader (`scripts/toml-tables.mjs`) that `vite.config.ts` and
+`scripts/sim-test.mjs` both import; `tests/sim/tables.test.ts` pins the resolved
+values against a golden captured BEFORE the move (commit order: golden + test
+first, passing on the old literals; extraction second).  PR 2 (`dmath`) is ALSO BUILT, rolled
+into the SAME PR at the user's request (to keep the PR count down): separate
+commits, so the invisible table move and the behaviour-moving math layer stay
+reviewable apart.  `engine/systems/dmath.ts` replaces every native libm call and
+`**` in the sim; `tests/sim/guard.test.ts` keeps it out; Node and Chromium now
+agree on the WORLD bit for bit (`tests/headless.spec.ts` asserts it
+unconditionally), and replay hashes were rebaselined by construction (the suites
+compare runs to each other, no hash literals).  simbench before → after is in
+CLAUDE.md §8 and is within container noise.  D-S3-d and D-S3-e are
+answered (2026-10-05, below); the balance harness is next.  Also in this PR, at
+the user's request: a NEW GAME button on the main menu (two-tap confirm; hidden
+when there is no progress) and the debug "Erase save" row moved into Save &
+Records, where it is found.  Two facts worth carrying forward: a table
+NAME that does not resolve (a sprite key, a weapon `extends`, a subtype) fails at
+module load, so `test:sim` and the boot smoke catch it and `vite build` does not;
+and the golden is a one-time migration check that a deliberate rebalance
+re-captures in the same commit.
+
 **Near-term payoff.**  Tuning without a rebuild, and a console port that
 inherits every balanced number instead of retyping it.  With `S2`'s
 headless harness, balance claims become measurements rather than feelings —
@@ -469,10 +501,27 @@ recur rather than complete.
   Held for a later pass, with reasons: `SHARD_VARIANTS` (961 lines, the
   `grainSpecFor` seam and the per-material DBG overrides), `WEAPONS`
   (computed, not data), `MODULE_DEFS` (`BASE_BANK_DIVISOR` pins to it).
-- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32).**  There are
-  **59** `*_CYCLE` tables, not ~90 (measured, PM 2026-10-04).  Triage is
-  scoped to the knobs belonging to the tables being extracted, so each call
-  lands in the PR for the table it concerns and no session faces all 59.
+- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32); BOTH CALLS MADE
+  (user, in S3 PR 1).**  There are **59** `*_CYCLE` tables, not ~90 (measured, PM
+  2026-10-04).  Triage is scoped to the knobs belonging to the tables being
+  extracted, so each call lands in the PR for the table it concerns and no session
+  faces all 59.  The three tables own two:
+  - **`ENEMY_SCALE_CYCLE` ("Enemy scale") → its steps MOVE INTO `enemies.toml`**
+    (`enemy_scale_cycle`).  The user chose this over keeping it as code or
+    removing it.  The cycle STAYS a cycle: it multiplies `ENEMY_SCALING`, which is
+    not an extracted table and stays in `constants.ts`; the resolver requires
+    index 0 = 1, so the first click is still the A/B.  Done; DBG row unchanged.
+  - **`SWARM_MOVE_MODES` ("Gnat move") stays a cycle, and gains a SEAM.**  The
+    user's answer was a question: does it make sense to add enemy types that wear
+    the alternate move modes, since the modes were never retired and the variety
+    is good?  Yes — it makes sense, and the seam is cheap: `swarmMove?` on an
+    `ENEMY_VARIANTS` row pins that archetype to one steer (absent follows the
+    cycle).  PR 1 lands ONLY the seam, which no row sets, so the invariant holds
+    (`tests/sim/tables.test.ts` pins both halves).  The NEW ENEMY TYPES are
+    gameplay content, not an extraction, so they are NOT in PR 1 and are not
+    `dmath`'s either: each needs an `EnemySubtype`, `ENEMY_ROLE`/`ENEMY_BEHAVIOR`
+    rows, a `shape` (+ `drawEnemyIcon` for the roster dialogue), a sprite, a place
+    in `WAVE_DEFINITIONS`, and a balance pass.  FLAGGED in §8 for the PM to place.
 - ~~**D-S3-c — Data format.**~~  **SETTLED (D32): TOML**, parsed at BUILD
   time through a Vite virtual-manifest plugin (the `nebulaManifestPlugin` /
   `sfxManifestPlugin` precedent), so the parser is a devDependency and ships
@@ -481,18 +530,127 @@ recur rather than complete.
   the format follows who WRITES the file — a generator's output is JSON, a
   hand-authored table is TOML — so the two formats are deliberate and
   neither is to be unified into the other.
-- **D-S3-d — Does the player get more than the 4-level difficulty index?**
-- **D-S3-e — Balance targets, stated as numbers.**  STILL OPEN and the one
-  to put to the user at the moment the harness is built, not before.  How long should wave 5
-  take?  What is a healthy run length?  Consequence: without stated
-  targets the harness has nothing to measure against and the session
-  degenerates into taste.
+- ~~**D-S3-d — Does the player get more than the 4-level difficulty index?**~~
+  **SETTLED (user, 2026-10-05).**  Yes — and the model changes shape:
+  1. **Up to 20 levels, and the new levels EXTEND the range upward.**  Levels
+     1–4 stay what today's four are; 5–20 are harder than today, not a
+     re-spread of the current range.
+  2. **Difficulty belongs to the PORTAL, not the menu.**  Each portal carries
+     its own level, shown when the player arrives.  The start-of-game picker
+     goes away (it is a saved setting today, `settings.difficulty`, so the
+     save needs a migration — S2's file format).
+  3. **Separate dials for alternate arenas** where the enemies are present but
+     NOT the objective (mazes, timed courses).  So difficulty is a vector of
+     dials per arena (enemy count, toughness, income, …), not one scalar.
+  4. **RIVALS enter the difficulty calculation.**  They are currently very
+     prominent at every level (score-cadenced, `RIVAL_CONSTANTS.SCORE_INTERVAL`
+     1000, capped by `MAX_RIVALS`).  The harness must measure how much of a
+     run's pressure and loot-theft they account for before they are re-tuned.
+  5. **FUTURE (not this phase):** difficulty that scales with the player's
+     weapon loadout, harder for stronger loadouts.  Design the dial vector so
+     this is one more input, not a rewrite.
+  6. **Intended weapon bands:** basic weapons start to struggle above level
+     2–3; Mk III above level 10; the 10–20 range is meant for rare Mk IV+
+     modules (extremely rare in shops, rare as boss / maze rewards).
+- ~~**D-S3-e — Balance targets, stated as numbers.**~~  **SETTLED in part
+  (user, 2026-10-05).**  Method: **measure what the game does today and
+  report it first**; targets are then judged against the report.  Stated
+  targets so far (mobile is the design target):
+  - **Run length:** finding a local portal and completing a run takes about
+    **1.5–7.5 minutes**.
+  - **Wave time escalates** with the wave, because time tracks enemy count.
+    Timed arenas (the future mazes) use the same measure.
+  - **Basic weapons kill tier-1 enemies in one shot** today; keep that at the
+    low levels.
+  - **Arenas vary per wave** in difficulty and enemy variety.
+  - **Income is NOT settled** (the user finds it hard).  Constraints given:
+    modules are lost for good on a double death, so they must not be out of
+    reach, and they are powerful, so not cheap; **Mk I–III are never gated
+    behind unlocks**; instead each STATION stocks a different variety, and a
+    higher mark or a rarer kind (Shield, Overcharge) is harder to find and
+    dearer.  That is a per-station catalogue, not an unlock tree.
+
+**D-S3-f (user, settled): module pricing is a factorial, and rare finds are arena
+rewards only.**  A mark costs its number times the mark below (Mk II = 2x, Mk III
+= 6x, Mk IV = 24x, Mk V = 120x Mk I); each family keeps its current Mk I price.
+The shop stops at Mk III; Mk IV and up are `rewardOnly` (boss drops now, maze
+completion and other arena rewards later).  Landed in `constants.ts`
+(`markCost`, `SHOP_MAX_MARK`, `ModuleDef.rewardOnly`), pinned by
+`tests/sim/pricing.test.ts`.  Consequences to carry into the level design: a Mk
+III is now 24-60 units against ~85 per level-3 run (about half a run); the
+Scanner Mk IV / V cost 168 / 840 units, and because a sell-back is 90% of cost a
+rare drop is also a large payout (Mk V sells for 756 units) — whether sell-back
+of reward-only finds should be capped is OPEN.
+
+**D-S3-g (user, settled): the shape of difficulty, and what stays put.**
+(1) **Sell-back stays at 90% for every mark**, reward-only finds included.
+(2) **A boss drops a reward-only mark far more rarely than a uniform draw
+would** (it was 1 in 18, "5% is too high"): `BOSS_REWARD_WEIGHT` makes it about
+1 boss in 200 (`bossRewardTable` / `pickBossReward`).  (3) **The starter gun
+stays relatively hard against the boss, and beatable.**  The bot clears the
+boss 1 time in 12 at level 1 and never at level 3; the user has beaten level 3
+with the starter gun, so that gap is the bot, not the game — no retune.
+(4) **Difficulty adjusts enemy HEALTH and DAMAGE more than it adjusts how many
+spawn** (today the levels move spawn count 3x and HP/damage 1.4x), **and it
+changes the VARIETY of enemies**: the Bulwark is a hard archetype and is placed
+as one, so it belongs to higher levels rather than appearing at every level.
+(5) **Stronger enemy AI is a later difficulty axis** and is parked
+(PARKING_LOT: "Enemy AI as a difficulty axis"), not designed here.
+
+**D-S3-h (user, settled as a starting point; confirmed by playtest only): enemy
+mix is driven by per-enemy ratings and the arena level.**  (1) Provisional,
+awaiting playtest.  (2) A level-3 wave no longer carries Bulwarks in numbers:
+the wave-5 spike (~49 points against 8-12 elsewhere) is gone; the Tank
+(RAMMER_3) stands where the Bulwark was.  (3) Every enemy has a `rating`
+(`data/enemy-difficulty.toml`); a wave is a POINT budget; the level sets a
+roster CEILING (the hardest rating allowed) and the mix is picked at random
+(seeded, `sim.waves`) with evenly split points, 2-4 types a wave, never the
+previous wave's mix.  So kamikaze, turret, nest, swarm and the rest vary by
+arena and wave.  Difficulty is the PORTAL's (`MapDescriptor.level`: Pocket 2,
+Universe 3, Ring 4, Seven Rings 6, field maps 3); the menu picker is gone.
+Levels 1-3 are the old Low/Med/High rows; above that HP and damage grow 1.14x a
+level and spawn 1.03x (capped 1.5x).  Playtest handle: DBG > World & Maps >
+Portals > "Arena level".  Baseline report predates this generator: re-run it.
+
+**D-S3-i (user, settled): the hub layout and arena varieties.**  Each arena map
+has three portals (easy / mid / hard: Pocket L1/2/4, Deep Space 2/3/5, Ring
+World 3/4/6, Seven Rings 5/6/8 — a starting point for the playtest); the eight
+material-field showcase rifts (Indestructible and Tile Heavy included) form a
+gravity-free debug ring just outside the home station; arenas and the three
+shops are spread at even angles over three rings round the home station, the
+easy variety innermost.  The mid variety keeps the original descriptor id.
+
+**PROPOSED (not settled) — the level curve, for the user to confirm.**
+Calibration (baseline report §8, mk3 on POCKET + RING, n = 6 a cell): enemy HP
+and damage x1.0 -> the fully outfitted bot beats the boss 4 times in 6; x1.5 ->
+1 in 6; x2 -> 0; x3 -> 1 (noisy).  The bot is harsher than a person, so
+"Mk III struggles" is placed higher than the bot's x1.5.  Shape: levels 1-3 are
+today's 1-3 unchanged (spawn 0.35 / 0.65 / 1.0, HP and damage 0.7 / 0.85 / 1.0);
+from level 4 the spawn budget grows only gently (about x1.03 a level, capped
+x1.5) while HP and damage grow x1.14 a level — x2.5 at level 10, x9 at level
+20.  Roster: the Bulwark moves from "every stage's wave 5" to "level 3 and up"
+(levels 1-2 put a Shooter 2 there), one Bulwark at level 3 as today, two from
+level 6, three from level 10; Kamikaze, Turret and Nest follow the same idea
+(introduced by level, then more of them).  Portal difficulty is shown on arrival.
+
+**BUILT in S3: the balance harness and today's baseline.**  Instruments:
+`tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
+`tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver
+`scripts/balance.mjs` (`--seeds N --jobs N`, `--ladder` adds the lean start at difficulty 1-2, `--report` re-renders from the
+JSON).  Output: `docs/BALANCE_BASELINE.md` (the table the user judges) and
+`docs/balance-baseline.json` (raw).  Not part of `npm test`/CI (about an hour
+at 3 seeds).  The bot is a YARDSTICK, not a player (perfect aim, fixed kite,
+no dodging, no charged shots); beams are pulled not held; hit attribution
+counts projectile hits only; rival loot theft is inferred from salvage per
+wave.  **NEXT in S3:** the user judges the baseline against the targets
+above; the portal-difficulty model, the level count and the per-station
+catalogues are DESIGNED from that, not before it.
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
 with the numbers visible in the diff.
 
-**Acceptance, as tests to write.**
+**Acceptance, as tests to write.**  *(PR 1: `tests/sim/tables.test.ts` — done.)*
 - for each extracted table, the loaded data is byte-equivalent in effect to
   the previous constants (assert the derived values, not the literals)
 - the existing suites that pin populations and balance (`maps.spec.ts`,
@@ -634,7 +792,12 @@ banks (D31), so it composes with them rather than reverting any.
   `public/assets/audio/score/index.json` lists the songs AND the music plan
   (which song plays in the hub, a field map, an arena, a boss fight).
   `AdaptiveMusic` loads the index; `scripts/inline-build.mjs` inlines it, so
-  the single-file standalone still plays the score.
+  the single-file standalone still plays the score.  **The plan is WRITTEN BY
+  THE IMPORTER, not hand-kept** — `for (const role of use) index.plan[role] =
+  meta.id`, from each song's own `use` array — so the editorial choice is made
+  in the KIT and the index is its output.  It only ever ADDS or overwrites the
+  roles a song claims and never clears one, so a role nobody claims keeps
+  whatever is there.  See D34: this retires half of D33's rationale.
 - **`npm run music:import -- <kit>`** takes a GarageBand export, checks
   length against tempo, folds the tail into the loop, applies ONE loudness
   gain across all layers, encodes, and adds or replaces that song in the
@@ -648,12 +811,45 @@ banks (D31), so it composes with them rather than reverting any.
   extension of S2's port surface, consistent with it.
 - **It set the GENERATED-DATA format precedent** that D33 then stated as a
   rule for the whole project.  See D33 before extracting any table.
+- **THE PIPELINE HAS NOW CARRIED A REAL SONG** (`6558b71`, 2026-10-06):
+  "Critical Mass", the BOSS song, re-imported from an actual GarageBand export
+  — the first content through `music:import` rather than `scripts/score/`.  So
+  the tool is proven end to end, and the three things it leaves behind are
+  worth knowing.  (1) The song is now PART authored, PART generated: the six
+  loop stems are the export, while `riser.mp3` and `victory.mp3` are the older
+  generated one-shots, because "a riser / victory not in this export keeps the
+  song's existing one" is the importer's deliberate rule.  (2) `song.json` is
+  copied beside the stems as the song's own record, and TWO of its fields are
+  INERT — `key` and `phraseBars` are read by nothing, in the engine or in the
+  importer.  Latent, like W2's variants: do not assume they are wired.  (3) The
+  boss stem grew 532 KB → 852 KB, which is MONO → STEREO (the importer encodes
+  80k mono / 128k stereo per layer) and not a length change — all six stems
+  measure 53.283 s, so the score is still synchronised.  Gates on it:
+  typecheck 0 and `test:sim` 47/47 LOCALLY, CI smoke green — **and the full
+  scope CANCELLED, by the very next push.**  An earlier revision of this entry
+  claimed "CI green both scopes" and that was wrong: the push-event
+  concurrency group is the REF, so my docs commit on top of this one killed the
+  full run that was validating it.  See §7's CI note — full green attaches to
+  the HEAD of a push burst, never to each commit in it.
 
 **Consequence for `S3`.**  `index.json` is a second data format alongside
 `S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
 Do not "unify" them.
 
-### W2 — Layer variants  (landed 2026-10-05, `67e8d7c`)
+### W2 — Layer variants  (landed 2026-10-05, `67e8d7c`; BACKED OUT
+`ae222f4`, same day, for a dedicated branch)
+
+**THIS DID NOT STAY.**  The whole variants layer was reverted hours after
+it landed — 1,390 deletions, `MusicContext.ts` deleted, every
+`AUDIO_CONSTANTS.MUSIC_*` it added gone, and `engine/ports.ts` +
+`platform/headless.ts` byte-identical to their pre-W2 state (verified).
+W1 is UNTOUCHED by the revert: songs-as-data, `music:import` and the index
+all survive, so the two are cleanly separable and only the variants layer
+went.  The entry is kept rather than deleted because what it ESTABLISHED is
+what a dedicated branch will meet again — and because the one durable
+lesson is the port rule below, which held this time and is the reason the
+revert was clean.  Read the rest as a description of that branch's starting
+point, not of this one's contents.
 
 The score gained ALTERNATIVE STEMS per slot.  The intensity model still
 decides which slots are ON; a DIRECTOR now decides which variant fills a
@@ -711,13 +907,51 @@ git fetch origin claude/steam-game-publishing-xhnui2
 git checkout -B <my-work-branch> origin/claude/steam-game-publishing-xhnui2
 ```
 
+**AND THE PR IS OPENED AGAINST THAT BRANCH, EXPLICITLY** (user call D37).
+Branching from the integration branch is NOT enough, because the PR BASE is a
+separate choice and its default is wrong: `gh pr create` bases on the
+repository's DEFAULT branch, i.e. `main`.  That is exactly how `S3`'s 62-commit
+PR #113 reached `main` — the session branched correctly and opened its PR at
+the default, doing nothing wrong.  So every brief states the base, and states
+it as a flag rather than as prose:
+
+```
+gh pr create --base claude/steam-game-publishing-xhnui2 --head <my-work-branch>
+```
+
+A PR already open at the wrong base is RETARGETED, not reopened — GitHub's
+"Edit" beside the base branch, or `gh pr edit <n> --base
+claude/steam-game-publishing-xhnui2` — which keeps the review history and the
+preview link.  **The PM session checks the base of every open PR in this
+phase** rather than trusting that the brief was followed, for the same reason
+the branch-point mitigation lives with the PM: it does not depend on a work
+session noticing anything.
+
 Two things about the NAME, so nobody reads meaning into it.  It is the
 planning session's own branch, named for the Steam question that opened that
 conversation before D0 settled on mobile — so it describes this phase
 BADLY, and that was accepted deliberately as the price of keeping one branch
 instead of two.  And it means the plan doc has lived on this branch from the
-start, which is why `main` does not carry it yet (PR #108): a work session
-must take the plan from the integration branch, not from the default one.
+start: a work session must take the plan from the integration branch, not
+from the default one.
+
+**`main` NOW CARRIES A STALE COPY, AND THAT IS WORSE THAN CARRYING NONE**
+(2026-10-06).  It used not to carry the doc at all — PR #108 was to be its
+first arrival — but `S3`'s accidental merge took it to `main` along with
+everything else, frozen at **D32**.  So `main`'s copy is missing D33 (data
+formats), D34, D35, D36 and D37 — including the rule about where to open a
+PR, which is the one a session reads this file to learn.  A session that
+pulls `main` therefore gets a plan that looks complete and authoritative and
+silently predates the correction to the mistake that put it there.  THE
+INTEGRATION BRANCH IS THE ONLY LIVE COPY; `main`'s is a snapshot, and the
+check is one line:
+
+```
+git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D3[3-9] '
+```
+
+Non-zero means you are reading the live one.  This resolves when the phase
+promotes; until then, every brief says which branch the plan comes from.
 
 ~~**This plan doc must reach `main` early**, because fresh work sessions
 clone the default branch and would otherwise not see it.~~  **OVERTAKEN by
@@ -726,7 +960,9 @@ promotes once, so the plan will NOT reach `main` early and this requirement
 is withdrawn rather than left standing as an unmet one.
 
 What replaces it is **brief hygiene, and it is the PM session's
-responsibility, not a work session's**.  The hazard is real and has already
+responsibility, not a work session's** — now in TWO parts, the branch point
+below and the PR BASE above (D37), because covering only the first is what let
+`S3`'s work reach `main`.  The hazard is real and has already
 fired once: the `S1` brief said `git checkout -B <branch> origin/main`, and
 because the plan lived only on this branch that command would have DELETED
 `docs/ENGINE_CORE_PLAN.md` from the working tree of a session whose first
@@ -748,6 +984,13 @@ Note the push list is now the ONLY way a run reaches full scope besides the
 `full-tests` label: a PR's BASE stopped picking the scope (user call,
 2026-09-29), so a PR against `main` runs smoke like any other.  Do not
 expect a plain PR into this branch, or out of it, to run the whole suite.
+That shape is what D37's model RUNS ON: a PR into the integration branch pays
+only the ~2-minute smoke per push, and the FULL suite runs once, on the merge,
+against everything accumulated so far — "merge to this branch and test before
+rolling into `main`" is already the wiring rather than something to build.
+Two consequences worth stating: the full verdict belongs to the merge COMMIT
+and not to the PR (§7's push-burst rule — name the commit), and a PR that
+wants the whole net BEFORE merging asks for it with the `full-tests` label.
 
 **A work session's own gate** is therefore CLAUDE.md §7's rule verbatim:
 typecheck + build + `npm test` (smoke) + the suites the change touches, per
@@ -838,6 +1081,10 @@ who made it, and the consequences for other sessions.
 | D31 | PM | 2026-10-04 | **Audio memory: the score decodes at 25 kHz, and the SFX banks decode LAZILY** (user call), after PR #110's adaptive score landed and the resident figure was MEASURED at ~133 MB (70.9 music + ~62 sliced cue buffers) against a mobile-first phase.  Options put to the user: drop the music decode rate / hold fewer layers / decode the banks lazily instead of all four at unlock.  **Call: 25 kHz and lazy.** | Music: `SCORE.DECODE_RATE` 32 → 25 kHz, measured 70.9 → **55.4 MB**; linear, and nothing about the bar grid is rate-dependent.  Banks: only the MENU bank decodes at unlock; `requestBank` starts the others FIRE-AND-FORGET from `play()` / `loop()`, so CLAUDE.md §8's "never a decode inside a frame" rule is kept — the asking trigger plays its procedural draft and returns, which is what every id already did while the eager preload was in flight.  Measured: title screen **4.7 MB** of banks (was ~62), a run that never fires **49.3**, audio in total ~105 MB in play and 16.5 at the title against 133 / ~77.  **Stated honestly: lazy decoding DEFERS rather than reduces** — impacts and world are asked for within seconds of a run, so a few seconds in the steady state is close to what it was; the reduction is the rate cut, and what laziness buys is the PEAK (the whole-bank buffer no longer stacks against the score's decode at unlock) and the menu.  Two consequences were load-bearing and are documented in §8: the WAV pass and the procedural pre-render had to switch from `hasSample` to the MANIFEST, or a not-yet-decoded bank id gets a WAV fetched AND three Offline takes rendered — costing more than the eager decode saved; and a live LOOP is dropped when its bank lands, or `move.thrust` keeps its draft for the whole run.  `tests/audio.spec.ts` gained a laziness regression (verified to FAIL against the eager build) and its whole-manifest test now asks for every bank via `decodeAllBanks()` — the claim is unchanged, only its trigger moved.  **Not a work-session payload:** done here, in the phase branch, because it is a two-constant change plus its guards and it blocked nothing in S3's brief. |
 | D32 | PM | 2026-10-04 | **S3's four pre-flight calls, settled before the brief was written** (user).  (a) **FORMAT: TOML.**  Options weighed: TOML / JSON + a TS schema / data-only TS modules.  The decider was COMMENTS — this repo's tables carry the reasoning behind each number (the grain table's "neither is visible in the row", the bank divisor's two factors), and that commentary is a large part of their value, so JSON would either lose it or scatter it into sibling files.  (b) **FIRST TABLES: `MAP_POPULATION` + `ENEMY_VARIANTS` + `BOSS_DEFS`** — ~560 measured lines, all three DESCRIPTIONS rather than derivations, one small / one medium / one nested-shape, and exactly what a balance harness needs to vary.  (c) **ORDER: tables before `dmath`** (D30 placed dmath in S3; this settles its position WITHIN the session, and does not reopen D30).  (d) **KNOB TRIAGE: only the extracted tables' knobs**, riding each extraction. | **The format choice is cheap here only because of an existing precedent, and that is the brief's load-bearing constraint.**  `vite.config.ts` already resolves two BUILD-TIME virtual manifests (`virtual:nebula-manifest`, `virtual:sfx-manifest`), so a TOML table parses at build time into a typed module: the parser is a devDependency, the bundle ships zero parser bytes, and `scripts/inline-build.mjs`'s single-file standalone — which cannot fetch anything — works for free because the data is already in the module.  THREE consumers must all resolve the new virtual ids or the gates break, and the second is the one that gets forgotten: (1) `vite.config.ts`; (2) `scripts/sim-test.mjs`, whose esbuild shim hardcodes `/^virtual:(nebula\|sfx)-manifest$/`, so `npm run test:sim` fails the moment a table becomes virtual; (3) `playwright.config.ts`'s webServer, which builds, so it is covered by (1).  ORDER rationale: extraction is the session's stated payoff and the lower-risk half, so if `dmath` sprawls (~150 call sites plus a `perf/` number either side) the valuable work has landed, and `dmath` explicitly does not block the mobile release.  The honest cost of that order: `dmath` later shifts the extraction's derived-value assertions in the LAST PLACE, so those assertions need tolerances rather than equality — the brief says so, since discovering it as a red suite is how it turns into a day.  MEASURED AND CORRECTED in §4 while settling these: `constants.ts` is 11,359 lines (the brief said ~1000) and there are 59 `*_CYCLE` tables (it said ~90). |
 | D33 | PM | 2026-10-05 | **THE FORMAT FOLLOWS WHO WRITES THE FILE, NOT WHO READS IT** (user call, after W1's `score/index.json` landed beside D32's TOML and the two could have read as drift).  **A file a GENERATOR rewrites is JSON.  A file only HUMANS write is TOML.**  So W1's song index stays JSON and `S3`'s tuning tables are TOML, and neither is to be "unified" into the other. | The rule is phrased on the WRITER because that is the property that actually decides it: TOML's one advantage here is COMMENTS, and a comment cannot survive a generator rewriting the file — `npm run music:import` adds or replaces songs in `index.json` on every run, so any commentary in it would be destroyed on the next import.  Phrasing the rule on the reader ("engine data is X") would have given the wrong answer for both files.  **THE INDEX IS HONESTLY A MIXED CASE, and it is the exception that proves the rule rather than a counter-example:** its `songs[]` array is generator-written, but its `plan` block (which song plays in the hub, a field map, an arena, a boss fight) is a HAND-AUTHORED editorial choice — and the file pays for being JSON exactly where you would expect, with an `"about"` STRING KEY doing a comment's job at the top.  That is the cost, it is small, and splitting four lines of `plan` into a separate TOML file to satisfy the rule would be churn for nothing.  If `plan` ever grows into real editorial reasoning, THAT is the moment to split it, and this row is the argument for doing so.  Recorded in CLAUDE.md §8 as well as here, so a session that reads only the master spec still sees it. |
+| D34 | PM | 2026-10-06 | **D33's RULE STANDS; ITS "MIXED CASE" CAVEAT IS RETIRED** (PM reconciliation after `6558b71`, not a new call).  The index is NOT a mixed case: `music:import` writes its `plan` block too, so `index.json` is a wholly generator-written file and the rule's own answer for it — JSON — is now the clean case rather than the exception.  Read D33's rule as written and ignore only its mixed-case paragraph. | D33 argued the index "pays for being JSON exactly where you would expect" because `plan` was HAND-AUTHORED editorial choice sitting in generated output.  That was true of the file when D33 was written and is not true of the code: `scripts/music-import.mjs` ends with `for (const role of use) index.plan[role] = meta.id`, so each song's own `use` array decides which roles it claims and the importer stamps them into the index.  **The editorial choice did not disappear — it moved UPSTREAM**, into the kit's hand-authored `song.json`, which is exactly where D33's deciding property says it belongs.  So the rule did better than its own footnote: the one file that looked like a counter-example turned out to obey it.  Two consequences.  (1) `plan` is still hand-EDITABLE (the importer never clears a role), so a human pin survives until a song claims that role — it is generator-written, not generator-owned.  (2) It puts a NEW question where the old caveat was, and that one is the user's, not mine: the kit's `song.json` is hand-written and read by a generator, so comments WOULD survive in it and D33's rule points at TOML — see §8.  Appended rather than editing D33, per §0: the log is append-only, and a correction that rewrites the row it corrects destroys the evidence that the rule was tested. |
+| D35 | PM | 2026-10-06 | **THE KIT'S `song.json` STAYS JSON, AND D33 CARRIES THE EXEMPTION** (user call, taking the PM's recommendation (a) on D34's §8 hand-up).  D33's rule points a hand-written file at TOML; the GarageBand kit's `song.json` is hand-written, read only by `music:import`, and stays JSON.  The rule is not weakened — it gains a stated boundary: **a file small enough that its fields need no explanation does not need a format that can explain them.**  The moment a kit carries reasoning worth a comment — WHY a song claims `boss`, why a tempo was chosen — that is the moment to split it, which is D33's own test applied one level up. | Options weighed were (a) leave it JSON and write the exemption into the rule, (b) move it to TOML for the sake of commentary, (c) TOML upstream with the generator's copy staying JSON.  (b) buys a comment nobody has yet wanted to write, against a change to W1's authoring surface and `docs/MUSIC_PIPELINE.md`; (c) is the most honest about the two files having different writers and the least worth its cost, since it means two formats for one shape.  The deciding fact is that the file is FIVE live fields (`id`, `title`, `bpm`, `bars`, `use`), four of which the importer validates by name, plus two inert ones — nothing in it is a judgement that needs defending.  Recorded in CLAUDE.md §8 beside D33, since that is where the rule is read. |
+| D36 | PM | 2026-10-06 | **D15 NO LONGER DESCRIBES THE BRANCH TOPOLOGY: `S3` PROMOTED TO `main` ON ITS OWN** (PM reconciliation of what happened, not a new call).  PR #113 (`claude/s3-numbers` → `main`, merged 2026-10-06) carried 62 commits and 155 files — `dmath`, the TOML content tables, the balance harness, factorial pricing, per-arena difficulty and the hub layout — so `main` is now AHEAD of the phase branch, which D15 said would not happen until the phase ended.  The user reports the merge was PREMATURE and that `S3` still has work in flight, so this is a topology change to absorb, not a phase completion. | **What is true now:** `main` holds `S1` + `S2` + `S3`; the phase branch holds W1 (the music pipeline), the W2 revert, the Critical Mass import and this plan's own commits — 14 commits `main` lacks.  The two diverged at `33ac6f3`.  **What was done:** `main` was merged INTO the phase branch (three conflicts: this doc twice, `package.json`, `package-lock.json`), so PR #108 is mergeable again and carries the music work forward rather than stranding it.  Both devDependencies survive — W1's `ffmpeg-static` and `S3`'s `smol-toml` — and the lockfile was REGENERATED with npm rather than hand-merged.  **What this costs:** D15's guarantee was that the phase lands as one reviewable promotion; that is gone and cannot be recovered by anything written here.  What replaces it is weaker and worth stating plainly — the phase branch is now a FOLLOWER of `main`, so every session on it must merge `main` before pushing, and a second premature promotion is now the likely failure rather than a hypothetical one.  **Not decided here:** whether the phase branch should keep accumulating at all, or whether the remaining work should go to `main` in PRs the way `S3`'s did.  That is the user's, and it is the one question this topology actually raises. |
+| D37 | PM | 2026-10-06 | **EVERY FUTURE PR IN THIS PHASE IS BASED ON `claude/steam-game-publishing-xhnui2`, AND THE BASE IS NOW A STATED PART OF EVERY BRIEF** (user call, settling D36's open question).  `S3`'s work was always INTENDED for the integration branch — the merge to `main` was a mistake, not a change of plan — so D15's model stands: the phase branch accumulates every session and workstream, is tested whole, and rolls into `main` once.  What is new is the mechanism that failed. | **WHY IT HAPPENED, because it will recur otherwise:** §5's brief hygiene covered the BRANCH POINT (`git checkout -B <branch> origin/claude/steam-game-publishing-xhnui2`, carried verbatim in every brief after the `S1` near-miss) and said NOTHING about the PR BASE — and `gh pr create` defaults the base to the repository's DEFAULT branch, which is `main`.  So a session that branched correctly still opened its PR at `main` by doing nothing wrong, and PR #113 (62 commits, 155 files) merged there.  A convention that depends on a tool's default being what you want is not a convention; §5 now carries the base as its own hygiene item, with `--base` written out.  **WHAT IS ALREADY TRUE AND NEEDS NO WIRING:** the phase branch sits in `pr-checks.yml`'s `push.branches`, so a merge INTO it runs the FULL suite while each PR push into it runs the cheap smoke — which is exactly the user's "merge these changes to this branch and test before rolling into main".  And the branch is a sound base again: `227afc5` merged `main` into it, so it now CONTAINS every commit `main` has (verified: 0 commits main-ahead, 15 phase-ahead) and a PR based on it carries `S3`'s work as well as the music work.  **WHAT THIS COSTS, stated plainly:** `main` already carries `S1`–`S3`, so the phase no longer promotes as one reviewable diff — D15's original guarantee is spent and D36 records that.  The model from here is the one the user asked for and it is the weaker, workable version: the phase branch stays the integration point and the place the whole net runs, and what eventually reaches `main` is the remainder. |
 
 ---
 
@@ -847,6 +1094,27 @@ Work sessions append here when a decision changes what a *later* session
 should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
+
+- ~~**W1 → the user (the kit `song.json`'s format).**~~  *(SETTLED, D35: the
+  user took option (a) — it stays JSON, and D33 carries the exemption.)*  D34 moved the music
+  pipeline's one hand-authored file out of `index.json` and into the GarageBand
+  kit's `song.json` — id, title, bpm, bars, `use`, and the two inert fields.
+  That file is WRITTEN BY A HUMAN and only READ by a generator, so comments
+  would survive in it, which is the exact property D33 says decides the format:
+  by D33's own rule it wants TOML.  It is JSON today.  **Nothing is broken and
+  nothing is urgent** — it is five live fields and the importer validates four
+  of them — so this is a consistency call, and it is the user's because D33 was
+  a user call and because changing it touches W1's authoring surface and
+  `docs/MUSIC_PIPELINE.md`, not just a parser.  Three ways to go: (a) leave it
+  JSON and write the exemption into D33's rule, since the file is small and the
+  importer already carries the only commentary that matters; (b) move it to
+  TOML, which buys the ability to say WHY a song claims `boss` beside the claim
+  — the kind of reasoning this repo normally keeps next to its numbers; (c) move
+  it to TOML *and* keep the generator's copy beside the stems as JSON, which is
+  honest about the two files having different writers but means two formats for
+  one shape.  My recommendation is (a) until a kit carries reasoning worth a
+  comment, on D33's own "that is the moment to split it" logic.  *(PM,
+  2026-10-06)*
 
 - **S1 → S2 (Clock port).**  Four wall-clock reads still sit in or beside the
   sim and a replay works around, not through, them: (1) `PerfController`'s load
@@ -975,7 +1243,9 @@ history stays readable.
 - **S2 → S3 (knob triage input).**  Persisted settings are only audio volumes
   + mute, control scheme and difficulty (D20).  Every other DBG cycle is
   per-session by construction.  *(S2, 2026-10-03)*
-- **W2 → S3 (`constants.ts` surface).**  Layer variants added ~48 lines of
+- ~~**W2 → S3 (`constants.ts` surface).**~~  *(MOOT, `ae222f4`: those ~48
+  lines were reverted with the variants layer, so there is no rebase surface
+  for `S3` here after all.  Live again only if that branch lands.)*    Layer variants added ~48 lines of
   `AUDIO_CONSTANTS.MUSIC_*` to `constants.ts` — tag radii, hysteresis, the
   family margin, the dwell, the decode budget and the family table.  `S3`
   extracts tables from that same file, so this is a REBASE surface, not a
@@ -983,7 +1253,10 @@ history stays readable.
   tuning for a subsystem whose data already lives in `score/index.json`
   (D33 — the index is generator-written JSON, these are hand-authored
   numbers that belong beside the code that reads them).  *(PM, 2026-10-05)*
-- **W2 → the audio-memory decision (D31).**  `MUSIC_DECODE_BUDGET_MB` is
+- ~~**W2 → the audio-memory decision (D31).**~~  *(MOOT, `ae222f4`:
+  `MUSIC_DECODE_BUDGET_MB` went with the revert, so D31's measured figures
+  stand unchallenged.  The re-measure below becomes a REAL decision the day a
+  variants branch lands AND a song declares variants — both, not either.)*    `MUSIC_DECODE_BUDGET_MB` is
   **110**, and it is a ceiling on the score's TOTAL decoded PCM (default
   stems plus the variant cache), not a variant-only allowance.  D31 cut the
   decode rate to 25 kHz on a MEASURED 70.9 → 55.4 MB for the score, with
@@ -998,3 +1271,35 @@ history stays readable.
   nebula goo step ("a cost measured against one population does not
   survive a change to that population").  A decision for the user when
   variants exist, not now.  *(PM, 2026-10-05)*
+- **S3 → PM (new gnat-flock enemy types need a home).**  The user wants VARIETY
+  from the "Gnat move" modes (boids / vortex / weave / burst), which were never
+  retired: archetypes that each wear one, rather than one global DBG cycle.  S3
+  PR 1 landed only the SEAM (`swarmMove?` on an `ENEMY_VARIANTS` row; no row sets
+  it).  The enemy types themselves are gameplay content — an `EnemySubtype`,
+  role/behaviour rows, a shape + roster icon, a sprite, wave placement and a
+  balance pass — and are not part of the extraction or of `dmath`.  PM to place
+  them: a third S3 PR, or a content item for after the balance harness exists
+  (they would be a natural first customer of it).  *(S3, 2026-10-04)*
+- **S3 → all sessions (content tables are files).**  `MAP_POPULATION`,
+  `ENEMY_VARIANTS` and `BOSS_DEFS` live in `data/*.toml`.  A balance change is a
+  TOML edit that also re-captures `tests/sim/fixtures/tables.golden.json` in the
+  same commit (that is what makes it visible); a new table is an entry in
+  `scripts/toml-tables.mjs` `TABLES`, and BOTH `vite.config.ts` and
+  `scripts/sim-test.mjs` pick it up from there — no second place to register it.
+  Arena layouts as data (S1's earlier flag) can use the same mechanism.
+  *(S3, 2026-10-04)*
+- **S3 → PM (PR 1 and PR 2 are one PR).**  At the user's request `dmath` was
+  rolled into the content-tables PR.  Consequences for later sessions: the
+  Node-vs-Chromium parity assertion is now EXACT for the world (S2's "streams and
+  player only" caveat is retired); any new sim code must use `dmath.*` and avoid
+  `**` or the guard fails; a deliberate change to dmath is a rebaseline.  *(S3,
+  2026-10-04)*
+- **S3 → PM / S2 / S4 (difficulty moves to the portal).**  User call
+  2026-10-05: difficulty is per PORTAL (up to 20 levels, shown on arrival), the
+  start-of-game picker goes away, alternate arenas get their own dial vector,
+  rivals count in the calculation, and weapon-loadout scaling is a later input.
+  Consequences: the SAVE FILE's `settings.difficulty` needs a migration (S2);
+  `WaveSystem` / `ENEMY_SCALING` / `DIFFICULTY_*` read a per-arena level, not
+  `difficultyLevel`; the portal descriptor (`MAP_DESCRIPTORS`) gains a level;
+  the arrival UI needs a level readout (S4 if it owns the mobile HUD).  Not
+  built yet — S3 reports today's numbers first.  *(S3, 2026-10-05)*

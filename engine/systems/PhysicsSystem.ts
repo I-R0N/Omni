@@ -1,5 +1,6 @@
 
 
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { mechanicalScale, materialOf, stampFractureProfile } from './energy';
 import { GameEntity, Vector2, MapType, EntityType } from '../../types';
@@ -97,7 +98,7 @@ function lerpHexColors(a: string, b: string, t: number): string {
 // pair is considered stable when distSq > sumRSq × STABLE_DIST_FACTOR_SQ.
 // Derived from `dist > sumR × (1 − STABLE_OVERLAP_FRACTION)`, i.e. the
 // overlap is below the configured fraction of contact distance.
-const STABLE_DIST_FACTOR_SQ = (1 - SHARD_PAIR_CONSTANTS.STABLE_OVERLAP_FRACTION) ** 2;
+const STABLE_DIST_FACTOR_SQ = dmath.pow(1 - SHARD_PAIR_CONSTANTS.STABLE_OVERLAP_FRACTION, 2);
 
 // Scratch buffer for applyDentStep's pre-dent vertex snapshot — sized
 // to the largest variant polygon (hex tiles have 6 vertices; plastic
@@ -462,7 +463,7 @@ export class PhysicsSystem {
     // body, and no change to any entity's hidden class (CLAUDE.md section 4).
     this.lastTimeScale = timeScale;
     if (this.sweepPaths.size > 0) { this.sweepPaths.clear(); this.sweepPoolUsed = 0; }
-    const friction = Math.pow(baseFriction, timeScale);
+    const friction = dmath.pow(baseFriction, timeScale);
 
     // Apply Planetary/Stellar Gravity (Scaled by time).
     // DBG-toggleable: when attractorGravityEnabled is false the scan
@@ -627,8 +628,8 @@ export class PhysicsSystem {
       // ORBITAL PHYSICS
       if (entity.orbitCenter && entity.orbitRadius && entity.orbitSpeed !== undefined && entity.orbitAngle !== undefined) {
           entity.orbitAngle += entity.orbitSpeed * dt;
-          entity.position.x = entity.orbitCenter.x + Math.cos(entity.orbitAngle) * entity.orbitRadius;
-          entity.position.y = entity.orbitCenter.y + Math.sin(entity.orbitAngle) * entity.orbitRadius;
+          entity.position.x = entity.orbitCenter.x + dmath.cos(entity.orbitAngle) * entity.orbitRadius;
+          entity.position.y = entity.orbitCenter.y + dmath.sin(entity.orbitAngle) * entity.orbitRadius;
           wrapPosition(entity.position);
 
           entity.velocity.x = 0;
@@ -678,8 +679,8 @@ export class PhysicsSystem {
                 : (entity.angularDamping ?? NEBULA_CONSTANTS.ANGULAR_DAMPING);
             const restSpeed = entity.restSpeed ?? NEBULA_CONSTANTS.REST_SPEED;
             const restSpin  = entity.restSpin  ?? NEBULA_CONSTANTS.REST_SPIN;
-            const lin = Math.pow(linearD, timeScale);
-            const ang = Math.pow(angularD, timeScale);
+            const lin = dmath.pow(linearD, timeScale);
+            const ang = dmath.pow(angularD, timeScale);
             entity.velocity.x *= lin;
             entity.velocity.y *= lin;
             if (Math.abs(entity.velocity.x) < restSpeed) entity.velocity.x = 0;
@@ -1017,7 +1018,7 @@ export class PhysicsSystem {
                     && radius >= crushR * E.SIZE_FRACTION;
                 if (ejectable) {
                     let vx = entity.velocity.x, vy = entity.velocity.y;
-                    let speed = Math.hypot(vx, vy);
+                    let speed = dmath.hypot(vx, vy);
                     if (speed > 1e-3) {
                         vx /= speed; vy /= speed;
                     } else {
@@ -1442,14 +1443,14 @@ export class PhysicsSystem {
       // its first hit lands the authored figure and its later hits still
       // decay.  Without this the fallback would be a constant and the bore
       // would not fall off at all — the property this whole step buys.
-      if (proj.spawnSpeed === undefined) proj.spawnSpeed = Math.hypot(v.x, v.y);
+      if (proj.spawnSpeed === undefined) proj.spawnSpeed = dmath.hypot(v.x, v.y);
       const spawn = proj.spawnSpeed;
       let speed: number;
       if (getActiveImpactVelocityMode() === 'relative') {
           const tv = target.velocity;
-          speed = Math.hypot(v.x - (tv?.x ?? 0), v.y - (tv?.y ?? 0));
+          speed = dmath.hypot(v.x - (tv?.x ?? 0), v.y - (tv?.y ?? 0));
       } else {
-          speed = Math.hypot(v.x, v.y);
+          speed = dmath.hypot(v.x, v.y);
       }
       return projectileBite(authored, speed, spawn);
   }
@@ -1469,7 +1470,7 @@ export class PhysicsSystem {
   private static projectileEnergyLeft(proj: GameEntity): number {
       const v = proj.velocity;
       if (v === undefined) return 0;
-      return kineticDamage(proj.mass ?? PROJECTILE_CONSTANTS.MASS, Math.hypot(v.x, v.y));
+      return kineticDamage(proj.mass ?? PROJECTILE_CONSTANTS.MASS, dmath.hypot(v.x, v.y));
   }
 
   /**
@@ -1485,7 +1486,7 @@ export class PhysicsSystem {
   private static spendProjectileEnergy(proj: GameEntity, mass: number, damage: number): void {
       const v = proj.velocity;
       if (v === undefined || !(damage > 0)) return;
-      const s = Math.hypot(v.x, v.y);
+      const s = dmath.hypot(v.x, v.y);
       if (!(s > 0)) return;
       const k = speedAfterSpending(mass, s, damage) / s;
       v.x *= k; v.y *= k;
@@ -1533,20 +1534,20 @@ export class PhysicsSystem {
       if (poly === undefined || poly.length < 3) return 0;
       const v = proj.velocity;
       if (v === undefined) return 0;
-      const vm = Math.hypot(v.x, v.y);
+      const vm = dmath.hypot(v.x, v.y);
       if (vm <= 1e-3) return 0;
 
       // Walk in the body's LOCAL frame: `polygonPoints` are stored
       // unrotated, so pointInPolygon has to be asked in those coords.
       // Only the world stamp rotates back out.
-      const cs = Math.cos(-target.rotation), sn = Math.sin(-target.rotation);
+      const cs = dmath.cos(-target.rotation), sn = dmath.sin(-target.rotation);
       const ex = wrapDeltaX(target.position.x, proj.position.x);
       const ey = wrapDeltaY(target.position.y, proj.position.y);
       let lx = ex * cs - ey * sn;
       let ly = ex * sn + ey * cs;
       const ldx = (v.x / vm) * cs - (v.y / vm) * sn;
       const ldy = (v.x / vm) * sn + (v.y / vm) * cs;
-      const cw = Math.cos(target.rotation), sw = Math.sin(target.rotation);
+      const cw = dmath.cos(target.rotation), sw = dmath.sin(target.rotation);
 
       const p = this._borePoint;
       const mass = proj.mass ?? PROJECTILE_CONSTANTS.MASS;
@@ -1678,7 +1679,7 @@ export class PhysicsSystem {
       const spread = opts?.spread;
       if (spread !== undefined && spread > 0) {
           const ang = (sim.combat() - 0.5) * spread;
-          const c = Math.cos(ang), sn = Math.sin(ang);
+          const c = dmath.cos(ang), sn = dmath.sin(ang);
           const tx = rx * c - ry * sn;
           ry = rx * sn + ry * c;
           rx = tx;
@@ -1686,7 +1687,7 @@ export class PhysicsSystem {
 
       proj.velocity.x = rx;
       proj.velocity.y = ry;
-      proj.rotation = Math.atan2(ry, rx);
+      proj.rotation = dmath.atan2(ry, rx);
 
       if (opts?.snapX !== undefined) proj.position.x = opts.snapX;
       if (opts?.snapY !== undefined) proj.position.y = opts.snapY;
@@ -1745,9 +1746,9 @@ export class PhysicsSystem {
       let bearing: number;
       const vx = proj.velocity?.x ?? 0, vy = proj.velocity?.y ?? 0;
       if (vx * vx + vy * vy > 1e-6) {
-          bearing = Math.atan2(-vy, -vx); // direction the shot came from
+          bearing = dmath.atan2(-vy, -vx); // direction the shot came from
       } else {
-          bearing = Math.atan2(
+          bearing = dmath.atan2(
               wrapDeltaY(target.position.y, proj.position.y),
               wrapDeltaX(target.position.x, proj.position.x),
           );
@@ -1970,8 +1971,8 @@ export class PhysicsSystem {
       // metal leave this 0 (dent where hit).
       const angleOffset = dent.dentVertexAngleOffset;
       if (angleOffset !== undefined && angleOffset !== 0) {
-          const cosA = Math.cos(angleOffset);
-          const sinA = Math.sin(angleOffset);
+          const cosA = dmath.cos(angleOffset);
+          const sinA = dmath.sin(angleOffset);
           const rx = dirX * cosA - dirY * sinA;
           const ry = dirX * sinA + dirY * cosA;
           dirX = rx;
@@ -2766,8 +2767,8 @@ export class PhysicsSystem {
    */
   public static impactStrength(self: GameEntity, other: GameEntity, velAlongNormal: number): number {
       const k = COLLISION_CONFIG.MASS_BIAS_EXPONENT;
-      const effSelf  = Math.pow(self.mass  === Infinity ? 0 : 1 / self.mass,  k);
-      const effOther = Math.pow(other.mass === Infinity ? 0 : 1 / other.mass, k);
+      const effSelf  = dmath.pow(self.mass  === Infinity ? 0 : 1 / self.mass,  k);
+      const effOther = dmath.pow(other.mass === Infinity ? 0 : 1 / other.mass, k);
       const denom = effSelf + effOther;
       if (denom <= 0) return 0;
       return (1 + COLLISION_CONFIG.ELASTICITY) * Math.abs(velAlongNormal) * (effSelf / denom);
@@ -2784,7 +2785,7 @@ export class PhysicsSystem {
       const gain = Math.max(floor, Math.min(1, dv / span));
       if (impactorMass === Infinity) return { gain };
       const pitch = Math.max(A.IMPACT_PITCH_MIN, Math.min(A.IMPACT_PITCH_MAX,
-          Math.pow(A.IMPACT_PITCH_REF_MASS / Math.max(0.01, impactorMass), A.IMPACT_PITCH_EXP)));
+          dmath.pow(A.IMPACT_PITCH_REF_MASS / Math.max(0.01, impactorMass), A.IMPACT_PITCH_EXP)));
       return { gain, pitch };
   }
 
@@ -3057,8 +3058,8 @@ export class PhysicsSystem {
           // consistently pushes apart instead of jittering.
           const seed = (a.id.charCodeAt(a.id.length - 1)
                       + b.id.charCodeAt(b.id.length - 1)) * 0.7853981633974483; // π/4
-          nx = Math.cos(seed);
-          ny = Math.sin(seed);
+          nx = dmath.cos(seed);
+          ny = dmath.sin(seed);
           dist = 0.001;
       } else {
           dist = Math.sqrt(distSq);
@@ -3078,13 +3079,13 @@ export class PhysicsSystem {
       if (a._massCacheKey !== a.mass) {
           const im = 1 / a.mass;
           a._invMassCache = im;
-          a._effInvMassCache = Math.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+          a._effInvMassCache = dmath.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
           a._massCacheKey = a.mass;
       }
       if (b._massCacheKey !== b.mass) {
           const im = 1 / b.mass;
           b._invMassCache = im;
-          b._effInvMassCache = Math.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+          b._effInvMassCache = dmath.pow(im, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
           b._massCacheKey = b.mass;
       }
       const invMassA = a._invMassCache!;
@@ -3403,14 +3404,14 @@ export class PhysicsSystem {
           distSq = wdx*wdx + wdy*wdy;
       }
 
-      if (distSq > (rA + rB + 10)**2) return;
+      if (distSq > dmath.pow(rA + rB + 10, 2)) return;
 
       // Terrain slam (Stage 5): the player hitting a tile / asteroid fast stamps
       // a short window updateBubbles (roamers/bubbles.ts) reads to shake a
       // latched bubble free.  STRUCTURE covers static tiles + mobile shards.
       if (a.type === EntityType.STRUCTURE || b.type === EntityType.STRUCTURE) {
           const ply = a.id === 'player' ? a : (b.id === 'player' ? b : null);
-          if (ply && Math.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
+          if (ply && dmath.hypot(ply.velocity.x, ply.velocity.y) >= BUBBLE_CONSTANTS.KNOCK_SPEED) {
               ply.terrainSlamTimer = 0.12;
           }
       }
@@ -3594,8 +3595,8 @@ export class PhysicsSystem {
       const c = comp.metalCells![idx];
       const ccx = c.ix * ux - cmx;
       const ccy = c.iy * uy - cmy;
-      const cos = Math.cos(comp.rotation);
-      const sin = Math.sin(comp.rotation);
+      const cos = dmath.cos(comp.rotation);
+      const sin = dmath.sin(comp.rotation);
       const px = comp.position.x;
       const py = comp.position.y;
       const lx0 = ccx, ly0 = c.up ? ccy - R : ccy + R;
@@ -3702,8 +3703,8 @@ export class PhysicsSystem {
                   if (van <= 0) {
                       // Mass-bias-compressed impulse split — same policy
                       // as resolveShardPair / resolveCollision.
-                      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
-                      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+                      const effInvMassA = dmath.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+                      const effInvMassB = dmath.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
                       const j = -(1 + ELASTICITY) * van / (effInvMassA + effInvMassB);
                       a.velocity.x -= nx * j * effInvMassA; a.velocity.y -= ny * j * effInvMassA;
                       b.velocity.x += nx * j * effInvMassB; b.velocity.y += ny * j * effInvMassB;
@@ -3860,7 +3861,7 @@ export class PhysicsSystem {
               const hit = other.hitEntityIds ?? (other.hitEntityIds = []);
               if (!hit.includes(nebula.id)) {
                   hit.push(nebula.id);
-                  const sp = Math.hypot(other.velocity.x, other.velocity.y);
+                  const sp = dmath.hypot(other.velocity.x, other.velocity.y);
                   if (sp > 1e-6) {
                       const dv = Math.min(GAS_DISPLACE_MAX_DV, sp * GAS_DISPLACE_PER_SPEED);
                       nebula.velocity.x += (other.velocity.x / sp) * dv;
@@ -4194,7 +4195,7 @@ export class PhysicsSystem {
               // Hit feedback — uncapped damage-scaled knockback + stagger so
               // the hit reads (post-armor projDmg, so chip hits kick weakly).
               if (target.type === EntityType.ENEMY && proj.velocity && !target.isExploding) {
-                  const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                  const vmag = dmath.hypot(proj.velocity.x, proj.velocity.y) || 1;
                   // POISE ((h)): a heavy hull takes a scaled-down shove and only
                   // staggers on a real hit, so a chip stream can neither push it
                   // off its line nor hold it in permanent hit-stun.  Absent →
@@ -4242,12 +4243,12 @@ export class PhysicsSystem {
                   // negligible against the hull, so what the player feels is
                   // the hit, not the shove.
                   const pv = proj.velocity;
-                  const pvm = pv ? Math.hypot(pv.x, pv.y) : 0;
+                  const pvm = pv ? dmath.hypot(pv.x, pv.y) : 0;
                   onShake(Math.min(HIT_FEEDBACK.PLAYER_SHAKE_MAX,
                       HIT_FEEDBACK.PLAYER_SHAKE_BASE + impactDmg * HIT_FEEDBACK.PLAYER_SHAKE_PER_DMG),
                       pvm > 0 ? { dirX: pv!.x / pvm, dirY: pv!.y / pvm } : undefined);
                   if (proj.velocity && !target.isExploding) {
-                      const vmag = Math.hypot(proj.velocity.x, proj.velocity.y) || 1;
+                      const vmag = dmath.hypot(proj.velocity.x, proj.velocity.y) || 1;
                       // Same impulse rule, so a laden hull is shoved less —
                       // normalised to leave the lean ship exactly as it was.
                       const kick = impactDmg * HIT_FEEDBACK.PLAYER_KICK_IMPULSE_PER_DMG
@@ -4489,7 +4490,7 @@ export class PhysicsSystem {
 
       if (totalInvMass === 0) return;
 
-      const mtvLen = Math.sqrt(mtv.x**2 + mtv.y**2);
+      const mtvLen = Math.sqrt(mtv.x * mtv.x + mtv.y * mtv.y);
       if (mtvLen < 0.0001) return;
 
       // 1. Positional Correction (Prevent Sinking)
@@ -4896,8 +4897,8 @@ export class PhysicsSystem {
       // COLLISION_CONFIG.MASS_BIAS_EXPONENT.  invMass = 0 for static
       // entities survives the pow unchanged (0^k = 0), so infinite-
       // mass behaviour is identical.
-      const effInvMassA = Math.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
-      const effInvMassB = Math.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+      const effInvMassA = dmath.pow(invMassA, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
+      const effInvMassB = dmath.pow(invMassB, COLLISION_CONFIG.MASS_BIAS_EXPONENT);
       const j = -(1 + ELASTICITY) * velAlongNormal;
       const impulse = j / (effInvMassA + effInvMassB);
 
@@ -4932,8 +4933,8 @@ export class PhysicsSystem {
               cos = e._satCacheCos;
               sin = e._satCacheSin!;
           } else {
-              cos = Math.cos(e.rotation);
-              sin = Math.sin(e.rotation);
+              cos = dmath.cos(e.rotation);
+              sin = dmath.sin(e.rotation);
               if (e.mass === Infinity) {
                   e._satCacheCos = cos;
                   e._satCacheSin = sin;

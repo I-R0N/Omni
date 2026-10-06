@@ -18,6 +18,7 @@
 //   - shard→tile snap (plastic / glass), rigid metal assembly, hotspot /
 //     large-shard collapse, and the grain + plastic dent recovery ticks.
 
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, Vector2, MapType, DropCompositionEntry, NebulaColorStop } from '../../types';
 import { getCollisionR, invalidateCollisionR } from '../entityCache';
@@ -1030,7 +1031,7 @@ export class ShardSystem {
 
     const iv = parent.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const impactAngle = impactSpeed > 0.001 ? dmath.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE = parentVariant.shatter.scatterHalfCone;
     // The energy profile's IMPULSE scales both scatter terms (energy
     // modules, §7): a thermal failure collapses where it stood, a slug
@@ -1043,7 +1044,7 @@ export class ShardSystem {
     const maxTier = ROCK_CONDENSE.DENSITY_MULT.length - 1;
     const parentTier = parent.densityTier ?? 0;
 
-    const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
+    const cos = dmath.cos(parent.rotation), sin = dmath.sin(parent.rotation);
     const parentSize = parent.size.x;
 
     for (const cell of cells) {
@@ -1072,14 +1073,14 @@ export class ShardSystem {
       // Radial direction — along the (rotated) centroid offset, so the
       // pieces separate along their own seams; a cell centred on the
       // parent origin takes a random direction.
-      const rlen = Math.hypot(cell.centroid.x, cell.centroid.y);
+      const rlen = dmath.hypot(cell.centroid.x, cell.centroid.y);
       let rdx: number, rdy: number;
       if (rlen > 1e-3) {
         rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
         rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
       } else {
         const a = sim.shards() * Math.PI * 2;
-        rdx = Math.cos(a); rdy = Math.sin(a);
+        rdx = dmath.cos(a); rdy = dmath.sin(a);
       }
       const rSpeed = radialSpeed * (0.7 + sim.shards() * 0.6);
 
@@ -1092,8 +1093,8 @@ export class ShardSystem {
         const fwd = profImpulse * Math.min(SHATTER_SCATTER_SPEED_CAP,
           impactSpeed * parentVariant.shatter.forwardDrag + 0.4 + sim.shards() * 1.2);
         const fa = impactAngle + (sim.shards() - 0.5) * HALF_CONE * 0.5;
-        vx += Math.cos(fa) * fwd;
-        vy += Math.sin(fa) * fwd;
+        vx += dmath.cos(fa) * fwd;
+        vy += dmath.sin(fa) * fwd;
       }
 
       // Fragment polygon: the cell's own shape, re-centred on its
@@ -1225,25 +1226,25 @@ export class ShardSystem {
     }
     const hp = ShardSystem.spawnShardHealth(childVariant.id, newSize, densityTier);
 
-    const cos = Math.cos(parent.rotation), sin = Math.sin(parent.rotation);
+    const cos = dmath.cos(parent.rotation), sin = dmath.sin(parent.rotation);
     const wx = parent.position.x + cell.centroid.x * cos - cell.centroid.y * sin;
     const wy = parent.position.y + cell.centroid.x * sin + cell.centroid.y * cos;
 
-    const rlen = Math.hypot(cell.centroid.x, cell.centroid.y);
+    const rlen = dmath.hypot(cell.centroid.x, cell.centroid.y);
     let rdx: number, rdy: number;
     if (rlen > 1e-3) {
       rdx = (cell.centroid.x * cos - cell.centroid.y * sin) / rlen;
       rdy = (cell.centroid.x * sin + cell.centroid.y * cos) / rlen;
     } else {
       const a = sim.shards() * Math.PI * 2;
-      rdx = Math.cos(a); rdy = Math.sin(a);
+      rdx = dmath.cos(a); rdy = dmath.sin(a);
     }
     const rSpeed = f.radialSpeed * (1.0 + sim.shards() * 0.6);
     let vx = parent.velocity.x + rdx * rSpeed;
     let vy = parent.velocity.y + rdy * rSpeed;
     const iv = parent.lastImpactVelocity;
     if (iv !== undefined) {
-      const s = Math.hypot(iv.x, iv.y);
+      const s = dmath.hypot(iv.x, iv.y);
       if (s > 1e-3) {
         const fwd = Math.min(SHATTER_SCATTER_SPEED_CAP,
           s * parentVariant.shatter.forwardDrag + 0.3 + sim.shards() * 0.8);
@@ -1383,7 +1384,7 @@ export class ShardSystem {
     const out: Vector2[] = new Array(numPoints);
     for (let k = 0; k < numPoints; k++) {
       const i = idx[k];
-      out[k] = { x: Math.cos(ang[i]) * rad[i], y: Math.sin(ang[i]) * rad[i] };
+      out[k] = { x: dmath.cos(ang[i]) * rad[i], y: dmath.sin(ang[i]) * rad[i] };
     }
     return out;
   }
@@ -1503,7 +1504,7 @@ export class ShardSystem {
       rawAreas.length = 0;
       let rawSum = 0;
       for (let i = 0; i < count; i++) {
-        const a = Math.pow(sim.shards(), alpha);
+        const a = dmath.pow(sim.shards(), alpha);
         rawAreas.push(a);
         rawSum += a;
       }
@@ -1517,7 +1518,7 @@ export class ShardSystem {
     // Resolve impact direction.
     const iv = parent.lastImpactVelocity;
     const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-    const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : null;
+    const impactAngle = impactSpeed > 0.001 ? dmath.atan2(iv!.y, iv!.x) : null;
     const HALF_CONE   = parentVariant.shatter.scatterHalfCone;
 
     const parentRadius = parent.size.x / 2;
@@ -1575,8 +1576,8 @@ export class ShardSystem {
         scatterAngle = sim.shards() * Math.PI * 2;
         scatterSpeed = 1 + sim.shards() * 2;
       }
-      const vx = parent.velocity.x + Math.cos(scatterAngle) * scatterSpeed;
-      const vy = parent.velocity.y + Math.sin(scatterAngle) * scatterSpeed;
+      const vx = parent.velocity.x + dmath.cos(scatterAngle) * scatterSpeed;
+      const vy = parent.velocity.y + dmath.sin(scatterAngle) * scatterSpeed;
 
       const baseR = (newSize / 2) * 0.8;
       const points = this.generateShardPolygon(
@@ -1589,8 +1590,8 @@ export class ShardSystem {
         childSpawn.polyVerticesOptions,
       );
 
-      const offsetX = Math.cos(scatterAngle) * parentRadius * 0.25;
-      const offsetY = Math.sin(scatterAngle) * parentRadius * 0.25;
+      const offsetX = dmath.cos(scatterAngle) * parentRadius * 0.25;
+      const offsetY = dmath.sin(scatterAngle) * parentRadius * 0.25;
       const maxSpin = 2.0 / (newSize / 20);
 
       // Stage 5: shard-family entities live on a single EntityType
@@ -1671,7 +1672,7 @@ export class ShardSystem {
     const count = countMin + Math.floor(sim.shards() * countRange);
     const alpha = alphaMin; // nebula uses uniform alphaMin === alphaMax
 
-    const rawAreas = Array.from({ length: count }, () => Math.pow(sim.shards(), alpha));
+    const rawAreas = Array.from({ length: count }, () => dmath.pow(sim.shards(), alpha));
     const rawSum   = rawAreas.reduce((s, a) => s + a, 0);
     const radii: number[] = rawAreas
       .map(a => Math.sqrt((a / rawSum) * parentArea))
@@ -1729,8 +1730,8 @@ export class ShardSystem {
 
       // Rear-cone angle: π + (−fan … +fan) relative to forward.
       const offsetAngle = Math.PI + (shardCount > 1 ? -fan + step * i : 0);
-      const cosA = Math.cos(offsetAngle);
-      const sinA = Math.sin(offsetAngle);
+      const cosA = dmath.cos(offsetAngle);
+      const sinA = dmath.sin(offsetAngle);
       const dx = fx * cosA - fy * sinA;
       const dy = fx * sinA + fy * cosA;
 
@@ -2273,7 +2274,7 @@ export class ShardSystem {
             const sizePower  = pullerVariant.merge.bondTimeSizePower ?? 1.5;
             const avgSize    = (a.size.x + b.size.x) * 0.5;
             const sizeRatio  = sizeRef > 0 ? Math.max(1, avgSize / sizeRef) : 1;
-            const baseScaled = baseTime * Math.pow(sizeRatio, sizePower);
+            const baseScaled = baseTime * dmath.pow(sizeRatio, sizePower);
             const threshold  = baseScaled * (rule.thresholdScale ?? 1);
 
             // Per-partner config (today: plastic-shard with cohesion-
@@ -2827,8 +2828,8 @@ export class ShardSystem {
         id:            nextId(idPrefix),
         type:          EntityType.STRUCTURE,
         shardVariant:  variant,
-        position:      { x: pos.x + Math.cos(angle) * size * 0.5, y: pos.y + Math.sin(angle) * size * 0.5 },
-        velocity:      { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+        position:      { x: pos.x + dmath.cos(angle) * size * 0.5, y: pos.y + dmath.sin(angle) * size * 0.5 },
+        velocity:      { x: dmath.cos(angle) * speed, y: dmath.sin(angle) * speed },
         size:          { x: size, y: size },
         rotation:      sim.shards() * Math.PI * 2,
         rotationSpeed: (sim.shards() - 0.5) * 2,
@@ -3165,8 +3166,8 @@ export class ShardSystem {
     const R = comp.metalLatticeR ?? (HEX_SIZE / Math.sqrt(3));
     for (let i = 0; i < remainder; i++) {
       const ang = sim.shards() * Math.PI * 2;
-      const wx = comp.position.x + Math.cos(ang) * R;
-      const wy = comp.position.y + Math.sin(ang) * R;
+      const wx = comp.position.x + dmath.cos(ang) * R;
+      const wy = comp.position.y + dmath.sin(ang) * R;
       this.spawnLooseMetalTriangle(
         entities, wx, wy, comp.position.x, comp.position.y, R,
         comp.color, comp.sprite, 1, comp.velocity.x, comp.velocity.y,
@@ -3210,9 +3211,9 @@ export class ShardSystem {
       maxHealth: health,
       mass: SHARD_VARIANTS['metal-shard'].spawn.sizeToMass(triSize),
       polygonPoints: [
-        { x: R * Math.cos(-Math.PI / 2),                   y: R * Math.sin(-Math.PI / 2) },
-        { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
-        { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+        { x: R * dmath.cos(-Math.PI / 2),                   y: R * dmath.sin(-Math.PI / 2) },
+        { x: R * dmath.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * dmath.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+        { x: R * dmath.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * dmath.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
       ],
       sprite,
       collapseGraceTimer: getActiveShatterGraceDelay(),
@@ -3242,8 +3243,8 @@ export class ShardSystem {
     // delta by -rotation, then offset by the mass centroid).
     const wdx = wrapDeltaX(comp.position.x, wx);
     const wdy = wrapDeltaY(comp.position.y, wy);
-    const cos = Math.cos(comp.rotation);
-    const sin = Math.sin(comp.rotation);
+    const cos = dmath.cos(comp.rotation);
+    const sin = dmath.sin(comp.rotation);
     const pieceLx = (wdx * cos + wdy * sin) + cmx;
     const pieceLy = (-wdx * sin + wdy * cos) + cmy;
 
@@ -3281,8 +3282,8 @@ export class ShardSystem {
 
     const sx = cmx1 - cmx0;
     const sy = cmy1 - cmy0;
-    const cos = Math.cos(comp.rotation);
-    const sin = Math.sin(comp.rotation);
+    const cos = dmath.cos(comp.rotation);
+    const sin = dmath.sin(comp.rotation);
     comp.position.x += sx * cos - sy * sin;
     comp.position.y += sx * sin + sy * cos;
     wrapPosition(comp.position);
@@ -3323,8 +3324,8 @@ export class ShardSystem {
     let cmx = 0, cmy = 0;
     for (const c of cells) { cmx += c.ix * ux; cmy += c.iy * uy; }
     cmx /= cells.length; cmy /= cells.length;
-    const cos = Math.cos(parent.rotation);
-    const sin = Math.sin(parent.rotation);
+    const cos = dmath.cos(parent.rotation);
+    const sin = dmath.sin(parent.rotation);
 
     const triDiameter = 2 * R;
     const variantDef = SHARD_VARIANTS['metal-shard'];
@@ -3333,9 +3334,9 @@ export class ShardSystem {
     const maxHpEach = Math.max(1, Math.round((parent.maxHealth ?? cells.length) / cells.length));
 
     const baseEquilateral: Vector2[] = [
-      { x: R * Math.cos(-Math.PI / 2),                 y: R * Math.sin(-Math.PI / 2) },
-      { x: R * Math.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
-      { x: R * Math.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * Math.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
+      { x: R * dmath.cos(-Math.PI / 2),                 y: R * dmath.sin(-Math.PI / 2) },
+      { x: R * dmath.cos(-Math.PI / 2 + 2 * Math.PI / 3), y: R * dmath.sin(-Math.PI / 2 + 2 * Math.PI / 3) },
+      { x: R * dmath.cos(-Math.PI / 2 + 4 * Math.PI / 3), y: R * dmath.sin(-Math.PI / 2 + 4 * Math.PI / 3) },
     ];
 
     for (let i = 0; i < cells.length; i++) {
@@ -3351,8 +3352,8 @@ export class ShardSystem {
       const dy = wy - parent.position.y;
       const scatterMag = Math.sqrt(dx * dx + dy * dy);
       const scatterSpeed = 1.0 + sim.shards() * 1.5;
-      const sx = scatterMag > 0.001 ? (dx / scatterMag) * scatterSpeed : Math.cos(i) * scatterSpeed;
-      const sy = scatterMag > 0.001 ? (dy / scatterMag) * scatterSpeed : Math.sin(i) * scatterSpeed;
+      const sx = scatterMag > 0.001 ? (dx / scatterMag) * scatterSpeed : dmath.cos(i) * scatterSpeed;
+      const sy = scatterMag > 0.001 ? (dy / scatterMag) * scatterSpeed : dmath.sin(i) * scatterSpeed;
       // Clone the equilateral template so each loose triangle owns
       // its own points (the dent pipeline mutates polygonPoints in
       // place; shared references would deform every sibling).
@@ -3384,7 +3385,7 @@ export class ShardSystem {
     if (onParticles && onParticles !== 'none' && onParticles !== 'inherit') {
       const iv = parent.lastImpactVelocity;
       const impactSpeed = iv ? Math.sqrt(iv.x * iv.x + iv.y * iv.y) : 0;
-      const impactAngle = impactSpeed > 0.001 ? Math.atan2(iv!.y, iv!.x) : undefined;
+      const impactAngle = impactSpeed > 0.001 ? dmath.atan2(iv!.y, iv!.x) : undefined;
       const dustCount = 4 + cells.length;
       this.particles.spawn(entities, parent.position, dustCount, onParticles.color, {
         speedMin: 1, speedMax: impactSpeed * 0.4 + 2,
@@ -3429,8 +3430,8 @@ export class ShardSystem {
     let ocmx = 0, ocmy = 0;
     for (const c of ocells) { ocmx += c.ix * ux; ocmy += c.iy * uy; }
     ocmx /= ocells.length; ocmy /= ocells.length;
-    const ocos = Math.cos(other.rotation);
-    const osin = Math.sin(other.rotation);
+    const ocos = dmath.cos(other.rotation);
+    const osin = dmath.sin(other.rotation);
     const placements = ocells.map(c => {
       const ex = c.ix * ux - ocmx, ey = c.iy * uy - ocmy;
       const pwx = other.position.x + ex * ocos - ey * osin;
@@ -3479,7 +3480,7 @@ export class ShardSystem {
 
     // Orient the lattice so cell (0,2) (local +y) lies along a→b, then drop
     // the origin at the pair's mass centroid (midpoint of equal masses).
-    a.rotation = Math.atan2(wdy, wdx) - Math.PI / 2;
+    a.rotation = dmath.atan2(wdy, wdx) - Math.PI / 2;
 
     // Approximate angular-momentum transfer about the new centroid: an
     // off-centre approach (the pair's relative velocity has a tangential

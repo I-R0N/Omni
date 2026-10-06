@@ -168,12 +168,12 @@ test.describe('map composition — MAP_POPULATION is the authority', () => {
     }));
 
     expect(r.stations).toBe(4);
-    // Four arena rifts PLUS the six-portal test rack beside the home station
+    // Twelve arena rifts PLUS the eight-portal field ring round the home station
     // (the star-field gauntlet's S12). Asserted as its parts rather than as
     // the total, so this says WHICH rifts are expected instead of restating a
     // number that changes whenever one is added.
-    expect(r.arenaRifts).toBe(4);
-    expect(r.rackRifts).toBe(6);
+    expect(r.arenaRifts).toBe(12);   // 4 maps x easy / mid / hard
+    expect(r.rackRifts).toBe(8);    // the gravity-free field ring
     expect(r.portals).toBe(r.arenaRifts + r.rackRifts);
     expect(r.glass).toBeGreaterThan(50);
     expect(r.nebula).toBeGreaterThan(300);

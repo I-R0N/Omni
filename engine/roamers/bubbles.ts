@@ -25,6 +25,7 @@
  *  `GameEngine`: they are small generic wave-enemy passes with nothing bubble
  *  about them, and filing them here would be a misfile.
  */
+import * as dmath from '../systems/dmath';
 import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, EnemySubtype, ConsumeConfig, GameState } from '../../types';
@@ -114,7 +115,7 @@ export function updateBubbles(g: GameEngine, dt: number) {
             const victim = resolveAggroTarget(g, e.attachedToId);
             const onPlayer = e.attachedToId === 'player';
             // Face the target so the membrane squashes against its hull (render).
-            e.rotation = Math.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
+            e.rotation = dmath.atan2(-(e.attachOffset?.y ?? 0), -(e.attachOffset?.x ?? 0));
             if (victim && !victim.isExploding) {
                 if (onPlayer) g.applyStatusEffect(p, { kind: 'disable', duration: B.EMP_REFRESH, dmgPerSec: 0, maxStacks: 1 });
                 const drain = B.LATCH_DPS * (Math.max(e.size.x, e.size.y) / baseSize); // bigger bubble bites harder
@@ -174,11 +175,11 @@ export function updateBubbles(g: GameEngine, dt: number) {
             e.size.x = base; e.size.y = base;
             syncBubbleMaxHealth(e); // back to base maxHP after shedding mass
             const a = sim.roamers() * Math.PI * 2;
-            e.velocity.x += Math.cos(a) * B.SPLIT_SPEED;
-            e.velocity.y += Math.sin(a) * B.SPLIT_SPEED;
+            e.velocity.x += dmath.cos(a) * B.SPLIT_SPEED;
+            e.velocity.y += dmath.sin(a) * B.SPLIT_SPEED;
             const child = g.waves.spawnAt(EnemySubtype.BUBBLE, e.position, ctx, false);
-            child.velocity.x = -Math.cos(a) * B.SPLIT_SPEED;
-            child.velocity.y = -Math.sin(a) * B.SPLIT_SPEED;
+            child.velocity.x = -dmath.cos(a) * B.SPLIT_SPEED;
+            child.velocity.y = -dmath.sin(a) * B.SPLIT_SPEED;
             g.spawnParticles(e.position, 8, e.color || '#67e8f9', {
                 speedMin: 2, speedMax: 6, sizeMin: 1.5, sizeMax: 3,
                 lifetimeMin: 0.2, lifetimeMax: 0.5,
@@ -288,12 +289,12 @@ function spawnAmbientBubble(g: GameEngine): GameEntity | null {
     const ctx = g.waveContext();
     if (!ctx) return null;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    const halfDiag = dmath.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
     const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + BUBBLE_CONSTANTS.SPAWN_MARGIN + sim.roamers() * 240;
     const pos = {
-        x: g.player.position.x + Math.cos(angle) * dist,
-        y: g.player.position.y + Math.sin(angle) * dist,
+        x: g.player.position.x + dmath.cos(angle) * dist,
+        y: g.player.position.y + dmath.sin(angle) * dist,
     };
     wrapPosition(pos);
     return g.waves.spawnAt(EnemySubtype.BUBBLE, pos, ctx, false);
@@ -424,7 +425,7 @@ function biteBody(
 ): boolean {
     const dx = wrapDeltaX(consumer.position.x, target.position.x); // consumer→target
     const dy = wrapDeltaY(consumer.position.y, target.position.y);
-    const d = Math.hypot(dx, dy) || 1;
+    const d = dmath.hypot(dx, dy) || 1;
     const surface = Math.max(target.size.x, target.size.y) * 0.5;
     const at = {
         x: target.position.x - (dx / d) * surface,
@@ -522,7 +523,7 @@ function beginDigest(g: GameEngine, consumer: GameEntity, shard: GameEntity, dx:
     consumer.bubbleDigestSize0 = Math.max(shard.size.x, shard.size.y);
     consumer.bubbleFeedTimer = BUBBLE_CONSTANTS.FEED_PULSE;
     if (isToxicShard(shard)) consumer.bubbleSickTimer = BUBBLE_CONSTANTS.SICK_DURATION;
-    const inward = Math.atan2(-dy, -dx); // shard → bubble
+    const inward = dmath.atan2(-dy, -dx); // shard → bubble
     g.spawnParticles(shard.position, 8, consumer.bubbleDigestColor, {
         spreadAngle: inward, spreadCone: 0.8,
         speedMin: 2.5, speedMax: 6, sizeMin: 1, sizeMax: 2.4,
@@ -537,7 +538,7 @@ function beginDigest(g: GameEngine, consumer: GameEntity, shard: GameEntity, dx:
  *  devours tiles through its own pass in `roamers/dragons.ts`. */
 function consumeTile(g: GameEngine, consumer: GameEntity, tile: GameEntity, cfg: ConsumeConfig, dx: number, dy: number) {
     growConsumer(consumer, cfg);
-    const inward = Math.atan2(-dy, -dx);
+    const inward = dmath.atan2(-dy, -dx);
     g.spawnParticles(tile.position, 9, tile.color || '#a8a29e', {
         spreadAngle: inward, spreadCone: 0.9,
         speedMin: 2.5, speedMax: 6.5, sizeMin: 1, sizeMax: 2.6,

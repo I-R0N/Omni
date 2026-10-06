@@ -1,7 +1,7 @@
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WaveAnnouncement } from '../../types';
 import {
-  DIFFICULTY_STAT_SCALES,
   ENEMY_VARIANTS,
   ENEMY_CONSTANTS,
   ENEMY_TRAITS,
@@ -18,7 +18,8 @@ import {
   isBossWave,
   getWaveDurationSec,
   getWaveSpawnBudget,
-  buildWaveSpawnList,
+  buildLevelWave,
+  levelScales,
   buildBossWaveSpawnList,
   scaledMass,
 } from '../../constants';
@@ -53,6 +54,9 @@ export class WaveSystem {
    *  waves had run consecutively.  It deliberately does NOT shift the DISPLAY
    *  wave number — the HUD still counts 1..STAGE_WAVE_COUNT within the stage. */
   public waveOffset: number = 0;
+  /** The distinct enemy types the previous ordinary wave used, so the next
+   *  one prefers others (buildLevelWave).  Cleared with the rest on init. */
+  private lastMix: EnemySubtype[] = [];
   /** Set once a stage's CAPSTONE BOSS is down: the ladder for this arena is
    *  finished, so no further wave ever starts here.  The player mops up what
    *  is already on the field and then chooses a rift.  Cleared by init(), so
@@ -105,6 +109,7 @@ export class WaveSystem {
    *  wave 1 banner, no grace-period cycling, no enemies. */
   public init(ctx: WaveSpawnContext, enabled: boolean = true, startIndex: number = 0, progress: number = 0) {
     this.halted = false;
+    this.lastMix = [];
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
@@ -196,9 +201,15 @@ export class WaveSystem {
     const budget = Math.max(1, Math.round(
       getWaveSpawnBudget(index) * ctx.enemyScale * (boss ? BOSS_CONSTANTS.COMPANION_BUDGET_FRAC : 1),
     ));
+    // A DBG forced enemy spawns only itself; a capstone streams its designed
+    // escort; every other wave is bought from the arena LEVEL's roster
+    // (buildLevelWave) and avoids repeating the previous wave's types.
     this.spawnList = boss
       ? buildBossWaveSpawnList(boss, budget)
-      : buildWaveSpawnList(index, budget, ctx.forcedEnemy);
+      : ctx.forcedEnemy
+        ? new Array(budget).fill(ctx.forcedEnemy)
+        : buildLevelWave(ctx.difficultyLevel, index, this.lastMix);
+    if (!boss && !ctx.forcedEnemy) this.lastMix = Array.from(new Set(this.spawnList));
     this.scheduleSpawns(this.spawnList.length);
 
     this.waveState = 'active';
@@ -218,7 +229,7 @@ export class WaveSystem {
     } else {
       this.announcements.push({
         text: `WAVE ${index + 1}`,
-        subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
+        subtext: `LEVEL ${ctx.difficultyLevel}  ·  DESTROY ${this.spawnList.length} HOSTILE${this.spawnList.length === 1 ? '' : 'S'}`,
         color: '#ffffff',
         lifetime: rosterLife,
         maxLifetime: rosterLife,
@@ -353,8 +364,8 @@ export class WaveSystem {
     for (let attempt = 0; attempt < 8; attempt++) {
       const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
       const dist = minSpawnDistance + sim.waves() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
-      pos.x = player.position.x + Math.cos(a) * dist;
-      pos.y = player.position.y + Math.sin(a) * dist;
+      pos.x = player.position.x + dmath.cos(a) * dist;
+      pos.y = player.position.y + dmath.sin(a) * dist;
       wrapPosition(pos);
       if (physics.isPositionClear(pos.x, pos.y, safeRadius)) break;
     }
@@ -372,7 +383,7 @@ export class WaveSystem {
     id: string, subtype: EnemySubtype, x: number, y: number,
     ctx: WaveSpawnContext, counts: boolean,
   ): GameEntity {
-    const statScale = DIFFICULTY_STAT_SCALES[ctx.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const statScale = levelScales(ctx.difficultyLevel);
     const config = ENEMY_VARIANTS[subtype];
 
     const tierMap: Partial<Record<string, number>> = {
@@ -634,6 +645,8 @@ export interface WaveSpawnContext {
   player: GameEntity;
   physics: PhysicsSystem;
   enemyScale: number;
+  /** The ARENA LEVEL (1..20) — what `GameEngine.arenaLevel()` resolves, not the
+   *  retired menu setting. */
   difficultyLevel: number;
   /** World-unit half-diagonal of the player's current viewport.  Used by
    *  spawnEnemy() to compute a minimum radial distance that keeps every

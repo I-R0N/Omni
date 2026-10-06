@@ -22,6 +22,7 @@
  *  (it flips `isExploding` and arms the wreck timer), not the FX layer, and
  *  the 5b suites call it straight off `window.__omniEngine`.
  */
+import * as dmath from './systems/dmath';
 import { sim } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { applyBoundaryDamage, stampLocalImpact } from './systems/fractureCache';
@@ -312,7 +313,7 @@ export function updateExplosionRings(g: GameEngine) {
                 // Let the player overshoot the speed cap so the blast actually
                 // launches them; the overshoot decays in updatePlayerMovement.
                 if (e.id === 'player') {
-                    const sp = Math.hypot(e.velocity.x, e.velocity.y);
+                    const sp = dmath.hypot(e.velocity.x, e.velocity.y);
                     e.overSpeedAllow = Math.max(e.overSpeedAllow ?? 0, sp);
                 }
             }
@@ -412,7 +413,7 @@ export function applyBlastToPlayer(g: GameEngine, pos: Vector2, radius: number, 
     if (radius <= 0) return;
     const dx = wrapDeltaX(pos.x, p.position.x);
     const dy = wrapDeltaY(pos.y, p.position.y);
-    const dist = Math.hypot(dx, dy);
+    const dist = dmath.hypot(dx, dy);
     if (dist > radius) return;
     const falloff = Math.max(0.3, 1 - dist / radius);
 
@@ -437,10 +438,10 @@ export function applyBlastToPlayer(g: GameEngine, pos: Vector2, radius: number, 
     const k = knockback * falloff;
     let nx: number, ny: number;
     if (dist > 0.001) { nx = dx / dist; ny = dy / dist; }
-    else { const a = sim.combat() * Math.PI * 2; nx = Math.cos(a); ny = Math.sin(a); }
+    else { const a = sim.combat() * Math.PI * 2; nx = dmath.cos(a); ny = dmath.sin(a); }
     p.velocity.x += nx * k;
     p.velocity.y += ny * k;
-    p.overSpeedAllow = Math.max(p.overSpeedAllow ?? 0, Math.hypot(p.velocity.x, p.velocity.y));
+    p.overSpeedAllow = Math.max(p.overSpeedAllow ?? 0, dmath.hypot(p.velocity.x, p.velocity.y));
 
     if (p.health <= 0 && !p.isExploding) g.handleEntityDeath(p);
 }

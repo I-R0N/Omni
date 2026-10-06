@@ -13,23 +13,22 @@
  *      the plan asks for, and it holds exactly.
  *
  *   2. Does a DIFFERENT JS ENGINE reproduce the sim?  Node 22 (V8 12.4) against
- *      Chromium 141 (V8 14.1), same seed, same log.  The random streams and the
- *      player match at every checkpoint on every map — the sim's whole decision
- *      sequence is reproduced — but the WORLD does not match bit for bit,
- *      because `Math.sin`, `Math.cos` and `Math.pow` are not specified to be
- *      correctly rounded and the two V8s disagree in the last place (Chromium
- *      ships glibc-derived trig; Node ships fdlibm; `pow` differs ~10% of the
- *      time on non-trivial inputs).  One ULP in an asteroid's velocity is then
- *      amplified by collisions.  That is a finding about the PLATFORM, not
- *      about the ports, so the test states it instead of hiding it: exact
- *      equality is required wherever libm agrees, and a measured libm report
- *      says whether it does.  See docs/ENGINE_CORE_PLAN.md §8.
+ *      Chromium 141 (V8 14.1), same seed, same log: the random streams, the
+ *      player AND THE WORLD must match bit for bit at every checkpoint on every
+ *      map.  This used to hold only for streams and player, because `Math.sin`,
+ *      `Math.cos` and `Math.pow` are not specified to be correctly rounded and
+ *      the two V8s disagreed in the last place.  The sim now calls
+ *      `engine/systems/dmath.ts` (engine-core S3, D30), built only from
+ *      operations every engine rounds identically, so the assertion is
+ *      unconditional.  The native-libm probe below is kept as INFORMATION: it
+ *      says whether this machine would have failed without dmath.
  *
  *  Harness rule 9 applies: page functions are stringified, so everything they
  *  need is inlined or passed as `arg`.
  */
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boot, stats, waitForStats, startRun } from './helpers';
@@ -99,8 +98,8 @@ test.describe('the ports do not change the sim (same JS engine, bit for bit)', (
   });
 });
 
-test.describe('Node (V8 12) vs Chromium (V8 14): what reproduces, and what libm decides', () => {
-  test('the random streams and the player match at every checkpoint; the world matches wherever libm does', async ({ page }) => {
+test.describe('Node (V8 12) vs Chromium (V8 14): what reproduces, and what dmath guarantees', () => {
+  test('the random streams and the player match at every checkpoint; the world matches exactly', async ({ page }) => {
     const node = nodeOut();
     await boot(page);
 
@@ -122,29 +121,23 @@ test.describe('Node (V8 12) vs Chromium (V8 14): what reproduces, and what libm 
     test.info().annotations.push({
       type: 'libm',
       description: libmDiffers.length === 0
-        ? 'Node and this Chromium agree on every probed function: world hashes must match exactly.'
-        : `Node and this Chromium DISAGREE on ${libmDiffers.join(', ')}: world is compared coarsely.`,
+        ? 'Node and this Chromium agree on every native libm function probed (dmath is not being tested by a disagreement here).'
+        : `Node and this Chromium DISAGREE natively on ${libmDiffers.join(', ')}; dmath is what makes the sim agree anyway.`,
     });
 
     for (const map of PARITY_MAPS) {
       const arg = { seed: PARITY_SEED, map, steps: PARITY_STEPS, every: PARITY_EVERY, inputs: PARITY_INPUTS };
       const b = await page.evaluate(`(${REPLAY_IN_PAGE})(window.__omniEngine, ${JSON.stringify(arg)})`) as Series;
       const n = node.series[map];
-      // The decision sequence and the player are libm-independent and EXACT.
       expect(b.rng, `${map}: rng streams`).toEqual(n.rng);
       expect(b.player, `${map}: player`).toEqual(n.player);
-      if (libmDiffers.length === 0) {
-        expect(b.world, `${map}: world`).toEqual(n.world);
-        expect(b.hash, `${map}: combined`).toEqual(n.hash);
-      }
+      expect(b.world, `${map}: world`).toEqual(n.world);
+      expect(b.hash, `${map}: combined`).toEqual(n.hash);
       expect(new Set(b.hash).size).toBeGreaterThan(5);
     }
 
-    // Terrain generation, step 0: the same bodies in the same order, the same
-    // numbers up to libm's last place.  A tolerance, not a hash, so that it
-    // holds with or without agreeing libm — and tight enough that a real
-    // divergence (a different seed, a different viewport, a missing port) is
-    // nowhere near it.
+    // Terrain generation, step 0: the same bodies in the same order with
+    // IDENTICAL numbers.
     const world0: Record<string, Row[]> = await page.evaluate(`(function () {
       const R = window.__omniReplay, g = window.__omniEngine, out = {};
       for (const map of ${JSON.stringify([...PARITY_MAPS])}) {
@@ -158,17 +151,36 @@ test.describe('Node (V8 12) vs Chromium (V8 14): what reproduces, and what libm 
     for (const map of PARITY_MAPS) {
       const a = world0[map], n = node.world0[map];
       expect(a.length, `${map}: step-0 entity count`).toBe(n.length);
-      let worst = 0;
       for (let i = 0; i < a.length; i++) {
         expect(a[i][0], `${map}[${i}] id`).toBe(n[i][0]);
         expect(a[i][1], `${map}[${i}] type`).toBe(n[i][1]);
-        for (let k = 2; k < 9; k++) {
-          const d = Math.abs((a[i][k] as number) - (n[i][k] as number)) / Math.max(1, Math.abs(n[i][k] as number));
-          worst = Math.max(worst, d);
-        }
+        for (let k = 2; k < 9; k++) expect(a[i][k], `${map}[${i}] field ${k}`).toBe(n[i][k]);
       }
-      expect(worst, `${map}: worst relative drift at step 0`).toBeLessThan(1e-9);
     }
+  });
+
+  test('this engine reproduces the pinned dmath bit table', async ({ page }) => {
+    await boot(page);
+    const fixture = fs.readFileSync(path.join(root, 'tests/sim/fixtures/dmath.bits.json'), 'utf8');
+    const bad: string[] = await page.evaluate(`(function () {
+      const fx = ${fixture}, D = window.__omniDmath;
+      const f64 = new Float64Array(1), u = new Uint32Array(f64.buffer);
+      f64[0] = 1; const HI = u[1] === 0x3ff00000 ? 1 : 0;
+      const bits = (x) => { f64[0] = x; return (u[HI] >>> 0).toString(16).padStart(8, '0') + (u[1 - HI] >>> 0).toString(16).padStart(8, '0'); };
+      const dec = (h) => { u[HI] = parseInt(h.slice(0, 8), 16); u[1 - HI] = parseInt(h.slice(8), 16); return f64[0]; };
+      const I = fx.inputs.map(dec), N = I.length, bad = [];
+      const one = { sin: D.sin, cos: D.cos, tan: D.tan, exp: (x) => D.exp(x / 100), log: (x) => D.log(Math.abs(x) + 1e-3),
+        atan: D.atan, cbrt: D.cbrt, asin: (x) => D.asin(x / (Math.abs(x) + 1)), acos: (x) => D.acos(x / (Math.abs(x) + 1)) };
+      const got = {};
+      for (const k in one) got[k] = I.map((x) => bits(one[k](x)));
+      got.pow = I.map((x, i) => bits(D.pow(Math.abs(x) + 0.01, I[(i + 7) % N] / 400)));
+      got.powInt = I.map((x, i) => bits(D.pow(x / 50, (i % 17) - 8)));
+      got.atan2 = I.map((y, i) => bits(D.atan2(y, I[(i * 5 + 3) % N])));
+      got.hypot = I.map((x, i) => bits(D.hypot(x, I[(i * 3 + 1) % N])));
+      for (const k in fx.table) for (let i = 0; i < N; i++) if (got[k][i] !== fx.table[k][i]) bad.push(k + '[' + i + ']');
+      return bad;
+    })()`);
+    expect(bad, 'dmath bits that differ in this browser').toEqual([]);
   });
 });
 
