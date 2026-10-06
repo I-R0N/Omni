@@ -30,6 +30,7 @@
 import React from 'react';
 import type { GameEngine } from '../engine/GameEngine';
 import { EngineStats, MapType, EnemySubtype, TrailShape, TrailEmitMode } from '../types';
+import { SONGS } from '../engine/systems/AdaptiveMusic';
 import { T_MICRO, T_NOTE, DEBUG_BTN, DEBUG_CHIP, DEBUG_OFF, DEBUG_ON } from './uiClasses';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -602,6 +603,23 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
     ],
   },
   {
+    id: 'records', label: 'Save & Records', group: 'economy',
+    rows: [
+      ctrl('Erase save', dbg(e => e.eraseSave()),
+        c => 'Erase',
+        'Erase the saved character: credits, cargo, loadout, hex slots, any wreck and the records — a brand-new start.',
+        'Wipes the save file back to a new character: no Salvage, empty cargo, the free Base Hull and Projector, every hex slot as shipped, no wreck, zeroed records. Settings (volume, control scheme, difficulty) are kept. The wiped state is written at once, so it survives a relaunch.'),
+      stat('Saved game', c => c.s.savedGame ? (c.s.savedGame.progress ? 'yes' : 'new character') : '—', 'Whether the save holds a character worth continuing.'),
+      stat('Deaths', c => String(c.s.savedGame?.records.deaths ?? '—'), 'Lifetime deaths, from the save file.'),
+      stat('Best score', c => (c.s.savedGame?.records.highScore ?? 0).toLocaleString(), 'Lifetime high score, from the save file.'),
+      stat('Best wave', c => String(c.s.savedGame?.records.bestWave ?? '—'), 'The deepest wave ever reached.'),
+      stat('Best combo', c => String(c.s.savedGame?.records.bestCombo ?? '—'), 'The best kill combo multiplier ever reached.'),
+      stat('Bosses / dragons', c => c.s.savedGame ? `${c.s.savedGame.records.bossesKilled} / ${c.s.savedGame.records.dragonsKilled}` : '—', 'Lifetime bosses and dragons killed.'),
+      stat('Wreck', c => c.s.savedGame?.wreck ? `${c.s.savedGame.wreck.modules} in ${c.s.savedGame.wreck.mapName}` : 'none', 'The outstanding death wreck: what is in it and where.'),
+      stat('Held waves', c => (c.s.savedGame?.arenaWaves.length ?? 0) === 0 ? 'none' : c.s.savedGame!.arenaWaves.map(w => `${w.mapName} W${w.wave + 1}+${w.progress} (${Math.round(w.awaySec / 60)}m)`).join(' · '), 'The wave each arena will come back at: held exactly for 5 minutes after you leave, then restarted from the top, one wave earlier per hour away.'),
+    ],
+  },
+  {
     id: 'salvage', label: 'Salvage & Stations', group: 'economy',
     rows: [
       stat('Salvage', c => (c.s.credits ?? 0).toLocaleString(), 'Your Salvage balance — the money the shops take.', c => 'text-amber-300'),
@@ -632,6 +650,10 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
   {
     id: 'portal', label: 'Portals', group: 'world',
     rows: [
+      ctrl('Arena level', dbg(e => e.dbg.cycleArenaLevel()),
+        c => c.s.arenaLevelForced ? `L${c.s.arenaLevel} (forced)` : `L${c.s.arenaLevel ?? '?'} (portal)`,
+        'The difficulty level the current arena\'s waves run at (1-20). Click to force a level.',
+        'Arena difficulty LEVEL, 1-20. Each portal has its own level; this forces one for every arena so the curve can be playtested (portal\'s own / 1 / 2 / 3 / 4 / 5 / 6 / 8 / 10 / 13 / 16 / 20). A level sets the spawn amount, how hard enemies hit and have health, and WHICH enemies may appear (data/enemy-difficulty.toml). Takes effect from the next wave; the wave banner names the level.'),
       ctrl('Transit fx', dbg(e => e.dbg.cyclePortalWarp()),
         c => c.s.portalWarpName ?? '0.9s',
         'Length of the tunnel flight played when you travel through a portal (or off).',
@@ -1163,6 +1185,45 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         c => c.s.collapseModeName ?? 'Merge',
         'How many copies of one sound may play when many fire at once.',
         'How a BURST of the same sound is folded into voices — a single frame can kill 40 enemies or shatter 200 shards. MERGE (shipped): simultaneous triggers of one id collapse into ONE voice whose gain is bumped, so bulk reads as heavier rather than as forty thin copies. SOME: half the retrigger window and double the voices, so a burst of 40 lands as roughly 20 distinct hits. ALL: no collapse at all — every trigger gets a voice, under a much-raised ceiling. This is the honest \u201cwhat does 40-at-once sound like\u201d test and is expected to be ugly; that is the evidence. Three gates move together (window, polyphony, tier ceilings) because loosening one alone just moves the drop a step later.'),
+    ],
+  },
+  {
+    id: 'music', label: 'Adaptive Music', group: 'perf',
+    rows: [
+      stat('Music int', c => {
+        const m = c.s.audio?.music;
+        return m ? `${m.intensity.toFixed(2)} → ${m.target.toFixed(2)}` : '—';
+      }, 'The adaptive score\u2019s smoothed intensity and the target it is moving toward.'),
+      stat('Layers', c => c.s.audio?.music?.layers.join(' · ') || '—',
+        'Which score layers are in: atmos · pulse · groove · heavy · apex · boss.'),
+      ctrl('Music song', dbg(e => e.audio.cycleMusicSong()),
+        c => { const m = c.s.audio?.music; return m ? `${m.song}${m.pending ? ` → ${m.pending}` : ''}${m.songPinned ? ' (pinned)' : ''}` : '—'; },
+        'Which song is playing (and the one a change is loading toward); press to pin one.',
+        'AUTO follows the music plan: the hub and field_* maps play Omni, arena_* maps Event Horizon, and any boss Critical Mass, with a victory stinger handing back when it dies. Pressing pins each song in turn (the change lands on the next bar line), then returns to AUTO.'),
+      chips('Play song', c => {
+        const mode = c.s.audio?.music?.songMode;
+        return [
+          {
+            key: 'auto', label: 'Auto',
+            summary: 'Let the music plan choose the song.',
+            detail: 'The hub and field_* maps play Omni, arena_* maps Event Horizon, and any boss Critical Mass, with a victory stinger handing back when it dies.',
+            act: dbg(e => e.audio.setMusicSong('auto')),
+            active: mode === 'auto', on: DEBUG_ON.indigo, hover: 'hover:border-indigo-400',
+          },
+          ...SONGS.map((s, i) => ({
+            key: s.id, label: s.title,
+            summary: `Pin ${s.title} (${s.bpm} BPM) until you pick Auto.`,
+            detail: 'The pin overrides the plan, through portals and boss fights too. The change lands on the next bar line: the new song loads alongside the old one, then they crossfade.',
+            act: dbg(e => e.audio.setMusicSong(i)),
+            active: mode === i, on: DEBUG_ON.indigo, hover: 'hover:border-indigo-400',
+          })),
+        ];
+      }),
+      stat('Music bar', c => c.s.audio?.music?.bar ?? '—', 'Bar 1–32 of the 60-second score loop.'),
+      ctrl('Music force', dbg(e => e.audio.cycleMusicDebugIntensity()),
+        c => { const f = c.s.audio?.music?.forced; return f === null || f === undefined ? 'game' : f.toFixed(2); },
+        'Pin the score\u2019s intensity to audition each layer.',
+        'GAME follows the fight. The fixed steps sit just past each layer\u2019s threshold: 0 atmos only, 0.25 + pulse, 0.45 + groove, 0.70 + heavy, 0.90 + apex, 1.00 adds the boss stem.'),
     ],
   },
   {

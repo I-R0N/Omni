@@ -20,6 +20,7 @@
  *  already applied by the per-entity `setTransform` at the top of the
  *  renderer's slow path.
  */
+import { fxRng } from '../rng';
 import type { RenderSystem } from '../RenderSystem';
 import { GameEntity, EntityType } from '../../../types';
 import { hexToRgb } from './drawUtils';
@@ -65,8 +66,8 @@ export function drawProjectileShape(
            for (let ti = 0; ti < tendrilCount; ti++) {
                const tAngle = (nowSec * 20 + ti * (Math.PI * 2 / tendrilCount)) % (Math.PI * 2);
                const tLen = r * (1.5 + Math.sin(nowSec * 30 + ti * 7) * 1.0);
-               const mx = Math.cos(tAngle) * tLen * 0.5 + (Math.random() - 0.5) * r;
-               const my = Math.sin(tAngle) * tLen * 0.5 + (Math.random() - 0.5) * r;
+               const mx = Math.cos(tAngle) * tLen * 0.5 + (fxRng.render() - 0.5) * r;
+               const my = Math.sin(tAngle) * tLen * 0.5 + (fxRng.render() - 0.5) * r;
                ctx.beginPath();
                ctx.moveTo(0, 0);
                ctx.lineTo(mx, my);

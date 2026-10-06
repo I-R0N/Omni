@@ -61,6 +61,7 @@ const PAD = { CROSS: 0, CIRCLE: 1, R2: 7, SELECT: 8, DPAD_DOWN: 13 };
  *  ·lit-N and ·fog, which use plain ones.  Seeded from the pre-overhaul panel
  *  (PR #105). */
 const ROW_LABELS = [
+  'Music int', 'Layers', 'Music song', 'Play song', 'Music bar', 'Music force',
   'Overlays', 'FPS', 'Wave', 'State', 'Wave timer', 'Thrust', 'Speed',
   'Snitch catch', 'Snitch spd', 'Gamepad', '  ↳ axes', '  ↳ rumble',
   '  ↳ triggers', '  ↳ report', '  ↳ trig enc', '  ↳ HID buzz', 'Impact vel',
@@ -68,8 +69,8 @@ const ROW_LABELS = [
   'Sim rate', 'Substep cap', 'Render scale', 'HUD rate', 'Gnat move',
   'Corrode', 'Disable', 'Traits', 'Station', 'Roll feel', 'Hull',
   'Roll damp', 'Tilt mode', 'Lean dir', 'Tilt src', 'Vel gain', 'Salvage',
-  '+1M Salv', 'Shield', 'Overcharge', 'Light', 'Lock slots', 'Outfit all',
-  'Reset', 'Transit fx', 'Size', 'Gravity', '  ↳ range', 'Lens',
+  '+1M Salv', 'Erase save', 'Saved game', 'Held waves', 'Deaths', 'Best score', 'Best wave', 'Best combo', 'Bosses / dragons', 'Wreck', 'Shield', 'Overcharge', 'Light', 'Lock slots', 'Outfit all',
+  'Reset', 'Arena level', 'Transit fx', 'Size', 'Gravity', '  ↳ range', 'Lens',
   '  ↳ radius', '  ↳ spin', '  ↳ live', 'Fracture', 'Frac relax',
   'Bnd strength', 'Dmg spread', 'Frac sep', 'Frac sites', 'Frac bias',
   'Chip dust', 'Grain mat', '  ↳ grain size', '  ↳ count min',

@@ -9,6 +9,16 @@ what is currently implemented. File paths are relative to the repo root.
 > `docs/POLISH_ARCHITECTURE.md` — hardness model, `AsteroidType`, fuel/gold
 > drops — is in git history; none of it shipped as written.)
 
+> **About `docs/ENGINE_CORE_PLAN.md`** — this one IS maintained and IS
+> live.  It is the working agreement for the current phase of work: a
+> deterministic, platform-free sim core with content as data, a mobile
+> release on top of it, and Steam deferred.  It carries the open GAMEPLAY
+> DECISIONS each work session must put to the user, an append-only decision
+> log, and the amendment protocol work sessions follow.  **If you are a
+> work session with a session ID (`S1`–`S4`), read its §0 and your own §4
+> section before touching anything.**  It is a PLAN, not a description of
+> what exists — this file stays the source of truth for what is shipped.
+
 ---
 
 ## 1. What Omni is
@@ -18,7 +28,10 @@ the HUD, Vite bundler, TypeScript throughout. Single-page app — no server, no
 backend, no persistence beyond in-memory run state.
 
 - Entry: `index.tsx` → `App.tsx` mounts a `<canvas>` + `UIOverlay` and owns a
-  single `GameEngine` instance.
+  single `GameEngine` instance, built over `createBrowserPlatform()` — the
+  clock, viewport, storage, lifecycle, entropy, audio, input and renderer
+  arrive through PORTS (`engine/ports.ts`, §8), so the same engine also runs
+  headless in Node (`platform/headless.ts`, `npm run test:sim`).
 - The engine runs its own `requestAnimationFrame` loop. Sim is fixed-timestep
   via an accumulator stepping `getSimDt()` (120 Hz = `FIXED_DT`, or 60 via
   DBG "Sim rate"); render cadence is decoupled from physics cadence.
@@ -39,18 +52,48 @@ types.ts                  All shared TS types; see §4
 constants.ts              ~11,000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + the nebula- and sfx-manifest
-                          plugins, build defines, OMNI_PROFILE_REACT alias
+                          plugins, the TOML content-table plugin, build
+                          defines, OMNI_PROFILE_REACT alias
+data/                     CONTENT TABLES as TOML (engine-core S3): 
+                          map-population.toml, enemies.toml (ENEMY_VARIANTS
+                          + the DBG enemy-scale steps), bosses.toml
+                          (BOSS_DEFS).  Parsed at BUILD time into
+                          `virtual:table/<name>` modules and resolved by
+                          constants.ts; the comments in them carry the
+                          reasoning behind each number (see §8)
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
                           (= test:smoke — boot + loop, the DEFAULT), plus
-                          test:smoke / test:full / test:audio.  The smoke
-                          set is defined HERE and nowhere else; CI runs
-                          these same scripts (no lint script)
+                          test:smoke / test:full / test:audio, and
+                          `test:sim` — the HEADLESS Node sim suites
+                          (tests/sim), a separate gate, not a Playwright
+                          scope.  The smoke set is defined HERE and nowhere
+                          else; CI runs these same scripts (no lint script)
 playwright.config.ts      Test harness: one 390×844 project (the DESIGN
                           TARGET; viewports.spec.ts overrides it per
                           describe block), a webServer
                           that builds then previews.  See §7
 netlify.toml              Netlify deploy config (publish = dist/)
+platform/                 THE PORTS' ADAPTERS (§8).  browser.ts builds the
+                          real Platform (performance clock, window viewport,
+                          localStorage + memory fallback, page visibility,
+                          crypto entropy, InputSystem attached to window,
+                          AudioSystem, RenderSystem); headless.ts builds the
+                          Node one (manual clock, 390×844, memory storage,
+                          silent audio, null renderer, the REAL InputSystem
+                          driven by hand)
+scripts/toml-tables.mjs   The content tables' ONE loader + id list, imported by
+                          vite.config.ts AND sim-test.mjs so the browser
+                          build and the Node harness cannot disagree
+scripts/sim-test.mjs      `npm run test:sim` — esbuilds tests/sim/*.test.ts
+                          (resolving the virtual manifests and tables) and runs
+                          them under `node --test`; `bundle()` is shared by
+                          sim-hash.mjs, which prints the Node hash series
+                          the browser parity test compares against
+scripts/balance.mjs       BALANCE HARNESS driver (engine-core S3): runs
+                          tests/sim/balance*.ts jobs across processes and
+                          writes docs/BALANCE_BASELINE.md + balance-baseline.json.
+                          A measurement, not a gate: not in npm test or CI
 scripts/inline-build.mjs  Bundles dist/ + audio into omniverse-standalone.html
 scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
                           authoring angle table, --placeholder renders
@@ -60,6 +103,20 @@ scripts/build-cinematic-audio.py
                           CinematicBank.json; master-audio.mjs and
                           prep-sfx.mjs are WAV-take tooling
 
+tests/sim/                HEADLESS SIM SUITES (node:test, engine-core S2):
+                          persistence.test.ts (the save file, relaunch,
+                          the wreck — over a shared MemoryStorage),
+                          headless.test.ts (determinism, order-independence,
+                          the replay format's inputs), lifecycle.test.ts
+                          (Escape, backgrounding), guard.test.ts (no
+                          platform globals in the sim — an allow-list of
+                          ADAPTERS, so a new file is guarded by default),
+                          tables.test.ts (the extracted content tables
+                          resolve to what they did before extraction,
+                          against fixtures/tables.golden.json),
+                          harness.ts + parityLog.ts (the shared kit and
+                          the canonical replay log).  Run by
+                          `npm run test:sim`, in CI before the browser
 tests/                    Playwright suites (roadmap 5b) — boot,
                           loop, economy, attribution, traits, screens,
                           plus input / help / minimap / maps (step 5),
@@ -93,6 +150,13 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           Cannon shell, now `'cannon+kinetic'` — and the
                           whole energy model — falloff, the grain bore,
                           overkill carry-through, the far side), audio,
+                          headless (the ports are faithful: a headless-platform
+                          engine and the live one replay to the same hashes,
+                          Node vs Chromium agree on streams, player AND
+                          world, bit for bit — dmath; Escape and the
+                          page-visibility pause), newgame (the main menu's
+                          NEW GAME: hidden without progress, two-tap
+                          confirm, erases the character, keeps settings),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 15
                           anti-flake rules — read 9, 12 and 13 before
@@ -102,7 +166,10 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           death — use `quietScene`),
                           and 15 before sampling over a window: a window
                           that outlives what it measures is measuring
-                          whatever happened next).  507 tests.  All run at
+                          whatever happened next), replay (the REPLAY HARNESS: same seed + same
+                          inputs ⇒ identical sim hashes across maps, the
+                          cosmetic streams cannot reach the sim, and no
+                          `Math.random` survives in the game code).  536 tests.  All run at
                           390×844 EXCEPT viewports.spec.ts (six sizes plus
                           a mid-session resize) and two starfield tests
                           that resize mid-test
@@ -143,6 +210,12 @@ components/
                           a resting keyboard / pad focus (see §8)
 
 engine/
+  ports.ts                THE PLATFORM PORTS — Clock, Storage, Renderer,
+                          Audio, Input, plus Viewport / Lifecycle / Entropy
+                          and the `Platform` bundle the engine is given.
+                          Imports nothing but types.  Clock and viewport are
+                          read through module-level accessors (`nowMs()`,
+                          `viewport()`); see §8
   GameEngine.ts           Orchestrator (~7,700 lines).  Owns the player
                           entity, camera, map, drop cache and the rAF
                           loop.  What is LEFT here after the
@@ -168,6 +241,21 @@ engine/
                           time snapshot of them (never the whole map), and
                           a ring that says so (`heatFrac`, the incendiary
                           shell) also deposits heat (see §8, energy)
+  replay.ts               THE REPLAY HARNESS (engine-core S1): a run is
+                          `(seed, input log)`; `runReplay` steps the real
+                          engine by hand (`GameEngine.stepSim`, no rAF, no
+                          wall clock) and hashes the SIM state every N steps
+                          so a divergence names its first step and section.
+                          Dev-only — no player-facing surface (D-S1-g).
+                          Published as `window.__omniReplay`
+  save.ts                 THE SAVE FILE, pure: `SaveFile` (character + wreck +
+                          records + settings), validation field by field,
+                          the `MIGRATIONS` chain, `parseSave` /
+                          `serializeSave`.  No storage access — the engine
+                          reads and writes through the `Storage` port.  §8
+  wreck.ts                THE DEATH WRECK: leave it, spawn its view in the
+                          map, recover it, pin its arena's seed.  Free
+                          functions over `g: GameEngine`.  §8
   energyEffects.ts        ENERGY MODULES, the side-effect half: the
                           bounded heated set (cooling, burn latch, glass
                           thermal failure, plastic bond release,
@@ -407,7 +495,16 @@ engine/
                           AREA at a target density, so every screen size
                           shows the same sky per unit area.  See §8 and
                           docs/GAUNTLET_STARFIELD_LOG.md
-    IdAllocator.ts        Monotonic nextId() for entity IDs
+    rng.ts                SEEDED RANDOM STREAMS (engine-core S1) — every
+                          draw in the game comes from a named mulberry32
+                          stream, `sim.*` (changes the world, must replay
+                          exactly) or `fxRng.*` (decoration only).  See §8
+    dmath.ts              DETERMINISTIC MATH (engine-core S3) — the sim's sin /
+                          cos / pow / exp / log / atan2 … from exact IEEE ops
+                          only, so every JS engine agrees to the bit.  The
+                          guard forbids native libm and `**` in the sim (§8)
+    IdAllocator.ts        Monotonic nextId() for entity IDs (cosmetic
+                          prefixes count on their own sequence — §8)
     PerfController.ts     Load-driven frame-skip coordinator for every
                           skippable periodic pass (see §3 and §8)
     enforceCap.ts         Shared FIFO hard-cap helper (particles,
@@ -424,16 +521,18 @@ engine/
                           recipe, through the AudioMix buses
     SfxRegistry.ts        The procedural FALLBACK of every sound in
                           docs/SFX_INVENTORY.md, keyed by its stable id
-    BackgroundMusic.ts    The streamed SCORE: ambient bed + three-track
-                          battle playlist on the Music bus; `setCombat`
-                          fades it, `cueBattleTrack` changes song
+    AdaptiveMusic.ts      The adaptive SCORE: six synchronised stems on the
+                          Music bus, faded by intensity (`setMusicThreat`,
+                          `setCombat`); `cueEncounter` returns to bar 1
     AudioMix.ts           Bus gains + policy: `busFor`, `survivesPause`,
                           `ducksWorld` (no entity dependencies)
     SfxVoicing.ts         `finishVoice`, the production layer wrapped round
                           every recipe at register time
     CinematicBank.json    GENERATED: each cue id's takes in the four
-                          audio/*.mp3 banks (106 ids), decoded once at
-                          unlock; a failed bank falls back to WAV / recipe
+                          audio/*.mp3 banks (106 ids).  A bank decodes
+                          LAZILY, on the first id asked for in it (the
+                          menu's at unlock); a failed bank falls back to
+                          WAV / recipe
     PerfRecorder.ts       DBG in-game FPS/perf capture harness — records
                           the per-frame timing + PerfSnapshot stream over a
                           window and exports a copy-paste report (DBG panel
@@ -463,7 +562,14 @@ public/assets/            Sprites, Nebula*.png (§6), ships/ tilt-sheet
 docs/                     CURRENT: SFX_INVENTORY.md (each sound id's
                           contract + fallback, §8), AUDIO_AUTHORING +
                           CINEMATIC_AUDIO, SHIP_SPRITE_SHEETS (generated).
-                          PLANS: CONFIG_CHANGES_PHASED_PLAN,
+                          PLANS: ENGINE_CORE_PLAN is the LIVE one — the
+                          working agreement for the current phase
+                          (deterministic platform-free sim core → mobile
+                          release; Steam deferred), carrying each work
+                          session's open GAMEPLAY DECISIONS, the
+                          append-only decision log and that phase's
+                          branch/CI conventions; then
+                          CONFIG_CHANGES_PHASED_PLAN,
                           PORTAL_AND_WORLD_LAYER_PLAN; MATERIAL_GRAIN_SPEC
                           is part shipped (A1–A4, B1), part proposed (§3
                           bonding / B2, §4).  HISTORY: GAME_FEEDBACK_PLAN
@@ -480,7 +586,10 @@ docs/                     CURRENT: SFX_INVENTORY.md (each sound id's
 
 Construction:
 
-1. `new GameEngine(onStatsUpdate, difficulty)` wires every subsystem, builds
+1. `new GameEngine(platform, onStatsUpdate, difficulty)` — `platform` is the
+   PORTS bundle (§8; `createBrowserPlatform()` in the app,
+   `createHeadlessPlatform()` in Node) — installs its clock and viewport,
+   subscribes to its lifecycle, wires every subsystem, builds
    the player entity, and calls `loadMap(buildMap(selectedMapType))`.
    `selectedMapType` defaults to `HUB_DESCRIPTOR.mapType` — a run starts
    on the OVERWORLD hub (roadmap step (k)).
@@ -496,7 +605,7 @@ swaps the menu backdrop, or switches-and-plays mid-game (below).
 returning to the menu returns to the default — map choice is a DEBUG
 override that lasts the run it starts, never a preference that sticks to
 the front door.  The main menu correspondingly offers no map choice:
-DIFFICULTY and START, with the controls picker and help beside them.  The
+START (difficulty is the portal's level, not a menu choice), with the controls picker and help beside them.  The
 map picker is a DEBUG row — World & Maps ▸ Maps (the showcases sit under
 ▸ Material Field Maps) in the debug panel, whose
 launcher floats in the menu's corner as it does over every screen — so
@@ -509,11 +618,13 @@ state on the way).
 `loadMapFresh(type)` — the MAP-SCOPED teardown + `loadMap(buildMap(type))`
 — and differ only in what they layer on top:
 
-- `resetAndLoadSelectedMap()` (new run: menu start / restart / mid-game
-  map switch) adds the RUN-SCOPED reset — credits, outfit
-  (`resetOutfit()`), score + combo, hull/shield refill, status effects,
-  camera zoom, and the per-run counters (`snitchCatchCount`,
-  `dragonsKilled`, `nextRivalScore`).
+- `resetAndLoadSelectedMap()` (new run: quit to menu / mid-game map
+  switch) adds the RUN-SCOPED reset — score + combo, hull/shield refill,
+  status effects, camera zoom, and the per-run counters (`snitchCatchCount`,
+  `dragonsKilled`, `nextRivalScore`).  It does NOT touch the CHARACTER —
+  credits, cargo, the installed loadout and the purchased hex slots persist
+  (§8, persistence); `resetCharacter()` is a new character, used by the
+  replay entry and DBG ▸ Economy ▸ Erase save.
 - `transitionToMap(descriptorId)` (portal travel) adds NOTHING of the
   sort — that is the whole point.  Run state CARRIES: credits, score
   (+ `displayScore`), `shipSlots` / `weaponSlots` / `inventory`, owned +
@@ -596,27 +707,36 @@ state on the way).
   `loadMapFresh` clears it, so a restart or second hop mid-drain means
   the wormhole kept the stragglers.
   Combat leftovers (shield timers, status effects, HUD messages) clear.
-  Wave progress is FRESH per entry — `WaveSystem.init` zeroes
-  `waveIndex`, so leaving an arena abandons the ladder; there is NO
-  per-map run state.
+  Wave progress is REMEMBERED per arena for a while (`engine/arenaWaves.ts`,
+  user call): `g.arenaWaves[arenaId]` = wave + enemies already down + the
+  wall-clock time the player was last there (`Clock.wallMs()`, the one epoch
+  read; stamped by every save while in the arena and just before any map
+  unloads).  Within `ARENA_WAVE_MEMORY.GRACE_SEC` (5 min) the wave comes back
+  EXACTLY (`WaveSystem.init(…, startIndex, progress)` fast-forwards the spawn
+  stream past the kills already scored; live enemies are not restored); after
+  that it restarts from the top of the same wave, and from a wave EARLIER for
+  every `DECAY_SEC` (1 h) away, down to wave 1.  A finished ladder (boss dead)
+  is forgotten.  It is saved (`SaveFile.arenaWaves`, optional) but is only the
+  WAVE SCRIPT — an arena's world still regenerates per entry, except that a wreck
+  pins its arena's seed (§8).  That is the whole per-map state there is.
 
-Death: `respawnPlayer()` refills at the current map's spawn and the run
-continues.  There IS now an interim death PENALTY (user call): raising the
-summary charges `min(balance, max(DEATH_PENALTY_FRACTION × balance,
-DEATH_PENALTY_MIN))` of the player's UNSPENT credits — whichever of the
-percentage and the flat floor is HIGHER, clamped to what they hold, so a
-broke pilot is zeroed and never driven negative.  Charged ONCE, on the
-transition into `deathPending`, so neither respawning nor restarting can
-double-charge, and money already spent on modules is untouched (the
-penalty taxes hoarding, not investment).  `lastDeathCreditsLost` /
-`runCreditsLost` carry it to the summary, which reports salvage as a
-LEDGER FOR THIS LIFE: earned since the last death
-(`lifeCreditsEarned`, snapshotted + zeroed at each death), lost to the
-wreck, and held after the loss.  The run gross (`runCreditsEarned`)
-stays on `EngineStats` but is deliberately NOT the headline — it keeps
-climbing and isn't the question being asked at the wreck.  Both numbers are PROVISIONAL
-and the fuller dynamic system still belongs to the economy tuning pass
-(step 6).
+Death (user calls D4/D6/D10/D11, engine-core S1 + S2): THE MOMENT THE SHIP
+FALLS (`onPlayerFell`, from `handleEntityDeath`) the engine counts the death,
+leaves a WRECK of what was mounted (`engine/wreck.ts`, §8) — replacing any older
+one — strips the loadout (`resetOutfit(true)`) and saves.  Doing that here and
+not at the respawn tap is what stops quitting the app on the death screen from
+keeping the loadout.  The RESPAWN button then runs
+`returnToStation()` — the player goes back to their STATION in the persistent
+hub (reloading it if they died in an arena, `stageIndex` back to 0), the hull
+and shield refill, and everything INSTALLED on the ship is already stripped
+(`resetOutfit(true)`): the hex slots fall back to the free lean start (Base
+Hull + Projector), which keeps the ship flyable.  What SURVIVES is the
+character, not the loadout: salvage (there is NO credit penalty any more —
+the old `DEATH_PENALTY_*` charge, `lastDeathCreditsLost` and the summary's
+"salvage lost" line are gone), CARGO modules, purchased hex slots, score and
+every run counter.  A death in the hub just refills and relocates beside the
+home station.  There is still no run terminator: the run is the persistent
+character.
 The screen itself is PRESENTATION around the respawn behaviour — when
 the wreck's `explosionTimer` runs out the engine no longer respawns; it
 arms `deathDelay` (`UI_CONSTANTS.DEATH_SCREEN_DELAY_SEC`), the boss
@@ -632,15 +752,16 @@ everything after step 4b stops: input / weapons / docking / drop
 collection / wave progress, the snitch / dragon / rival ticks, the
 projectile post-pass and the energy layer — heat neither cools nor burns
 until the respawn), the
-explosion-timer branch is guarded on `explosionTimer > 0` so the PENALTY
-cannot be re-charged every step, and the summary is a SNAPSHOT
+explosion-timer branch is guarded on `explosionTimer > 0` so the summary
+snapshot cannot be re-taken every step, and the summary is a SNAPSHOT
 (`deathSummary`, taken at the moment of death and republished verbatim)
 so nothing behind the screen can move the numbers on it.  `runTimeSec`
 likewise stops explicitly while `deathDelay > 0 || deathPending` — reading
-your own obituary is not play time.  Its three buttons are three existing
-paths: `respawnFromDeath()` (→ `respawnPlayer()`, the old auto-respawn),
-`restartRun()` (`resetAndLoadSelectedMap()` + `startGame()` — the menu
-START path without the menu), and `quitToMenu()` (→ `restartGame()`).
+your own obituary is not play time.  Its two buttons are
+`respawnFromDeath()` ("Respawn at Home Station" — `returnToStation()`: the
+hub, installed modules stripped) and `quitToMenu()` (→ `restartGame()`);
+there is deliberately no restart-in-place.  Stations exist only in the hub,
+so the home station is the one place a death can return to.
 The RUN-SUMMARY COUNTERS (`runKills` / `runCreditsEarned` / `runTimeSec`
 / `runWavesCleared` / `runHighestWave` / `runBestCombo`, alongside the
 existing `score` / `credits` / `bossesKilled`) are RUN-scoped: zeroed in
@@ -1320,7 +1441,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   call (`getActiveFractureMode`).  See
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/GAUNTLET_VORONOI_LOG.md` for the gauntlet ledger.
-- `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
+- `MAP_POPULATION` (`data/map-population.toml`) — central per-MapType per-ShardVariantId entity-
   count table, and since step 5 (G7) the ACTUAL authority rather than a
   parallel description for every map's rock free-spawn
   (`getRockShardFreeSpawn()`) and for the natural maps' tile-variant mix.
@@ -1342,7 +1463,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the CHAIN itself is the energy layer's `ENERGY_CONSTANTS.CHAIN_*`),
   `HOMING_ACQUIRE_RANGE`
 - `PROJECTILE_CONSTANTS`, `MAX_PROJECTILES`, `MAX_PARTICLES`
-- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
+- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (`data/enemies.toml`, schema
+  `EnemyVariantDef`; per-archetype `weapon` override +
   optional `burst` fire pattern + `glow` shot hint — the per-archetype
   `cooldown` is the real fire cadence; the old global burst config is gone),
   `ENEMY_ROLE`, `ENEMY_WEAPON`.  Roster today: 6 base archetypes
@@ -1748,7 +1870,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `ENEMY_SCALING` / `enemyHpMult()` / `enemyDamageMult()` — per-wave
   enemy growth on top of difficulty: HP scales at spawn, damage rides a
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
-  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
+  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` (its steps
+  are `enemy_scale_cycle` in `data/enemies.toml`) is the
   DBG "Enemy scale" knob (Enemies & Bosses ▸ Enemy Tuning, with the
   "↳ live" hp/dmg-mult readout).
 - `ENEMY_TRAITS` / `EnemyTraitSet` — enemy counterplay traits (the
@@ -1796,7 +1919,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
   front-shield reduce damage BEFORE the bucket sees it, so bursting a
   plated target means bursting it FROM BEHIND.
-- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
+- `BOSS_CONSTANTS` / `BOSS_DEFS` (`data/bosses.toml`) / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
   `isBossWave()` / `bossForWave()` / `buildBossWaveSpawnList()` — the (h)
   BOSS capstone tables.  A stage is `BOSS_CONSTANTS.WAVE_INTERVAL`
   ordinary waves plus the boss's OWN wave, so every
@@ -1856,8 +1979,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `MODULE_REQUIREMENTS` / `HEX_ADJACENCY` — the hex-slot outfitting
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
-  Mk I/II/III varieties (own price ≈ the cumulative old level-curve
-  cost, own fixed effect — no levels, no in-place upgrades), guns (the
+  Mk I/II/III varieties (price = mark! x the family's Mk I price, so Mk III is 6x; a mark past `SHOP_MAX_MARK` (3) is `rewardOnly`, never sold, and only the scanner has Mk IV/V today; own fixed effect — no levels, no in-place upgrades), guns (the
   five `dlv_*` deliveries), the three `nrg_*` energy modifiers and
   Shield/Overcharge/Light are single varieties.  The Mk families today
   are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
@@ -2466,7 +2588,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
-- `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
+- `HUB_LAYOUT` / `HUB_ARENA_VARIETIES` / `OVERWORLD_STATIONS` / `HUB_PORTAL_SITES` /
+  `HUB_TEST_PORTAL_SITES` — the hub's whole layout, computed once with dmath:
+  home station at the centre; a ring of eight debug FIELD rifts (every
+  showcase map, no varieties, NO gravity well) at r = 1300; then 15 slots at
+  even angles over three radii (2700 / 3900 / 5000) holding the 12 arena rifts
+  (4 maps x easy / mid / hard — ring = variety, so distance reads as difficulty;
+  the mid keeps the original id) and the three shop stations.
+  `tests/sim/hublayout.test.ts` pins the spacing.
+- `PORTAL_CONSTANTS` / `RETURN_PORTAL_OFFSET` — the
   map portals (roadmap step (k)): rift size / colours (violet out, sky
   home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
   burst — plus the WORMHOLE block: `GRAVITY_RANGE` / `GRAVITY_STRENGTH` /
@@ -2552,7 +2682,7 @@ and `DIFFICULTY_STAT_SCALES`.
 Every map is named by a row in the **`MAP_DESCRIPTORS` registry**
 (`engine/maps/MapDescriptors.ts`) — a THIN typed layer of stable string
 ids over the MapType plumbing (roadmap step (k), strategy guardrail #3).
-A descriptor carries exactly five fields, all with live consumers:
+A descriptor carries five fields with live consumers plus an optional `level` (the arena's difficulty, 1..20; `ENEMY_RATING` / `buildLevelWave` in constants.ts turn it into a wave mix, `data/enemy-difficulty.toml`):
 `id` (portal targets + `transitionToMap`), `name` (portal tag + entry
 affordance), `mapType` (what `buildMap` instantiates), `kind`
 (`'hub' | 'arena'` — `HUB_DESCRIPTOR` is where a run starts and where
@@ -2647,6 +2777,15 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     NOT type-check** (esbuild strips types without checking them), which
     is how six type errors accumulated unseen before 5b; the build being
     green says nothing about the types.
+  - `npm run test:sim` — **the HEADLESS SIM suites** (`tests/sim`, ~25 s):
+    the real `GameEngine` in Node on the stand-in ports, no browser and no
+    dev server.  Not a Playwright scope and not part of `npm test`; CI runs
+    it right after the build, before the browser suites.  It is where a
+    sim-level assertion belongs from now on — the platform guard, replay
+    determinism, Escape / backgrounding — and `tests/headless.spec.ts` is the
+    one browser suite that proves the Node and browser sims agree (§8).  Run
+    it with the suites your change touches whenever the change touches the
+    sim, the ports or the input / lifecycle path.
   - `npm test` — **the SMOKE scope: `boot` + `loop`, ~1 minute.**  This is
     the DEFAULT on purpose (user call): the full suite is ~19 minutes, and
     a gate that expensive stops being run.  `npm run test:full` is the
@@ -2669,9 +2808,11 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     the boot/loop canary suites (~1.5 minutes end to end, measured
     2026-09-22).  A type error, a broken bundle, or a broken core loop
     still blocks every merge.
-  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main` and
-    `claude/plan-completion` (immediately after a merge lands), on any PR
-    carrying the **`full-tests` label** (the opt-in for pre-merge full
+  - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main`,
+    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` (the
+    engine-core + mobile phase's integration branch,
+    docs/ENGINE_CORE_PLAN.md §5) — immediately after a merge lands — on any
+    PR carrying the **`full-tests` label** (the opt-in for pre-merge full
     validation), and on manual dispatch.  Full CI runs took 18–22 minutes
     in late September 2026.
   A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs whose
@@ -2721,9 +2862,12 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   - It is deliberately SECRET-FREE, so unlike `pr-preview` it also runs
     on fork PRs.  Keep it that way — a merge gate that silently skips for
     outside contributors is not a gate.
-  - It also runs on pushes to `main` AND to `claude/plan-completion`, so a
-    bad merge into either long-lived branch is visible immediately instead
-    of at the next PR opened against it (plan-completion: merged, PR #93).
+  - It also runs on pushes to the long-lived branches themselves — `main`,
+    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` — so a
+    bad merge into one is visible immediately instead of at the next PR
+    opened against it (plan-completion: merged, PR #93).  Listing a branch
+    there is the ONLY way a push reaches full scope, since a PR's base no
+    longer picks it.
   - On failure the Playwright HTML report uploads as a run artifact
     (`playwright-report-<run id>`, 7-day retention) — read that before
     re-running, since the suites are timing-sensitive and the report
@@ -2741,6 +2885,225 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 
 ## 8. Conventions and gotchas
 
+- **ALL RANDOMNESS IS A SEEDED STREAM, AND THE STREAMS ARE SPLIT BY WHAT
+  THEY CAN CHANGE** (engine-core plan S1, user call D1).  `Math.random` is
+  banned from the game code — `tests/replay.spec.ts` greps for it — and every
+  draw reads a named stream from `engine/systems/rng.ts`: `sim.terrain` /
+  `waves` / `drops` / `shards` / `nebula` / `ai` / `combat` / `roamers` /
+  `energy` / `engine` for anything that moves the WORLD, and `fxRng.particles`
+  / `sprites` / `render` / `audio` / `sky` for anything that only decorates
+  it.  The rule that matters: **nothing the sim reads may come from an `fxRng`
+  stream** (the render layer, audio, background and particle files may not
+  import `sim` at all — also grepped).  The streams are one per subsystem,
+  not one per kind, so a draw added to the drop code cannot shift what the AI
+  rolls next.  Generator: mulberry32, the repo's precedent
+  (`fracture.ts`), with its 32-bit state exposed so the replay hash folds it
+  in.  SEEDING IS PER MAP, NOT PER RUN (user call D8): every map load goes
+  through `GameEngine.loadMapSeeded`, which seeds the streams for the map's
+  KIND.  The HUB is a persistent world — its terrain is generated from the
+  one fixed `HUB_WORLD_SEED` (`MapDescriptors.ts`), so it is the same place
+  on every visit and every run, and it carries no seed (`arenaSeed` is null);
+  an ARENA is a fresh mini-game that carries its own — random
+  (`freshRunSeed`) unless `beginSeededRun(seed, map)` pinned one — and that
+  `arenaSeed` is what the death summary shows (D2).  After the hub's terrain
+  is built the streams are reseeded from a fresh (or pinned) seed, so ambient
+  fauna does not repeat every visit.  The call that made
+  AI jitter SIM: enemy wobble moves bodies, so a replay that did not reproduce
+  it would be silently false.  Five non-obvious things hold determinism up:
+  an entity id is SIM STATE (`seedFromEntityId` seeds the fracture pattern),
+  so cosmetic prefixes (`part`/`glit`/`score`/`dmg`/`hud`/`lightning`) count
+  on a separate sequence in `IdAllocator` or a particle count rolled on a
+  cosmetic stream would shift the next shard's break; the id counter restarts
+  with each MAP, so every id-keyed cache (`AISystem.reset`) must clear on map
+  load or a new map's enemy inherits the last one's memory of its id, and
+  debris carried through a portal is re-id'd `xfer_<id>` at capture so it can
+  never collide; the sim clock (`simClock`) restarts with the map; the
+  PerfController's load signal has a wall-clock term, which a held replay
+  feeds as 0; and `PhysicsSystem.shardPairCallCount` restarts with the map.
+- **CONTENT TABLES ARE TOML, PARSED AT BUILD TIME** (engine-core S3, plan D32;
+  `data/*.toml`, `scripts/toml-tables.mjs`).  `MAP_POPULATION`, `ENEMY_VARIANTS`
+  (+ `enemy_scale_cycle`) and `BOSS_DEFS` are files, not literals, because this
+  repo's tables carry the reasoning behind each number as comments and TOML
+  keeps them beside the value.  Derivation LOGIC stays code (`massFor`,
+  `enemyHpMult`, the DBG ladders, `BOSS_WEAPONS`, which is computed from the
+  weapon table); `SHARD_VARIANTS`, `WEAPONS` and `MODULE_DEFS` are deliberately
+  NOT extracted yet.  Rules to keep:
+  (1) **The parser runs at build time and ships zero runtime bytes.**  Each file
+  becomes a `virtual:table/<name>` module — the `virtual:nebula-manifest`
+  precedent — exporting plain JSON.  Do NOT fetch a data file at runtime: the
+  single-file standalone cannot fetch anything, and works today only because the
+  data is already inside the module.
+  (2) **TWO consumers resolve the ids and share ONE loader**:
+  `vite.config.ts` (dev, `vite build`, and so Playwright's webServer and the
+  standalone) and `scripts/sim-test.mjs`'s esbuild shim (`npm run test:sim`,
+  `sim-hash.mjs`).  Both import `scripts/toml-tables.mjs`; a new table is an
+  entry in its `TABLES`, a file, and nothing else.  The shim throws on an
+  unknown `virtual:table/…` rather than falling through to the manifest branch.
+  (3) **A file holds NAMES where a value is code**, resolved by the `resolve*`
+  functions beside each table in `constants.ts`: `sprite = "ENEMY_DRONE"` is an
+  `ASSETS` key, `weapon = { extends = "SCATTER", cooldown = 1.25 }` spreads
+  `BOSS_WEAPONS.SCATTER` and then the listed fields (as `{ ...BOSS_WEAPONS.SCATTER,
+  cooldown: 1.25 }` did), `spawner.subtype` / `companions` are `EnemySubtype`
+  ids.  A malformed file fails the BUILD with the file and the parser's reason; an
+  unknown NAME fails at module load — naming the file and row — so it is caught by
+  `test:sim` and the boot smoke, NOT by `vite build`.
+  (4) **Equivalence is pinned against a golden, not the literals**
+  (`tests/sim/tables.test.ts`, `fixtures/tables.golden.json`): the resolved tables
+  as they were before extraction, compared with a relative 1e-9 tolerance so
+  `dmath`'s last-place shifts do not turn it red, with key ORDER enforced only at
+  the table levels (maps, variants, archetypes).  A deliberate rebalance edits the
+  TOML and re-captures the golden in the same commit, which is what makes it a
+  visible one — `tests/maps.spec.ts` plays the same role for populations.
+  (5) **`swarmMove` is the seam for non-default gnat flocks**: an optional
+  `ENEMY_VARIANTS` field that pins a 'swarm'-behaviour row to one steer
+  (boids / vortex / weave / burst); absent follows the DBG "Gnat move" cycle.
+  No shipped row sets it.
+- **THE SIM TALKS TO THE PLATFORM THROUGH PORTS, AND ONLY THROUGH PORTS**
+  (`engine/ports.ts`; engine-core S2).  Five named ports — Clock, Storage,
+  Renderer, Audio, Input — plus Viewport, Lifecycle and Entropy, bundled as
+  the `Platform` the `GameEngine` constructor takes.  Nothing in the sim names
+  `window`, `document`, `navigator`, `performance`, `localStorage`,
+  `requestAnimationFrame` or `Date.now`: `tests/sim/guard.test.ts` greps for
+  them, and it is an ALLOW-LIST OF ADAPTERS (`InputSystem`, `DualSenseHID`,
+  `RenderSystem` + `render/`, `BackgroundManager`, `AudioSystem`,
+  `AdaptiveMusic`, `PerfRecorder`) rather than a list of sim files — every
+  other file under `engine/` plus `constants.ts` / `types.ts` / `assets.ts` is
+  guarded by default, so a new file fails in the right direction.  Comments
+  and string literals are stripped first; only code can trip it.  Five rules
+  to know before touching it:
+  (1) **Clock and viewport are MODULE-LEVEL, on purpose** — `nowMs()` and
+  `viewport()` are read from a dozen constructed-without-wiring files (the
+  diagnostics timers in PhysicsSystem, the wake radius in four roamers,
+  `effectiveDpr`), and threading a handle through them would change every
+  signature for no gain.  The engine constructed LAST owns them; a process
+  holding two engines calls `engine.activatePlatform()` on the one it is about
+  to drive, and `runReplay` does.  `viewport()` returns ONE reused object in
+  the browser — never mutate it, never hold it across a frame.
+  (2) **`InputSystem` is the adapter and its constructor touches no platform
+  object.**  Listeners are attached by `attach(window)` (browser platform
+  only), so the very same class runs headless, driven by `applyReplayFrame`:
+  the scheme rules, joystick math and fire queues are the browser's own, not a
+  re-implementation.  Its `instanceof HTMLElement` / `HTMLCanvasElement`
+  checks answer "not a UI target / ignore" where those classes do not exist.
+  (3) **The headless platform is the real engine with the world swapped
+  out**: a `ManualClock` that only moves when told to (so every diagnostic
+  timer reads 0 ms, which is also what a held replay feeds the PerfController),
+  390×844 (the design target, and the Playwright project's size), memory
+  storage, a hand-driven lifecycle, `NullAudio` (records the ids it was asked
+  for) and `NullRenderer`.  It is NOT a second implementation: a headless
+  step is `GameEngine.stepSim`.
+  (4) **A SEED STILL COMES FROM THE OUTSIDE WORLD IN ONE PLACE** —
+  `Entropy.seed()` (crypto in a browser, a counter headless).  S1's
+  `freshRunSeed` was removed from `replay.ts` for it.
+  (5) **Both parity claims are tested, and they have DIFFERENT answers.**
+  `tests/headless.spec.ts`: (a) a headless-platform engine and the live
+  engine replay every parity map to the SAME HASHES, bit for bit, in one page
+  — the ports change nothing; (b) Node against Chromium reproduces the random
+  streams, the player AND THE WORLD, bit for bit, on every parity map
+  (engine-core S3, D30).  Until `dmath` this held only for streams and player:
+  `Math.sin`, `Math.cos` and `Math.pow` are not correctly rounded and differ
+  between V8s in the last place, and collisions amplify one ULP.  The sim now
+  calls `engine/systems/dmath.ts` (see the DMATH bullet below), so the
+  assertion is unconditional; the native-libm probe in the test survives as
+  information only.  Cross-engine agreement is also pinned as a table
+  (`tests/sim/fixtures/dmath.bits.json`, reproduced by Node in `test:sim` and
+  by Chromium in `headless.spec.ts` through `window.__omniDmath`).
+- **THE SIM NEVER CALLS THE ENGINE'S LIBM — `dmath`** (engine-core S3, plan D30;
+  `engine/systems/dmath.ts`).  `sin cos tan asin acos atan atan2 exp log log2
+  pow cbrt hypot` plus `PI` are rebuilt from operations the IEEE-754 standard
+  fixes (`+ - * /`, `Math.sqrt`, `floor`, `abs`, and integer views of a double):
+  fdlibm kernels with Cody-Waite reduction, so every JS engine (V8, JSC, SM)
+  returns the same bits.  Rules: (1) call it as `dmath.sin(x)` — never
+  `Math.sin`, and never the `**` operator, which V8 may lower to libm `pow`
+  (write `x * x`, or `dmath.pow`); `tests/sim/guard.test.ts` greps for both and,
+  like the platform guard, is an ALLOW-LIST of PRESENTATION files (render/,
+  RenderSystem, audio, background, particles, trails, NebulaColor, PerfRecorder),
+  so a new engine file is deterministic by default.  (2) Accuracy is secondary
+  to agreement but measured against native: sin/cos ≤ 2.2e-16 abs, exp / cbrt /
+  hypot ≤ ~4e-16 rel, pow ≤ 7e-15 rel; `pow` with an integer exponent in
+  [-64, 64] is repeated squaring, else exp(y·log x).  Arguments beyond ~1e5 rad
+  fold deterministically but lose accuracy (irrelevant to the sim).  (3) Changing
+  dmath on purpose moves every replay hash, so it is a rebaseline in the same
+  commit, with `OMNI_WRITE_DMATH_BITS=1 npm run test:sim -- --filter dmath`.
+  (4) It introduced no per-call cost worth a knob: `perf/simbench.mjs` ms per
+  sim substep (before → after, noisy ±15-30% in this container) hub-idle
+  1.25 → 1.61, asteroid-6k 2.22 → 2.48, glass-field 0.99 → 0.81, roamer-stack
+  2.51 → 2.49.
+- **THE SAVE FILE AND THE WRECK** (plan D10, D14, D20–D24; `engine/save.ts`,
+  `engine/wreck.ts`).  What persists, through the `Storage` port under one key
+  (`omni.save`): the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
+  hex-slot counts — the outstanding WRECK, lifetime RECORDS (high score, best
+  wave / combo, bosses, dragons, deaths) and SETTINGS (audio volumes + mute,
+  control scheme, difficulty).  NOT saved: any arena's world (arenas regenerate
+  per entry, D8), the hub's terrain (a fixed `HUB_WORLD_SEED` regenerates it
+  identically — destroyed hub terrain does not survive a relaunch), the sim's or
+  the rng's state, a replay.  Suspending a run is PAUSE ONLY (D21): a replay is
+  bit-exact only within one JS engine (§8, ports), so it is not a safe save
+  format; an OS kill resumes the character at the hub.  Rules:
+  (1) **A new run keeps the character.**  `resetAndLoadSelectedMap` no longer
+  zeroes credits / outfit; `resetCharacter()` does, and `beginSeededRun` calls it
+  so a replay never reads the save.  A fresh Playwright context has empty storage,
+  so every suite still starts on a new character.
+  (2) **Saves are written, not scheduled by the sim**: `autosaveTick` runs in
+  `loop()` once per second of FRAME time (settings change while the world is
+  frozen), and `saveNow()` also runs at death, on backgrounding, on `stop()` and on
+  recovery.  It compares one small JSON string with the last write, so it is cheap
+  to call.  Lifetime bests are max()ed in at write time.
+  (3) **Version policy is MIGRATE**: a `version` integer and `MIGRATIONS[n]`
+  (n → n + 1, plain JSON, chained).  A bad field costs that field; an unknown
+  module id is dropped.  A save from a NEWER build or one that will not parse is
+  never overwritten: its text is parked under `omni.save.unreadable` first.
+  S6's world state arrives as a migration, not a wipe.
+  (4) **THE WRECK IS A RECORD WITH A VIEW.**  `g.wreck` = `{arenaId, seed, x, y,
+  ship[], weapon[]}` — the mounted modules, minus the free cost-0 ones; `g.wreckEntity`
+  is a non-drop INTERACTABLE rebuilt from it at the end of every map load
+  (`loadMapSeeded`), so it survives relaunches and map hops with nothing
+  serialized but the record.  `loadMapSeeded` reads `wreckSeedFor`, so re-entering
+  that arena PINS its seed and S1's seeded generation rebuilds the same terrain
+  (a replay's own pinned seed still wins).  A pinned arena also repeats its wave
+  script, since a seed covers everything.  A hub death leaves a hub wreck (no seed).
+  (5) **LOST ON A SECOND DEATH, never on a clock** — read literally: any death
+  before recovery replaces the record, so a bare second death also destroys the
+  old wreck, and a second death with gear leaves one new wreck, never two.
+  (6) **Recovery is flying into it** (`WRECK_CONSTANTS.RECOVER_RANGE`) and gives
+  the modules back TO CARGO ONLY (user call) — nothing is re-installed, the player
+  refits at a station; a module that finds the hold full pays resale, so a recovery
+  never destroys one.
+  (7) **The wreck is drawn by the generic POI path** (a disc in `WRECK_CONSTANTS
+  .COLOR` and the word WRECK), `found` from birth (`isRetainedContact`).  Finding
+  it again is guided: `updateWreckGuide` stamps `wreckGuide` on the wreck, or from
+  another map on the rift toward it, which draws a permanent amber edge arrow
+  (budget-exempt), a clamped, pulsing minimap beacon and, on that rift in the
+  world, an amber ring + "WRECK THIS WAY" tag — no scan needed.  The
+  death screen names a wreck the death destroyed (`runSummary.lostWreck`), and
+  the main menu says CONTINUE with the saved credits / modules / wreck when the
+  save holds progress (`EngineStats.savedGame`, menu and debug panel only).
+- **ESCAPE PAUSES; BACKGROUNDING PAUSES** (engine-core S2).
+  `GameEngine.escapePressed()` (spent in `pollGamepad`, above every freeze, so
+  it works from inside the paused state): debug panel open → close it; docked
+  or paused → `menuBack()` (undock / resume); live play → `pauseGame()`;
+  nothing on the menu or on the death and stage-clear screens (decisions, not
+  dismissals).  `onLifecycle('background')` releases every held key (a hidden
+  page is never told a key came up) and pauses SILENTLY (`pauseGame(true)`: the
+  audio layer is already being suspended, and a "back" blip queued on a
+  suspended context would play on return); `'foreground'` NEVER resumes by
+  itself but always re-anchors `lastTime` and zeroes the accumulator, in every
+  state including the death screen, which keeps running — the accumulator
+  drain clamps a long frame to `MAX_FRAME_TIME`, so a stale `lastTime` was
+  bounded at five substeps rather than free, and the re-anchor makes it
+  nothing.  The lifecycle subscription is made in the constructor and dropped
+  by `stop()`.
+- **THE REPLAY FORMAT'S INPUTS** (`engine/replay.ts`; extends S1).  Keys,
+  pointer, one-step tap fires (`fire`), one-step CHARGED-shot releases
+  (`charge` — the outcome, not the wall-clock hold that earned it), the
+  PerfController's sim-time term (`simMs`, latched; 0 when absent, which is
+  the old behaviour), and the `viewport` the log was recorded at, which
+  `runReplay` CHECKS and refuses by name when the run's viewport differs
+  (aim is a screen position and the spawn ring is sized in screens, so a
+  replay at another size is a different run — measured).  `beginSeededRun` now
+  also zeroes the player's heading: map load re-places the ship but leaves
+  where it was pointing, so the step-0 hash used to depend on the previous
+  replay on the same engine.
 - **Torus math is non-optional.** Any new distance check, nearest-neighbor
   scan, or projectile targeting must go through `wrapDeltaX`/`wrapDeltaY`.
   Naïve `a.x - b.x` will silently break across seams.
@@ -5183,21 +5546,22 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   separate collapse keys, describing touch, keyboard/mouse, gamepad and the
   run's basics.  It is a collapsible SECTION rather than a sixth
   full-screen overlay on purpose.  Keep it accurate to what is BOUND: where
-  the game has no binding (there is no keyboard weapon-cycle or pause key),
-  the panel says nothing rather than inventing one.
+  the game has no binding (there is no keyboard weapon-cycle key), the panel
+  says nothing rather than inventing one.  (Escape IS bound — it pauses —
+  and the keyboard group lists it.)
 - **Sound goes through one id, and the id is the contract.**  Every
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
   **Adding or licensing music and produced audio:** see
-  `docs/AUDIO_AUTHORING.md`. It documents the bank generator, streaming music
-  path, standalone inclusion, credits and validation; this paragraph remains the
+  `docs/AUDIO_AUTHORING.md`. It documents the bank generator, the adaptive
+  score, standalone inclusion, credits and validation; this paragraph remains the
   system-contract reference.
   `docs/SFX_INVENTORY.md` is the source of truth for each id's CONTRACT —
   trigger site, mix tier, variation, polyphony + throttle, mix level,
   positional vs UI-flat — and for its procedural FALLBACK recipe
   (duration, sonic character, frequency + envelope).  What PLAYS is a
   sample-bank take: four 192 kbps mono MP3 banks in `public/assets/audio/`,
-  decoded once at unlock and sliced per id by
+  decoded once per bank — lazily, see below — and sliced per id by
   `engine/systems/CinematicBank.json` — three takes per one-shot, chosen at
   random and never the one just played, and one 4 s seamless take per
   loop, 304 covering all 106 ids — both regenerated by
@@ -5218,10 +5582,40 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   loaders check before fetching (a single HTML file cannot fetch
   anything), so it plays the baked banks and score.  Everything after
   the byte source is shared, so a baked take takes the same decode,
-  silent-file rejection and take choice as a served one.  Files are
-  fetched and DECODED ONCE at unlock, never on first trigger: a
+  silent-file rejection and take choice as a served one.  **A BANK IS
+  DECODED ONCE, LAZILY, AND NEVER INSIDE A FRAME** (user call; the memory
+  note below).  All four used to decode at unlock; now only the MENU bank
+  does, and `requestBank` — called from `play()` and from `loop()` turning
+  on — starts the others on the first id asked for in them.  It is
+  FIRE-AND-FORGET, which is what keeps the old rule's guarantee: a
   `decodeAudioData` inside the frame a collision lands in is the one way
-  this path could cost frames.  Pitch rides `playbackRate`, so the call
+  this path could cost frames, so the trigger that asks plays its
+  PROCEDURAL voice and returns, exactly as every id already did while the
+  eager preload was in flight, and the take arrives for the next trigger.
+  Two things fall out and both are load-bearing.  The WAV pass and the
+  procedural pre-render ask `BANK_OF_ID` — the MANIFEST — rather than
+  `hasSample`, because an id whose bank has not been asked for yet has no
+  sample and would otherwise have a WAV fetched AND three Offline takes
+  rendered for it, which costs more memory than the eager decode this
+  replaces.  And a LIVE LOOP is dropped when its bank lands
+  (`decodeBank`), or it keeps the draft for the whole run: `loop()` only
+  builds a voice at creation and `move.thrust` idles continuously, so
+  nothing would ever swap it.  `decodeAllBanks()` asks for the lot and is
+  for the suites and the tooling, which assert over the whole manifest.
+  MEASURED (`AudioSystem.decodedBankBytes` beside
+  `AdaptiveMusic.decodedBytes`, in-browser at 390x844): the title screen
+  holds **4.7 MB** of cue buffers against ~62 before, and a run that never
+  fires holds 49.3 — the weapons bank genuinely never decodes.  What this
+  buys is the PEAK and the menu, not the steady state: impacts and world
+  are asked for within seconds, so a few seconds into a run the resident
+  figure is close to what it always was, and the reduction is the score's
+  rate cut (`SCORE.DECODE_RATE` 32 -> 25 kHz, 70.9 -> **55.4 MB** measured,
+  user call).  Audio in play totals ~105 MB not firing and ~117 firing,
+  against 133 before; at the title screen 16.5 against ~77.  That matters
+  because this phase is a MOBILE release and iOS Safari kills a tab on peak
+  RSS.  `tests/audio.spec.ts` pins both halves — the whole-manifest claim
+  (which now asks for every bank) and the laziness itself, the latter
+  verified to FAIL against the eager build.  Pitch rides `playbackRate`, so the call
   site's existing `{gain, pitch}` (impact strength, impactor mass) still
   spans one take from pebble-tap to boulder-slam.  The synth drafts can
   be switched OFF wholesale (`AudioSystem.draftsEnabled` — an engine field
@@ -5248,10 +5642,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   than being routed back through the orchestrator.
 - **Audio is EVENT-DRIVEN; nothing audio-related runs per frame** except
   `audio.setListener(camera)` and `audio.setActive(...)`, two number
-  writes and a boolean, plus the battle score's proximity test
-  (`GameEngine.inCombatProximity`, an early-outing walk of the enemy index
-  already built that frame), which reaches `audio.setCombat` only on a
-  transition.  A voice lives as long as its buffer (or the duration its
+  writes and a boolean, plus the score's threat scan
+  (`GameEngine.inCombatProximity`, one walk of the enemy index already
+  built that frame), which reaches `audio.setCombat` only on a transition
+  and `audio.setMusicThreat` as one small object per frame.  A voice lives as long as its buffer (or the duration its
   synth returns) and schedules one `setTimeout` to retire itself; retired
   entries are also pruned lazily inside `play()`, and there are no
   `onended` handlers.  Measured before the sample banks landed and not
@@ -5365,24 +5759,31 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   recorded bed, all smoothed) — gating the loop on `throttle > 0` snapped
   the whole bed on and off with the input and read as jarring.  It stops
   only on death, pause and dock.
-- **Music is a STREAMED score that combat only ducks** (`BackgroundMusic.ts`,
+- **Music is an ADAPTIVE score of synchronised stems** (`AdaptiveMusic.ts`,
   on `AudioMix`'s Music bus, which feeds master directly rather than the
-  SFX bus).  `space-ambient.mp3` loops as the bed and is only ever ducked;
-  `fly-`, `tracers-` and `countdown-battle.mp3` form a battle PLAYLIST
-  that never loops a track.  Tracks are `<audio>` elements routed through
-  `createMediaElementSource`, never decoded PCM, and load lazily: the title
-  screen requests none of the battle catalog.  Combat is
-  `GameEngine.inCombatProximity` — any live boss at any range, or a hostile
-  within `AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS` screens (let go at
-  `MUSIC_RELEASE_SCREENS`; neutral fauna and rivals count only once they
-  hunt the player), held for `MUSIC_LINGER_SEC` after the last one leaves
-  — sent to `audio.setCombat` on transitions only.  A lull fades the layer
-  and then PAUSES it, so the song resumes in place; inside an encounter a
-  track changes only on its own `ended`.  Only a boss arriving
+  SFX bus).  One original piece (D minor, 128 BPM, 60 s) as six stems —
+  atmos, pulse, groove, heavy, apex, boss — decoded at 25 kHz and looping
+  on ONE AudioContext clock, so a layer always joins on the beat the music
+  is already on.  Intensity = state floor (explore / alert / combat gate /
+  boss) + pressure + damage (read from EHP falling) + low hull, smoothed
+  (fast rise, 3.5 s hold, slow fall); each layer has on/off thresholds and
+  enters on the next beat or bar (the groove behind a riser).  Combat is
+  still `GameEngine.inCombatProximity` — any live boss at any range, or a
+  hostile within `AUDIO_CONSTANTS.MUSIC_ENGAGE_SCREENS` screens (let go at
+  `MUSIC_RELEASE_SCREENS`), held for `MUSIC_LINGER_SEC` — sent to
+  `audio.setCombat` on transitions; the same enemy walk measures pressure
+  and alert (`MUSIC_ALERT_SCREENS`, `MUSIC_CLOSE_SCREENS`) for
+  `audio.setMusicThreat`, reported every frame.  Three songs, chosen by a
+  DIRECTOR (`MUSIC_PLAN`): hub and `field_*` maps → "Omni", `arena_*` →
+  "Event Horizon", any boss → "Critical Mass", a victory stinger handing
+  back when the last boss dies (`audio.musicBossDefeated`, from
+  `payBossBounty`).  Song changes load the new song alongside and commit
+  seamlessly on a bar line.  Only a boss arriving
   (`handleBossSpawn`) or a map load (`loadMapFresh`, which first drops the
-  linger and stands the layer down) cuts to a new song from the top
-  (`cueBattleTrack`), which is where boss-specific music will be chosen.
-  Pinned by `tests/audio.spec.ts`; how-to in `docs/AUDIO_AUTHORING.md`.
+  linger, stands combat down and zeroes the intensity hold) returns the
+  score to bar 1 (`cueEncounter`).  The title screen loads only the bed.
+  Pinned by `tests/audio.spec.ts`; how-to in `docs/AUDIO_AUTHORING.md`;
+  the music itself is generated by `scripts/score/`.
 - **iOS needs three things desktop does not.**  (1) The ring/silent switch
   silences WebAudio, because Safari puts it in the "ambient" session by
   default — the game claims the `playback` session instead, via
@@ -5399,7 +5800,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns twelve, once, in its mount effect — except
+  them.**  `App.tsx` assigns fifteen, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5466,6 +5867,19 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     suites (`tests/mass.spec.ts` first).  A projectile a twentieth the
     density of the hull that fires it plays perfectly well; only the
     tables side by side show it.
+  - `__omniDmath` — the deterministic math layer; `headless.spec.ts` hands
+    Chromium the pinned bit table and requires the same bits.
+  - `__omniReplay` — the replay harness (`runReplay`, `endReplay`,
+    `hashSimState`, `firstDivergence`) and the `rng` stream module.  A
+    stream that leaks into the sim still plays perfectly and throws nothing,
+    so `tests/replay.spec.ts` pins it through this handle.
+  - `__omniHeadless` — `createEngine()`, a SECOND real `GameEngine` on the
+    headless platform, so `tests/headless.spec.ts` can replay one seed in the
+    live engine and in this one inside the SAME page (same JS engine, same
+    libm) and require every hash to match to the bit — the proof that the
+    ports change nothing about the sim.  It installs its own clock and
+    viewport (module-level, §8), so the caller `stop()`s the live engine
+    first.
   - `__omniBlend` — the bonded-pair blend geometry (`buildFilletPath`,
     `blendAttachRadius`, `coatMargin`, `roundedPolyPath`), every failure
     mode of which — a degenerate pair, NaN coordinates, a seam, a fillet
@@ -5988,6 +6402,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
      and teal on the map is two contacts as far as the player is
      concerned.  Drops stay excluded entirely.
 
+- **A wave start is a ROSTER DIALOGUE, not a banner** (`WaveAnnouncement.roster`, set by `WaveSystem.startWave` from the spawn list plus a capstone's boss): ONE panel above centre (`renderWaveRosterDialogue`, `render/hud.ts`, middle at 30% of the height) that leads with the enemies — each subtype that must die as its flat silhouette (`drawEnemyIcon`, `render/enemyShapes.ts`) and a large "xN" — under a small "WAVE n · DESTROY N" heading.  It holds `WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD` (3.2 s) rather than the banner's 1 s, so `renderWaveAnnouncements` reads each announcement's own `maxLifetime` for its hold.  Cells shrink to fit the width; a wave resumed from the arena memory shows its full roster.  Announcements without a roster (clears, snitch, boss phases) are still the plain banner.
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
   width isn't known at design time, and the game is played on a 390px-wide
@@ -6079,8 +6494,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
 - Default branch: `main`.
 - Feature work lives on `claude/<feature>-<suffix>` (or `codex/*`) branches.
 - Three GitHub Actions: `pr-checks.yml` (the merge gate — typecheck +
-  build + Playwright on every PR and on pushes to `main` and
-  `claude/plan-completion`, which PR #93 merged into `main`),
+  build + Playwright on every PR and on pushes to `main`,
+  `claude/plan-completion` (merged into `main`, PR #93) and
+  `claude/steam-game-publishing-xhnui2` (the current phase's integration
+  branch — docs/ENGINE_CORE_PLAN.md §5)),
   `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
   on every push of a same-repo PR and publishes it to the
   `i-r0n/omni-standalone` mirror, linked from a PR comment as a
@@ -6091,8 +6508,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `publish-standalone.yml` (releases the single-file standalone build).
 - **`PR checks` is the default gate on every PR and the final step before
   a merge.**  Per PR push it runs the SMOKE scope, whatever the base; the
-  FULL suite runs on pushes to `main` / `claude/plan-completion` (once a
-  merge lands), on the `full-tests` label and on manual dispatch (§7).
+  FULL suite runs on pushes to `main` / `claude/plan-completion` /
+  `claude/steam-game-publishing-xhnui2` (once a merge lands), on the
+  `full-tests` label and on manual dispatch (§7).
   Locally: typecheck + build + the touched suites per commit AND per push
   to a working branch; the FULL `npm run test:full` when the USER gives
   notice they are ready to merge the PR into its parent branch, not on the

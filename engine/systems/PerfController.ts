@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 import {
   PERF_CONTROLLER_CONSTANTS as PC,
   PERF_TASKS,
@@ -223,7 +224,7 @@ export class PerfController {
     // hard toward maxInterval near peak — lets a wide min→max span
     // (e.g. shardPair 1→128) reach the top only under real pressure
     // instead of dragging big intervals down to light load.
-    if (t.autoCurve !== 1) shaped = Math.pow(shaped, t.autoCurve);
+    if (t.autoCurve !== 1) shaped = dmath.pow(shaped, t.autoCurve);
     return Math.round(t.minInterval + (t.maxInterval - t.minInterval) * shaped);
   }
 

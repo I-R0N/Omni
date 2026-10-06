@@ -19,6 +19,8 @@
  *    payload, a shell's blast chain) are QUEUED and resolved after physics: the dynamic
  *    grid is only safe to read between substeps (CLAUDE.md §8).
  */
+import * as dmath from './systems/dmath';
+import { sim, fxRng } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, Vector2, WeaponConfig } from '../types';
 import {
@@ -225,7 +227,7 @@ function nearestK(buf: GameEntity[], x: number, y: number, k: number): void {
 }
 
 function dist(ax: number, ay: number, bx: number, by: number): number {
-    return Math.hypot(wrapDeltaX(ax, bx), wrapDeltaY(ay, by));
+    return dmath.hypot(wrapDeltaX(ax, bx), wrapDeltaY(ay, by));
 }
 
 // ── Damage ───────────────────────────────────────────────────────────────────
@@ -235,7 +237,7 @@ function dist(ax: number, ay: number, bx: number, by: number): number {
 function contactOn(e: GameEntity, from: Vector2 | null): Vector2 {
     if (!from) return { x: e.position.x, y: e.position.y };
     const dx = wrapDeltaX(e.position.x, from.x), dy = wrapDeltaY(e.position.y, from.y);
-    const d = Math.hypot(dx, dy) || 1;
+    const d = dmath.hypot(dx, dy) || 1;
     const r = Math.max(e.size.x, e.size.y) * 0.45;
     return { x: e.position.x + (dx / d) * r, y: e.position.y + (dy / d) * r };
 }
@@ -247,7 +249,7 @@ function killBody(g: GameEngine, e: GameEntity, from: Vector2 | null, byPlayer: 
     if (e.type === EntityType.STRUCTURE) {
         if (from && !e.lastImpactVelocity) {
             const dx = wrapDeltaX(from.x, e.position.x), dy = wrapDeltaY(from.y, e.position.y);
-            const d = Math.hypot(dx, dy) || 1;
+            const d = dmath.hypot(dx, dy) || 1;
             e.lastImpactVelocity = { x: (dx / d) * 4, y: (dy / d) * 4 };
         }
         if (e.mass === Infinity) g.physics.removeStaticEntity(e);
@@ -398,7 +400,7 @@ function addHeatSpot(e: GameEntity, gain: number, at: Vector2 | null, spotFrac =
     let px = 0, py = 0, s0 = R;
     if (at) {
         const dx = wrapDeltaX(e.position.x, at.x), dy = wrapDeltaY(e.position.y, at.y);
-        const cs = Math.cos(-(e.rotation || 0)), sn = Math.sin(-(e.rotation || 0));
+        const cs = dmath.cos(-(e.rotation || 0)), sn = dmath.sin(-(e.rotation || 0));
         px = dx * cs - dy * sn;
         py = dx * sn + dy * cs;
         // The initial spot: small against the body, never a pinpoint.
@@ -561,9 +563,9 @@ function agitateGas(g: GameEngine, e: GameEntity, heat: number, dt: number,
     if (e.mass !== Infinity) {
         if (!(agitation > 0)) return;
         const k = agitation * Math.min(heat, 1.5) * dt * 60;
-        const a = Math.random() * Math.PI * 2;
-        e.velocity.x += Math.cos(a) * k;
-        e.velocity.y += Math.sin(a) * k;
+        const a = sim.energy() * Math.PI * 2;
+        e.velocity.x += dmath.cos(a) * k;
+        e.velocity.y += dmath.sin(a) * k;
         if (heat > 0.2) e.nebulaMergeCooldown = Math.max(e.nebulaMergeCooldown ?? 0, 0.5);
     } else if (heat >= disperseAt && e.health > 0 && !e.deathDispatched) {
         // The same break-up a ship flying through the cloud causes, with no
@@ -906,7 +908,7 @@ export function queueElectric(g: GameEngine, at: Vector2, spec: NonNullable<Weap
 
 /** WeaponSystem's sink for every delivery that is not a round. */
 export function fireInstant(g: GameEngine, c: WeaponConfig, player: GameEntity, target: Vector2): void {
-    const aim = Math.atan2(wrapDeltaY(player.position.y, target.y), wrapDeltaX(player.position.x, target.x));
+    const aim = dmath.atan2(wrapDeltaY(player.position.y, target.y), wrapDeltaX(player.position.x, target.x));
     if (c.delivery === 'beam' && (c.pulseCount ?? 0) > 0) {
         // A STREAM OF PULSES (the kinetic beam): a pull guarantees
         // `pulseCount` of them, and the stream then runs for as long as the
@@ -1003,9 +1005,9 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
         for (let i = 0; i < buf.length; i++) {
             const e = buf[i];
             const ox = wrapDeltaX(px, e.position.x), oy = wrapDeltaY(py, e.position.y);
-            const d = Math.hypot(ox, oy);
+            const d = dmath.hypot(ox, oy);
             if (d > R || d < 1) continue;
-            let da = Math.atan2(oy, ox) - aim;
+            let da = dmath.atan2(oy, ox) - aim;
             while (da > Math.PI) da -= Math.PI * 2;
             while (da < -Math.PI) da += Math.PI * 2;
             if (Math.abs(da) > half) continue;
@@ -1022,7 +1024,7 @@ function fireCone(g: GameEngine, c: WeaponConfig, player: GameEntity, aim: numbe
             dischargeElectric(g, player.position, t, c.electric, c.color, true, true);
         }
         if (forks === 0) {
-            for (let k = -1; k <= 1; k++) fizzle(g, px + Math.cos(aim) * 20, py + Math.sin(aim) * 20, aim + k * half * 0.6, c.color);
+            for (let k = -1; k <= 1; k++) fizzle(g, px + dmath.cos(aim) * 20, py + dmath.sin(aim) * 20, aim + k * half * 0.6, c.color);
         }
     }
 }
@@ -1147,7 +1149,7 @@ function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: 
                          halfW: number): number {
     const poly = e.polygonPoints!;
     const rot = e.rotation ?? 0;
-    const cs = Math.cos(-rot), sn = Math.sin(-rot);
+    const cs = dmath.cos(-rot), sn = dmath.sin(-rot);
     const rx = -wrapDeltaX(ox, e.position.x), ry = -wrapDeltaY(oy, e.position.y);
     const lx0 = rx * cs - ry * sn, ly0 = rx * sn + ry * cs;
     const dx = ux * cs - uy * sn, dy = ux * sn + uy * cs;
@@ -1171,7 +1173,7 @@ function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: 
             if (t >= 0 && sgm >= 0 && sgm <= 1 && t < best) {
                 best = t;
                 // Edge normal, turned to face AWAY from the polygon's centre.
-                const el = Math.hypot(ex, ey) || 1;
+                const el = dmath.hypot(ex, ey) || 1;
                 let mx = ey / el, my = -ex / el;
                 if (mx * (ax + bx) + my * (ay + by) < 0) { mx = -mx; my = -my; }
                 bnx = mx; bny = my;
@@ -1180,7 +1182,7 @@ function rayPolygonEntry(e: GameEntity, ox: number, oy: number, ux: number, uy: 
         if (inside) { best = 0; bnx = -dx; bny = -dy; break; }
     }
     // Back to world.
-    const cw = Math.cos(rot), sw = Math.sin(rot);
+    const cw = dmath.cos(rot), sw = dmath.sin(rot);
     _hitNx = bnx * cw - bny * sw;
     _hitNy = bnx * sw + bny * cw;
     return best;
@@ -1224,7 +1226,7 @@ function raycast(g: GameEngine, ox: number, oy: number, ux: number, uy: number, 
                 tHit = Math.max(0, t - Math.sqrt(Math.max(0, rad * rad - perp * perp)));
                 const hx = ox + ux * tHit, hy = oy + uy * tHit;
                 const ex = wrapDeltaX(e.position.x, hx), ey = wrapDeltaY(e.position.y, hy);
-                const m = Math.hypot(ex, ey) || 1;
+                const m = dmath.hypot(ex, ey) || 1;
                 nx = ex / m; ny = ey / m;
             }
             if (tHit < bestT) { bestT = tHit; best = e; bnx = nx; bny = ny; }
@@ -1258,7 +1260,7 @@ function refract(dx: number, dy: number, nx: number, ny: number, eta: number): b
     if (k < 0) return false;
     const a = eta * cosi - Math.sqrt(k);
     _rx = eta * dx + a * nx; _ry = eta * dy + a * ny;
-    const m = Math.hypot(_rx, _ry) || 1;
+    const m = dmath.hypot(_rx, _ry) || 1;
     _rx /= m; _ry /= m;
     return true;
 }
@@ -1288,7 +1290,7 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
     const grain = (e.shardVariant ? grainSpecFor(e.shardVariant)?.grainSize : undefined) ?? 12;
     const s = Math.max(4, grain);
     const rot = e.rotation ?? 0;
-    const cs = Math.cos(-rot), sn = Math.sin(-rot), cw = Math.cos(rot), sw = Math.sin(rot);
+    const cs = dmath.cos(-rot), sn = dmath.sin(-rot), cw = dmath.cos(rot), sw = dmath.sin(rot);
     let lx = wrapDeltaX(e.position.x, x), ly = wrapDeltaY(e.position.y, y);
     { const tx = lx * cs - ly * sn, ty = lx * sn + ly * cs; lx = tx; ly = ty; }
     let dx = ux * cs - uy * sn, dy = ux * sn + uy * cs;
@@ -1314,7 +1316,7 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
                 const sg = (qx * dy - qy * dx) / den;
                 if (t >= 0 && t <= s + 1e-6 && sg >= 0 && sg <= 1 && t < tBest) {
                     tBest = t;
-                    const el = Math.hypot(ex, ey) || 1;
+                    const el = dmath.hypot(ex, ey) || 1;
                     let mx = ey / el, my = -ex / el;
                     if (mx * (ax + bx) + my * (ay + by) < 0) { mx = -mx; my = -my; }
                     enx = mx; eny = my;
@@ -1369,13 +1371,13 @@ function traverse(g: GameEngine, e: GameEntity, x: number, y: number, ux: number
             // brightness like every other segment.
             const sf = f * r.boundarySplit;
             const a = jitter(e.id, stepN, 2) * Math.max(0.35, r.boundaryScatter * 3);
-            const ca = Math.cos(a), sa = Math.sin(a);
+            const ca = dmath.cos(a), sa = dmath.sin(a);
             const bdx = dx * ca - dy * sa, bdy = dx * sa + dy * ca;
             pushRay(wx, wy, bdx * cw - bdy * sw, bdx * sw + bdy * cw, len - travelled, sf, bounces, null, e, stepN + 101);
         }
         if (r.boundaryScatter > 0) {
             const a = jitter(e.id, stepN, 1) * r.boundaryScatter;
-            const ca = Math.cos(a), sa = Math.sin(a);
+            const ca = dmath.cos(a), sa = dmath.sin(a);
             const tx = dx * ca - dy * sa; dy = dx * sa + dy * ca; dx = tx;
         }
     }
@@ -1504,7 +1506,7 @@ function tickBeam(g: GameEngine, dt: number): void {
     // at, which is also what a pull at a target means.
     if (held && b.time <= 0) b.angle = p.rotation;
     const ang = b.angle;
-    const ux = Math.cos(ang), uy = Math.sin(ang);
+    const ux = dmath.cos(ang), uy = dmath.sin(ang);
     const muzzle = Math.max(p.size.x, p.size.y) * 0.6;
     const ox = p.position.x + ux * muzzle, oy = p.position.y + uy * muzzle;
     const range = c.beamRange ?? 260;
@@ -1526,9 +1528,9 @@ function tickBeam(g: GameEngine, dt: number): void {
         for (let i = 0; i < buf.length; i++) {
             const e = buf[i];
             const dx = wrapDeltaX(ox, e.position.x), dy = wrapDeltaY(oy, e.position.y);
-            const d = Math.hypot(dx, dy);
+            const d = dmath.hypot(dx, dy);
             if (d > range || d < 1) continue;
-            if ((dx * ux + dy * uy) / d < Math.cos(Math.PI / 3)) continue;
+            if ((dx * ux + dy * uy) / d < dmath.cos(Math.PI / 3)) continue;
             const cond = responseOf(materialOf(e)).conductivity;
             if (cond < ENERGY_CONSTANTS.CHAIN_MIN_CONDUCTIVITY) continue;
             const s = d / cond;
@@ -1653,12 +1655,12 @@ function tickPulses(g: GameEngine, dt: number): void {
                 // them) but leaves from a RANDOM point across a narrow lane
                 // (user call: variety rather than a sweep in series), rolled
                 // clear of the last one so two in a row never overlap.
-                const ux = Math.cos(bu.angle), uy = Math.sin(bu.angle);
+                const ux = dmath.cos(bu.angle), uy = dmath.sin(bu.angle);
                 const muzzle = Math.max(pl.size.x, pl.size.y) * 0.6;
                 const lane = c.pulseSpread ?? 0;
                 let off = 0;
                 if (lane > 0) {
-                    off = (Math.random() * 2 - 1) * lane;
+                    off = (sim.energy() * 2 - 1) * lane;
                     if (bu.lastOff !== undefined && Math.abs(off - bu.lastOff) < lane * 0.5) {
                         off = bu.lastOff > 0 ? off - lane : off + lane;
                         off = Math.max(-lane, Math.min(lane, off));
@@ -1737,7 +1739,7 @@ function tickHazards(g: GameEngine, dt: number): void {
                 s.emberAcc -= 1;
                 const r = Math.max(p.size.x, p.size.y) * 0.45;
                 g.spawnParticles(p.position, 1,
-                    Math.random() < 0.5 ? '#ffb347' : '#ff6a2b', {
+                    fxRng.particles() < 0.5 ? '#ffb347' : '#ff6a2b', {
                         speedMin: 0.4, speedMax: 1.6, sizeMin: 1.2, sizeMax: 2.6,
                         lifetimeMin: 0.25, lifetimeMax: 0.55, positionJitter: r,
                         baseVelocity: { x: p.velocity.x * 0.6, y: p.velocity.y * 0.6 },

@@ -1,0 +1,125 @@
+# BOSS_DEFS — the boss capstone phase tables.  Parsed at BUILD time
+# (scripts/toml-tables.mjs) and resolved into constants.ts's `BOSS_DEFS`; the
+# schema is `BossDef` / `BossPhaseDef` there, and BOSS_CONSTANTS, BOSS_ROTATION
+# and the wave-cadence helpers stay in code beside them.  The boss HULLS are
+# archetype rows in enemies.toml.
+#
+# A boss is NOT a new entity category.  It is an ENEMY_VARIANTS archetype like
+# any other, with a row here describing its PHASES.  A phase is expressed
+# entirely through fields the existing systems already read — a
+# Partial<WeaponConfig> override, a shield (arc or bubble), a brood spawner, a
+# trait set, a speed multiplier, a colour — so a phase change is a STAMP, never
+# a script (strategy guardrail #36e).  `updateBosses` (engine/bosses.ts) applies
+# a phase once, on the health-fraction transition.
+#
+# Phases are listed in DESCENDING order of `atHealthFrac`; phase 0 must be 1.
+# A phase is a FULL description of the boss's current state: fields ABSENT from
+# a phase are CLEARED, so a phase can drop a shield or stop escorts.
+#
+# Names, not code: `weapon = { extends = "SCATTER", ... }` spreads
+# BOSS_WEAPONS.SCATTER and then the listed fields over it (as the old
+# `{ ...BOSS_WEAPONS.SCATTER, cooldown: 1.25 }` did); `spawner.subtype` and
+# `companions` are EnemySubtype ids.
+
+# ── Warden — the chassis boss ──
+# Phase 1  a barrier shield over armor plating: chip fire does almost
+#          nothing, so you have to bring a big hit (or wear the shield down
+#          and then bring one).
+# Phase 2  barrier blown AND plating gone: it speeds up, shortens its beat
+#          and calls a swarm escort — every weapon works now, the question is
+#          whether you can out-damage the escort.
+[BOSS_WARDEN]
+name = "WARDEN"
+# Escort: an ARMOURED honour guard that restates the boss's own lesson —
+# a Bulwark's arc shield and a Tank's armor both punish chip fire, so the
+# whole wave asks the same question the Warden asks.
+companions = ["BULWARK", "RAMMER_3", "SHOOTER_2"]
+
+[[BOSS_WARDEN.phases]]
+atHealthFrac = 1
+color = "#38bdf8"
+shield = { amount = 80, regen = 5 }
+traits = { armor = { chipThreshold = 8, reduction = 0.65 } }
+
+[[BOSS_WARDEN.phases]]
+atHealthFrac = 0.5
+announce = "WARDEN — BARRIER DOWN"
+color = "#f97316"
+speedMult = 1.35
+weapon = { cooldown = 1.2, damage = 11, speed = 9, size = 10, count = 2, spread = 12, color = "#fdba74", glow = true }
+spawner = { subtype = "SWARM", interval = 5.0, batch = 3, maxBrood = 9 }
+
+# ── Reaver — the scattergun boss (weapon-boss 1) ──
+# Phase 1  brawls with the themed player Shotgun and JUKES straight shots:
+#          the Seeker is the felt answer, everything else has to lead it.
+# Phase 2  raises a TRACKING ARC SHIELD on top of the evasion — face-tanking
+#          stops working and you have to flank (the Bulwark's soft counter at
+#          boss scale).  Slower jukes, tighter/faster cone.
+# Phase 3  shield gone, evasion TRADED for ARMOR, a wider point-blank cone
+#          and a KAMIKAZE escort — the right answer flips from Seeker
+#          (dodge) to a big-hit weapon (chip-resist) mid-fight.
+[BOSS_SCATTER]
+name = "REAVER"
+# Escort: a FAST pack.  The Reaver's problem is hitting something that
+# jukes; the escort makes standing still to line a shot up expensive.
+companions = ["RAMMER_1", "SWARM", "KAMIKAZE"]
+
+[[BOSS_SCATTER.phases]]
+atHealthFrac = 1
+color = "#fbbf24"
+traits = { evasive = { sense = 340, missRadius = 46, impulse = 7.5, cooldown = 0.85 } }
+
+[[BOSS_SCATTER.phases]]
+atHealthFrac = 0.66
+announce = "REAVER RAISES ITS GUARD"
+color = "#f59e0b"
+speedMult = 1.1
+shield = { amount = 90, regen = 6, arc = { deg = 160, slew = 2.4 } }
+weapon = { extends = "SCATTER", cooldown = 1.25, spread = 16, count = 8 }
+traits = { evasive = { sense = 340, missRadius = 46, impulse = 7.5, cooldown = 1.1 } }
+
+[[BOSS_SCATTER.phases]]
+atHealthFrac = 0.33
+announce = "REAVER — ENRAGED"
+color = "#ef4444"
+speedMult = 1.25
+weapon = { extends = "SCATTER", cooldown = 0.95, spread = 30, count = 9, damage = 4 }
+spawner = { subtype = "KAMIKAZE", interval = 6.0, batch = 2, maxBrood = 4 }
+traits = { armor = { chipThreshold = 6, reduction = 0.6 } }
+
+# ── Bastion — the siege boss (weapon-boss 2) ──
+# Phase 1  a FRONT-SHIELD plate only: shooting it in the face barely
+#          scratches it, so the lesson is "get behind it" (or splash /
+#          chain past the plate, which bypass the projectile path entirely).
+# Phase 2  plate PLUS regen — the hard part of the fight.  Note the
+#          deliberate ORDERING in PhysicsSystem: the plate reduces damage
+#          BEFORE the burst bucket sees it, so bursting a plated target
+#          means bursting it FROM BEHIND.
+# Phase 3  plate blown off, regen stronger, a TURRET escort pins you down:
+#          a pure damage race in the open.
+[BOSS_SIEGE]
+name = "BASTION"
+# Escort: EMPLACEMENTS.  The Bastion's answer is to flank it; turrets and
+# a nest make the flanking lane the thing you have to earn.
+companions = ["TURRET", "NEST", "SHOOTER_3"]
+
+[[BOSS_SIEGE.phases]]
+atHealthFrac = 1
+color = "#c084fc"
+traits = { frontShield = { deg = 150, reduction = 0.75 } }
+
+[[BOSS_SIEGE.phases]]
+atHealthFrac = 0.7
+announce = "BASTION — REPAIR SYSTEMS ONLINE"
+color = "#a855f7"
+weapon = { extends = "SIEGE", cooldown = 2.6 }
+traits = { frontShield = { deg = 150, reduction = 0.75 }, regen = { perSec = 3.5, burstDamage = 16, windowSec = 0.4, burnSec = 3.0 } }
+
+[[BOSS_SIEGE.phases]]
+atHealthFrac = 0.35
+announce = "BASTION — PLATING BREACHED"
+color = "#f472b6"
+speedMult = 1.3
+weapon = { extends = "SIEGE", cooldown = 2.1, explosionRadius = 160 }
+spawner = { subtype = "TURRET", interval = 8.0, batch = 1, maxBrood = 3 }
+traits = { regen = { perSec = 5, burstDamage = 16, windowSec = 0.4, burnSec = 3.0 } }

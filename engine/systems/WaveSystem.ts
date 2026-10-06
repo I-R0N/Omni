@@ -1,6 +1,7 @@
+import * as dmath from './dmath';
+import { sim } from './rng';
 import { GameEntity, EntityType, EnemySubtype, Vector2, WaveAnnouncement } from '../../types';
 import {
-  DIFFICULTY_STAT_SCALES,
   ENEMY_VARIANTS,
   ENEMY_CONSTANTS,
   ENEMY_TRAITS,
@@ -17,7 +18,8 @@ import {
   isBossWave,
   getWaveDurationSec,
   getWaveSpawnBudget,
-  buildWaveSpawnList,
+  buildLevelWave,
+  levelScales,
   buildBossWaveSpawnList,
   scaledMass,
 } from '../../constants';
@@ -52,6 +54,9 @@ export class WaveSystem {
    *  waves had run consecutively.  It deliberately does NOT shift the DISPLAY
    *  wave number — the HUD still counts 1..STAGE_WAVE_COUNT within the stage. */
   public waveOffset: number = 0;
+  /** The distinct enemy types the previous ordinary wave used, so the next
+   *  one prefers others (buildLevelWave).  Cleared with the rest on init. */
+  private lastMix: EnemySubtype[] = [];
   /** Set once a stage's CAPSTONE BOSS is down: the ladder for this arena is
    *  finished, so no further wave ever starts here.  The player mops up what
    *  is already on the field and then chooses a rift.  Cleared by init(), so
@@ -102,8 +107,9 @@ export class WaveSystem {
    *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no
    *  wave 1 banner, no grace-period cycling, no enemies. */
-  public init(ctx: WaveSpawnContext, enabled: boolean = true) {
+  public init(ctx: WaveSpawnContext, enabled: boolean = true, startIndex: number = 0, progress: number = 0) {
     this.halted = false;
+    this.lastMix = [];
     this.waveIndex = 0;
     this.waveEnemyIds = new Set();
     this.waveState = 'inactive';
@@ -116,7 +122,28 @@ export class WaveSystem {
     this.nextSpawnIdx = 0;
     this.lastSpawnAtSec = -Infinity;
     if (!enabled || ctx.enemyScale <= 0) return;
-    this.startWave(0, ctx);
+    this.startWave(startIndex, ctx);
+    this.fastForward(progress);
+  }
+
+  /** Enemies of the ACTIVE wave already spawned and killed — the fidelity an
+   *  arena keeps for a few minutes after the player leaves (arenaWaves.ts).
+   *  0 for a capstone: its boss is the fight, and it starts over. */
+  public progressDone(entities: GameEntity[]): number {
+    if (this.waveState !== 'active' || this.capstoneWave) return 0;
+    return Math.max(0, this.nextSpawnIdx - this.countLiveTracked(entities));
+  }
+
+  /** Resume a wave `done` kills in: the stream carries on from the next slot
+   *  as if those enemies had come and died.  Never skips the whole budget, so
+   *  a resumed wave still has something to clear. */
+  private fastForward(done: number) {
+    if (done <= 0 || this.waveState !== 'active' || this.capstoneWave) return;
+    const n = Math.min(Math.floor(done), Math.max(0, this.spawnList.length - 1));
+    if (n <= 0) return;
+    this.nextSpawnIdx = n;
+    this.elapsedSec = this.spawnTimesSec[n - 1] ?? 0;
+    this.lastSpawnAtSec = this.elapsedSec;
   }
 
   /**
@@ -174,32 +201,52 @@ export class WaveSystem {
     const budget = Math.max(1, Math.round(
       getWaveSpawnBudget(index) * ctx.enemyScale * (boss ? BOSS_CONSTANTS.COMPANION_BUDGET_FRAC : 1),
     ));
+    // A DBG forced enemy spawns only itself; a capstone streams its designed
+    // escort; every other wave is bought from the arena LEVEL's roster
+    // (buildLevelWave) and avoids repeating the previous wave's types.
     this.spawnList = boss
       ? buildBossWaveSpawnList(boss, budget)
-      : buildWaveSpawnList(index, budget, ctx.forcedEnemy);
+      : ctx.forcedEnemy
+        ? new Array(budget).fill(ctx.forcedEnemy)
+        : buildLevelWave(ctx.difficultyLevel, index, this.lastMix);
+    if (!boss && !ctx.forcedEnemy) this.lastMix = Array.from(new Set(this.spawnList));
     this.scheduleSpawns(this.spawnList.length);
 
     this.waveState = 'active';
     this.capstoneWave = !!boss;
-    const totalLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
+    const roster = this.rosterOf(this.spawnList, boss);
+    const rosterLife = WAVE_ANNOUNCE_CONSTANTS.FADEIN + WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD + WAVE_ANNOUNCE_CONSTANTS.FADEOUT;
     if (boss) {
       this.spawnBoss(boss, ctx);
       this.announcements.push({
         text: BOSS_DEFS[boss]?.name ?? 'BOSS',
         subtext: `WAVE ${index + 1}  ·  CAPSTONE`,
         color: '#f87171',
-        lifetime: totalLife,
-        maxLifetime: totalLife,
+        lifetime: rosterLife,
+        maxLifetime: rosterLife,
+        roster,
       });
     } else {
       this.announcements.push({
         text: `WAVE ${index + 1}`,
-        subtext: `DESTROY ${budget} HOSTILE${budget === 1 ? '' : 'S'}`,
+        subtext: `LEVEL ${ctx.difficultyLevel}  ·  DESTROY ${this.spawnList.length} HOSTILE${this.spawnList.length === 1 ? '' : 'S'}`,
         color: '#ffffff',
-        lifetime: totalLife,
-        maxLifetime: totalLife,
+        lifetime: rosterLife,
+        maxLifetime: rosterLife,
+        roster,
       });
     }
+  }
+
+  /** Per-subtype counts of what this wave must kill — the spawn list plus the
+   *  capstone's boss — in first-appearance order (boss first). */
+  private rosterOf(list: EnemySubtype[], boss: EnemySubtype | null): { subtype: EnemySubtype; count: number }[] {
+    const counts = new Map<EnemySubtype, number>();
+    if (boss) counts.set(boss, 1);
+    for (const s of list) counts.set(s, (counts.get(s) ?? 0) + 1);
+    const out: { subtype: EnemySubtype; count: number }[] = [];
+    counts.forEach((count, subtype) => out.push({ subtype, count }));
+    return out;
   }
 
   /**
@@ -311,14 +358,14 @@ export class WaveSystem {
     // viewport, padded by the configured offscreen margin and the enemy's
     // own half-size so even its sprite edge stays off-screen.
     const minSpawnDistance = viewportHalfDiagonal + WAVE_CONSTANTS.OFFSCREEN_MARGIN + enemyHalfSize;
-    const baseAngle = Math.random() * Math.PI * 2;
+    const baseAngle = sim.waves() * Math.PI * 2;
     const pos = this.spawnPos;
     // Try up to 8 candidate positions; pick first one clear of static tiles.
     for (let attempt = 0; attempt < 8; attempt++) {
       const a = baseAngle + (attempt / 8) * Math.PI * 2 * 0.25;
-      const dist = minSpawnDistance + Math.random() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
-      pos.x = player.position.x + Math.cos(a) * dist;
-      pos.y = player.position.y + Math.sin(a) * dist;
+      const dist = minSpawnDistance + sim.waves() * WAVE_CONSTANTS.SPAWN_RING_SPREAD;
+      pos.x = player.position.x + dmath.cos(a) * dist;
+      pos.y = player.position.y + dmath.sin(a) * dist;
       wrapPosition(pos);
       if (physics.isPositionClear(pos.x, pos.y, safeRadius)) break;
     }
@@ -336,7 +383,7 @@ export class WaveSystem {
     id: string, subtype: EnemySubtype, x: number, y: number,
     ctx: WaveSpawnContext, counts: boolean,
   ): GameEntity {
-    const statScale = DIFFICULTY_STAT_SCALES[ctx.difficultyLevel] ?? DIFFICULTY_STAT_SCALES[3];
+    const statScale = levelScales(ctx.difficultyLevel);
     const config = ENEMY_VARIANTS[subtype];
 
     const tierMap: Partial<Record<string, number>> = {
@@ -364,7 +411,7 @@ export class WaveSystem {
       position: { x, y },
       velocity: { x: 0, y: 0 },
       size: { x: config.size, y: config.size },
-      rotation: Math.random() * Math.PI * 2,
+      rotation: sim.waves() * Math.PI * 2,
       color: config.color,
       active: true,
       health: scaledHealth,
@@ -404,13 +451,13 @@ export class WaveSystem {
       if (config.shieldArc) {
         enemy.shieldArcHalfWidth = (config.shieldArc.deg * Math.PI / 180) / 2;
         enemy.shieldArcSpin = config.shieldArc.slew;
-        enemy.shieldArcAngle = Math.random() * Math.PI * 2;
+        enemy.shieldArcAngle = sim.waves() * Math.PI * 2;
       }
     }
 
     // Nest spawner (Stage 4): seed the brood spawn timer so it staggers.
     if (config.spawner) {
-      enemy.spawnTimer = config.spawner.interval * (0.4 + Math.random() * 0.6);
+      enemy.spawnTimer = config.spawner.interval * (0.4 + sim.waves() * 0.6);
     }
 
     // Boss ((h)): mark it so the HUD bar / render aura / payout paths pick it
@@ -453,11 +500,11 @@ export class WaveSystem {
   public spawnAt(subtype: EnemySubtype, pos: Vector2, ctx: WaveSpawnContext, counts: boolean = false): GameEntity {
     const id = nextId(`brood_${this.waveIndex}`);
     const jitter = ENEMY_VARIANTS[subtype].size;
-    const x = pos.x + (Math.random() - 0.5) * jitter;
-    const y = pos.y + (Math.random() - 0.5) * jitter;
+    const x = pos.x + (sim.waves() - 0.5) * jitter;
+    const y = pos.y + (sim.waves() - 0.5) * jitter;
     const enemy = this.buildEnemy(id, subtype, x, y, ctx, counts);
-    enemy.velocity.x = (Math.random() - 0.5) * 4;
-    enemy.velocity.y = (Math.random() - 0.5) * 4;
+    enemy.velocity.x = (sim.waves() - 0.5) * 4;
+    enemy.velocity.y = (sim.waves() - 0.5) * 4;
     ctx.entities.push(enemy);
     this.waveEnemyIds.add(id);
     return enemy;
@@ -598,6 +645,8 @@ export interface WaveSpawnContext {
   player: GameEntity;
   physics: PhysicsSystem;
   enemyScale: number;
+  /** The ARENA LEVEL (1..20) — what `GameEngine.arenaLevel()` resolves, not the
+   *  retired menu setting. */
   difficultyLevel: number;
   /** World-unit half-diagonal of the player's current viewport.  Used by
    *  spawnEnemy() to compute a minimum radial distance that keeps every

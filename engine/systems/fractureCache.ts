@@ -19,6 +19,7 @@
  *  exactly the cracks the player was just shown.
  */
 
+import * as dmath from './dmath';
 import { GameEntity, Vector2 } from '../../types';
 import { ShardVariantId } from './ShardSystem.types';
 import { wrapDeltaX, wrapDeltaY } from '../toroidal';
@@ -51,7 +52,7 @@ export function stampLocalImpact(e: GameEntity, worldPos: Vector2 | undefined): 
   if (worldPos === undefined) return;
   const dx = wrapDeltaX(e.position.x, worldPos.x);
   const dy = wrapDeltaY(e.position.y, worldPos.y);
-  const cs = Math.cos(-e.rotation), sn = Math.sin(-e.rotation);
+  const cs = dmath.cos(-e.rotation), sn = dmath.sin(-e.rotation);
   e.lastImpactLocal = { x: dx * cs - dy * sn, y: dx * sn + dy * cs };
 }
 
@@ -59,10 +60,10 @@ function localImpactPoint(e: GameEntity): { x: number; y: number } | null {
   if (e.lastImpactLocal !== undefined) return e.lastImpactLocal;
   const iv = e.lastImpactVelocity;
   if (iv === undefined) return null;
-  const s = Math.hypot(iv.x, iv.y);
+  const s = dmath.hypot(iv.x, iv.y);
   if (s <= 1e-3) return null;
   const size = Math.max(e.size.x, e.size.y);
-  const cos = Math.cos(-e.rotation), sin = Math.sin(-e.rotation);
+  const cos = dmath.cos(-e.rotation), sin = dmath.sin(-e.rotation);
   const lx = (iv.x * cos - iv.y * sin) / s;
   const ly = (iv.x * sin + iv.y * cos) / s;
   const r = size * 0.4;
@@ -99,7 +100,7 @@ export function ensureFractureCells(e: GameEntity): FractureCell[] | null {
   // while the same material's shard had ~8.4 — a shard was quietly a
   // finer-grained material than its own tile.
   const bodyArea = polygonArea(e.polygonPoints);
-  const grainArea = Math.PI * (f.grainSize * 0.5) ** 2;
+  const grainArea = Math.PI * dmath.pow(f.grainSize * 0.5, 2);
   let sites = Math.round((bodyArea / Math.max(1e-6, grainArea)) * getFractureSiteScale());
   const merges = e.mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
@@ -208,7 +209,7 @@ export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
   const ip = localImpactPoint(e);
   const px = ip !== null ? ip.x : 0;
   const py = ip !== null ? ip.y : 0;
-  const d2 = (x: number, y: number) => (x - px) ** 2 + (y - py) ** 2;
+  const d2 = (x: number, y: number) => (x - px) * (x - px) + (y - py) * (y - py);
 
   // Cells nearest the impact are traced (and so break off) first.
   const order = cells
@@ -273,7 +274,7 @@ export function ensureFractureEdges(e: GameEntity): FractureEdge[] | null {
 function computeEdgeNeed(
   e: GameEntity, edge: FractureEdge, strength: number, index = -1,
 ): number {
-  const len = Math.hypot(edge.bx - edge.ax, edge.by - edge.ay);
+  const len = dmath.hypot(edge.bx - edge.ax, edge.by - edge.ay);
   let s = strength;
   // BOND SPREAD (A2): a seeded per-boundary wobble around the material's
   // strength, so one material still breaks unevenly — some seams give
@@ -333,7 +334,7 @@ const PROFILE_BOND_EXPONENT = 0.65;
 function profileBondScale(e: GameEntity): number {
   const r = e.fractureSiteRatio;
   if (r === undefined || e.fractureCells === undefined || !(r > 0)) return 1;
-  return Math.pow(r, PROFILE_BOND_EXPONENT);
+  return dmath.pow(r, PROFILE_BOND_EXPONENT);
 }
 
 /** MEASURED: the interior boundary a decomposition puts inside a body, per
@@ -370,7 +371,7 @@ export function estimateBoundaryHp(variantId: ShardVariantId, size: number, merg
   const f = grainSpecFor(variantId);
   const bond = f?.bondStrength;
   if (f === undefined || bond === undefined || !(size > 0)) return null;
-  let sites = Math.round(((size / Math.max(1e-6, f.grainSize)) ** 2) * getFractureSiteScale());
+  let sites = Math.round(dmath.pow(size / Math.max(1e-6, f.grainSize), 2) * getFractureSiteScale());
   const merges = mergeCount ?? 1;
   if (merges > 1) sites = Math.max(sites, merges);
   sites = Math.max(f.grainCountMin, Math.min(f.grainCountMax, sites));
@@ -451,7 +452,7 @@ function spendOnBoundaries(
   const cellD = new Map<number, number>();
   if (cells !== undefined) {
     for (const c of cells) {
-      cellD.set(c.siteIndex, (c.centroid.x - px) ** 2 + (c.centroid.y - py) ** 2);
+      cellD.set(c.siteIndex, (c.centroid.x - px) * (c.centroid.x - px) + (c.centroid.y - py) * (c.centroid.y - py));
     }
   }
   const cellKey = (ed: FractureEdge): number => {
@@ -483,8 +484,8 @@ function spendOnBoundaries(
     const ka = cellKey(edges[a]), kb = cellKey(edges[b]);
     if (ka !== kb) return ka - kb;
     const ea = edges[a], eb = edges[b];
-    return ((ea.mx - px) ** 2 + (ea.my - py) ** 2)
-         - ((eb.mx - px) ** 2 + (eb.my - py) ** 2);
+    return ((ea.mx - px) * (ea.mx - px) + (ea.my - py) * (ea.my - py))
+         - ((eb.mx - px) * (eb.mx - px) + (eb.my - py) * (eb.my - py));
   });
   let left = damage;
   for (const i of order) {
@@ -546,7 +547,7 @@ function spendSpread(
   for (let k = 0; k < order.length; k++) {
     const d2 = cellKey(edges[order[k]]);
     const d = d2 === Infinity ? width : Math.sqrt(d2);
-    w[k] = Math.exp(-d / lambda);
+    w[k] = dmath.exp(-d / lambda);
   }
 
   let left = damage;
@@ -729,7 +730,7 @@ export function dentStruckGrain(e: GameEntity): boolean {
   for (const v of c.points) {
     if (!onParentBoundary(v.x, v.y, pts, eps2)) continue;
     const dx = c.centroid.x - v.x, dy = c.centroid.y - v.y;
-    const len = Math.hypot(dx, dy);
+    const len = dmath.hypot(dx, dy);
     if (len < 1e-6) continue;
     moves.set(key(v.x, v.y), { dx: (dx / len) * pull, dy: (dy / len) * pull });
   }

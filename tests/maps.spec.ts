@@ -168,12 +168,12 @@ test.describe('map composition — MAP_POPULATION is the authority', () => {
     }));
 
     expect(r.stations).toBe(4);
-    // Four arena rifts PLUS the six-portal test rack beside the home station
+    // Twelve arena rifts PLUS the eight-portal field ring round the home station
     // (the star-field gauntlet's S12). Asserted as its parts rather than as
     // the total, so this says WHICH rifts are expected instead of restating a
     // number that changes whenever one is added.
-    expect(r.arenaRifts).toBe(4);
-    expect(r.rackRifts).toBe(6);
+    expect(r.arenaRifts).toBe(12);   // 4 maps x easy / mid / hard
+    expect(r.rackRifts).toBe(8);    // the gravity-free field ring
     expect(r.portals).toBe(r.arenaRifts + r.rackRifts);
     expect(r.glass).toBeGreaterThan(50);
     expect(r.nebula).toBeGreaterThan(300);
@@ -662,7 +662,9 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
         const anchor = exit ? exit.position : e.player.position;
         for (const id of ids) {
           if (seen[id]) continue;
-          const en = e.currentMap.entities.find((x: any) => x.id === id && x.active);
+          // Carried debris is re-id'd `xfer_<id>` at capture (ids restart with
+          // the destination map, so it must not collide with a new one).
+          const en = e.currentMap.entities.find((x: any) => x.id === 'xfer_' + id && x.active);
           if (!en) continue;
           seen[id] = {
             speed: Math.hypot(en.velocity.x, en.velocity.y),
@@ -676,7 +678,7 @@ test.describe('debris transit — the wormhole takes what is around you', () => 
 
       const ok = e.transitionToMap(rift.portalTargetId);
       const queuedIds = e.portalTransit.map((t: any) => t.entity.id);
-      return { ok, ids, queued: e.portalTransit.length, carried: ids.filter(id => queuedIds.includes(id)).length };
+      return { ok, ids, queued: e.portalTransit.length, carried: ids.filter(id => queuedIds.includes('xfer_' + id)).length };
     });
 
     expect(run, 'an arena rift on the hub').not.toBeNull();

@@ -1,4 +1,6 @@
 
+import * as dmath from '../systems/dmath';
+import { sim, fxRng } from '../systems/rng';
 import { MapType, GameEntity, EntityType, Vector2, EnemySubtype } from '../../types';
 import { TileGenerator, HEX_SIZE, HEX_WIDTH, HEX_V_SPACING, pixelToHexCoord, hexCoordToPixel } from './TileGenerator';
 import { COLORS, randomRockShade, getRockShardFreeSpawn, ASSETS, ENEMY_CONSTANTS, ENEMY_VARIANTS, MAP_POPULATION, StructureVariant, SHARD_VARIANTS, rockHitCeiling, STATION_CONSTANTS, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, HUB_TEST_PORTAL_SITES, RETURN_PORTAL_OFFSET } from '../../constants';
@@ -130,7 +132,7 @@ export abstract class BaseMapLayer {
    * it a minimap dot, an off-screen chevron, and asteroid-respawn
    * avoidance for free.  The destination's display name rides on `name`.
    */
-  protected addPortal(targetId: string, pos: Vector2, color: string) {
+  protected addPortal(targetId: string, pos: Vector2, color: string, gravity = true) {
     this.entities.push({
       id: nextId('portal'),
       type: EntityType.INTERACTABLE,
@@ -151,9 +153,13 @@ export abstract class BaseMapLayer {
       // mouth is swallowed by the close-attractor crush) and by RenderSystem's
       // attractor bucket, which feeds the background star lensing.  The
       // player feels only GRAVITY_PLAYER_SCALE of it — a tug, never a trap.
-      gravityRange: PORTAL_CONSTANTS.GRAVITY_RANGE,
-      gravityStrength: PORTAL_CONSTANTS.GRAVITY_STRENGTH,
-      gravityPlayerScale: PORTAL_CONSTANTS.GRAVITY_PLAYER_SCALE,
+      // `gravity: false` (the hub's debug field rifts) leaves all three off:
+      // no attractor, no lens, nothing thrown at the base.
+      ...(gravity ? {
+        gravityRange: PORTAL_CONSTANTS.GRAVITY_RANGE,
+        gravityStrength: PORTAL_CONSTANTS.GRAVITY_STRENGTH,
+        gravityPlayerScale: PORTAL_CONSTANTS.GRAVITY_PLAYER_SCALE,
+      } : {}),
       // How big the world at the other end is.  A rift is a window onto its
       // destination, so `portalHorizonRadius` sizes the black disc from this
       // — Pocket shows a small mouth, Deep Space a wide one.  Stamped here
@@ -239,11 +245,11 @@ export abstract class BaseMapLayer {
         // of rocks in single file.
         const perpX = -flow.y;
         const perpY =  flow.x;
-        const j = (Math.random() - 0.5) * 2 * PATH_PERP_JITTER;
+        const j = (sim.terrain() - 0.5) * 2 * PATH_PERP_JITTER;
         const pos = { x: px + perpX * j, y: py + perpY * j };
         wrapPosition(pos);
 
-        const size = minSize + Math.random() * (maxSize - minSize);
+        const size = minSize + sim.terrain() * (maxSize - minSize);
         this.entities.push(this.createRockShard(pos.x, pos.y, size, speedMultiplier, allowedSprites));
     }
 
@@ -251,11 +257,11 @@ export abstract class BaseMapLayer {
     // the non-current regions of the map still have some asteroids to
     // bump into.
     for (let i = 0; i < scatterCount; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 500 + Math.random() * (radius - 500);
-        const x = Math.cos(angle) * dist;
-        const y = Math.sin(angle) * dist;
-        const size = minSize + Math.random() * (maxSize - minSize);
+        const angle = sim.terrain() * Math.PI * 2;
+        const dist = 500 + sim.terrain() * (radius - 500);
+        const x = dmath.cos(angle) * dist;
+        const y = dmath.sin(angle) * dist;
+        const size = minSize + sim.terrain() * (maxSize - minSize);
         this.entities.push(this.createRockShard(x, y, size, speedMultiplier, allowedSprites));
     }
   }
@@ -275,15 +281,15 @@ export abstract class BaseMapLayer {
     // polyVerticesOptions (when set) takes priority over Min/Max.
     const spawn = SHARD_VARIANTS['rock-shard'].spawn;
     const numPoints = spawn.polyVerticesOptions
-      ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
+      ? spawn.polyVerticesOptions[Math.floor(sim.terrain() * spawn.polyVerticesOptions.length)]
       : spawn.polyVerticesMin
-        + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+        + Math.floor(sim.terrain() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
     const baseR = (size / 2) * 0.82;
     const rawPts: { angle: number; r: number }[] = [];
     for (let i = 0; i < numPoints; i++) {
         const baseAngle   = (i / numPoints) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
-        const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
+        const angleJitter = (sim.terrain() - 0.5) * (Math.PI / numPoints) * spawn.angleJitter * 2;
+        const radiusFrac  = spawn.radiusMin + sim.terrain() * spawn.radiusRange;
         rawPts.push({
             angle: baseAngle + angleJitter,
             r:     baseR * radiusFrac,
@@ -291,8 +297,8 @@ export abstract class BaseMapLayer {
     }
     rawPts.sort((a, b) => a.angle - b.angle);
     const points: Vector2[] = rawPts.map(p => ({
-        x: Math.cos(p.angle) * p.r,
-        y: Math.sin(p.angle) * p.r,
+        x: dmath.cos(p.angle) * p.r,
+        y: dmath.sin(p.angle) * p.r,
     }));
 
     let asteroidAssets = [ASSETS.ASTEROID_1, ASSETS.ASTEROID_2, ASSETS.ASTEROID_3, ASSETS.ASTEROID_ICE, ASSETS.ASTEROID_VOLCANIC];
@@ -301,7 +307,7 @@ export abstract class BaseMapLayer {
         asteroidAssets = allowedSprites;
     }
 
-    const randomSprite = asteroidAssets[Math.floor(Math.random() * asteroidAssets.length)];
+    const randomSprite = asteroidAssets[Math.floor(fxRng.sprites() * asteroidAssets.length)];
     // maxHealth is the size-scaled hit ceiling for the probabilistic break
     // model (ROCK_BREAK): the asteroid cracks on hit 1 and from hit 2 on
     // rolls an early break that's guaranteed by the ceiling.  Bigger rocks
@@ -311,8 +317,8 @@ export abstract class BaseMapLayer {
     // Blend flow direction (70%) with random drift (30%) for the initial velocity.
     // This seeds the asteroid into the vortex streamlines from spawn.
     const flow = this.sampleFlow(x, y);
-    const randX = (Math.random() - 0.5) * 2;
-    const randY = (Math.random() - 0.5) * 2;
+    const randX = (sim.terrain() - 0.5) * 2;
+    const randY = (sim.terrain() - 0.5) * 2;
     const FLOW_BIAS = 0.7;
     const vx = (flow.x * FLOW_BIAS + randX * (1 - FLOW_BIAS)) * speedMultiplier;
     const vy = (flow.y * FLOW_BIAS + randY * (1 - FLOW_BIAS)) * speedMultiplier;
@@ -320,7 +326,7 @@ export abstract class BaseMapLayer {
     // Smaller rocks spin faster; scale is roughly 1.5 rad/s at size 20 down
     // to ~0.19 rad/s at size 160.  Random sign gives both CW and CCW tumble.
     const maxSpin = 1.5 / (size / 20);
-    const rotationSpeed = (Math.random() - 0.5) * 2 * maxSpin;
+    const rotationSpeed = (sim.terrain() - 0.5) * 2 * maxSpin;
 
     return {
         id: nextId('ast'),
@@ -331,7 +337,7 @@ export abstract class BaseMapLayer {
         position: { x, y },
         velocity: { x: vx, y: vy },
         size: { x: size, y: size },
-        rotation: Math.random() * Math.PI * 2,
+        rotation: sim.terrain() * Math.PI * 2,
         rotationSpeed,
         // Per-instance rock shade (G7): a free-spawned belt is the biggest
         // expanse of rock in the game and was one flat slate.
@@ -432,7 +438,7 @@ export class UniverseMap extends BaseMapLayer {
 
     // Clear a safe open area around spawn
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > 350 * 350;
     });
 
@@ -482,14 +488,14 @@ export class OverworldMap extends BaseMapLayer {
     // Clear every station's and every portal's home patch: nothing
     // generates on top of them (the home station's clearance doubles as
     // the spawn-safe bubble — the player spawns just off it).
-    const clear2 = STATION_CONSTANTS.CLEARANCE ** 2;
-    const portalClear2 = PORTAL_CONSTANTS.CLEARANCE ** 2;
+    const clear2 = STATION_CONSTANTS.CLEARANCE * STATION_CONSTANTS.CLEARANCE;
+    const portalClear2 = PORTAL_CONSTANTS.CLEARANCE * PORTAL_CONSTANTS.CLEARANCE;
     this.entities = this.entities.filter(e =>
         OVERWORLD_STATIONS.every(st => {
             const dx = e.position.x - st.x, dy = e.position.y - st.y;
             return dx * dx + dy * dy > clear2;
         })
-        && HUB_PORTAL_SITES.every(p => {
+        && HUB_PORTAL_SITES.concat(HUB_TEST_PORTAL_SITES).every(p => {
             const dx = e.position.x - p.x, dy = e.position.y - p.y;
             return dx * dx + dy * dy > portalClear2;
         })
@@ -527,11 +533,10 @@ export class OverworldMap extends BaseMapLayer {
       this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
     }
 
-    // The TEST RACK — a vertical column of portals into the showcase maps,
-    // stepping the star-density range from densest at the top to sparsest at
-    // the bottom.  +Y is down, so descending the column is descending altitude.
+    // The debug FIELD RING — the showcase maps in a tight ring round the home
+    // station, with no gravity well (see HUB_TEST_PORTAL_SITES).
     for (const p of HUB_TEST_PORTAL_SITES) {
-      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
+      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR, false);
     }
   }
 }
@@ -585,7 +590,7 @@ export class RingMap extends BaseMapLayer {
     // Clear a safe open area around spawn (same rule as UniverseMap so
     // the player never spawns inside an asteroid).
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > 350 * 350;
     });
 
@@ -649,7 +654,7 @@ export class SevenRingsMap extends BaseMapLayer {
     const safeClear = Math.min(350, SevenRingsMap.INNER_RADIUS - HEX_SIZE * 1.5);
     const safeClearSq = safeClear * safeClear;
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > safeClearSq;
     });
 
@@ -707,7 +712,7 @@ export class PocketMap extends BaseMapLayer {
     // Keep a small safe bubble around spawn so the player doesn't
     // materialise inside a tile.
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > 120 * 120;
     });
 
@@ -775,7 +780,7 @@ export class AsteroidFieldMap extends BaseMapLayer {
 
     const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > clearSq;
     });
  
@@ -818,7 +823,7 @@ abstract class SingleVariantTileFieldMap extends BaseMapLayer {
 
     const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > clearSq;
     });
  
@@ -994,7 +999,7 @@ export class TileHeavyMap extends BaseMapLayer {
     // inside a wall (mirrors the SingleVariantTileFieldMap pattern).
     const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > clearSq;
     });
  
@@ -1048,7 +1053,7 @@ export class NebulaFieldMap extends BaseMapLayer {
 
     const clearSq = SINGLE_ELEMENT_SPAWN_CLEAR * SINGLE_ELEMENT_SPAWN_CLEAR;
     this.entities = this.entities.filter(e => {
-        const d2 = e.position.x ** 2 + e.position.y ** 2;
+        const d2 = e.position.x * e.position.x + e.position.y * e.position.y;
         return d2 > clearSq;
     });
  
@@ -1098,7 +1103,7 @@ function emitGlassTileRing(
       const { x, y } = hexCoordToPixel(c, r);
       const d = Math.sqrt(x * x + y * y);
       if (Math.abs(d - radius) > band) continue;
-      cand.push({ c, r, x, y, a: Math.atan2(y, x) });
+      cand.push({ c, r, x, y, a: dmath.atan2(y, x) });
     }
   }
   if (stride > 1) cand.sort((p, q) => p.a - q.a);

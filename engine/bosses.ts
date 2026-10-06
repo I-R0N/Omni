@@ -19,16 +19,19 @@
  *  enemy can carry, not a boss mechanism, so filing it under bosses would be
  *  a misfile.
  */
+import * as dmath from './systems/dmath';
+import { sim } from './systems/rng';
 import type { GameEngine } from './GameEngine';
 import { GameEntity, EntityType, EnemySubtype, EngineStats, Vector2 } from '../types';
 import {
     BOSS_CONSTANTS, BOSS_DEFS, BossDef, ENEMY_VARIANTS, COLLISION_CONFIG,
-    WAVE_ANNOUNCE_CONSTANTS, MODULE_DEFS, PORTAL_CONSTANTS, HUB_PORTAL_SITES,
+    WAVE_ANNOUNCE_CONSTANTS, pickBossReward, PORTAL_CONSTANTS, HUB_PORTAL_SITES,
     SALVAGE_CONSTANTS,
 } from '../constants';
 import { MAP_DESCRIPTORS } from './maps/MapDescriptors';
 import { wrapPosition } from './toroidal';
 import { nextId } from './systems/IdAllocator';
+import { clearArenaWave } from './arenaWaves';
 
 /** Live-boss HUD readout — undefined when no boss is alive, so the HUD bar
  *  simply isn't rendered.  Cheap: `liveBoss` is maintained by updateBosses,
@@ -170,16 +173,23 @@ if (index > 0) g.audio.play('boss.phase', { x: boss.position.x, y: boss.position
  */
 export function payBossBounty(g: GameEngine, boss: GameEntity) {
 g.audio.play('boss.death');
+    // The music director's victory beat — only when this was the LAST live
+    // boss; with another still up, the boss theme carries on.
+    if (!g.entityIndex.enemies.some(e => e !== boss && e.isBoss === true && !e.isExploding)) {
+        g.audio.musicBossDefeated();
+    }
     g.bossesKilled++;
+    g.records.bossesKilled++;
+    clearArenaWave(g);
     g.awardScore(BOSS_CONSTANTS.SCORE, boss.position);
     // The money is PHYSICAL — the same salvage drops every other source pays,
     // sprayed off the corpse so it converges and merges normally.
     for (let i = 0; i < BOSS_CONSTANTS.SALVAGE_DROPS; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const d = 30 + Math.random() * 140;
+        const a = sim.roamers() * Math.PI * 2;
+        const d = 30 + sim.roamers() * 140;
         g.spawnSalvageDrop({
-            x: boss.position.x + Math.cos(a) * d,
-            y: boss.position.y + Math.sin(a) * d,
+            x: boss.position.x + dmath.cos(a) * d,
+            y: boss.position.y + dmath.sin(a) * d,
         });
     }
     // ── The payoff moment ──────────────────────────────────────────────
@@ -289,16 +299,16 @@ g.audio.play('boss.death');
  *  inventory (user call — it replaced the timed shop discount, which asked
  *  the player to be near a shop within a countdown to collect anything).
  *
- *  Uniform over the catalog, which is PROVISIONAL: it can hand a Mk III on
- *  stage 1.  Weighting by stage depth is a tuning-pass question.
+ *  Weighted (`bossRewardTable`): shop modules are equally likely and a
+ *  reward-only mark (Mk IV+) is rare.  It can still hand a Mk III on stage 1;
+ *  weighting by stage depth is a tuning-pass question.
  *
  *  If the inventory is full there is nowhere to put it, so the reward pays
  *  its catalog value in Salvage instead — the player is never simply denied
  *  the drop for having full cargo. */
 function grantBossModule(g: GameEngine): { label?: string; desc?: string; credits?: number } {
-    const catalog = MODULE_DEFS.filter(d => d.cost > 0);
-    if (catalog.length === 0) return {};
-    const def = catalog[Math.floor(Math.random() * catalog.length)];
+    const def = pickBossReward(sim.roamers());
+    if (!def) return {};
     const slot = g.inventory.indexOf(null);
     if (slot === -1) {
         const paid = g.modulePrice(def.cost);
@@ -329,13 +339,13 @@ function openDescentPortal(g: GameEngine, pos: Vector2) {
     const arenas = MAP_DESCRIPTORS.filter(d => d.kind === 'arena' && d.wavesEnabled
         && HUB_PORTAL_SITES.some(site => site.targetId === d.id));
     if (arenas.length === 0) return;
-    const dest = arenas[Math.floor(Math.random() * arenas.length)];
+    const dest = arenas[Math.floor(sim.roamers() * arenas.length)];
 
     // Offset from the corpse so the rift doesn't sit under the debris.
-    const a = Math.random() * Math.PI * 2;
+    const a = sim.roamers() * Math.PI * 2;
     const p = {
-        x: pos.x + Math.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
-        y: pos.y + Math.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+        x: pos.x + dmath.cos(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
+        y: pos.y + dmath.sin(a) * PORTAL_CONSTANTS.DESCENT_OFFSET,
     };
     wrapPosition(p);
     const portal: GameEntity = {

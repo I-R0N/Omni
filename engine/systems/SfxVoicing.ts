@@ -1,3 +1,4 @@
+import { fxRng } from './rng';
 import { noise, tone, type SfxDef, type SynthCtx } from './AudioSystem';
 
 /** Production finishing for the authored event recipes. Existing recordings
@@ -6,7 +7,7 @@ export function finishVoice(id: string, def: SfxDef): SfxDef {
   const original = def.render;
   const render = (s: SynthCtx) => {
     const end = original(s);
-    const stagger = 0.008 + Math.random() * 0.008;
+    const stagger = 0.008 + fxRng.audio() * 0.008;
     if (/^(destroy\.|impact.explosion)/.test(id)) {
       // Weight, then a quiet debris aftershock. Material frequency keeps
       // glass brittle, metal dense, rock granular and nebula breathy.

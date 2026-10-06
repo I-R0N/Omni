@@ -1,6 +1,8 @@
 
 import React, { Profiler, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
+import { createBrowserPlatform } from './platform/browser';
+import { createHeadlessPlatform } from './platform/headless';
 import * as Energy from './engine/systems/energy';
 import { EngineStats, MapType, GameState, ControlScheme } from './types';
 import { effectiveDpr, cycleRenderScale, getActiveRenderScaleName,
@@ -30,6 +32,9 @@ import { installMenuNav, pickNext } from './components/menuNav';
 import {
   enumerateCells, resolveTiltCell, cellIndex, cellMatrix,
 } from './engine/systems/render/shipSprites';
+import { runReplay, endReplay, hashSimState, firstDivergence } from './engine/replay';
+import * as rngStreams from './engine/systems/rng';
+import * as dmath from './engine/systems/dmath';
 import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
 import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
@@ -68,12 +73,15 @@ const App: React.FC = () => {
     if (!canvasRef.current) return;
 
     // Initialize Engine
-    const engine = new GameEngine((newStats) => {
+    const engine = new GameEngine(createBrowserPlatform(), (newStats) => {
         setStats(newStats);
         // Debug handle for the live stats payload — same rationale as
         // __omniEngine below.
         (window as any).__omniStats = newStats;
     }, difficultyRef.current);
+
+    // The save may carry a different difficulty than the menu's default.
+    setDifficulty(engine.getDifficulty());
 
     // Debug handle.  The game already ships a full in-game debug menu (the DBG
     // button, on every screen), so the engine is deliberately reachable from the console
@@ -239,6 +247,35 @@ const App: React.FC = () => {
     (window as any).__omniBlend = {
       buildFilletPath, blendAttachRadius, coatMargin, roundedPolyPath,
     };
+    // The REPLAY harness (engine-core S1): record (seed, inputs), replay by
+    // stepping the real engine by hand, compare sim-state hashes.  Wrong in a
+    // way nothing reports — a stream that leaks into the sim still plays
+    // perfectly — so a suite pins it through here.  Nothing in the game reads
+    // this handle.
+    (window as any).__omniReplay = {
+      runReplay, endReplay, hashSimState, firstDivergence, rng: rngStreams,
+    };
+
+    // The deterministic MATH layer (engine-core S3, D30): the sim's sin / cos /
+    // pow / exp / log / atan2 …, built only from operations every JS engine
+    // rounds identically.  Agreement between engines cannot be proved from
+    // inside one, so tests/headless.spec.ts hands THIS engine the pinned bit
+    // table (tests/sim/fixtures/dmath.bits.json) and requires the same bits.
+    // Nothing in the game reads this handle.
+    (window as any).__omniDmath = dmath;
+
+    // The HEADLESS platform (engine-core S2): builds a second, real GameEngine
+    // on the stand-in ports (manual clock, null renderer, silent audio).  The
+    // ports claim is that where the sim reads the clock / input / output moves
+    // and NOTHING ELSE does — and the only way to see that is to replay one
+    // seed in the live engine and in this one, in the SAME JS engine, and
+    // require every hash to match to the bit (tests/headless.spec.ts).  It
+    // installs its own clock and viewport (they are module-level, see
+    // engine/ports.ts), so a caller `stop()`s the live engine first.  Nothing
+    // in the game reads this handle.
+    (window as any).__omniHeadless = {
+      createEngine: () => new GameEngine(createHeadlessPlatform(), () => { /* no UI */ }, 3),
+    };
 
     const handleResize = () => {
       if (canvasRef.current) {
@@ -305,6 +342,13 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.startGame();
   };
 
+  // NEW GAME: wipe the save (the menu already asked twice), then begin.
+  const handleNewGame = () => {
+      if (!engineRef.current) return;
+      engineRef.current.eraseSave();
+      engineRef.current.startGame();
+  };
+
   const handlePause = () => {
       if (engineRef.current) engineRef.current.pauseGame();
   };
@@ -320,10 +364,6 @@ const App: React.FC = () => {
   // Death / run-summary screen actions (Phase 3 Pair A).
   const handleRespawn = () => {
       if (engineRef.current) engineRef.current.respawnFromDeath();
-  };
-
-  const handleRestartRun = () => {
-      if (engineRef.current) engineRef.current.restartRun();
   };
 
   const handleQuitToMenu = () => {
@@ -484,11 +524,11 @@ const App: React.FC = () => {
         stats={stats}
         onCycleWeapon={handleCycleWeapon}
         onStart={handleStart}
+        onNewGame={handleNewGame}
         onPause={handlePause}
         onResume={handleResume}
         onRestart={handleRestart}
         onRespawn={handleRespawn}
-        onRestartRun={handleRestartRun}
         onQuitToMenu={handleQuitToMenu}
         onDismissStageClear={handleDismissStageClear}
         onAudioCue={id => engineRef.current?.audio.play(id)}

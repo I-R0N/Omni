@@ -1,0 +1,53 @@
+# Enemy difficulty and the arena LEVEL curve (engine-core S3, D-S3-d / D-S3-g).
+#
+# Three things live here, because they are one idea: an enemy is worth a number
+# of POINTS, a wave is a number of points to spend, and the arena's LEVEL
+# decides which enemies may be bought and how hard they hit.
+#
+#   [rating]  what one enemy is worth.  MEASURED, not guessed: shots a bare
+#             Projector needs (balance baseline §4, wave-1 HP) and how much it
+#             hurts back.  A Drone or Shooter 1 (1 HP) is the unit.  The Bulwark
+#             is 8 because its shield + 150-degree deflecting arc took the
+#             Projector 21 shots against the Tank's 7 — it is the hardest
+#             ordinary enemy and is placed as one.
+#   [wave]    points to spend per wave of a stage (wave 1..5), before the level's
+#             spawn scale, and how many DIFFERENT types a wave mixes.
+#   [ceiling] the roster ceiling: an enemy rated above
+#               base + (wave + waveBias) * (slope + slopePerLevel * (level - 1))
+#             cannot appear.  Deeper waves and higher levels open higher
+#             ratings, so level drives the MIX, not only the numbers.
+#   [level]   levels 4..20 (levels 1-3 are the old Low/Med/High rows in
+#             constants.ts, unchanged): enemy health and damage grow
+#             `hpDmgGrowth` per level, the spawn amount only `spawnGrowth` (to
+#             `spawnCap`) — difficulty is mostly tougher enemies, not more.
+#
+# PROVISIONAL until playtested (user: "a good place to start").
+
+[rating]
+SWARM = 0.3      # 1 HP gnat, pops on contact; comes in flocks
+RAMMER_1 = 1     # Drone — 1 HP peashooter
+SHOOTER_1 = 1    # 1 HP shooter
+KAMIKAZE = 1.5   # 2 HP, detonates on contact: kill it early or it hurts
+RAMMER_2 = 2     # Charger — 2 HP, fast, twin cannon
+SHOOTER_2 = 2    # 2 HP, acid rounds
+RAMMER_3 = 4     # Tank — 5 HP and armour: 7 Projector shots
+SHOOTER_3 = 3    # Sniper — 3 HP, telegraphed heavy shot
+TURRET = 3       # 8 HP, stationary, homing missiles
+NEST = 5         # 14 HP, births swarm brood
+BULWARK = 8      # shield + deflecting arc: 21 Projector shots
+
+[wave]
+points = [6, 8, 11, 15, 20]   # waves 1..5 at spawn scale 1 (the old L3 budgets)
+variety = [2, 2, 3, 3, 4]     # distinct enemy types mixed in each wave
+maxPerType = 12               # a flock is bounded
+
+[ceiling]
+base = 1.0
+waveBias = 0.5
+slope = 0.6
+slopePerLevel = 0.12
+
+[level]
+hpDmgGrowth = 1.14
+spawnGrowth = 1.03
+spawnCap = 1.5

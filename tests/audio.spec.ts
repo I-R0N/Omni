@@ -1,6 +1,6 @@
 /** The sound system as shipped: the recorded banks decode with full id
- *  coverage, the mix controls and voice budget hold, and the streamed battle
- *  layer follows combat.  Plus two contracts that used to live in an ungated
+ *  coverage, the mix controls and voice budget hold, and the adaptive score
+ *  follows the fight.  Plus two contracts that used to live in an ungated
  *  smoke script, here so the merge gate runs them: docs/SFX_INVENTORY.md and
  *  the registry name the SAME ids, and audio survives what iOS does to a web
  *  page (the ring switch, interruptions, backgrounding).
@@ -40,6 +40,12 @@ test('all cinematic cues decode with full coverage and bounded memory', async ({
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.prepared, null, { timeout: 90000 });
+  // The banks decode LAZILY now (one family per first use), and this test's
+  // claim is about the WHOLE manifest — every take decodes, carries signal
+  // and fits the ceiling — so it asks for all four.  The claim is unchanged;
+  // only what triggers the decode moved.  The laziness itself is pinned by
+  // 'the banks decode lazily' below.
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
   const result = await engine(page, e => {
     const a = e.audio;
     const bad: string[] = [];
@@ -72,10 +78,60 @@ test('all cinematic cues decode with full coverage and bounded memory', async ({
   watch.assertClean();
 });
 
+test('the banks decode lazily, and the title screen holds one of them', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.prepared, null, { timeout: 90000 });
+
+  // THE TITLE SCREEN HOLDS THE MENU BANK AND NOTHING ELSE.  All four used to
+  // decode at unlock; measured, that was ~62 MB of cue buffers before the
+  // player had pressed START.
+  const menu = await engine(page, e => ({
+    mb: e.audio.decodedBankBytes / 1048576,
+    takes: e.audio.sampleCount,
+    failures: e.audio.bankFailures,
+    // The menu's own cue is decoded — this screen's sounds must be heard.
+    ui: e.audio.hasSample('ui.confirm'),
+    // A combat cue is NOT, and it is not standing on a WAV or a pre-rendered
+    // procedural cache either: `BANK_OF_ID` keeps both fallbacks off a bank
+    // id, so lazy decoding cannot cost more memory than it saves.
+    impact: e.audio.hasSample('impact.tile.rock'),
+  }));
+  expect(menu.failures).toEqual([]);
+  expect(menu.ui).toBe(true);
+  expect(menu.impact).toBe(false);
+  expect(menu.mb).toBeLessThan(12);
+
+  // ASKING FOR A CUE STARTS ITS BANK, and the asking trigger does not wait:
+  // play() returns having only kicked the decode off, so no decode lands in
+  // the frame (CLAUDE.md §8).  The draft voice covers that trigger.
+  await engine(page, e => { e.audio.setActive(true); e.audio.play('impact.tile.rock'); });
+  await page.waitForFunction(() => window.__omniEngine.audio.hasSample('impact.tile.rock'),
+                             null, { timeout: 60000 });
+  const after = await engine(page, e => ({
+    mb: e.audio.decodedBankBytes / 1048576,
+    takes: e.audio.sampleCount,
+    failures: e.audio.bankFailures,
+    // Still lazy: one more bank arrived, not all of them.
+    weapon: e.audio.hasSample('weapon.cannon.fire'),
+  }));
+  expect(after.failures).toEqual([]);
+  expect(after.takes).toBeGreaterThan(menu.takes);
+  expect(after.mb).toBeGreaterThan(menu.mb);
+  expect(after.weapon).toBe(false);
+
+  // And the whole manifest is still reachable on demand.
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
+  expect(await engine(page, e => e.audio.sampleCount)).toBe(304);
+  expect(await engine(page, e => e.audio.bankFailures)).toEqual([]);
+  watch.assertClean();
+});
+
 test('mix controls, variation inspection, torus pan and pause cleanup', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page);
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
   await page.waitForFunction(() => window.__omniEngine.audio.sampleCount === 304);
   const result = await engine(page, e => {
     const a = e.audio;
@@ -253,233 +309,253 @@ test('triggers fire their own ids, and ambient shard breaks stay near-field', as
 });
 
 
-test('streamed music keeps its place; battle layer follows combat, music/mute, and pause', async ({ page }) => {
+/* THE ADAPTIVE SCORE (engine/systems/AdaptiveMusic.ts).  Six stems on one
+ * clock; the game decides only how loud each is.  `battleActive` means the
+ * GROOVE layer (kick, snare, bass) is in — the old "battle layer" contract,
+ * kept under the same name so the portal/lull A/B below reads as before.
+ * `jumps` counts cues back to bar 1, the score's only horizontal move. */
+test('the score keeps its place through combat, pause, music volume and mute', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.music?.playing);
-  expect(await engine(page, e => e.audio.music.battleTrackIndex)).toBe(-1);
-  expect(await engine(page, e => e.audio.music.battleTracks.every(track => !track.loaded))).toBeTruthy();
+  // The title screen fetches the exploration bed only.
+  expect(await engine(page, e => e.audio.music.isLoaded('groove'))).toBeFalsy();
   await startRun(page);
-  await page.waitForFunction(() => window.__omniEngine.audio.music.currentTime > 0.2);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.position > 0.2);
   await engine(page, e => e.audio.setCombat(true));
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
-  expect(await engine(page, e => e.audio.music.battleActive)).toBeTruthy();
-  const firstBattle = await engine(page, e => e.audio.music.battleTrackIndex);
-  await engine(page, e => e.audio.music.currentBattle.media.dispatchEvent(new Event('ended')));
-  await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(firstBattle);
-  await engine(page, e => e.audio.setCombat(false));
-  expect(await engine(page, e => e.audio.music.battleActive)).toBeFalsy();
-  const before = await engine(page, e => e.audio.music.currentTime);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive
+    && window.__omniEngine.audio.music.isLoaded('groove'), null, { timeout: 20000 });
+  await expect.poll(() => engine(page, e => e.audio.music.layerGain('groove')),
+    { timeout: 10000 }).toBeGreaterThan(0.5);
+  const before = await engine(page, e => e.audio.music.position);
   await engine(page, e => { e.audio.setSfxVolume(0); e.pauseGame(); });
-  await expect.poll(() => engine(page, e => e.audio.music.currentTime)).toBeGreaterThan(before);
+  // Paused: the combat layers leave, the bed plays on — and so does time.
+  await expect.poll(() => engine(page, e => e.audio.music.battleActive)).toBeFalsy();
+  await expect.poll(() => engine(page, e => e.audio.music.position)).not.toBe(before);
   await engine(page, e => e.audio.setMusicVolume(0));
   await page.waitForFunction(() => !window.__omniEngine.audio.music.playing);
-  const pausedAt = await engine(page, e => e.audio.music.currentTime);
+  const heldAt = await engine(page, e => e.audio.music.position);
+  // WALL time, deliberately: the game is paused, so sim time is not what
+  // could move a stopped score — the audio clock is.
+  await page.waitForTimeout(500);
+  expect(await engine(page, e => e.audio.music.position), 'stopped means held').toBe(heldAt);
   await engine(page, e => e.audio.setMusicVolume(0.7));
   await page.waitForFunction(() => window.__omniEngine.audio.music.playing);
-  expect(await engine(page, e => e.audio.music.currentTime)).toBeGreaterThanOrEqual(pausedAt);
+  const resumed = await engine(page, e => e.audio.music.position);
+  expect(Math.abs(resumed - heldAt), 'resumes on the same beat, not from the top').toBeLessThan(0.5);
   await engine(page, e => e.audio.setMuted(true));
   await page.waitForFunction(() => !window.__omniEngine.audio.music.playing);
   expect(await engine(page, e => e.audio.music.error)).toBeNull();
   watch.assertClean();
 });
 
-// The battle layer is a CONTINUOUS playlist that proximity only ducks.  Both
-// halves of that used to be one action: every rising edge of the combat signal
-// called `startNextBattle`, which advanced the index AND rewound to 0 — and an
-// arena's field goes empty on every wave clear, so a wave sequence chopped
-// itself into a new song every few seconds.
-test('a lull ducks the battle layer without changing or rewinding the song', async ({ page }) => {
+test('intensity brings the layers in in order, and the stems stay in budget', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page);
-  await engine(page, e => e.audio.setCombat(true));
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
-
-  // PRECONDITION as a selection criterion (README rule 13): "it resumed where
-  // it left off" is only a claim about a track that was genuinely running, so
-  // wait for real playback rather than asserting against a track at 0.
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battleCurrentTime > 0.3,
-    null, { timeout: 20000 });
-  const engagedIndex = await engine(page, e => e.audio.music.battleTrackIndex);
-  const engagedAt = await engine(page, e => e.audio.music.battleCurrentTime);
-  expect(engagedIndex).toBeGreaterThanOrEqual(0);
-  expect(engagedAt).toBeGreaterThan(0.3);
-
-  // The lull.  The pause trails the fade by three time constants, so this is
-  // waiting on the real scheduled pause, not on a fixed sleep.
-  await engine(page, e => e.audio.setCombat(false));
-  expect(await engine(page, e => e.audio.music.battleActive)).toBeFalsy();
-  await expect.poll(() => engine(page, e => e.audio.music.battlePlaying),
-    { timeout: 20000 }).toBeFalsy();
-  const heldAt = await engine(page, e => e.audio.music.battleCurrentTime);
-  const heldIndex = await engine(page, e => e.audio.music.battleTrackIndex);
-  // Paused, not stopped: the position is still standing where the fade left it.
-  expect(heldIndex).toBe(engagedIndex);
-  expect(heldAt).toBeGreaterThanOrEqual(engagedAt);
-
-  // Re-engaging resumes THE SAME SONG at THE SAME POINT.  A restart would put
-  // the index one on and the clock back near zero, which is exactly what the
-  // old rising edge did.
-  await engine(page, e => e.audio.setCombat(true));
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
-  expect(await engine(page, e => e.audio.music.battleTrackIndex)).toBe(heldIndex);
-  const resumedAt = await engine(page, e => e.audio.music.battleCurrentTime);
-  expect(resumedAt).toBeGreaterThanOrEqual(heldAt - 0.05);
-
-  // And the hand-over still works — `ended` is now the ONLY thing that moves
-  // the index, so this is the negative control for the claim above.
-  await engine(page, e => e.audio.music.currentBattle.media.dispatchEvent(new Event('ended')));
-  await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(heldIndex);
+  await page.waitForFunction(() => ['atmos', 'pulse', 'groove', 'heavy', 'apex']
+    .every(id => window.__omniEngine.audio.music.isLoaded(id)), null, { timeout: 20000 });
+  const steps: [number, string[]][] = [
+    [0, ['atmos']],
+    [0.25, ['atmos', 'pulse']],
+    [0.45, ['atmos', 'pulse', 'groove']],
+    [0.7, ['atmos', 'pulse', 'groove', 'heavy']],
+    [0.9, ['atmos', 'pulse', 'groove', 'heavy', 'apex']],
+  ];
+  for (const [v, layers] of steps) {
+    await engine(page, (e, x) => e.audio.setMusicDebugIntensity(x), v);
+    expect(await engine(page, e => e.audio.music.activeLayers), `intensity ${v}`).toEqual(layers);
+  }
+  // Hysteresis: just under the groove's ON threshold but above its OFF one,
+  // coming DOWN from 0.9, keeps the groove (and drops heavy and apex).
+  await engine(page, e => e.audio.setMusicDebugIntensity(0.33));
+  expect(await engine(page, e => e.audio.music.activeLayers)).toEqual(['atmos', 'pulse', 'groove']);
+  await engine(page, e => e.audio.setMusicDebugIntensity(null));
+  // Entries are quantised: the gain reaches the layer on a grid line, so a
+  // freshly-entered layer is audible within a bar plus its fade.
+  await engine(page, e => e.audio.setMusicDebugIntensity(0.9));
+  await expect.poll(() => engine(page, e => e.audio.music.layerGain('apex')),
+    { timeout: 4000 }).toBeGreaterThan(0.5);
+  expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(96 * 1024 * 1024);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
   watch.assertClean();
 });
 
-
-// A capstone warping in is one of the two moments the playlist cuts to a new
-// song (the other is a map change — see 'a new arena starts a new song'):
-// it is a designed beat, so the score starts with it rather than carrying on
-// with whatever the wave ladder was playing.
-test('a boss warping in cuts the battle layer to a new song', async ({ page }) => {
+// A lull only lowers the intensity.  The old playlist cut to a new song on
+// every rising edge of the combat signal, which chopped a wave sequence into
+// fragments; the score must never jump inside one encounter.
+test('a lull lowers the intensity without moving the score', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page);
   await engine(page, e => e.audio.setCombat(true));
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive, null, { timeout: 20000 });
+  const jumps = await engine(page, e => e.audio.music.jumps);
+  await engine(page, e => e.audio.setCombat(false));
+  await expect.poll(() => engine(page, e => e.audio.music.battleActive), { timeout: 20000 }).toBeFalsy();
+  await engine(page, e => e.audio.setCombat(true));
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
+  expect(await engine(page, e => e.audio.music.jumps), 'no cue back to bar 1').toBe(jumps);
+  watch.assertClean();
+});
 
-  // Same precondition as the lull test (README rule 13): "it cut to a new
-  // song" only means something against a song that was genuinely running.
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battleCurrentTime > 0.3,
-    null, { timeout: 20000 });
-  const before = await engine(page, e => e.audio.music.battleTrackIndex);
-  expect(before).toBeGreaterThanOrEqual(0);
-
+// A capstone is a designed beat: the score returns to bar 1 with it, and the
+// boss stem joins.
+test('a boss warping in restarts the phrase and brings in the boss stem', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.playing);
+  const jumps = await engine(page, e => e.audio.music.jumps);
   await engine(page, e => e.debugSpawnBoss());
-  await expect.poll(() => engine(page, e => e.audio.music.battleTrackIndex)).not.toBe(before);
-  // From the TOP, not from wherever the interrupted track happened to be.
-  expect(await engine(page, e => e.audio.music.battleCurrentTime)).toBeLessThan(0.3);
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battlePlaying);
-
-  // And the boss holds the layer open from the offscreen ring it arrived on:
-  // shove it far past the release radius and the score stays engaged, where
-  // an ordinary hostile would have been let go.
+  expect(await engine(page, e => e.audio.music.jumps)).toBe(jumps + 1);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.isLayerOn('boss')
+    && window.__omniEngine.audio.music.isLoaded('boss'), null, { timeout: 20000 });
+  expect(await engine(page, e => e.audio.music.battleActive)).toBeTruthy();
+  // The boss holds the stack up from the offscreen ring it arrived on: shove
+  // it far past the release radius and the score stays engaged.
   await engine(page, e => {
     const boss = e.entityIndex.enemies.find((x: { isBoss?: boolean }) => x.isBoss === true);
     if (boss) { boss.position.x = e.player.position.x + 9000; boss.velocity.x = 0; boss.velocity.y = 0; }
   });
   await advanceSim(page, 1);
   expect(await engine(page, e => e.audio.music.battleActive)).toBeTruthy();
+  expect(await engine(page, e => e.audio.music.isLayerOn('boss'))).toBeTruthy();
   watch.assertClean();
 });
 
-/* LEAVING THE AREA ENDS THE FIGHT — the battle layer must not follow you
+/* LEAVING THE AREA ENDS THE FIGHT — the combat layers must not follow you
  * through a portal (user report: "while fighting a boss, I left the arena to
- * the overworld and the battle music continued").
- *
- * The cause was not the combat signal, which is correct: the boss is gone from
- * the destination on the very first frame.  It was `MUSIC_LINGER_SEC` being
- * carried across the map change.  That linger exists for a LULL inside one
- * arena — the field empties on every wave clear and the next wave is seconds
- * off — but `transitionToMap` deliberately leaves the enemies behind, so a
- * transit is the opposite of a lull.  Measured on the unfixed build: combat
- * stayed true for the full 6.0 s of overworld, with the layer's own ~5 s fade
- * on top.
- *
- * The two tests below are ONE A/B and have to be read together: same elapsed
- * time, opposite outcomes, and the only difference is whether the map changed.
- * Either alone is weak — dropping the linger everywhere would pass the first
- * and fail the second, which is exactly the over-correction to guard. */
-test('a portal out of a boss fight stands the battle layer down', async ({ page }) => {
+ * the overworld and the battle music continued").  Read with the lull test
+ * after it: same elapsed time, opposite outcomes, and the only difference is
+ * whether the map changed.  The adaptive score adds a second way to get this
+ * wrong — its intensity HOLD, which is exactly what carries a lull — so the
+ * map cue drops intensity outright. */
+test('a portal out of a boss fight stands the combat layers down', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page, 'POCKET');
   await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
-
-  // Drive the REAL signal (harness rule 6): a boss on the field is what puts
-  // the engine into combat, not a direct `setCombat`.
   await engine(page, e => e.debugSpawnBoss());
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
-
-  // The same call `enterPortal()` makes.
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive, null, { timeout: 20000 });
   await engine(page, e => e.transitionToMap('overworld'));
   await waitForTransit(page);
   await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
-
-  // WELL INSIDE the linger window the unfixed build held: the layer is down
-  // because the encounter ended, not because 6 s elapsed.
   await advanceSim(page, 2);
   expect(await engine(page, e => e.audio.music.battleActive),
-    'the battle layer follows the fight, not the player').toBeFalsy();
-  // And the boss really is gone, so the claim is about the linger and not
-  // about a boss that somehow travelled with us.
+    'the combat layers follow the fight, not the player').toBeFalsy();
+  expect(await engine(page, e => e.audio.music.isLayerOn('boss'))).toBeFalsy();
   expect(await engine(page, e => e.entityIndex.enemies.filter(
     (x: { isBoss?: boolean }) => x.isBoss === true).length)).toBe(0);
-
-  // ARRIVING somewhere dangerous still engages — the destination decides from
-  // its OWN hostiles, which is the half that must survive the fix.
+  // Arriving somewhere dangerous still engages.
   await engine(page, e => e.debugSpawnBoss());
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive, null, { timeout: 20000 });
   watch.assertClean();
 });
 
-test('a new arena starts a new song', async ({ page }) => {
+test('a new arena opens a new phrase', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page, 'POCKET');
   await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
-
-  // Open the playlist through the REAL signal (harness rule 6).  The boss
-  // spawn cues a track of its own, which is exactly why the reading below is
-  // taken AFTER it: what is under test is the map change's cue, so the boss's
-  // must already be spent.
-  await engine(page, e => e.debugSpawnBoss());
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
-  const before = await engine(page, e => e.audio.music.battleTrackIndex);
-  expect(before, 'the playlist is open, so there is a song to carry over')
-    .toBeGreaterThanOrEqual(0);
-
-  // The same call `enterPortal()` makes.  Nothing else cues between here and
-  // the reading below — the boss stays behind, so a changed index can only be
-  // the map change.
+  await page.waitForFunction(() => window.__omniEngine.audio.music.playing);
+  const jumps = await engine(page, e => e.audio.music.jumps);
   await engine(page, e => e.transitionToMap('overworld'));
   await waitForTransit(page);
   await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
-
-  const after = await engine(page, e => ({
-    index: e.audio.music.battleTrackIndex,
-    at: e.audio.music.battleCurrentTime,
-  }));
-  expect(after.index, 'a map change opens a different track, not the old one')
-    .not.toBe(before);
-  // From the TOP.  `advanceBattle` rewinds the successor, so this is what
-  // says the layer will not resume the previous song mid-phrase — the whole
-  // of the user report.
-  expect(after.at, 'the new song starts at its beginning').toBeLessThan(0.5);
-
-  // AND THE CUE IS SILENT.  The stand-down runs first in `loadMapFresh`, so
-  // the fresh track waits paused rather than starting at full level over the
-  // warp beat.  (This is a consequence of that ordering, not a proof of it:
-  // the combat report would also have gone down on the first frame after the
-  // transit either way.)
+  expect(await engine(page, e => e.audio.music.jumps), 'the map change cued bar 1').toBeGreaterThan(jumps);
   expect(await engine(page, e => e.audio.music.battleActive),
-    'arriving somewhere quiet does not play the new song at anybody')
-    .toBeFalsy();
+    'arriving somewhere quiet brings no drums').toBeFalsy();
   watch.assertClean();
 });
 
-test('a lull inside one arena still holds the battle layer up', async ({ page }) => {
+// THE MUSIC DIRECTOR (MUSIC_PLAN in AdaptiveMusic).  Each area owns a theme —
+// the hub and field_* maps Omni, arena_* maps Event Horizon — a boss brings
+// in the boss theme (Critical Mass) with an impact, and its death plays the
+// victory stinger and hands back to the area's theme.  A pin overrides all.
+test('the director: area themes, a boss theme, a victory hand-back, and pins', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page, 'POCKET');
   await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
+  const song = () => engine(page, e => e.audio.music.song.id);
+  await expect.poll(song, { timeout: 20000 }).toBe('event-horizon');      // arena_pocket → battle theme
+  expect(await engine(page, e => e.audio.music.area)).toBe('arena_pocket');
+
+  await engine(page, e => e.transitionToMap('overworld'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');               // home sounds like home
 
   await engine(page, e => e.debugSpawnBoss());
-  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive);
-  const opened = await engine(page, e => e.audio.music.battleTrackIndex);
+  await expect.poll(song, { timeout: 20000 }).toBe('critical-mass');      // the boss theme takes over
+  expect(await engine(page, e => e.audio.music.lastStinger)).toBe('impact');
+  await page.waitForFunction(() => window.__omniEngine.audio.music.isLayerOn('boss'), null, { timeout: 20000 });
 
+  // The last boss dies: victory stinger, drums down, back to the area theme.
+  await engine(page, e => {
+    for (const x of e.entityIndex.enemies) if ((x as { isBoss?: boolean }).isBoss) (x as { active: boolean }).active = false;
+    e.audio.musicBossDefeated();
+  });
+  expect(await engine(page, e => e.audio.music.lastStinger)).toBe('victory');
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');
+  await expect.poll(() => engine(page, e => e.audio.music.battleActive), { timeout: 20000 }).toBeFalsy();
+
+  // A pin overrides the plan, through a portal, and AUTO restores it.
+  await engine(page, e => e.audio.music.setSongMode(1));
+  await expect.poll(song, { timeout: 20000 }).toBe('event-horizon');
+  await engine(page, e => e.transitionToMap('arena_pocket'));
+  await waitForTransit(page);
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'back in the arena');
+  expect(await song()).toBe('event-horizon');
+  await engine(page, e => e.audio.music.setSongMode(0));
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');
+  await engine(page, e => e.audio.music.setSongMode('auto'));
+  await expect.poll(song, { timeout: 20000 }).toBe('event-horizon');      // back to the plan for this arena
+  // Two songs are resident only for the length of a decode.
+  expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(110 * 1024 * 1024);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
+// The debug panel's song picker: AUTO plus one chip per song, the active one lit.
+test('the debug panel picks a song directly, and AUTO hands it back to the plan', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.playing);
+  await page.getByTestId('debug-launcher').click();
+  await waitForStats(page, s => s.debugPanel?.open === true, 'the debug panel');
+  await page.locator('[data-debug-group="perf"]').click();
+  await page.locator('[data-debug-section="music"]').click();
+  const row = page.locator('[data-debug-row="Play song"]');
+  await row.scrollIntoViewIfNeeded();
+  await expect(row.locator('button')).toHaveText(['Auto', 'Omni', 'Event Horizon', 'Critical Mass']);
+  const song = () => engine(page, e => e.audio.music.song.id);
+  expect(await engine(page, e => e.audio.music.songMode), 'starts on the plan').toBe('auto');
+
+  for (const [label, id, idx] of [['Critical Mass', 'critical-mass', 2], ['Event Horizon', 'event-horizon', 1]] as const) {
+    await row.locator('button', { hasText: label }).click();
+    await expect.poll(song, { timeout: 20000 }).toBe(id);
+    expect(await engine(page, e => e.audio.music.songMode), `${label} is pinned`).toBe(idx);
+    await page.waitForFunction(i => window.__omniStats?.audio?.music?.songMode === i, idx);   // the panel's own readout
+  }
+  await row.locator('button', { hasText: 'Auto' }).click();
+  expect(await engine(page, e => e.audio.music.songMode)).toBe('auto');
+  await expect.poll(song, { timeout: 20000 }).toBe('omni');            // the hub's plan
+  watch.assertClean();
+});
+
+test('a lull inside one arena still holds the combat layers up', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page, 'POCKET');
+  await waitForStats(page, s => s.currentMapType === 'POCKET', 'the arena');
+  await engine(page, e => e.debugSpawnBoss());
+  await page.waitForFunction(() => window.__omniEngine.audio.music.battleActive, null, { timeout: 20000 });
+  const jumps = await engine(page, e => e.audio.music.jumps);
   // Empty the field WITHOUT changing map — a wave clear, which is what the
-  // linger is for.  The boss is dropped straight out of the world rather than
-  // killed, so no death beat, rout or stage-clear screen runs and the only
-  // thing under test is the proximity signal going quiet.
+  // linger and the hold are for.
   const cleared = await engine(page, e => {
     let n = 0;
     for (const x of e.currentMap.entities) {
@@ -488,19 +564,12 @@ test('a lull inside one arena still holds the battle layer up', async ({ page })
     return n;
   });
   expect(cleared, 'the field really had something in it').toBeGreaterThan(0);
-
-  // The SAME 2 s that finds the layer down after a transit finds it still up
-  // here.  That is the whole A/B.
   await advanceSim(page, 2);
   expect(await engine(page, e => e.entityIndex.enemies.filter(
-    (x: { isBoss?: boolean }) => x.isBoss === true).length),
-    'the field is genuinely empty of bosses').toBe(0);
+    (x: { isBoss?: boolean }) => x.isBoss === true).length)).toBe(0);
   expect(await engine(page, e => e.audio.music.battleActive),
     'a lull ducks nothing — the next wave is seconds away').toBeTruthy();
-  // The other half of the same rule, and the A/B against the test above: a
-  // map change cuts to a new song, a lull inside one arena does not.
-  expect(await engine(page, e => e.audio.music.battleTrackIndex),
-    'a lull does not advance the playlist either').toBe(opened);
+  expect(await engine(page, e => e.audio.music.jumps), 'and does not restart the phrase').toBe(jumps);
   watch.assertClean();
 });
 
@@ -508,6 +577,8 @@ test('long player tails do not suppress the next attack', async ({ page }) => {
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await page.waitForFunction(() => window.__omniEngine.audio.prepared);
+  // Reads a weapons-bank take directly, so it needs that bank decoded.
+  await page.evaluate(() => window.__omniEngine.audio.decodeAllBanks());
   await startRun(page);
   const result = await engine(page, async e => {
     const a = e.audio;

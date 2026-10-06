@@ -12,6 +12,8 @@
  *  an outfitted player can still out-fly it.  Engine-managed lifecycle;
  *  AISystem skips them via the `isRival` flag.
  */
+import * as dmath from '../systems/dmath';
+import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType, WeaponType, WeaponConfig } from '../../types';
 import {
@@ -20,6 +22,7 @@ import {
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
 import { nextId } from '../systems/IdAllocator';
+import { viewport } from '../ports';
 
 /** A rival ship and its engine-managed lifecycle/AI state.  The ship itself is
  *  a plain EntityType.ENEMY carrying `isRival`; everything else lives here so
@@ -40,7 +43,7 @@ export interface RivalInstance {
 
 function rollRivalDisposition(): RivalDisposition {
     const w = RIVAL_CONSTANTS.WEIGHTS;
-    const r = Math.random() * (w.hostile + w.ally + w.neutral);
+    const r = sim.roamers() * (w.hostile + w.ally + w.neutral);
     if (r < w.hostile) return 'hostile';
     if (r < w.hostile + w.ally) return 'ally';
     return 'neutral';
@@ -124,20 +127,20 @@ export function updateRivals(g: GameEngine, dt: number) {
         let dirX: number, dirY: number, speedMul = 1;
         if (inst.state === 'leave' && inst.portal) {
             const px = wrapDeltaX(s.position.x, inst.portal.x), py = wrapDeltaY(s.position.y, inst.portal.y);
-            const pm = Math.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm; speedMul = R.LEAVE_SPEED_MULT;
+            const pm = dmath.hypot(px, py) || 1; dirX = px / pm; dirY = py / pm; speedMul = R.LEAVE_SPEED_MULT;
         } else if (target) {
             const tx = wrapDeltaX(s.position.x, target.position.x), ty = wrapDeltaY(s.position.y, target.position.y);
-            const tm = Math.hypot(tx, ty) || 1;
+            const tm = dmath.hypot(tx, ty) || 1;
             // Hold a firing gap: close if far, back off if too near; always strafe.
             const sign = tm > R.PREFERRED_DIST * 1.15 ? 1 : tm < R.PREFERRED_DIST * 0.7 ? -1 : 0;
             dirX = (tx / tm) * sign + (-ty / tm) * 0.7;
             dirY = (ty / tm) * sign + (tx / tm) * 0.7;
-            const dm = Math.hypot(dirX, dirY) || 1; dirX /= dm; dirY /= dm;
-            s.rotation = Math.atan2(ty, tx); // face the target
+            const dm = dmath.hypot(dirX, dirY) || 1; dirX /= dm; dirY /= dm;
+            s.rotation = dmath.atan2(ty, tx); // face the target
         } else {
             const flow = g.flowField.sampleShardFlow(s.position.x, s.position.y);
-            const fm = Math.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
-            s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+            const fm = dmath.hypot(flow.x, flow.y) || 1; dirX = flow.x / fm; dirY = flow.y / fm;
+            s.rotation = dmath.atan2(s.velocity.y, s.velocity.x);
         }
         // Player-style movement: apply thrust along the desired heading, then
         // self-cap speed (PhysicsSystem applies the map friction afterward, so
@@ -145,9 +148,9 @@ export function updateRivals(g: GameEngine, dt: number) {
         s.velocity.x += dirX * acc * timeScale;
         s.velocity.y += dirY * acc * timeScale;
         const maxSpeed = baseMaxSpeed * speedMul;
-        const sp = Math.hypot(s.velocity.x, s.velocity.y);
+        const sp = dmath.hypot(s.velocity.x, s.velocity.y);
         if (sp > maxSpeed) { const k = maxSpeed / sp; s.velocity.x *= k; s.velocity.y *= k; }
-        if (inst.state === 'leave') s.rotation = Math.atan2(s.velocity.y, s.velocity.x);
+        if (inst.state === 'leave') s.rotation = dmath.atan2(s.velocity.y, s.velocity.x);
 
         // ── Fire (only while roaming, target in range) ──
         if (inst.state === 'roam' && target && inst.fireTimer <= 0
@@ -167,7 +170,7 @@ export function updateRivals(g: GameEngine, dt: number) {
         } else if (inst.state === 'roam') {
             if (inst.stateTimer <= 0) {
                 inst.state = 'leave'; inst.stateTimer = R.LEAVE_DURATION;
-                const vm = Math.hypot(s.velocity.x, s.velocity.y) || 1;
+                const vm = dmath.hypot(s.velocity.x, s.velocity.y) || 1;
                 const portal = { x: s.position.x + (s.velocity.x / vm) * R.PORTAL_AHEAD, y: s.position.y + (s.velocity.y / vm) * R.PORTAL_AHEAD };
                 wrapPosition(portal);
                 inst.portal = portal;
@@ -191,20 +194,20 @@ export function spawnRival(g: GameEngine, forced?: RivalDisposition) {
     if (!g.currentMap) return;
     const R = RIVAL_CONSTANTS;
     const zoom = g.camera.zoom || 1;
-    const halfDiag = Math.hypot((window.innerWidth / 2) / zoom, (window.innerHeight / 2) / zoom);
-    const angle = Math.random() * Math.PI * 2;
+    const halfDiag = dmath.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    const angle = sim.roamers() * Math.PI * 2;
     const dist = halfDiag + R.SPAWN_MARGIN;
-    const pos = { x: g.player.position.x + Math.cos(angle) * dist, y: g.player.position.y + Math.sin(angle) * dist };
+    const pos = { x: g.player.position.x + dmath.cos(angle) * dist, y: g.player.position.y + dmath.sin(angle) * dist };
     wrapPosition(pos);
     g.openPortal(pos, { color: R.PORTAL_COLOR, radius: R.PORTAL_RADIUS, duration: R.PORTAL_DURATION });
 
     const disposition = forced ?? rollRivalDisposition();
-    const sprite = R.SPRITES[Math.floor(Math.random() * R.SPRITES.length)];
+    const sprite = R.SPRITES[Math.floor(fxRng.sprites() * R.SPRITES.length)];
     const ship: GameEntity = {
         id: nextId('rival'),
         type: EntityType.ENEMY,
         position: { x: pos.x, y: pos.y },
-        velocity: { x: -Math.cos(angle) * 2, y: -Math.sin(angle) * 2 }, // heading inward
+        velocity: { x: -dmath.cos(angle) * 2, y: -dmath.sin(angle) * 2 }, // heading inward
         size: { x: R.SIZE, y: R.SIZE },
         rotation: angle + Math.PI,
         color: R.COLORS[disposition],
@@ -217,12 +220,12 @@ export function spawnRival(g: GameEngine, forced?: RivalDisposition) {
         isRival: true,
         sprite,
         trail: [],
-        glowPhase: Math.random() * Math.PI * 2,
+        glowPhase: fxRng.sprites() * Math.PI * 2,
     };
     g.currentMap.entities.push(ship);
     g.rivals.push({
         ship, disposition, state: 'enter', stateTimer: R.ENTER_DURATION,
-        fireTimer: Math.random() * R.WEAPON.cooldown, stolen: 0,
+        fireTimer: sim.roamers() * R.WEAPON.cooldown, stolen: 0,
     });
     g.audio.play('rival.warp.in', { x: ship.position.x, y: ship.position.y });
 }

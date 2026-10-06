@@ -56,6 +56,7 @@ import {
 import { applyModuleEffects } from './outfitting';
 import { FlowPattern, samplePattern } from './systems/FlowField';
 import { FlowFieldGrid } from './systems/FlowFieldGrid';
+import { nowMs } from './ports';
 
 /** DBG-only cycle tables.  They lived as private statics on `GameEngine`;
  *  nothing but the cycle methods below ever read them, so they came here
@@ -1001,6 +1002,15 @@ export class DebugControls {
     cycleVelGain();
   }
 
+  /** DBG "Arena level": force the arena difficulty level for playtesting —
+   *  portal's own → 1 → 2 → 3 → 4 → 5 → 6 → 8 → 10 → 13 → 16 → 20 → portal's own.
+   *  Takes effect from the NEXT wave (a wave already streaming keeps its mix). */
+  cycleArenaLevel() {
+    const steps: Array<number | null> = [null, 1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20];
+    const i = steps.indexOf(this.g.dbgArenaLevel);
+    this.g.dbgArenaLevel = steps[(i + 1) % steps.length];
+  }
+
   /** Cycle the DBG snitch-speed multiplier (SNITCH_SPEED_CYCLE) — scales
    *  both AI speed states live so the chase feel can be tuned in-game. */
   cycleSnitchSpeed() {
@@ -1189,7 +1199,7 @@ export class DebugControls {
   cycleSubstepCap() {
     cycleSubstepCap();
     this.g.simAccumulator = 0;
-    this.g.lastTime = performance.now();
+    this.g.lastTime = nowMs();
   }
 
   /** DBG: cycle the HUD (React) update rate — 60Hz default / 30 / 15.
@@ -1219,7 +1229,7 @@ export class DebugControls {
   cycleSimRate() {
     cycleSimRate();
     this.g.simAccumulator = 0;
-    this.g.lastTime = performance.now();
+    this.g.lastTime = nowMs();
   }
 
   /** Toggle the FF Vectors overlay (asteroid-flow arrows). */

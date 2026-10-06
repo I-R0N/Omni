@@ -14,6 +14,7 @@
  *  whiten, the boss aura ring, the engine flame, and the damage-crack
  *  overlay.
  */
+import { fxRng } from '../rng';
 import { GameEntity, EntityType } from '../../../types';
 import {
     BOSS_CONSTANTS, BOSS_DEFS, BUBBLE_CONSTANTS, DRAGON_CONSTANTS,
@@ -239,13 +240,13 @@ export function drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity
         if (latched && entity.attachedToId === 'player') {
             ctx.lineWidth = 1.4;
             for (let k = 0; k < 3; k++) {
-                ctx.strokeStyle = `rgba(245,158,11,${0.5 + 0.45 * Math.random()})`;
+                ctx.strokeStyle = `rgba(245,158,11,${0.5 + 0.45 * fxRng.render()})`;
                 ctx.beginPath();
-                let ax = rb * sxx * 0.7, ay = (Math.random() - 0.5) * rb * 0.8;
+                let ax = rb * sxx * 0.7, ay = (fxRng.render() - 0.5) * rb * 0.8;
                 ctx.moveTo(ax, ay);
                 for (let s = 0; s < 3; s++) {
-                    ax += rb * 0.5 * (0.6 + Math.random() * 0.6);
-                    ay += (Math.random() - 0.5) * rb * 0.7;
+                    ax += rb * 0.5 * (0.6 + fxRng.render() * 0.6);
+                    ay += (fxRng.render() - 0.5) * rb * 0.7;
                     ctx.lineTo(ax, ay);
                 }
                 ctx.stroke();
@@ -751,6 +752,21 @@ export function drawEnemyShape(ctx: CanvasRenderingContext2D, entity: GameEntity
         ctx.fill();
         ctx.restore();
     }
+}
+
+/** A flat, flame-free silhouette of an archetype for HUD lists (the wave
+ *  roster): the same path the world draws, filled in the archetype colour
+ *  with a nose pip, at the origin facing +x.  Allocates nothing. */
+export function drawEnemyIcon(ctx: CanvasRenderingContext2D, shape: string, color: string, r: number) {
+    buildEnemyPath(ctx, shape, r);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(r * 0.35, 0, r * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha *= 0.75;
+    ctx.fill();
+    ctx.globalAlpha /= 0.75;
 }
 
 function buildEnemyPath(ctx: CanvasRenderingContext2D, shape: string, r: number) {

@@ -427,37 +427,21 @@ test.describe('the star field', () => {
     watch.assertClean();
   });
 
-  test('the hub TEST RACK steps density down as it goes down the map', async ({ page }) => {
-    // "Lower portals correspond to closer to a planet" — so the rack's vertical
-    // order IS the density order, and +Y is DOWN. Two tables encode this (the
-    // portal sites and the per-map densities) and nothing but this test stops
-    // them drifting apart the moment either is edited.
+  test('the hub field ring still carries the six density showcases, densest first', async ({ page }) => {
+    // The field rifts used to be a vertical rack whose order WAS the density
+    // order; they are a ring round the home station now (no gravity), so the
+    // position claim is gone and what is left is that each showcase map is
+    // reachable and its sky steps down in the declared order.
     const watch = await boot(page);
     await startRun(page);
 
-    const rack = await engine(page, e => {
-      // Read the LIVE portals off the hub rather than the constants table, so
-      // this checks what the player can actually fly to.
-      const seen = e.portals.map((p: any) => ({
-        target: p.portalTargetId as string,
-        y: p.position.y as number,
-      }));
-      return seen;
-    });
-
-    // The six showcase destinations are the rack.
+    const rack = await engine(page, e => e.portals.map((p: any) => ({
+      target: p.portalTargetId as string, y: p.position.y as number })));
     const RACK_IDS = ['field_asteroid', 'field_glass', 'field_metal',
                       'field_plastic', 'field_rock', 'field_nebula'];
     const onRack = rack.filter(r => RACK_IDS.includes(r.target));
     expect(onRack.length).toBe(RACK_IDS.length);
-
-    // Sorted top-to-bottom (ascending y = descending altitude), density must
-    // step down at every portal.
-    const byY = [...onRack].sort((a, b) => a.y - b.y);
-    const order = byY.map(r => RACK_IDS.indexOf(r.target));
-    // The rack table is declared densest-first, so the y-sorted order must be
-    // exactly the declared order.
-    expect(order).toEqual([0, 1, 2, 3, 4, 5]);
+    const byY = RACK_IDS.map(id => onRack.find(r => r.target === id)!);
 
     // ...and the DENSITIES, read off the live generator rather than a table:
     // point the sky at each destination's map type, top to bottom — the same
@@ -479,7 +463,7 @@ test.describe('the star field', () => {
       densities.push(densityOf(await readField(page)));
     }
     for (let i = 1; i < densities.length; i++) {
-      expect(densities[i], `rack densities, top to bottom: ${densities.map(Math.round).join(', ')}`)
+      expect(densities[i], `densities in declared order: ${densities.map(Math.round).join(', ')}`)
         .toBeLessThan(densities[i - 1]);
     }
 
@@ -495,7 +479,7 @@ test.describe('the star field', () => {
     await startRun(page);
 
     const targets = await engine(page, e => e.portals.map((p: any) => p.portalTargetId as string));
-    expect(targets.length).toBeGreaterThanOrEqual(10);   // 4 arenas + 6 rack
+    expect(targets.length).toBeGreaterThanOrEqual(20);   // 12 arena varieties + 8 field rifts
 
     const stranded: string[] = [];
     for (const id of targets) {

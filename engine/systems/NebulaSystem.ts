@@ -1,3 +1,5 @@
+import * as dmath from './dmath';
+import { sim } from './rng';
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, randomPlasticShardShade, nebulaHueToShardVariant, NEBULA_CONDENSE, nebulaTileShare } from '../../constants';
 import {
@@ -157,7 +159,7 @@ export class NebulaSystem {
         // Low-frequency salvage drop — the ONLY standard drop nebulae produce.
         // Roll is independent of the shard math so shard count/size is
         // unaffected; the drop (if any) is a bonus alongside the shards.
-        if (Math.random() < NEBULA_CONSTANTS.SALVAGE_DROP_CHANCE) {
+        if (sim.nebula() < NEBULA_CONSTANTS.SALVAGE_DROP_CHANCE) {
             this.drops.spawnSalvageDrop(
                 entities,
                 activeDrops,
@@ -628,19 +630,19 @@ export class NebulaSystem {
 
         const baseR = (targetSize / 2) * 0.8;
         const verts = spawn.polyVerticesOptions
-            ? spawn.polyVerticesOptions[Math.floor(Math.random() * spawn.polyVerticesOptions.length)]
-            : spawn.polyVerticesMin + Math.floor(Math.random() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
+            ? spawn.polyVerticesOptions[Math.floor(sim.nebula() * spawn.polyVerticesOptions.length)]
+            : spawn.polyVerticesMin + Math.floor(sim.nebula() * (spawn.polyVerticesMax - spawn.polyVerticesMin + 1));
         const raw: { angle: number; r: number }[] = [];
         for (let i = 0; i < verts; i++) {
             const baseAngle   = (i / verts) * Math.PI * 2;
-            const angleJitter = (Math.random() - 0.5) * (Math.PI / verts) * spawn.angleJitter * 2;
-            const radiusFrac  = spawn.radiusMin + Math.random() * spawn.radiusRange;
+            const angleJitter = (sim.nebula() - 0.5) * (Math.PI / verts) * spawn.angleJitter * 2;
+            const radiusFrac  = spawn.radiusMin + sim.nebula() * spawn.radiusRange;
             raw.push({ angle: baseAngle + angleJitter, r: baseR * radiusFrac });
         }
         raw.sort((a, b) => a.angle - b.angle);
         const polygonPoints = raw.map(p => ({
-            x: Math.cos(p.angle) * p.r,
-            y: Math.sin(p.angle) * p.r,
+            x: dmath.cos(p.angle) * p.r,
+            y: dmath.sin(p.angle) * p.r,
         }));
 
         // Per-variant durability + colour.  HP comes from NEBULA_CONDENSE
@@ -677,8 +679,8 @@ export class NebulaSystem {
             position:     { x: position.x, y: position.y },
             velocity:     { x: velocity.x, y: velocity.y },
             size:         { x: targetSize, y: targetSize },
-            rotation:      Math.random() * Math.PI * 2,
-            rotationSpeed: (Math.random() - 0.5) * 1.0,
+            rotation:      sim.nebula() * Math.PI * 2,
+            rotationSpeed: (sim.nebula() - 0.5) * 1.0,
             color,
             active:        true,
             health:        hp,
@@ -847,7 +849,7 @@ export class NebulaSystem {
         // The share is `nebulaTileShare()` rather than a literal half — see
         // the ladder in constants.ts — and it is read AT THE ROLL so a DBG
         // click re-tunes the clouds already in the world.
-        if (canAffordTile && Math.random() < nebulaTileShare()) {
+        if (canAffordTile && sim.nebula() < nebulaTileShare()) {
             if (this.transmuteToTileAt(entities, position, composition, blendHex, physics)) return;
             // NO FREE HEX.  Both source shards are already fading, so doing
             // nothing here DESTROYS the pair's mass — a silent loss that only

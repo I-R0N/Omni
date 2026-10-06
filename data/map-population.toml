@@ -1,0 +1,202 @@
+# MAP_POPULATION — per-map entity counts.  Parsed at BUILD time
+# (scripts/toml-tables.mjs) and resolved into constants.ts's `MAP_POPULATION`;
+# CLAUDE.md §5 describes who reads it.
+#
+# Source of truth for "how many of variant X spawn on map Y".  Source of truth
+# for rock-shard free-spawn counts (read via getRockShardFreeSpawn) and per-map
+# tile-cluster sizing (read by BaseMapLayer.populateTileClusters /
+# populateNebulaClusters — the natural maps only; the showcase maps hardcode
+# their SINGLE_ELEMENT_CLUSTER_* populations, so their tileCluster rows below
+# are unread).  Replaces the legacy ASTEROID_GENERATION_CONFIG +
+# NEBULA_CONSTANTS.CLUSTER_* fields, both deleted in the shard-system overhaul.
+#
+# Layout: [MAP.variant.freeSpawn | tileCluster] or [MAP.variant] tileRings.
+# Map names are the MapType values; variants are ShardVariantIds.  The order of
+# the maps and of the variants within one map is the order the old table had.
+
+# ── Overworld (wave-free home map, 12k) ──────────────────────────────────────
+# Standard mixed terrain, read directly from this table by OverworldMap.init().
+# Since G7 every natural map reads its tile-variant mix from here; the table is
+# the authority rather than a parallel description of one.
+[OVERWORLD.rock-shard.freeSpawn]
+count = 120
+minSize = 20
+maxSize = 160
+speedMultiplier = 1.5
+spawnRadius = 5000
+
+[OVERWORLD.glass-tile.tileCluster]
+clusterCount = 10
+minClusterSize = 10
+maxClusterSize = 30
+
+[OVERWORLD.plastic-tile.tileCluster]
+clusterCount = 4
+minClusterSize = 8
+maxClusterSize = 20
+
+[OVERWORLD.metal-tile.tileCluster]
+clusterCount = 3
+minClusterSize = 6
+maxClusterSize = 14
+
+[OVERWORLD.nebula-tile.tileCluster]
+clusterCount = 42
+minClusterSize = 12
+maxClusterSize = 36
+
+# ── Deep Space (16k arena) ───────────────────────────────────────────────────
+# These counts are what UniverseMap.init HAS been generating; before G7 the
+# class hardcoded them and this entry said something else entirely (glass 14 /
+# nebula 65+120), so the table documented a map that had not existed for a long
+# time.  The numbers moved here unchanged — G7 was a data move, not a rebalance.
+[UNIVERSE.rock-shard.freeSpawn]
+count = 140
+minSize = 20
+maxSize = 160
+speedMultiplier = 1.5
+spawnRadius = 6000
+
+# The old 42-cluster budget split 64 / 23 / 13 glass / plastic / metal.
+# Written out as counts, because a percentage split of a budget is a second
+# thing to keep in sync and the counts are what get generated.
+[UNIVERSE.glass-tile.tileCluster]
+clusterCount = 27
+minClusterSize = 10
+maxClusterSize = 34
+
+[UNIVERSE.plastic-tile.tileCluster]
+clusterCount = 10
+minClusterSize = 8
+maxClusterSize = 22
+
+[UNIVERSE.metal-tile.tileCluster]
+clusterCount = 5
+minClusterSize = 6
+maxClusterSize = 14
+
+# indestructible-tile intentionally absent — per decision #6, reserved for
+# deliberate border/structure placement, not random clusters in the natural
+# maps.  INDESTRUCTIBLE_FIELD showcase still spawns it for stress testing.
+#
+# The inner/outer split is gone rather than moved: UniverseMap stopped applying
+# it long ago (its own comment records why — on smaller maps it visibly
+# concentrated clusters in the centre) and merely AVERAGED the two size ranges
+# into one pass.  Carrying a field no code reads is how the entry above came to
+# be wrong in the first place.
+[UNIVERSE.nebula-tile.tileCluster]
+clusterCount = 75
+minClusterSize = 11
+maxClusterSize = 34
+
+[RING.rock-shard.freeSpawn]
+count = 280
+minSize = 20
+maxSize = 160
+speedMultiplier = 1.5
+spawnRadius = 5000
+
+# ── Seven Rings (12k arena) ──────────────────────────────────────────────────
+# A ring map's tile-variant "ratio" is WHICH RING is made of what, so it is
+# expressed as ring indices rather than cluster counts — inner rings soft, outer
+# wall indestructible, which is the map's whole readable-difficulty idea.  The
+# ring GEOMETRY (count, radii, thinning) stays in SevenRingsMap: that is the
+# map's shape, not its population.  indestructible-tile appears here and
+# nowhere else in the natural maps, which is exactly what decision #6 reserves
+# it for — deliberate border placement, never a random cluster.
+[SEVEN_RINGS.rock-shard.freeSpawn]
+count = 280
+minSize = 20
+maxSize = 160
+speedMultiplier = 1.5
+spawnRadius = 5000
+
+[SEVEN_RINGS.glass-tile]
+tileRings = [0, 1]
+
+[SEVEN_RINGS.plastic-tile]
+tileRings = [2, 3]
+
+[SEVEN_RINGS.metal-tile]
+tileRings = [4, 5]
+
+[SEVEN_RINGS.indestructible-tile]
+tileRings = [6]
+
+# ── Pocket sandbox (4k) ──────────────────────────────────────────────────────
+# The cluster COUNTS here already matched what PocketMap.init hardcoded; only
+# the nebula SIZE range disagreed (the class generates 6–12, this said 6–20), so
+# the table is corrected to the map that exists.
+[POCKET.rock-shard.freeSpawn]
+count = 1
+minSize = 20
+maxSize = 80
+speedMultiplier = 1.5
+spawnRadius = 1600
+
+[POCKET.glass-tile.tileCluster]
+clusterCount = 8
+minClusterSize = 6
+maxClusterSize = 14
+
+[POCKET.plastic-tile.tileCluster]
+clusterCount = 5
+minClusterSize = 5
+maxClusterSize = 10
+
+[POCKET.metal-tile.tileCluster]
+clusterCount = 3
+minClusterSize = 4
+maxClusterSize = 8
+
+# indestructible-tile intentionally absent — see the UNIVERSE note above for the
+# decision-#6 rationale.
+[POCKET.nebula-tile.tileCluster]
+clusterCount = 12
+minClusterSize = 6
+maxClusterSize = 12
+
+# ── Single-element showcase maps ─────────────────────────────────────────────
+# Only ASTEROID_FIELD's rock count is read from here; the tile/nebula rows of the
+# others are unread (see the header).
+[ASTEROID_FIELD.rock-shard.freeSpawn]
+count = 1200
+minSize = 20
+maxSize = 160
+speedMultiplier = 1.5
+spawnRadius = 2500
+
+[GLASS_FIELD.glass-tile.tileCluster]
+clusterCount = 100
+minClusterSize = 10
+maxClusterSize = 30
+
+[PLASTIC_FIELD.plastic-tile.tileCluster]
+clusterCount = 100
+minClusterSize = 10
+maxClusterSize = 30
+
+[METAL_FIELD.metal-tile.tileCluster]
+clusterCount = 100
+minClusterSize = 10
+maxClusterSize = 30
+
+[INDESTRUCTIBLE_FIELD.indestructible-tile.tileCluster]
+clusterCount = 100
+minClusterSize = 10
+maxClusterSize = 30
+
+[NEBULA_FIELD.nebula-tile.tileCluster]
+clusterCount = 65
+minClusterSize = 14
+maxClusterSize = 42
+
+[ROCK_FIELD.rock-tile.tileCluster]
+clusterCount = 100
+minClusterSize = 10
+maxClusterSize = 30
+
+# Tile-heavy stress map — `TileHeavyMap.init()` populates the map directly with
+# hardcoded counts (it doesn't read MAP_POPULATION), so this entry only exists
+# to satisfy the Record<MapType, …> shape.
+[TILE_HEAVY]

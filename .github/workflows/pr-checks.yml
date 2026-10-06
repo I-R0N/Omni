@@ -8,9 +8,10 @@ name: PR checks
 #           error, or a broken core loop still fails in ~3 minutes; nothing
 #           merges without this green.
 #   FULL  — the entire Playwright suite, at the MAJOR SEAMS only:
-#           pushes to `main` and `claude/plan-completion` (i.e. immediately
-#           after a merge lands), any PR carrying the `full-tests` label
-#           (the opt-in for pre-merge full validation), and manual dispatch.
+#           pushes to `main`, `claude/plan-completion` and
+#           `claude/steam-game-publishing-xhnui2` (i.e. immediately after a
+#           merge lands), any PR carrying the `full-tests` label (the opt-in
+#           for pre-merge full validation), and manual dispatch.
 #
 # A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs against
 # `main` used to run FULL — meant for the plan-completion → main promotion —
@@ -35,9 +36,16 @@ on:
   # Also guard the long-lived branches themselves, so a bad merge is visible
   # immediately rather than at the next PR opened against them.  `main` is the
   # default branch; `claude/plan-completion` is the integration branch the
-  # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md).
+  # completion roadmap merges into (docs/GAME_FEEDBACK_PLAN.md);
+  # `claude/steam-game-publishing-xhnui2` is the integration branch for the
+  # engine-core + mobile phase (docs/ENGINE_CORE_PLAN.md §5; it carries the
+  # phase's own name badly, and that is a known cosmetic cost of keeping one
+  # branch rather than two).  Listing a branch here is the WHOLE mechanism now
+  # that a PR's base no longer picks the scope: the step below sends every
+  # non-`pull_request` event to the full suite, so a merge into one runs the
+  # whole net while PRs INTO it get the cheap per-push smoke.
   push:
-    branches: [main, claude/plan-completion]
+    branches: [main, claude/plan-completion, claude/steam-game-publishing-xhnui2]
   workflow_dispatch:
 
 concurrency:
@@ -76,6 +84,14 @@ jobs:
       # running it standalone keeps a build break from reading as a test flake.
       - name: Build
         run: npm run build
+
+      # Gate 2b — the HEADLESS SIM suites (tests/sim, engine-core S2): the real
+      # GameEngine in Node on the stand-in ports, no browser.  Seconds, not
+      # minutes, and it carries the platform guard (no `window` / `document` /
+      # `navigator` / `performance` in the sim) and the replay claims, so a
+      # sim regression fails here before the browser suites even start.
+      - name: Headless sim tests
+        run: npm run test:sim
 
       # The browser download is the one step worth caching: `npm ci` costs ~2s
       # behind setup-node's lockfile-keyed npm cache, while fetching Chromium
