@@ -223,7 +223,7 @@ test('a death leaves a wreck of what was MOUNTED, strips the ship, and keeps car
   // and the summary says so
   const s = g.runSummarySnapshot();
   assert.equal(s.wreck.modules, had.length);
-  assert.equal(s.wreck.mapName, 'Pocket');
+  assert.equal(s.wreck.mapName, 'Pocket · L2');
   assert.equal(g.records.deaths, 1);
 });
 

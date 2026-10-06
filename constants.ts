@@ -7997,15 +7997,62 @@ export const STATION_VARIANTS: Record<StationKind, { name: string; color: string
   armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true } },
   tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true } },
 };
+/** THE HUB LAYOUT — where every station and rift sits on the 12k Overworld.
+ *
+ *  Home station at the centre.  Around it, a tight ring of EIGHT debug rifts
+ *  (the material-field maps, `HUB_TEST_PORTAL_SITES`, no gravity).  Beyond
+ *  that, FIFTEEN slots spread at even angular steps around the home station
+ *  over three radii: the 12 arena rifts (4 maps x 3 difficulty varieties)
+ *  and the three shop stations.  Ring index = variety, so the easy variant
+ *  of every map is the inner ring and the hard one the outer — distance from
+ *  home reads as difficulty.  The map order rotates one place per ring, so
+ *  neighbouring angles are never the same map.  Positions are computed once
+ *  (dmath, so every JS engine agrees) and rounded to whole units; the sim
+ *  test `hublayout.test.ts` pins the minimum torus spacing. */
+export const HUB_LAYOUT = {
+  /** Debug-field ring radius (home station CLEARANCE is 520). */
+  FIELD_RADIUS: 1300,
+  /** Arena / shop ring radii, inner to outer = easy / mid / hard. */
+  RING_RADII: [2700, 3900, 5000] as readonly number[],
+  /** Slots around the home station. */
+  SLOTS: 15,
+  /** Angle of slot 0, radians (keeps nothing exactly on an axis). */
+  ANGLE0: 0.2,
+};
+
+/** Arena maps in rotation order, and their three varieties (easy / mid / hard).
+ *  The MID variety keeps the original descriptor id, so saves, wave memory and
+ *  wrecks keyed on it carry over. */
+export const HUB_ARENA_VARIETIES: readonly { base: string; ids: readonly [string, string, string] }[] = [
+  { base: 'pocket',      ids: ['arena_pocket_easy',      'arena_pocket',      'arena_pocket_hard'] },
+  { base: 'universe',    ids: ['arena_universe_easy',    'arena_universe',    'arena_universe_hard'] },
+  { base: 'ring',        ids: ['arena_ring_easy',        'arena_ring',        'arena_ring_hard'] },
+  { base: 'seven_rings', ids: ['arena_seven_rings_easy', 'arena_seven_rings', 'arena_seven_rings_hard'] },
+];
+const HUB_SHOPS: readonly StationKind[] = ['shipwright', 'armory', 'tradehub'];
+
+function hubSlotPos(slot: number): { x: number; y: number } {
+  const a = HUB_LAYOUT.ANGLE0 + slot * (2 * dmath.PI / HUB_LAYOUT.SLOTS);
+  const r = HUB_LAYOUT.RING_RADII[slot % 3];
+  return { x: Math.round(dmath.cos(a) * r), y: Math.round(dmath.sin(a) * r) };
+}
+
+const HUB_SLOT_CONTENT: { arena?: string; shop?: StationKind; x: number; y: number }[] = [];
+for (let slot = 0; slot < HUB_LAYOUT.SLOTS; slot++) {
+  const v = slot % 3, k = Math.floor(slot / 3), pos = hubSlotPos(slot);
+  if (k < HUB_ARENA_VARIETIES.length) {
+    HUB_SLOT_CONTENT.push({ arena: HUB_ARENA_VARIETIES[(k + v) % HUB_ARENA_VARIETIES.length].ids[v], ...pos });
+  } else {
+    HUB_SLOT_CONTENT.push({ shop: HUB_SHOPS[v], ...pos });
+  }
+}
+
 /** Overworld station placement (world units; map is 12k, torus).  The home
- *  station sits at the player-spawn center; the shop stations are spread
- *  well apart so finding each is a flight (chevrons + minimap dots point
- *  the way). */
+ *  station sits at the player-spawn center; the shop stations take their
+ *  slots in the hub layout above. */
 export const OVERWORLD_STATIONS: readonly { kind: StationKind; x: number; y: number }[] = [
-  { kind: 'home',       x: 0,     y: 0 },
-  { kind: 'shipwright', x: -3600, y: -2400 },
-  { kind: 'armory',     x: 3600,  y: 2400 },
-  { kind: 'tradehub',   x: 3800,  y: -2600 },
+  { kind: 'home', x: 0, y: 0 },
+  ...HUB_SLOT_CONTENT.filter(c => c.shop).map(c => ({ kind: c.shop as StationKind, x: c.x, y: c.y })),
 ];
 
 // ── Overworld map (wave-free home map, increment 1e) ────────────────────────
@@ -8347,38 +8394,24 @@ export const PORTAL_CONSTANTS = {
   INDICATOR_RANGE: 1500,
 };
 
-/** Hub portal placement (world units; the Overworld is 12k square, torus).
- *  One portal per full-game arena, spread well clear of the four stations
- *  at (0,0) / (-3600,-2400) / (3600,2400) / (3800,-2600) and of each other,
- *  so reaching one is a flight — chevrons + minimap dots point the way.
- *  Showcase maps are not in this list: they hang off the TEST RACK below. */
-export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
-  { targetId: 'arena_universe',    x: -3600, y:  2400 },
-  { targetId: 'arena_ring',        x:     0, y: -4200 },
-  { targetId: 'arena_seven_rings', x:     0, y:  4200 },
-  { targetId: 'arena_pocket',      x: -4400, y:     0 },
-];
+/** Hub portal placement: one rift per arena VARIETY (4 maps x 3 levels), in
+ *  the slots of `HUB_LAYOUT`.  Showcase maps are not in this list: they form
+ *  the debug field ring below. */
+export const HUB_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] =
+  HUB_SLOT_CONTENT.filter(c => c.arena).map(c => ({ targetId: c.arena as string, x: c.x, y: c.y }));
 
-/** TEST PORTALS — a vertical rack beside the home station, one per showcase
- *  map, stepping the whole star-density range in order.
- *
- *  The column is the point: +Y is DOWN, so a portal further down the map leads
- *  to a LOWER-density sky.  Read as descending altitude — the top of the rack
- *  is deep space and the bottom is the closest thing the game has to a planet
- *  approach.  Densities are not repeated here; each target's value lives in
- *  STAR_DENSITY_BY_MAP, and `tests/starfield.spec.ts` asserts the two tables
- *  agree so they cannot drift apart.
- *
- *  Placed at x = +1400: clear of the home station's CLEARANCE (520) and of the
- *  player spawn, and spaced 600 apart so only one is ever inside USE_RANGE. */
-export const HUB_TEST_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] = [
-  { targetId: 'field_asteroid', x: 1400, y: -1500 },   // densest sky
-  { targetId: 'field_glass',    x: 1400, y:  -900 },
-  { targetId: 'field_metal',    x: 1400, y:  -300 },
-  { targetId: 'field_plastic',  x: 1400, y:   300 },
-  { targetId: 'field_rock',     x: 1400, y:   900 },
-  { targetId: 'field_nebula',   x: 1400, y:  1500 },   // sparsest sky
-];
+/** DEBUG FIELD RIFTS — the material-field showcase maps (no varieties), in a
+ *  tight ring just outside the home station, clockwise from the densest sky.
+ *  They carry NO gravity well (`addPortal`'s `gravity: false`): they are for
+ *  debugging, and a well beside the home station would throw debris at the
+ *  player's base. */
+const HUB_FIELD_IDS = ['field_asteroid', 'field_glass', 'field_metal', 'field_plastic',
+  'field_rock', 'field_nebula', 'field_indestructible', 'field_tile_heavy'] as const;
+export const HUB_TEST_PORTAL_SITES: readonly { targetId: string; x: number; y: number }[] =
+  HUB_FIELD_IDS.map((targetId, i) => {
+    const a = (i + 0.5) * (2 * dmath.PI / HUB_FIELD_IDS.length);
+    return { targetId, x: Math.round(dmath.cos(a) * HUB_LAYOUT.FIELD_RADIUS), y: Math.round(dmath.sin(a) * HUB_LAYOUT.FIELD_RADIUS) };
+  });
 
 /** Where an arena's return portal sits relative to that map's playerSpawn.
  *  Close enough to be visible from the arrival point (the way home is never

@@ -28,7 +28,7 @@
 import type { GameEngine } from './GameEngine';
 import { EntityType, type GameEntity } from '../types';
 import { MODULE_RESALE, moduleDef, WRECK_CONSTANTS } from '../constants';
-import { descriptorForMapType, mapDescriptor } from './maps/MapDescriptors';
+import { mapDescriptor } from './maps/MapDescriptors';
 import { nextId } from './systems/IdAllocator';
 import { wrapDeltaX, wrapDeltaY } from './toroidal';
 import { modulePrice } from './outfitting';
@@ -47,8 +47,7 @@ export function makeWreckRecord(g: GameEngine): WreckRecord | null {
   const ship = leftBehind(g.shipSlots);
   const weapon = leftBehind(g.weaponSlots);
   if (!ship.some(Boolean) && !weapon.some(Boolean)) return null;
-  const type = g.currentMap?.type;
-  const id = type !== undefined ? descriptorForMapType(type)?.id : undefined;
+  const id = g.currentDescriptor()?.id;
   if (!id) return null; // a map with no descriptor (a DBG-only showcase) leaves no wreck
   return {
     arenaId: id,
@@ -83,8 +82,7 @@ function removeWreckEntity(g: GameEngine): void {
 export function spawnWreckEntity(g: GameEngine): void {
   removeWreckEntity(g);
   const w = g.wreck;
-  const type = g.currentMap?.type;
-  if (!w || type === undefined || descriptorForMapType(type)?.id !== w.arenaId) return;
+  if (!w || g.currentDescriptor()?.id !== w.arenaId) return;
   const e: GameEntity = {
     id: nextId('wreck'),
     type: EntityType.INTERACTABLE,
@@ -155,7 +153,7 @@ export function updateWreckGuide(g: GameEngine): void {
   if (!w || g.player.isExploding) return;
   let target: GameEntity | null = g.wreckEntity && g.wreckEntity.active ? g.wreckEntity : null;
   if (!target) {
-    const inHub = mapDescriptor(w.arenaId)?.kind !== 'hub' && descriptorForMapType(g.currentMap?.type)?.kind === 'hub';
+    const inHub = mapDescriptor(w.arenaId)?.kind !== 'hub' && g.currentDescriptor()?.kind === 'hub';
     for (const p of g.portals) {
       if (!p.active) continue;
       if (!inHub || p.portalTargetId === w.arenaId) { target = p; break; }

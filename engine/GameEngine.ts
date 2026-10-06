@@ -20,7 +20,7 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
-import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MapDescriptor, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
@@ -1394,6 +1394,8 @@ export class GameEngine {
   public wreck: WreckRecord | null = null;
   /** Held wave state per arena (engine/arenaWaves.ts). */
   public arenaWaves: Record<string, ArenaWaveMemory> = {};
+  /** True only inside `beginSeededRun`: the departing map's wave is not remembered. */
+  public dropArenaStamp = false;
   public wreckEntity: GameEntity | null = null;
   /** The contact currently carrying `wreckGuide` (engine/wreck.ts). */
   public wreckGuideEntity: GameEntity | null = null;
@@ -1419,11 +1421,16 @@ export class GameEngine {
     // A replay must not depend on a save: a fresh character, no wreck.
     this.wreck = null;
     this.arenaWaves = {};
+    // Unloading the previous map would stamp ITS wave back into the memory just
+    // cleared (loadMapFresh stamps before it tears down), and the new run would
+    // start fast-forwarded: a replay must begin from nothing held.
+    this.dropArenaStamp = true;
     this.resetCharacter();
     this.deathPending = false;
     this.deathDelay = 0;
     this.deathSummary = null;
     this.resetAndLoadSelectedMap();
+    this.dropArenaStamp = false;
     this.startGame();
     // A replay starts from a DEFINED state, not from wherever the last run left
     // the ship pointing: map load re-places the player but leaves its heading
@@ -1813,13 +1820,33 @@ export class GameEngine {
       this.loadMapSeeded(type);
   }
 
+  /** The descriptor id of the map that is loaded (several descriptors can share
+   *  one MapType: an arena's easy / mid / hard varieties). */
+  mapDescId: string | undefined;
+  /** Set by `transitionToMap` for the one load it is about to make. */
+  private pendingDescId: string | undefined;
+
+  /** The loaded map's own descriptor — the variety the player is IN, which a
+   *  bare MapType cannot say. */
+  currentDescriptor(): MapDescriptor | undefined {
+      const t = this.currentMap?.type;
+      const d = mapDescriptor(this.mapDescId);
+      return d && d.mapType === t ? d : descriptorForMapType(t);
+  }
+
+  /** The descriptor a load of `type` is for: the pending portal target, else the type's default. */
+  private descFor(type: MapType): MapDescriptor | undefined {
+      const d = mapDescriptor(this.pendingDescId);
+      return d && d.mapType === type ? d : descriptorForMapType(type);
+  }
+
   /** Tell the music director which area is being entered, so it picks that
    *  area's theme.  Every map load announces it: `loadMapFresh` (a run, a
    *  portal, a death return) and the menu backdrop swap in `setMapType`, which
    *  loads through `loadMapSeeded` alone and would otherwise start a run on a
    *  picked arena with the hub's song. */
   private announceMusicArea(type: MapType) {
-      const area = descriptorForMapType(type);
+      const area = this.descFor(type);
       this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
   }
 
@@ -1836,14 +1863,17 @@ export class GameEngine {
       // seed has to determine, and every cache keyed by either was rebuilt
       // or cleared above.  (Debris carried through a portal is re-id'd at
       // capture so it cannot collide with the new map's ids.)
-      const kind = descriptorForMapType(type)?.kind;
+      const desc = this.descFor(type);
+      this.mapDescId = desc?.id;
+      this.pendingDescId = undefined;
+      const kind = desc?.kind;
       if (kind === 'hub') {
         seedRng(HUB_WORLD_SEED);
         this.arenaSeed = null;
       } else {
         // A wreck PINS its arena's seed (D-S2-d1) so S1's seeded generation
         // rebuilds the terrain the ship fell in.  A replay's pinned seed wins.
-        const pinned = wreckSeedFor(this, descriptorForMapType(type)?.id);
+        const pinned = wreckSeedFor(this, desc?.id);
         const seed = (this.pendingRunSeed ?? pinned ?? this.platform.entropy.seed()) >>> 0;
         this.pendingRunSeed = null;
         seedRng(seed);
@@ -2008,7 +2038,7 @@ export class GameEngine {
       // runs below, reads the new value.
       // Where the player is coming FROM, resolved before the map is swapped —
       // used below to put them at the matching rift MOUTH on arrival.
-      const fromId = descriptorForMapType(this.currentMap?.type)?.id;
+      const fromId = this.currentDescriptor()?.id;
 
       // DEBRIS TRAVELS WITH YOU (user call): everything loose within
       // TRANSIT.RADIUS of the ship — mobile shards and collectible drops,
@@ -2051,6 +2081,7 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
 
+      this.pendingDescId = dest.id;
       this.loadMapFresh(dest.mapType, true);
       // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
       // back at the map just left — which is exactly the hub's per-arena
@@ -7139,7 +7170,7 @@ export class GameEngine {
    *  1-3 setting for a map that has none. */
   arenaLevel(): number {
     if (this.dbgArenaLevel !== null) return this.dbgArenaLevel;
-    const d = descriptorForMapType(this.currentMap?.type);
+    const d = this.currentDescriptor();
     return d?.level ?? Math.max(1, this.difficultyLevel);
   }
 
@@ -7829,7 +7860,7 @@ export class GameEngine {
    *  is initialised disabled there, exactly like difficulty "None" — and
    *  every arena runs waves.  Unregistered maps default to enabled. */
   get wavesEnabled(): boolean {
-    return descriptorForMapType(this.currentMap?.type)?.wavesEnabled ?? true;
+    return this.currentDescriptor()?.wavesEnabled ?? true;
   }
 
   private initWaveSystem() {
@@ -7841,7 +7872,7 @@ export class GameEngine {
     // An arena remembers where its wave script stood (engine/arenaWaves.ts):
     // exactly, for a few minutes after the player left, then from the top of
     // an ever earlier wave.
-    const held = arenaWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id);
+    const held = arenaWaveFor(this, this.currentDescriptor()?.id);
     this.waves.init(ctx, this.wavesEnabled, held.wave, held.progress);
     if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }

@@ -56,13 +56,21 @@ export const MAP_DESCRIPTORS: readonly MapDescriptor[] = [
   // The hub — wave-free, stations, portals out to the arenas.
   { id: 'overworld',            name: 'Overworld',      mapType: MapType.OVERWORLD,   kind: 'hub',   wavesEnabled: false },
 
-  // Full-game arenas.  These four are the portal-linked set: the hub
-  // places one portal per entry in HUB_PORTAL_SITES, and each of these
+  // Full-game arenas.  Four maps x three difficulty varieties (easy / mid /
+  // hard; the mid keeps the original id): the hub places one portal per entry in HUB_PORTAL_SITES, and each of these
   // maps carries a return portal home (BaseMapLayer.addReturnPortal).
-  { id: 'arena_universe',       name: 'Deep Space',     mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 3 },
-  { id: 'arena_ring',           name: 'Ring World',     mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 4 },
-  { id: 'arena_seven_rings',    name: 'Seven Rings',    mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 6 },
-  { id: 'arena_pocket',         name: 'Pocket',         mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 2 },
+  { id: 'arena_pocket_easy',       name: 'Pocket · L1',      mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 1 },
+  { id: 'arena_pocket',            name: 'Pocket · L2',      mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 2 },
+  { id: 'arena_pocket_hard',       name: 'Pocket · L4',      mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 4 },
+  { id: 'arena_universe_easy',     name: 'Deep Space · L2',  mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 2 },
+  { id: 'arena_universe',          name: 'Deep Space · L3',  mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'arena_universe_hard',     name: 'Deep Space · L5',  mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 5 },
+  { id: 'arena_ring_easy',         name: 'Ring World · L3',  mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'arena_ring',              name: 'Ring World · L4',  mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 4 },
+  { id: 'arena_ring_hard',         name: 'Ring World · L6',  mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 6 },
+  { id: 'arena_seven_rings_easy',  name: 'Seven Rings · L5', mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 5 },
+  { id: 'arena_seven_rings',       name: 'Seven Rings · L6', mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 6 },
+  { id: 'arena_seven_rings_hard',  name: 'Seven Rings · L8', mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 8 },
 
   // Showcase / test maps — reached from the debug panel's map picker, and six
   // of them (all but Indestructible and Tile Heavy) from the hub's TEST RACK
@@ -81,7 +89,14 @@ export const MAP_DESCRIPTORS: readonly MapDescriptor[] = [
 // Built once — the registry is static, and both lookups run on the map-load
 // path (never per frame).
 const BY_ID = new Map<string, MapDescriptor>(MAP_DESCRIPTORS.map(d => [d.id, d]));
-const BY_MAP_TYPE = new Map<MapType, MapDescriptor>(MAP_DESCRIPTORS.map(d => [d.mapType, d]));
+// Several descriptors can share a MapType (an arena's easy / mid / hard
+// varieties): the type's DEFAULT is the original, un-suffixed id.  The engine
+// tracks which variety is loaded itself (`GameEngine.currentDescriptor`).
+const BY_MAP_TYPE = new Map<MapType, MapDescriptor>();
+for (const d of MAP_DESCRIPTORS) {
+  const cur = BY_MAP_TYPE.get(d.mapType);
+  if (!cur || /_(easy|hard)$/.test(cur.id)) BY_MAP_TYPE.set(d.mapType, d);
+}
 
 /** Look up a descriptor by its stable id (portal targets, transitions). */
 export function mapDescriptor(id: string | undefined): MapDescriptor | undefined {

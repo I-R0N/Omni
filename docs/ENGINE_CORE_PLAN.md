@@ -600,6 +600,14 @@ Levels 1-3 are the old Low/Med/High rows; above that HP and damage grow 1.14x a
 level and spawn 1.03x (capped 1.5x).  Playtest handle: DBG > World & Maps >
 Portals > "Arena level".  Baseline report predates this generator: re-run it.
 
+**D-S3-i (user, settled): the hub layout and arena varieties.**  Each arena map
+has three portals (easy / mid / hard: Pocket L1/2/4, Deep Space 2/3/5, Ring
+World 3/4/6, Seven Rings 5/6/8 — a starting point for the playtest); the eight
+material-field showcase rifts (Indestructible and Tile Heavy included) form a
+gravity-free debug ring just outside the home station; arenas and the three
+shops are spread at even angles over three rings round the home station, the
+easy variety innermost.  The mid variety keeps the original descriptor id.
+
 **PROPOSED (not settled) — the level curve, for the user to confirm.**
 Calibration (baseline report §8, mk3 on POCKET + RING, n = 6 a cell): enemy HP
 and damage x1.0 -> the fully outfitted bot beats the boss 4 times in 6; x1.5 ->

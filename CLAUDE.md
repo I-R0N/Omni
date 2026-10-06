@@ -2588,7 +2588,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
-- `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
+- `HUB_LAYOUT` / `HUB_ARENA_VARIETIES` / `OVERWORLD_STATIONS` / `HUB_PORTAL_SITES` /
+  `HUB_TEST_PORTAL_SITES` — the hub's whole layout, computed once with dmath:
+  home station at the centre; a ring of eight debug FIELD rifts (every
+  showcase map, no varieties, NO gravity well) at r = 1300; then 15 slots at
+  even angles over three radii (2700 / 3900 / 5000) holding the 12 arena rifts
+  (4 maps x easy / mid / hard — ring = variety, so distance reads as difficulty;
+  the mid keeps the original id) and the three shop stations.
+  `tests/sim/hublayout.test.ts` pins the spacing.
+- `PORTAL_CONSTANTS` / `RETURN_PORTAL_OFFSET` — the
   map portals (roadmap step (k)): rift size / colours (violet out, sky
   home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
   burst — plus the WORMHOLE block: `GRAVITY_RANGE` / `GRAVITY_STRENGTH` /

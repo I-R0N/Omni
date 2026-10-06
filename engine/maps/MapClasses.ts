@@ -132,7 +132,7 @@ export abstract class BaseMapLayer {
    * it a minimap dot, an off-screen chevron, and asteroid-respawn
    * avoidance for free.  The destination's display name rides on `name`.
    */
-  protected addPortal(targetId: string, pos: Vector2, color: string) {
+  protected addPortal(targetId: string, pos: Vector2, color: string, gravity = true) {
     this.entities.push({
       id: nextId('portal'),
       type: EntityType.INTERACTABLE,
@@ -153,9 +153,13 @@ export abstract class BaseMapLayer {
       // mouth is swallowed by the close-attractor crush) and by RenderSystem's
       // attractor bucket, which feeds the background star lensing.  The
       // player feels only GRAVITY_PLAYER_SCALE of it — a tug, never a trap.
-      gravityRange: PORTAL_CONSTANTS.GRAVITY_RANGE,
-      gravityStrength: PORTAL_CONSTANTS.GRAVITY_STRENGTH,
-      gravityPlayerScale: PORTAL_CONSTANTS.GRAVITY_PLAYER_SCALE,
+      // `gravity: false` (the hub's debug field rifts) leaves all three off:
+      // no attractor, no lens, nothing thrown at the base.
+      ...(gravity ? {
+        gravityRange: PORTAL_CONSTANTS.GRAVITY_RANGE,
+        gravityStrength: PORTAL_CONSTANTS.GRAVITY_STRENGTH,
+        gravityPlayerScale: PORTAL_CONSTANTS.GRAVITY_PLAYER_SCALE,
+      } : {}),
       // How big the world at the other end is.  A rift is a window onto its
       // destination, so `portalHorizonRadius` sizes the black disc from this
       // — Pocket shows a small mouth, Deep Space a wide one.  Stamped here
@@ -491,7 +495,7 @@ export class OverworldMap extends BaseMapLayer {
             const dx = e.position.x - st.x, dy = e.position.y - st.y;
             return dx * dx + dy * dy > clear2;
         })
-        && HUB_PORTAL_SITES.every(p => {
+        && HUB_PORTAL_SITES.concat(HUB_TEST_PORTAL_SITES).every(p => {
             const dx = e.position.x - p.x, dy = e.position.y - p.y;
             return dx * dx + dy * dy > portalClear2;
         })
@@ -529,11 +533,10 @@ export class OverworldMap extends BaseMapLayer {
       this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
     }
 
-    // The TEST RACK — a vertical column of portals into the showcase maps,
-    // stepping the star-density range from densest at the top to sparsest at
-    // the bottom.  +Y is down, so descending the column is descending altitude.
+    // The debug FIELD RING — the showcase maps in a tight ring round the home
+    // station, with no gravity well (see HUB_TEST_PORTAL_SITES).
     for (const p of HUB_TEST_PORTAL_SITES) {
-      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR);
+      this.addPortal(p.targetId, { x: p.x, y: p.y }, PORTAL_CONSTANTS.COLOR, false);
     }
   }
 }
