@@ -634,7 +634,12 @@ banks (D31), so it composes with them rather than reverting any.
   `public/assets/audio/score/index.json` lists the songs AND the music plan
   (which song plays in the hub, a field map, an arena, a boss fight).
   `AdaptiveMusic` loads the index; `scripts/inline-build.mjs` inlines it, so
-  the single-file standalone still plays the score.
+  the single-file standalone still plays the score.  **The plan is WRITTEN BY
+  THE IMPORTER, not hand-kept** — `for (const role of use) index.plan[role] =
+  meta.id`, from each song's own `use` array — so the editorial choice is made
+  in the KIT and the index is its output.  It only ever ADDS or overwrites the
+  roles a song claims and never clears one, so a role nobody claims keeps
+  whatever is there.  See D34: this retires half of D33's rationale.
 - **`npm run music:import -- <kit>`** takes a GarageBand export, checks
   length against tempo, folds the tail into the loop, applies ONE loudness
   gain across all layers, encodes, and adds or replaces that song in the
@@ -648,6 +653,21 @@ banks (D31), so it composes with them rather than reverting any.
   extension of S2's port surface, consistent with it.
 - **It set the GENERATED-DATA format precedent** that D33 then stated as a
   rule for the whole project.  See D33 before extracting any table.
+- **THE PIPELINE HAS NOW CARRIED A REAL SONG** (`6558b71`, 2026-10-06):
+  "Critical Mass", the BOSS song, re-imported from an actual GarageBand export
+  — the first content through `music:import` rather than `scripts/score/`.  So
+  the tool is proven end to end, and the three things it leaves behind are
+  worth knowing.  (1) The song is now PART authored, PART generated: the six
+  loop stems are the export, while `riser.mp3` and `victory.mp3` are the older
+  generated one-shots, because "a riser / victory not in this export keeps the
+  song's existing one" is the importer's deliberate rule.  (2) `song.json` is
+  copied beside the stems as the song's own record, and TWO of its fields are
+  INERT — `key` and `phraseBars` are read by nothing, in the engine or in the
+  importer.  Latent, like W2's variants: do not assume they are wired.  (3) The
+  boss stem grew 532 KB → 852 KB, which is MONO → STEREO (the importer encodes
+  80k mono / 128k stereo per layer) and not a length change — all six stems
+  measure 53.283 s, so the score is still synchronised.  Gates on it:
+  typecheck 0, `test:sim` 47/47, CI green both scopes.
 
 **Consequence for `S3`.**  `index.json` is a second data format alongside
 `S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
@@ -851,6 +871,7 @@ who made it, and the consequences for other sessions.
 | D31 | PM | 2026-10-04 | **Audio memory: the score decodes at 25 kHz, and the SFX banks decode LAZILY** (user call), after PR #110's adaptive score landed and the resident figure was MEASURED at ~133 MB (70.9 music + ~62 sliced cue buffers) against a mobile-first phase.  Options put to the user: drop the music decode rate / hold fewer layers / decode the banks lazily instead of all four at unlock.  **Call: 25 kHz and lazy.** | Music: `SCORE.DECODE_RATE` 32 → 25 kHz, measured 70.9 → **55.4 MB**; linear, and nothing about the bar grid is rate-dependent.  Banks: only the MENU bank decodes at unlock; `requestBank` starts the others FIRE-AND-FORGET from `play()` / `loop()`, so CLAUDE.md §8's "never a decode inside a frame" rule is kept — the asking trigger plays its procedural draft and returns, which is what every id already did while the eager preload was in flight.  Measured: title screen **4.7 MB** of banks (was ~62), a run that never fires **49.3**, audio in total ~105 MB in play and 16.5 at the title against 133 / ~77.  **Stated honestly: lazy decoding DEFERS rather than reduces** — impacts and world are asked for within seconds of a run, so a few seconds in the steady state is close to what it was; the reduction is the rate cut, and what laziness buys is the PEAK (the whole-bank buffer no longer stacks against the score's decode at unlock) and the menu.  Two consequences were load-bearing and are documented in §8: the WAV pass and the procedural pre-render had to switch from `hasSample` to the MANIFEST, or a not-yet-decoded bank id gets a WAV fetched AND three Offline takes rendered — costing more than the eager decode saved; and a live LOOP is dropped when its bank lands, or `move.thrust` keeps its draft for the whole run.  `tests/audio.spec.ts` gained a laziness regression (verified to FAIL against the eager build) and its whole-manifest test now asks for every bank via `decodeAllBanks()` — the claim is unchanged, only its trigger moved.  **Not a work-session payload:** done here, in the phase branch, because it is a two-constant change plus its guards and it blocked nothing in S3's brief. |
 | D32 | PM | 2026-10-04 | **S3's four pre-flight calls, settled before the brief was written** (user).  (a) **FORMAT: TOML.**  Options weighed: TOML / JSON + a TS schema / data-only TS modules.  The decider was COMMENTS — this repo's tables carry the reasoning behind each number (the grain table's "neither is visible in the row", the bank divisor's two factors), and that commentary is a large part of their value, so JSON would either lose it or scatter it into sibling files.  (b) **FIRST TABLES: `MAP_POPULATION` + `ENEMY_VARIANTS` + `BOSS_DEFS`** — ~560 measured lines, all three DESCRIPTIONS rather than derivations, one small / one medium / one nested-shape, and exactly what a balance harness needs to vary.  (c) **ORDER: tables before `dmath`** (D30 placed dmath in S3; this settles its position WITHIN the session, and does not reopen D30).  (d) **KNOB TRIAGE: only the extracted tables' knobs**, riding each extraction. | **The format choice is cheap here only because of an existing precedent, and that is the brief's load-bearing constraint.**  `vite.config.ts` already resolves two BUILD-TIME virtual manifests (`virtual:nebula-manifest`, `virtual:sfx-manifest`), so a TOML table parses at build time into a typed module: the parser is a devDependency, the bundle ships zero parser bytes, and `scripts/inline-build.mjs`'s single-file standalone — which cannot fetch anything — works for free because the data is already in the module.  THREE consumers must all resolve the new virtual ids or the gates break, and the second is the one that gets forgotten: (1) `vite.config.ts`; (2) `scripts/sim-test.mjs`, whose esbuild shim hardcodes `/^virtual:(nebula\|sfx)-manifest$/`, so `npm run test:sim` fails the moment a table becomes virtual; (3) `playwright.config.ts`'s webServer, which builds, so it is covered by (1).  ORDER rationale: extraction is the session's stated payoff and the lower-risk half, so if `dmath` sprawls (~150 call sites plus a `perf/` number either side) the valuable work has landed, and `dmath` explicitly does not block the mobile release.  The honest cost of that order: `dmath` later shifts the extraction's derived-value assertions in the LAST PLACE, so those assertions need tolerances rather than equality — the brief says so, since discovering it as a red suite is how it turns into a day.  MEASURED AND CORRECTED in §4 while settling these: `constants.ts` is 11,359 lines (the brief said ~1000) and there are 59 `*_CYCLE` tables (it said ~90). |
 | D33 | PM | 2026-10-05 | **THE FORMAT FOLLOWS WHO WRITES THE FILE, NOT WHO READS IT** (user call, after W1's `score/index.json` landed beside D32's TOML and the two could have read as drift).  **A file a GENERATOR rewrites is JSON.  A file only HUMANS write is TOML.**  So W1's song index stays JSON and `S3`'s tuning tables are TOML, and neither is to be "unified" into the other. | The rule is phrased on the WRITER because that is the property that actually decides it: TOML's one advantage here is COMMENTS, and a comment cannot survive a generator rewriting the file — `npm run music:import` adds or replaces songs in `index.json` on every run, so any commentary in it would be destroyed on the next import.  Phrasing the rule on the reader ("engine data is X") would have given the wrong answer for both files.  **THE INDEX IS HONESTLY A MIXED CASE, and it is the exception that proves the rule rather than a counter-example:** its `songs[]` array is generator-written, but its `plan` block (which song plays in the hub, a field map, an arena, a boss fight) is a HAND-AUTHORED editorial choice — and the file pays for being JSON exactly where you would expect, with an `"about"` STRING KEY doing a comment's job at the top.  That is the cost, it is small, and splitting four lines of `plan` into a separate TOML file to satisfy the rule would be churn for nothing.  If `plan` ever grows into real editorial reasoning, THAT is the moment to split it, and this row is the argument for doing so.  Recorded in CLAUDE.md §8 as well as here, so a session that reads only the master spec still sees it. |
+| D34 | PM | 2026-10-06 | **D33's RULE STANDS; ITS "MIXED CASE" CAVEAT IS RETIRED** (PM reconciliation after `6558b71`, not a new call).  The index is NOT a mixed case: `music:import` writes its `plan` block too, so `index.json` is a wholly generator-written file and the rule's own answer for it — JSON — is now the clean case rather than the exception.  Read D33's rule as written and ignore only its mixed-case paragraph. | D33 argued the index "pays for being JSON exactly where you would expect" because `plan` was HAND-AUTHORED editorial choice sitting in generated output.  That was true of the file when D33 was written and is not true of the code: `scripts/music-import.mjs` ends with `for (const role of use) index.plan[role] = meta.id`, so each song's own `use` array decides which roles it claims and the importer stamps them into the index.  **The editorial choice did not disappear — it moved UPSTREAM**, into the kit's hand-authored `song.json`, which is exactly where D33's deciding property says it belongs.  So the rule did better than its own footnote: the one file that looked like a counter-example turned out to obey it.  Two consequences.  (1) `plan` is still hand-EDITABLE (the importer never clears a role), so a human pin survives until a song claims that role — it is generator-written, not generator-owned.  (2) It puts a NEW question where the old caveat was, and that one is the user's, not mine: the kit's `song.json` is hand-written and read by a generator, so comments WOULD survive in it and D33's rule points at TOML — see §8.  Appended rather than editing D33, per §0: the log is append-only, and a correction that rewrites the row it corrects destroys the evidence that the rule was tested. |
 
 ---
 
@@ -860,6 +881,26 @@ Work sessions append here when a decision changes what a *later* session
 should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
+
+- **W1 → the user (the kit `song.json`'s format).**  D34 moved the music
+  pipeline's one hand-authored file out of `index.json` and into the GarageBand
+  kit's `song.json` — id, title, bpm, bars, `use`, and the two inert fields.
+  That file is WRITTEN BY A HUMAN and only READ by a generator, so comments
+  would survive in it, which is the exact property D33 says decides the format:
+  by D33's own rule it wants TOML.  It is JSON today.  **Nothing is broken and
+  nothing is urgent** — it is five live fields and the importer validates four
+  of them — so this is a consistency call, and it is the user's because D33 was
+  a user call and because changing it touches W1's authoring surface and
+  `docs/MUSIC_PIPELINE.md`, not just a parser.  Three ways to go: (a) leave it
+  JSON and write the exemption into D33's rule, since the file is small and the
+  importer already carries the only commentary that matters; (b) move it to
+  TOML, which buys the ability to say WHY a song claims `boss` beside the claim
+  — the kind of reasoning this repo normally keeps next to its numbers; (c) move
+  it to TOML *and* keep the generator's copy beside the stems as JSON, which is
+  honest about the two files having different writers but means two formats for
+  one shape.  My recommendation is (a) until a kit carries reasoning worth a
+  comment, on D33's own "that is the moment to split it" logic.  *(PM,
+  2026-10-06)*
 
 - **S1 → S2 (Clock port).**  Four wall-clock reads still sit in or beside the
   sim and a replay works around, not through, them: (1) `PerfController`'s load
