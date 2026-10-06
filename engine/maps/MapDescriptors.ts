@@ -23,6 +23,8 @@ import { MapType } from '../../types';
  *   mapType      the MapType GameEngine.buildMap() instantiates
  *   kind         'hub' (wave-free home) | 'arena' (wave gameplay)
  *   wavesEnabled what WaveSystem.init(ctx, enabled) is handed
+ *   level        the ARENA LEVEL (1..20) its waves run at — what the portal
+ *                shows on arrival.  Absent on the hub (no waves).
  *
  * `kind` and `wavesEnabled` are separate on purpose: "is the home hub"
  * and "runs waves" are the same answer today, but the showcase maps are
@@ -42,6 +44,10 @@ export interface MapDescriptor {
   kind: MapKind;
   /** Handed straight to `WaveSystem.init(ctx, enabled)` on load. */
   wavesEnabled: boolean;
+  /** Arena difficulty level 1..20 (data/enemy-difficulty.toml, constants
+   *  `levelScales`).  Each portal's own dial (D-S3-d); PROVISIONAL until the
+   *  user has playtested the spread. */
+  level?: number;
 }
 
 /** Every map in the game, in menu order.  Adding a map = one row here
@@ -50,32 +56,47 @@ export const MAP_DESCRIPTORS: readonly MapDescriptor[] = [
   // The hub — wave-free, stations, portals out to the arenas.
   { id: 'overworld',            name: 'Overworld',      mapType: MapType.OVERWORLD,   kind: 'hub',   wavesEnabled: false },
 
-  // Full-game arenas.  These four are the portal-linked set: the hub
-  // places one portal per entry in HUB_PORTAL_SITES, and each of these
+  // Full-game arenas.  Four maps x three difficulty varieties (easy / mid /
+  // hard; the mid keeps the original id): the hub places one portal per entry in HUB_PORTAL_SITES, and each of these
   // maps carries a return portal home (BaseMapLayer.addReturnPortal).
-  { id: 'arena_universe',       name: 'Deep Space',     mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true },
-  { id: 'arena_ring',           name: 'Ring World',     mapType: MapType.RING,        kind: 'arena', wavesEnabled: true },
-  { id: 'arena_seven_rings',    name: 'Seven Rings',    mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true },
-  { id: 'arena_pocket',         name: 'Pocket',         mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true },
+  { id: 'arena_pocket_easy',       name: 'Pocket · L1',      mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 1 },
+  { id: 'arena_pocket',            name: 'Pocket · L2',      mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 2 },
+  { id: 'arena_pocket_hard',       name: 'Pocket · L4',      mapType: MapType.POCKET,      kind: 'arena', wavesEnabled: true, level: 4 },
+  { id: 'arena_universe_easy',     name: 'Deep Space · L2',  mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 2 },
+  { id: 'arena_universe',          name: 'Deep Space · L3',  mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'arena_universe_hard',     name: 'Deep Space · L5',  mapType: MapType.UNIVERSE,    kind: 'arena', wavesEnabled: true, level: 5 },
+  { id: 'arena_ring_easy',         name: 'Ring World · L3',  mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'arena_ring',              name: 'Ring World · L4',  mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 4 },
+  { id: 'arena_ring_hard',         name: 'Ring World · L6',  mapType: MapType.RING,        kind: 'arena', wavesEnabled: true, level: 6 },
+  { id: 'arena_seven_rings_easy',  name: 'Seven Rings · L5', mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 5 },
+  { id: 'arena_seven_rings',       name: 'Seven Rings · L6', mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 6 },
+  { id: 'arena_seven_rings_hard',  name: 'Seven Rings · L8', mapType: MapType.SEVEN_RINGS, kind: 'arena', wavesEnabled: true, level: 8 },
 
   // Showcase / test maps — reached from the debug panel's map picker, and six
   // of them (all but Indestructible and Tile Heavy) from the hub's TEST RACK
   // (HUB_TEST_PORTAL_SITES); every one carries a return rift home.
   // Registered so `wavesEnabled` has ONE source of truth for every map.
-  { id: 'field_asteroid',       name: 'Asteroid Field', mapType: MapType.ASTEROID_FIELD,       kind: 'arena', wavesEnabled: true },
-  { id: 'field_glass',          name: 'Glass Field',    mapType: MapType.GLASS_FIELD,          kind: 'arena', wavesEnabled: true },
-  { id: 'field_plastic',        name: 'Plastic Field',  mapType: MapType.PLASTIC_FIELD,        kind: 'arena', wavesEnabled: true },
-  { id: 'field_metal',          name: 'Metal Field',    mapType: MapType.METAL_FIELD,          kind: 'arena', wavesEnabled: true },
-  { id: 'field_indestructible', name: 'Indestructible', mapType: MapType.INDESTRUCTIBLE_FIELD, kind: 'arena', wavesEnabled: true },
-  { id: 'field_nebula',         name: 'Nebula Field',   mapType: MapType.NEBULA_FIELD,         kind: 'arena', wavesEnabled: true },
-  { id: 'field_rock',           name: 'Rock Field',     mapType: MapType.ROCK_FIELD,           kind: 'arena', wavesEnabled: true },
-  { id: 'field_tile_heavy',     name: 'Tile Heavy',     mapType: MapType.TILE_HEAVY,           kind: 'arena', wavesEnabled: true },
+  { id: 'field_asteroid',       name: 'Asteroid Field', mapType: MapType.ASTEROID_FIELD,       kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_glass',          name: 'Glass Field',    mapType: MapType.GLASS_FIELD,          kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_plastic',        name: 'Plastic Field',  mapType: MapType.PLASTIC_FIELD,        kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_metal',          name: 'Metal Field',    mapType: MapType.METAL_FIELD,          kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_indestructible', name: 'Indestructible', mapType: MapType.INDESTRUCTIBLE_FIELD, kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_nebula',         name: 'Nebula Field',   mapType: MapType.NEBULA_FIELD,         kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_rock',           name: 'Rock Field',     mapType: MapType.ROCK_FIELD,           kind: 'arena', wavesEnabled: true, level: 3 },
+  { id: 'field_tile_heavy',     name: 'Tile Heavy',     mapType: MapType.TILE_HEAVY,           kind: 'arena', wavesEnabled: true, level: 3 },
 ];
 
 // Built once — the registry is static, and both lookups run on the map-load
 // path (never per frame).
 const BY_ID = new Map<string, MapDescriptor>(MAP_DESCRIPTORS.map(d => [d.id, d]));
-const BY_MAP_TYPE = new Map<MapType, MapDescriptor>(MAP_DESCRIPTORS.map(d => [d.mapType, d]));
+// Several descriptors can share a MapType (an arena's easy / mid / hard
+// varieties): the type's DEFAULT is the original, un-suffixed id.  The engine
+// tracks which variety is loaded itself (`GameEngine.currentDescriptor`).
+const BY_MAP_TYPE = new Map<MapType, MapDescriptor>();
+for (const d of MAP_DESCRIPTORS) {
+  const cur = BY_MAP_TYPE.get(d.mapType);
+  if (!cur || /_(easy|hard)$/.test(cur.id)) BY_MAP_TYPE.set(d.mapType, d);
+}
 
 /** Look up a descriptor by its stable id (portal targets, transitions). */
 export function mapDescriptor(id: string | undefined): MapDescriptor | undefined {

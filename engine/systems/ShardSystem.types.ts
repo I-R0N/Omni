@@ -113,7 +113,7 @@ export interface ShardSpawnShape {
    *  child recipes copy onto every fragment); a metal composite has
    *  METAL_ASSEMBLY's damping stamped directly when it forms.  Values
    *  are per-second decay factors — PhysicsSystem applies them via
-   *  `Math.pow(damping, timeScale)`. */
+   *  `dmath.pow(damping, timeScale)`. */
   linearDamping?: number;
   angularDamping?: number;
   /** Optional per-entity speed/spin floor stamped at spawn time.

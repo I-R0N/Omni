@@ -34,6 +34,7 @@ import {
 } from './engine/systems/render/shipSprites';
 import { runReplay, endReplay, hashSimState, firstDivergence } from './engine/replay';
 import * as rngStreams from './engine/systems/rng';
+import * as dmath from './engine/systems/dmath';
 import { drawPlayerCube } from './engine/systems/render/playerCube';
 import { SHIP_SHEETS } from './assets';
 import { mulberry32, polygonArea, polygonSignedArea, polygonCentroid, pointInPolygon,
@@ -255,6 +256,14 @@ const App: React.FC = () => {
       runReplay, endReplay, hashSimState, firstDivergence, rng: rngStreams,
     };
 
+    // The deterministic MATH layer (engine-core S3, D30): the sim's sin / cos /
+    // pow / exp / log / atan2 …, built only from operations every JS engine
+    // rounds identically.  Agreement between engines cannot be proved from
+    // inside one, so tests/headless.spec.ts hands THIS engine the pinned bit
+    // table (tests/sim/fixtures/dmath.bits.json) and requires the same bits.
+    // Nothing in the game reads this handle.
+    (window as any).__omniDmath = dmath;
+
     // The HEADLESS platform (engine-core S2): builds a second, real GameEngine
     // on the stand-in ports (manual clock, null renderer, silent audio).  The
     // ports claim is that where the sim reads the clock / input / output moves
@@ -331,6 +340,13 @@ const App: React.FC = () => {
 
   const handleStart = () => {
       if (engineRef.current) engineRef.current.startGame();
+  };
+
+  // NEW GAME: wipe the save (the menu already asked twice), then begin.
+  const handleNewGame = () => {
+      if (!engineRef.current) return;
+      engineRef.current.eraseSave();
+      engineRef.current.startGame();
   };
 
   const handlePause = () => {
@@ -508,6 +524,7 @@ const App: React.FC = () => {
         stats={stats}
         onCycleWeapon={handleCycleWeapon}
         onStart={handleStart}
+        onNewGame={handleNewGame}
         onPause={handlePause}
         onResume={handleResume}
         onRestart={handleRestart}

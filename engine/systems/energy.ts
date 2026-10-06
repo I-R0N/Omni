@@ -26,6 +26,7 @@
  * combo bookkeeping.
  */
 
+import * as dmath from './dmath';
 import type { GameEntity } from '../../types';
 import type { GrainSpec } from './ShardSystem.types';
 
@@ -547,7 +548,7 @@ export function clampHeat(h: number, ceiling: number = ENERGY_CONSTANTS.MAX_HEAT
  *  body actually becomes COLD (and leaves the active set) in finite time. */
 export function coolHeat(mat: MaterialId, heat: number, dt: number): number {
   const r = responseOf(mat);
-  const h = clampHeat(heat, maxHeatOf(mat)) * Math.exp(-r.coolingPerSec * Math.max(0, dt));
+  const h = clampHeat(heat, maxHeatOf(mat)) * dmath.exp(-r.coolingPerSec * Math.max(0, dt));
   return h < ENERGY_CONSTANTS.HEAT_EPSILON ? 0 : h;
 }
 
@@ -619,15 +620,15 @@ export function easeShownHeat(shown: number, target: number, dt: number): number
   const s = Number.isFinite(shown) && shown > 0 ? shown : 0;
   const t = Number.isFinite(target) && target > 0 ? target : 0;
   const tau = t > s ? ENERGY_CONSTANTS.SHOW_RISE_SEC : ENERGY_CONSTANTS.SHOW_FALL_SEC;
-  const out = s + (t - s) * (1 - Math.exp(-Math.max(0, dt) / tau));
+  const out = s + (t - s) * (1 - dmath.exp(-Math.max(0, dt) / tau));
   return out < ENERGY_CONSTANTS.SHOW_MIN && t <= 0 ? 0 : out;
 }
 
 export function heatRadiance(t: number): number {
   if (!(t > 0)) return 0;
   const T0 = 0.35;
-  const hi = (1 + T0) ** 4 - T0 ** 4;
-  return Math.min(1.5, ((t + T0) ** 4 - T0 ** 4) / hi);
+  const hi = dmath.pow(1 + T0, 4) - dmath.pow(T0, 4);
+  return Math.min(1.5, (dmath.pow(t + T0, 4) - dmath.pow(T0, 4)) / hi);
 }
 
 /** Multiplier on MECHANICAL energy for a body at `heat` — how heat lowers the

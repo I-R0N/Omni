@@ -23,11 +23,14 @@ import { spawnSync } from 'node:child_process';
 // esbuild is vite's own dependency (always installed, hoisted), so it is not
 // declared a second time here — that would churn the lockfile for nothing.
 import { build } from 'esbuild';
+import { isTableId, loadTableModule } from './toml-tables.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'node_modules', '.cache', 'omni-sim');
 
-/** The two virtual modules vite.config.ts provides, scanned the same way. */
+/** The virtual modules vite.config.ts provides: the two manifests, scanned the
+ *  same way, and the TOML content tables, parsed by the SAME loader
+ *  (scripts/toml-tables.mjs) so Node and the browser build cannot disagree. */
 function scan(dir, re, mapper) {
   try {
     return fs.readdirSync(path.join(root, dir)).filter((f) => re.test(f)).sort().map(mapper);
@@ -38,8 +41,10 @@ function scan(dir, re, mapper) {
 const virtualManifests = {
   name: 'omni-virtual-manifests',
   setup(b) {
-    b.onResolve({ filter: /^virtual:(nebula|sfx)-manifest$/ }, (a) => ({ path: a.path, namespace: 'omni-virtual' }));
+    b.onResolve({ filter: /^virtual:(nebula|sfx)-manifest$|^virtual:table\// }, (a) => ({ path: a.path, namespace: 'omni-virtual' }));
     b.onLoad({ filter: /.*/, namespace: 'omni-virtual' }, (a) => {
+      if (isTableId(a.path)) return { contents: loadTableModule(a.path), loader: 'js' };
+      if (a.path.startsWith('virtual:table/')) throw new Error(`unknown content table ${a.path} - add it to TABLES in scripts/toml-tables.mjs`);
       const list = a.path === 'virtual:nebula-manifest'
         ? scan('public/assets', /^Nebula\d+\.png$/i, (f) => `/assets/${f}`)
         : scan('public/assets/sfx', /\.wav$/i, (f) => f);

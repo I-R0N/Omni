@@ -1,0 +1,1008 @@
+{
+ "MAP_POPULATION": {
+  "OVERWORLD": {
+   "rock-shard": {
+    "freeSpawn": {
+     "count": 120,
+     "minSize": 20,
+     "maxSize": 160,
+     "speedMultiplier": 1.5,
+     "spawnRadius": 5000
+    }
+   },
+   "glass-tile": {
+    "tileCluster": {
+     "clusterCount": 10,
+     "minClusterSize": 10,
+     "maxClusterSize": 30
+    }
+   },
+   "plastic-tile": {
+    "tileCluster": {
+     "clusterCount": 4,
+     "minClusterSize": 8,
+     "maxClusterSize": 20
+    }
+   },
+   "metal-tile": {
+    "tileCluster": {
+     "clusterCount": 3,
+     "minClusterSize": 6,
+     "maxClusterSize": 14
+    }
+   },
+   "nebula-tile": {
+    "tileCluster": {
+     "clusterCount": 42,
+     "minClusterSize": 12,
+     "maxClusterSize": 36
+    }
+   }
+  },
+  "UNIVERSE": {
+   "rock-shard": {
+    "freeSpawn": {
+     "count": 140,
+     "minSize": 20,
+     "maxSize": 160,
+     "speedMultiplier": 1.5,
+     "spawnRadius": 6000
+    }
+   },
+   "glass-tile": {
+    "tileCluster": {
+     "clusterCount": 27,
+     "minClusterSize": 10,
+     "maxClusterSize": 34
+    }
+   },
+   "plastic-tile": {
+    "tileCluster": {
+     "clusterCount": 10,
+     "minClusterSize": 8,
+     "maxClusterSize": 22
+    }
+   },
+   "metal-tile": {
+    "tileCluster": {
+     "clusterCount": 5,
+     "minClusterSize": 6,
+     "maxClusterSize": 14
+    }
+   },
+   "nebula-tile": {
+    "tileCluster": {
+     "clusterCount": 75,
+     "minClusterSize": 11,
+     "maxClusterSize": 34
+    }
+   }
+  },
+  "RING": {
+   "rock-shard": {
+    "freeSpawn": {
+     "count": 280,
+     "minSize": 20,
+     "maxSize": 160,
+     "speedMultiplier": 1.5,
+     "spawnRadius": 5000
+    }
+   }
+  },
+  "SEVEN_RINGS": {
+   "rock-shard": {
+    "freeSpawn": {
+     "count": 280,
+     "minSize": 20,
+     "maxSize": 160,
+     "speedMultiplier": 1.5,
+     "spawnRadius": 5000
+    }
+   },
+   "glass-tile": {
+    "tileRings": [
+     0,
+     1
+    ]
+   },
+   "plastic-tile": {
+    "tileRings": [
+     2,
+     3
+    ]
+   },
+   "metal-tile": {
+    "tileRings": [
+     4,
+     5
+    ]
+   },
+   "indestructible-tile": {
+    "tileRings": [
+     6
+    ]
+   }
+  },
+  "POCKET": {
+   "rock-shard": {
+    "freeSpawn": {
+     "count": 1,
+     "minSize": 20,
+     "maxSize": 80,
+     "speedMultiplier": 1.5,
+     "spawnRadius": 1600
+    }
+   },
+   "glass-tile": {
+    "tileCluster": {
+     "clusterCount": 8,
+     "minClusterSize": 6,
+     "maxClusterSize": 14
+    }
+   },
+   "plastic-tile": {
+    "tileCluster": {
+     "clusterCount": 5,
+     "minClusterSize": 5,
+     "maxClusterSize": 10
+    }
+   },
+   "metal-tile": {
+    "tileCluster": {
+     "clusterCount": 3,
+     "minClusterSize": 4,
+     "maxClusterSize": 8
+    }
+   },
+   "nebula-tile": {
+    "tileCluster": {
+     "clusterCount": 12,
+     "minClusterSize": 6,
+     "maxClusterSize": 12
+    }
+   }
+  },
+  "ASTEROID_FIELD": {
+   "rock-shard": {
+    "freeSpawn": {
+     "count": 1200,
+     "minSize": 20,
+     "maxSize": 160,
+     "speedMultiplier": 1.5,
+     "spawnRadius": 2500
+    }
+   }
+  },
+  "GLASS_FIELD": {
+   "glass-tile": {
+    "tileCluster": {
+     "clusterCount": 100,
+     "minClusterSize": 10,
+     "maxClusterSize": 30
+    }
+   }
+  },
+  "PLASTIC_FIELD": {
+   "plastic-tile": {
+    "tileCluster": {
+     "clusterCount": 100,
+     "minClusterSize": 10,
+     "maxClusterSize": 30
+    }
+   }
+  },
+  "METAL_FIELD": {
+   "metal-tile": {
+    "tileCluster": {
+     "clusterCount": 100,
+     "minClusterSize": 10,
+     "maxClusterSize": 30
+    }
+   }
+  },
+  "INDESTRUCTIBLE_FIELD": {
+   "indestructible-tile": {
+    "tileCluster": {
+     "clusterCount": 100,
+     "minClusterSize": 10,
+     "maxClusterSize": 30
+    }
+   }
+  },
+  "NEBULA_FIELD": {
+   "nebula-tile": {
+    "tileCluster": {
+     "clusterCount": 65,
+     "minClusterSize": 14,
+     "maxClusterSize": 42
+    }
+   }
+  },
+  "ROCK_FIELD": {
+   "rock-tile": {
+    "tileCluster": {
+     "clusterCount": 100,
+     "minClusterSize": 10,
+     "maxClusterSize": 30
+    }
+   }
+  },
+  "TILE_HEAVY": {}
+ },
+ "ENEMY_VARIANTS": {
+  "RAMMER_1": {
+   "color": "#ef4444",
+   "size": 28,
+   "health": 1,
+   "maxSpeed": 5,
+   "accel": 3.5,
+   "turnRate": 2.8,
+   "sprite": "/assets/drone.png",
+   "mass": 10,
+   "shape": "circle",
+   "shoots": true,
+   "contactDamage": 8,
+   "weapon": {
+    "cooldown": 0.7,
+    "damage": 5,
+    "speed": 9,
+    "size": 4,
+    "color": "#fb7185"
+   }
+  },
+  "RAMMER_2": {
+   "color": "#f97316",
+   "size": 28,
+   "health": 2,
+   "maxSpeed": 8,
+   "accel": 5.5,
+   "turnRate": 3.2,
+   "sprite": "/assets/charger.png",
+   "mass": 8,
+   "shape": "arrow",
+   "shoots": true,
+   "contactDamage": 10,
+   "weapon": {
+    "cooldown": 1.15,
+    "damage": 7,
+    "speed": 9,
+    "size": 5,
+    "count": 2,
+    "spread": 14,
+    "color": "#fb923c"
+   },
+   "telegraph": 0.3
+  },
+  "RAMMER_3": {
+   "color": "#facc15",
+   "size": 32,
+   "health": 5,
+   "maxSpeed": 4.5,
+   "accel": 3,
+   "turnRate": 1.6,
+   "sprite": "/assets/tank.png",
+   "mass": 18,
+   "shape": "hexagon",
+   "shoots": true,
+   "contactDamage": 14,
+   "weapon": {
+    "cooldown": 2.2,
+    "damage": 16,
+    "speed": 7,
+    "size": 10,
+    "color": "#fde047"
+   },
+   "telegraph": 0.9
+  },
+  "SHOOTER_1": {
+   "color": "#4ade80",
+   "size": 28,
+   "health": 1,
+   "maxSpeed": 4,
+   "accel": 2.5,
+   "turnRate": 1.3,
+   "sprite": "/assets/skirmisher.png",
+   "mass": 12,
+   "shape": "diamond",
+   "shoots": true,
+   "contactDamage": 0,
+   "weapon": {
+    "cooldown": 1.1,
+    "damage": 6,
+    "speed": 9,
+    "size": 5,
+    "color": "#4ade80"
+   }
+  },
+  "SHOOTER_2": {
+   "color": "#22d3ee",
+   "size": 28,
+   "health": 2,
+   "maxSpeed": 5.5,
+   "accel": 3,
+   "turnRate": 1.2,
+   "sprite": "/assets/orbiter.png",
+   "mass": 10,
+   "shape": "pentagon",
+   "shoots": true,
+   "contactDamage": 0,
+   "weapon": {
+    "cooldown": 1.5,
+    "damage": 5,
+    "speed": 8,
+    "size": 6,
+    "glow": true
+   },
+   "burst": {
+    "size": 2,
+    "gap": 0.18
+   }
+  },
+  "SHOOTER_3": {
+   "color": "#3b82f6",
+   "size": 26,
+   "health": 3,
+   "maxSpeed": 4,
+   "accel": 3,
+   "turnRate": 1.8,
+   "sprite": "/assets/sniper.png",
+   "mass": 9,
+   "shape": "chevron",
+   "shoots": true,
+   "contactDamage": 0,
+   "weapon": {
+    "cooldown": 2.8,
+    "damage": 15,
+    "speed": 16,
+    "size": 4,
+    "color": "#60a5fa",
+    "glow": true
+   },
+   "telegraph": 0.75,
+   "aimLaser": true
+  },
+  "KAMIKAZE": {
+   "color": "#e879f9",
+   "size": 26,
+   "health": 2,
+   "maxSpeed": 9,
+   "accel": 7,
+   "turnRate": 4,
+   "sprite": "/assets/drone.png",
+   "mass": 7,
+   "shape": "star",
+   "shoots": false,
+   "contactDamage": 10,
+   "detonate": {
+    "radius": 170,
+    "damage": 34,
+    "knockback": 1.5
+   }
+  },
+  "BULWARK": {
+   "color": "#a78bfa",
+   "size": 34,
+   "health": 4,
+   "maxSpeed": 3.5,
+   "accel": 2.2,
+   "turnRate": 1.1,
+   "sprite": "/assets/tank.png",
+   "mass": 16,
+   "shape": "octagon",
+   "shoots": true,
+   "contactDamage": 0,
+   "weapon": {
+    "cooldown": 1.8,
+    "damage": 3.5,
+    "speed": 8,
+    "size": 5,
+    "count": 3,
+    "spread": 22,
+    "color": "#c4b5fd"
+   },
+   "shield": 54,
+   "shieldRegen": 4,
+   "shieldArc": {
+    "deg": 150,
+    "slew": 2.8
+   },
+   "telegraph": 0.5
+  },
+  "TURRET": {
+   "color": "#94a3b8",
+   "size": 36,
+   "health": 8,
+   "maxSpeed": 0,
+   "accel": 0,
+   "turnRate": 1.8,
+   "sprite": "/assets/tank.png",
+   "mass": 50,
+   "shape": "cross",
+   "shoots": true,
+   "contactDamage": 0,
+   "weapon": {
+    "cooldown": 2.6,
+    "damage": 12,
+    "speed": 5,
+    "size": 7,
+    "color": "#fb7185",
+    "homing": true,
+    "homingStrength": 0.5,
+    "glow": true
+   },
+   "telegraph": 0.7
+  },
+  "SWARM": {
+   "color": "#2dd4bf",
+   "size": 16,
+   "health": 1,
+   "maxSpeed": 7.5,
+   "accel": 7,
+   "turnRate": 4.5,
+   "sprite": "/assets/drone.png",
+   "mass": 4,
+   "shape": "triangle",
+   "shoots": false,
+   "contactDamage": 3,
+   "diesOnContact": true
+  },
+  "NEST": {
+   "color": "#0d9488",
+   "size": 46,
+   "health": 14,
+   "maxSpeed": 0,
+   "accel": 0,
+   "turnRate": 0.6,
+   "sprite": "/assets/tank.png",
+   "mass": 60,
+   "shape": "nest",
+   "shoots": false,
+   "contactDamage": 0,
+   "spawner": {
+    "subtype": "SWARM",
+    "interval": 4,
+    "batch": 2,
+    "maxBrood": 10
+   }
+  },
+  "BUBBLE": {
+   "color": "#67e8f9",
+   "size": 15,
+   "health": 50,
+   "maxSpeed": 3.4,
+   "accel": 3,
+   "turnRate": 1.6,
+   "sprite": "/assets/drone.png",
+   "mass": 9,
+   "shape": "bubble",
+   "shoots": false,
+   "contactDamage": 0,
+   "consume": {
+    "eats": "shard",
+    "range": 150,
+    "growthPerEat": 3,
+    "maxSize": 58,
+    "hpPerEat": 2,
+    "pull": 14,
+    "swallowMaxFrac": 1,
+    "bite": {
+     "damage": 3,
+     "interval": 1.2,
+     "reach": 8,
+     "tiles": true
+    }
+   },
+   "multiply": {
+    "atSize": 50,
+    "maxPopulation": 14
+   },
+   "ambient": true,
+   "thirdParty": true
+  },
+  "DRAGON": {
+   "color": "#34d399",
+   "size": 64,
+   "health": 500,
+   "maxSpeed": 6,
+   "accel": 4,
+   "turnRate": 1.2,
+   "sprite": "/assets/tank.png",
+   "mass": 500,
+   "shape": "dragon",
+   "shoots": false,
+   "contactDamage": 16,
+   "consume": {
+    "eats": "tile",
+    "range": 90,
+    "growthPerEat": 4,
+    "maxSize": 150
+   }
+  },
+  "BOSS_WARDEN": {
+   "color": "#38bdf8",
+   "size": 82,
+   "health": 120,
+   "maxSpeed": 3.2,
+   "accel": 2,
+   "turnRate": 1,
+   "sprite": "/assets/tank.png",
+   "mass": 140,
+   "shape": "warden",
+   "shoots": true,
+   "contactDamage": 18,
+   "weapon": {
+    "cooldown": 2,
+    "damage": 14,
+    "speed": 8,
+    "size": 12,
+    "color": "#7dd3fc",
+    "glow": true
+   },
+   "telegraph": 0.8,
+   "poise": {
+    "stunDamage": 12,
+    "knockScale": 0.12
+   }
+  },
+  "BOSS_SCATTER": {
+   "color": "#fbbf24",
+   "size": 74,
+   "health": 105,
+   "maxSpeed": 6.2,
+   "accel": 5,
+   "turnRate": 2.4,
+   "sprite": "/assets/tank.png",
+   "mass": 90,
+   "shape": "talon",
+   "shoots": true,
+   "contactDamage": 16,
+   "weapon": {
+    "delivery": "spread",
+    "name": "Reaver Scattergun",
+    "cooldown": 1.5,
+    "speed": 15,
+    "damage": 5,
+    "lifetime": 0.95,
+    "color": "#facc15",
+    "size": 5,
+    "count": 7,
+    "spread": 21,
+    "recoil": 0,
+    "mass": 1.4222,
+    "speedRetain": 0.3,
+    "energy": "kinetic"
+   },
+   "telegraph": 0.45,
+   "poise": {
+    "stunDamage": 9,
+    "knockScale": 0.3
+   }
+  },
+  "BOSS_SIEGE": {
+   "color": "#c084fc",
+   "size": 92,
+   "health": 150,
+   "maxSpeed": 2.4,
+   "accel": 1.6,
+   "turnRate": 0.8,
+   "sprite": "/assets/tank.png",
+   "mass": 200,
+   "shape": "bastion",
+   "shoots": true,
+   "contactDamage": 20,
+   "weapon": {
+    "delivery": "cannon",
+    "name": "Bastion Siege Battery",
+    "cooldown": 3.2,
+    "speed": 11,
+    "damage": 9,
+    "lifetime": 3.2,
+    "color": "#f1f5f9",
+    "size": 12,
+    "count": 1,
+    "spread": 0,
+    "recoil": 0,
+    "mass": 4.7603,
+    "explosionRadius": 130,
+    "explosionKnockback": 5,
+    "detonateOn": "fuse",
+    "fuseSeconds": 0.42,
+    "blastScale": 0.2,
+    "boreCostScale": 0.25,
+    "explosionDamage": 6
+   },
+   "burst": {
+    "size": 2,
+    "gap": 0.55
+   },
+   "telegraph": 1,
+   "preferredDistance": 620,
+   "poise": {
+    "stunDamage": 14,
+    "knockScale": 0.08
+   }
+  }
+ },
+ "BOSS_DEFS": {
+  "BOSS_WARDEN": {
+   "name": "WARDEN",
+   "companions": [
+    "BULWARK",
+    "RAMMER_3",
+    "SHOOTER_2"
+   ],
+   "phases": [
+    {
+     "atHealthFrac": 1,
+     "color": "#38bdf8",
+     "shield": {
+      "amount": 80,
+      "regen": 5
+     },
+     "traits": {
+      "armor": {
+       "chipThreshold": 8,
+       "reduction": 0.65
+      }
+     }
+    },
+    {
+     "atHealthFrac": 0.5,
+     "announce": "WARDEN — BARRIER DOWN",
+     "color": "#f97316",
+     "speedMult": 1.35,
+     "weapon": {
+      "cooldown": 1.2,
+      "damage": 11,
+      "speed": 9,
+      "size": 10,
+      "count": 2,
+      "spread": 12,
+      "color": "#fdba74",
+      "glow": true
+     },
+     "spawner": {
+      "subtype": "SWARM",
+      "interval": 5,
+      "batch": 3,
+      "maxBrood": 9
+     }
+    }
+   ]
+  },
+  "BOSS_SCATTER": {
+   "name": "REAVER",
+   "companions": [
+    "RAMMER_1",
+    "SWARM",
+    "KAMIKAZE"
+   ],
+   "phases": [
+    {
+     "atHealthFrac": 1,
+     "color": "#fbbf24",
+     "traits": {
+      "evasive": {
+       "sense": 340,
+       "missRadius": 46,
+       "impulse": 7.5,
+       "cooldown": 0.85
+      }
+     }
+    },
+    {
+     "atHealthFrac": 0.66,
+     "announce": "REAVER RAISES ITS GUARD",
+     "color": "#f59e0b",
+     "speedMult": 1.1,
+     "shield": {
+      "amount": 90,
+      "regen": 6,
+      "arc": {
+       "deg": 160,
+       "slew": 2.4
+      }
+     },
+     "weapon": {
+      "delivery": "spread",
+      "name": "Reaver Scattergun",
+      "cooldown": 1.25,
+      "speed": 15,
+      "damage": 5,
+      "lifetime": 0.95,
+      "color": "#facc15",
+      "size": 5,
+      "count": 8,
+      "spread": 16,
+      "recoil": 0,
+      "mass": 1.4222,
+      "speedRetain": 0.3,
+      "energy": "kinetic"
+     },
+     "traits": {
+      "evasive": {
+       "sense": 340,
+       "missRadius": 46,
+       "impulse": 7.5,
+       "cooldown": 1.1
+      }
+     }
+    },
+    {
+     "atHealthFrac": 0.33,
+     "announce": "REAVER — ENRAGED",
+     "color": "#ef4444",
+     "speedMult": 1.25,
+     "weapon": {
+      "delivery": "spread",
+      "name": "Reaver Scattergun",
+      "cooldown": 0.95,
+      "speed": 15,
+      "damage": 4,
+      "lifetime": 0.95,
+      "color": "#facc15",
+      "size": 5,
+      "count": 9,
+      "spread": 30,
+      "recoil": 0,
+      "mass": 1.4222,
+      "speedRetain": 0.3,
+      "energy": "kinetic"
+     },
+     "spawner": {
+      "subtype": "KAMIKAZE",
+      "interval": 6,
+      "batch": 2,
+      "maxBrood": 4
+     },
+     "traits": {
+      "armor": {
+       "chipThreshold": 6,
+       "reduction": 0.6
+      }
+     }
+    }
+   ]
+  },
+  "BOSS_SIEGE": {
+   "name": "BASTION",
+   "companions": [
+    "TURRET",
+    "NEST",
+    "SHOOTER_3"
+   ],
+   "phases": [
+    {
+     "atHealthFrac": 1,
+     "color": "#c084fc",
+     "traits": {
+      "frontShield": {
+       "deg": 150,
+       "reduction": 0.75
+      }
+     }
+    },
+    {
+     "atHealthFrac": 0.7,
+     "announce": "BASTION — REPAIR SYSTEMS ONLINE",
+     "color": "#a855f7",
+     "weapon": {
+      "delivery": "cannon",
+      "name": "Bastion Siege Battery",
+      "cooldown": 2.6,
+      "speed": 11,
+      "damage": 9,
+      "lifetime": 3.2,
+      "color": "#f1f5f9",
+      "size": 12,
+      "count": 1,
+      "spread": 0,
+      "recoil": 0,
+      "mass": 4.7603,
+      "explosionRadius": 130,
+      "explosionKnockback": 5,
+      "detonateOn": "fuse",
+      "fuseSeconds": 0.42,
+      "blastScale": 0.2,
+      "boreCostScale": 0.25,
+      "explosionDamage": 6
+     },
+     "traits": {
+      "frontShield": {
+       "deg": 150,
+       "reduction": 0.75
+      },
+      "regen": {
+       "perSec": 3.5,
+       "burstDamage": 16,
+       "windowSec": 0.4,
+       "burnSec": 3
+      }
+     }
+    },
+    {
+     "atHealthFrac": 0.35,
+     "announce": "BASTION — PLATING BREACHED",
+     "color": "#f472b6",
+     "speedMult": 1.3,
+     "weapon": {
+      "delivery": "cannon",
+      "name": "Bastion Siege Battery",
+      "cooldown": 2.1,
+      "speed": 11,
+      "damage": 9,
+      "lifetime": 3.2,
+      "color": "#f1f5f9",
+      "size": 12,
+      "count": 1,
+      "spread": 0,
+      "recoil": 0,
+      "mass": 4.7603,
+      "explosionRadius": 160,
+      "explosionKnockback": 5,
+      "detonateOn": "fuse",
+      "fuseSeconds": 0.42,
+      "blastScale": 0.2,
+      "boreCostScale": 0.25,
+      "explosionDamage": 6
+     },
+     "spawner": {
+      "subtype": "TURRET",
+      "interval": 8,
+      "batch": 1,
+      "maxBrood": 3
+     },
+     "traits": {
+      "regen": {
+       "perSec": 5,
+       "burstDamage": 16,
+       "windowSec": 0.4,
+       "burnSec": 3
+      }
+     }
+    }
+   ]
+  }
+ },
+ "ENEMY_SCALE_CYCLE": [
+  1,
+  0,
+  0.5,
+  1.5,
+  2
+ ],
+ "rockFreeSpawn": {
+  "OVERWORLD": {
+   "count": 120,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 5000,
+   "speedMultiplier": 1.5
+  },
+  "UNIVERSE": {
+   "count": 140,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 6000,
+   "speedMultiplier": 1.5
+  },
+  "RING": {
+   "count": 280,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 5000,
+   "speedMultiplier": 1.5
+  },
+  "SEVEN_RINGS": {
+   "count": 280,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 5000,
+   "speedMultiplier": 1.5
+  },
+  "POCKET": {
+   "count": 1,
+   "minSize": 20,
+   "maxSize": 80,
+   "radius": 1600,
+   "speedMultiplier": 1.5
+  },
+  "ASTEROID_FIELD": {
+   "count": 1200,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "GLASS_FIELD": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "PLASTIC_FIELD": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "METAL_FIELD": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "INDESTRUCTIBLE_FIELD": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "NEBULA_FIELD": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "ROCK_FIELD": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  },
+  "TILE_HEAVY": {
+   "count": 0,
+   "minSize": 20,
+   "maxSize": 160,
+   "radius": 2500,
+   "speedMultiplier": 1.5
+  }
+ },
+ "bossWave": {
+  "BOSS_WARDEN": [
+   "BULWARK",
+   "RAMMER_3",
+   "SHOOTER_2",
+   "BULWARK",
+   "RAMMER_3",
+   "SHOOTER_2",
+   "BULWARK",
+   "RAMMER_3",
+   "SHOOTER_2",
+   "BULWARK",
+   "RAMMER_3"
+  ],
+  "BOSS_SCATTER": [
+   "RAMMER_1",
+   "SWARM",
+   "KAMIKAZE",
+   "RAMMER_1",
+   "SWARM",
+   "KAMIKAZE",
+   "RAMMER_1",
+   "SWARM",
+   "KAMIKAZE",
+   "RAMMER_1",
+   "SWARM"
+  ],
+  "BOSS_SIEGE": [
+   "TURRET",
+   "NEST",
+   "SHOOTER_3",
+   "TURRET",
+   "NEST",
+   "SHOOTER_3",
+   "TURRET",
+   "NEST",
+   "SHOOTER_3",
+   "TURRET",
+   "NEST"
+  ]
+ }
+}

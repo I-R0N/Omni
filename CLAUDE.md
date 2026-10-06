@@ -52,7 +52,15 @@ types.ts                  All shared TS types; see §4
 constants.ts              ~11,000 lines of config-as-code; see §5
 assets.ts                 Asset manifest + auto-discovered nebula image sets
 vite.config.ts            React + Tailwind + the nebula- and sfx-manifest
-                          plugins, build defines, OMNI_PROFILE_REACT alias
+                          plugins, the TOML content-table plugin, build
+                          defines, OMNI_PROFILE_REACT alias
+data/                     CONTENT TABLES as TOML (engine-core S3): 
+                          map-population.toml, enemies.toml (ENEMY_VARIANTS
+                          + the DBG enemy-scale steps), bosses.toml
+                          (BOSS_DEFS).  Parsed at BUILD time into
+                          `virtual:table/<name>` modules and resolved by
+                          constants.ts; the comments in them carry the
+                          reasoning behind each number (see §8)
 tsconfig.json             ES2022, bundler resolution, "@/*" → repo root
 package.json              Scripts: dev, build, preview, typecheck, test
                           (= test:smoke — boot + loop, the DEFAULT), plus
@@ -74,11 +82,18 @@ platform/                 THE PORTS' ADAPTERS (§8).  browser.ts builds the
                           Node one (manual clock, 390×844, memory storage,
                           silent audio, null renderer, the REAL InputSystem
                           driven by hand)
+scripts/toml-tables.mjs   The content tables' ONE loader + id list, imported by
+                          vite.config.ts AND sim-test.mjs so the browser
+                          build and the Node harness cannot disagree
 scripts/sim-test.mjs      `npm run test:sim` — esbuilds tests/sim/*.test.ts
-                          (resolving the two virtual manifests) and runs
+                          (resolving the virtual manifests and tables) and runs
                           them under `node --test`; `bundle()` is shared by
                           sim-hash.mjs, which prints the Node hash series
                           the browser parity test compares against
+scripts/balance.mjs       BALANCE HARNESS driver (engine-core S3): runs
+                          tests/sim/balance*.ts jobs across processes and
+                          writes docs/BALANCE_BASELINE.md + balance-baseline.json.
+                          A measurement, not a gate: not in npm test or CI
 scripts/inline-build.mjs  Bundles dist/ + audio into omniverse-standalone.html
 scripts/gen-ship-sheet.mjs  Ship tilt-sheet tooling: --table prints the
                           authoring angle table, --placeholder renders
@@ -96,6 +111,9 @@ tests/sim/                HEADLESS SIM SUITES (node:test, engine-core S2):
                           (Escape, backgrounding), guard.test.ts (no
                           platform globals in the sim — an allow-list of
                           ADAPTERS, so a new file is guarded by default),
+                          tables.test.ts (the extracted content tables
+                          resolve to what they did before extraction,
+                          against fixtures/tables.golden.json),
                           harness.ts + parityLog.ts (the shared kit and
                           the canonical replay log).  Run by
                           `npm run test:sim`, in CI before the browser
@@ -134,9 +152,11 @@ tests/                    Playwright suites (roadmap 5b) — boot,
                           overkill carry-through, the far side), audio,
                           headless (the ports are faithful: a headless-platform
                           engine and the live one replay to the same hashes,
-                          Node vs Chromium agree on the streams and the
-                          player but not the world — libm; Escape and the
-                          page-visibility pause),
+                          Node vs Chromium agree on streams, player AND
+                          world, bit for bit — dmath; Escape and the
+                          page-visibility pause), newgame (the main menu's
+                          NEW GAME: hidden without progress, two-tap
+                          confirm, erases the character, keeps settings),
                           helpers.ts (the shared harness over the debug
                           handles) and README.md (suite map + the 15
                           anti-flake rules — read 9, 12 and 13 before
@@ -479,6 +499,10 @@ engine/
                           draw in the game comes from a named mulberry32
                           stream, `sim.*` (changes the world, must replay
                           exactly) or `fxRng.*` (decoration only).  See §8
+    dmath.ts              DETERMINISTIC MATH (engine-core S3) — the sim's sin /
+                          cos / pow / exp / log / atan2 … from exact IEEE ops
+                          only, so every JS engine agrees to the bit.  The
+                          guard forbids native libm and `**` in the sim (§8)
     IdAllocator.ts        Monotonic nextId() for entity IDs (cosmetic
                           prefixes count on their own sequence — §8)
     PerfController.ts     Load-driven frame-skip coordinator for every
@@ -581,7 +605,7 @@ swaps the menu backdrop, or switches-and-plays mid-game (below).
 returning to the menu returns to the default — map choice is a DEBUG
 override that lasts the run it starts, never a preference that sticks to
 the front door.  The main menu correspondingly offers no map choice:
-DIFFICULTY and START, with the controls picker and help beside them.  The
+START (difficulty is the portal's level, not a menu choice), with the controls picker and help beside them.  The
 map picker is a DEBUG row — World & Maps ▸ Maps (the showcases sit under
 ▸ Material Field Maps) in the debug panel, whose
 launcher floats in the menu's corner as it does over every screen — so
@@ -1417,7 +1441,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   call (`getActiveFractureMode`).  See
   `engine/systems/ShardSystem.types.ts` for the schema and
   `docs/GAUNTLET_VORONOI_LOG.md` for the gauntlet ledger.
-- `MAP_POPULATION` — central per-MapType per-ShardVariantId entity-
+- `MAP_POPULATION` (`data/map-population.toml`) — central per-MapType per-ShardVariantId entity-
   count table, and since step 5 (G7) the ACTUAL authority rather than a
   parallel description for every map's rock free-spawn
   (`getRockShardFreeSpawn()`) and for the natural maps' tile-variant mix.
@@ -1439,7 +1463,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   the CHAIN itself is the energy layer's `ENERGY_CONSTANTS.CHAIN_*`),
   `HOMING_ACQUIRE_RANGE`
 - `PROJECTILE_CONSTANTS`, `MAX_PROJECTILES`, `MAX_PARTICLES`
-- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (per-archetype `weapon` override +
+- `ENEMY_CONSTANTS`, `ENEMY_VARIANTS` (`data/enemies.toml`, schema
+  `EnemyVariantDef`; per-archetype `weapon` override +
   optional `burst` fire pattern + `glow` shot hint — the per-archetype
   `cooldown` is the real fire cadence; the old global burst config is gone),
   `ENEMY_ROLE`, `ENEMY_WEAPON`.  Roster today: 6 base archetypes
@@ -1845,7 +1870,8 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
 - `ENEMY_SCALING` / `enemyHpMult()` / `enemyDamageMult()` — per-wave
   enemy growth on top of difficulty: HP scales at spawn, damage rides a
   per-enemy `damageMult` (read by the ram path + enemy-projectile spawn).
-  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` is the
+  Tuned gentle for a comfortable player lead; `ENEMY_SCALE_CYCLE` (its steps
+  are `enemy_scale_cycle` in `data/enemies.toml`) is the
   DBG "Enemy scale" knob (Enemies & Bosses ▸ Enemy Tuning, with the
   "↳ live" hp/dmg-mult readout).
 - `ENEMY_TRAITS` / `EnemyTraitSet` — enemy counterplay traits (the
@@ -1893,7 +1919,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `GameEngine.updateEnemyRegen` ticks it.  Deliberate ORDERING: armor and
   front-shield reduce damage BEFORE the bucket sees it, so bursting a
   plated target means bursting it FROM BEHIND.
-- `BOSS_CONSTANTS` / `BOSS_DEFS` / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
+- `BOSS_CONSTANTS` / `BOSS_DEFS` (`data/bosses.toml`) / `BOSS_ROTATION` / `STAGE_WAVE_COUNT` /
   `isBossWave()` / `bossForWave()` / `buildBossWaveSpawnList()` — the (h)
   BOSS capstone tables.  A stage is `BOSS_CONSTANTS.WAVE_INTERVAL`
   ordinary waves plus the boss's OWN wave, so every
@@ -1953,8 +1979,7 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   `MODULE_REQUIREMENTS` / `HEX_ADJACENCY` — the hex-slot outfitting
   system (module-config increment).  EVERY piece of progression is a
   discrete NON-UPGRADEABLE module ITEM: stat families come in fixed
-  Mk I/II/III varieties (own price ≈ the cumulative old level-curve
-  cost, own fixed effect — no levels, no in-place upgrades), guns (the
+  Mk I/II/III varieties (price = mark! x the family's Mk I price, so Mk III is 6x; a mark past `SHOP_MAX_MARK` (3) is `rewardOnly`, never sold, and only the scanner has Mk IV/V today; own fixed effect — no levels, no in-place upgrades), guns (the
   five `dlv_*` deliveries), the three `nrg_*` energy modifiers and
   Shield/Overcharge/Light are single varieties.  The Mk families today
   are Hull / Plating / Capacitor / Engine / Thrusters / **Scanner**
@@ -2563,7 +2588,15 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   short-circuit); the docked UI shows only the panels the station's
   services offer.  Purchases land in the inventory and can be
   outfitted on the spot.
-- `PORTAL_CONSTANTS` / `HUB_PORTAL_SITES` / `RETURN_PORTAL_OFFSET` — the
+- `HUB_LAYOUT` / `HUB_ARENA_VARIETIES` / `OVERWORLD_STATIONS` / `HUB_PORTAL_SITES` /
+  `HUB_TEST_PORTAL_SITES` — the hub's whole layout, computed once with dmath:
+  home station at the centre; a ring of eight debug FIELD rifts (every
+  showcase map, no varieties, NO gravity well) at r = 1300; then 15 slots at
+  even angles over three radii (2700 / 3900 / 5000) holding the 12 arena rifts
+  (4 maps x easy / mid / hard — ring = variety, so distance reads as difficulty;
+  the mid keeps the original id) and the three shop stations.
+  `tests/sim/hublayout.test.ts` pins the spacing.
+- `PORTAL_CONSTANTS` / `RETURN_PORTAL_OFFSET` — the
   map portals (roadmap step (k)): rift size / colours (violet out, sky
   home) / `USE_RANGE` / placement `CLEARANCE` / the `openPortal` transit
   burst — plus the WORMHOLE block: `GRAVITY_RANGE` / `GRAVITY_STRENGTH` /
@@ -2649,7 +2682,7 @@ and `DIFFICULTY_STAT_SCALES`.
 Every map is named by a row in the **`MAP_DESCRIPTORS` registry**
 (`engine/maps/MapDescriptors.ts`) — a THIN typed layer of stable string
 ids over the MapType plumbing (roadmap step (k), strategy guardrail #3).
-A descriptor carries exactly five fields, all with live consumers:
+A descriptor carries five fields with live consumers plus an optional `level` (the arena's difficulty, 1..20; `ENEMY_RATING` / `buildLevelWave` in constants.ts turn it into a wave mix, `data/enemy-difficulty.toml`):
 `id` (portal targets + `transitionToMap`), `name` (portal tag + entry
 affordance), `mapType` (what `buildMap` instantiates), `kind`
 (`'hub' | 'arena'` — `HUB_DESCRIPTOR` is where a run starts and where
@@ -2904,6 +2937,44 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   never collide; the sim clock (`simClock`) restarts with the map; the
   PerfController's load signal has a wall-clock term, which a held replay
   feeds as 0; and `PhysicsSystem.shardPairCallCount` restarts with the map.
+- **CONTENT TABLES ARE TOML, PARSED AT BUILD TIME** (engine-core S3, plan D32;
+  `data/*.toml`, `scripts/toml-tables.mjs`).  `MAP_POPULATION`, `ENEMY_VARIANTS`
+  (+ `enemy_scale_cycle`) and `BOSS_DEFS` are files, not literals, because this
+  repo's tables carry the reasoning behind each number as comments and TOML
+  keeps them beside the value.  Derivation LOGIC stays code (`massFor`,
+  `enemyHpMult`, the DBG ladders, `BOSS_WEAPONS`, which is computed from the
+  weapon table); `SHARD_VARIANTS`, `WEAPONS` and `MODULE_DEFS` are deliberately
+  NOT extracted yet.  Rules to keep:
+  (1) **The parser runs at build time and ships zero runtime bytes.**  Each file
+  becomes a `virtual:table/<name>` module — the `virtual:nebula-manifest`
+  precedent — exporting plain JSON.  Do NOT fetch a data file at runtime: the
+  single-file standalone cannot fetch anything, and works today only because the
+  data is already inside the module.
+  (2) **TWO consumers resolve the ids and share ONE loader**:
+  `vite.config.ts` (dev, `vite build`, and so Playwright's webServer and the
+  standalone) and `scripts/sim-test.mjs`'s esbuild shim (`npm run test:sim`,
+  `sim-hash.mjs`).  Both import `scripts/toml-tables.mjs`; a new table is an
+  entry in its `TABLES`, a file, and nothing else.  The shim throws on an
+  unknown `virtual:table/…` rather than falling through to the manifest branch.
+  (3) **A file holds NAMES where a value is code**, resolved by the `resolve*`
+  functions beside each table in `constants.ts`: `sprite = "ENEMY_DRONE"` is an
+  `ASSETS` key, `weapon = { extends = "SCATTER", cooldown = 1.25 }` spreads
+  `BOSS_WEAPONS.SCATTER` and then the listed fields (as `{ ...BOSS_WEAPONS.SCATTER,
+  cooldown: 1.25 }` did), `spawner.subtype` / `companions` are `EnemySubtype`
+  ids.  A malformed file fails the BUILD with the file and the parser's reason; an
+  unknown NAME fails at module load — naming the file and row — so it is caught by
+  `test:sim` and the boot smoke, NOT by `vite build`.
+  (4) **Equivalence is pinned against a golden, not the literals**
+  (`tests/sim/tables.test.ts`, `fixtures/tables.golden.json`): the resolved tables
+  as they were before extraction, compared with a relative 1e-9 tolerance so
+  `dmath`'s last-place shifts do not turn it red, with key ORDER enforced only at
+  the table levels (maps, variants, archetypes).  A deliberate rebalance edits the
+  TOML and re-captures the golden in the same commit, which is what makes it a
+  visible one — `tests/maps.spec.ts` plays the same role for populations.
+  (5) **`swarmMove` is the seam for non-default gnat flocks**: an optional
+  `ENEMY_VARIANTS` field that pins a 'swarm'-behaviour row to one steer
+  (boids / vortex / weave / burst); absent follows the DBG "Gnat move" cycle.
+  No shipped row sets it.
 - **THE SIM TALKS TO THE PLATFORM THROUGH PORTS, AND ONLY THROUGH PORTS**
   (`engine/ports.ts`; engine-core S2).  Five named ports — Clock, Storage,
   Renderer, Audio, Input — plus Viewport, Lifecycle and Entropy, bundled as
@@ -2945,20 +3016,36 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `tests/headless.spec.ts`: (a) a headless-platform engine and the live
   engine replay every parity map to the SAME HASHES, bit for bit, in one page
   — the ports change nothing; (b) Node against Chromium reproduces the random
-  streams and the player exactly but NOT the world, because `Math.sin`,
-  `Math.cos` and `Math.pow` are not correctly rounded and differ between V8s
-  in the last place (Node 22's fdlibm trig against Chromium 141's glibc-derived
-  trig, which `--js-flags=--no-use-libm-trig-functions` turns off; `pow` differs
-  on ~10% of non-trivial inputs and has no flag).  One ULP in an asteroid's
-  velocity is amplified by collisions: measured, POCKET diverges by step 200 and
-  NEBULA_FIELD by step 600 while the player never does.  `atan2`, `hypot`,
-  `exp`, `log` and `sqrt` agree today.  So a replay is bit-exact WITHIN one JS
-  engine, and a console port or a cross-device replay needs a deterministic
-  math layer (own `sin` / `cos` / `pow`, ~150 call sites in the sim) — which
-  was deliberately NOT done in a behaviour-preserving PR, since it moves
-  every number at the last place.  The libm probe in the test says which
-  functions disagree on the machine running it; exact world equality is
-  required exactly where it reports none.
+  streams, the player AND THE WORLD, bit for bit, on every parity map
+  (engine-core S3, D30).  Until `dmath` this held only for streams and player:
+  `Math.sin`, `Math.cos` and `Math.pow` are not correctly rounded and differ
+  between V8s in the last place, and collisions amplify one ULP.  The sim now
+  calls `engine/systems/dmath.ts` (see the DMATH bullet below), so the
+  assertion is unconditional; the native-libm probe in the test survives as
+  information only.  Cross-engine agreement is also pinned as a table
+  (`tests/sim/fixtures/dmath.bits.json`, reproduced by Node in `test:sim` and
+  by Chromium in `headless.spec.ts` through `window.__omniDmath`).
+- **THE SIM NEVER CALLS THE ENGINE'S LIBM — `dmath`** (engine-core S3, plan D30;
+  `engine/systems/dmath.ts`).  `sin cos tan asin acos atan atan2 exp log log2
+  pow cbrt hypot` plus `PI` are rebuilt from operations the IEEE-754 standard
+  fixes (`+ - * /`, `Math.sqrt`, `floor`, `abs`, and integer views of a double):
+  fdlibm kernels with Cody-Waite reduction, so every JS engine (V8, JSC, SM)
+  returns the same bits.  Rules: (1) call it as `dmath.sin(x)` — never
+  `Math.sin`, and never the `**` operator, which V8 may lower to libm `pow`
+  (write `x * x`, or `dmath.pow`); `tests/sim/guard.test.ts` greps for both and,
+  like the platform guard, is an ALLOW-LIST of PRESENTATION files (render/,
+  RenderSystem, audio, background, particles, trails, NebulaColor, PerfRecorder),
+  so a new engine file is deterministic by default.  (2) Accuracy is secondary
+  to agreement but measured against native: sin/cos ≤ 2.2e-16 abs, exp / cbrt /
+  hypot ≤ ~4e-16 rel, pow ≤ 7e-15 rel; `pow` with an integer exponent in
+  [-64, 64] is repeated squaring, else exp(y·log x).  Arguments beyond ~1e5 rad
+  fold deterministically but lose accuracy (irrelevant to the sim).  (3) Changing
+  dmath on purpose moves every replay hash, so it is a rebaseline in the same
+  commit, with `OMNI_WRITE_DMATH_BITS=1 npm run test:sim -- --filter dmath`.
+  (4) It introduced no per-call cost worth a knob: `perf/simbench.mjs` ms per
+  sim substep (before → after, noisy ±15-30% in this container) hub-idle
+  1.25 → 1.61, asteroid-6k 2.22 → 2.48, glass-field 0.99 → 0.81, roamer-stack
+  2.51 → 2.49.
 - **THE SAVE FILE AND THE WRECK** (plan D10, D14, D20–D24; `engine/save.ts`,
   `engine/wreck.ts`).  What persists, through the `Storage` port under one key
   (`omni.save`): the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
@@ -5506,6 +5593,16 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   stays hand-EDITABLE, since the importer only ever adds or overwrites the
   roles a song claims and never clears one, so a role nobody claims keeps
   whatever is there.
+  THE KIT'S `song.json` IS THE RULE'S ONE STATED EXEMPTION (user call): it
+  is hand-written and would keep comments, so the rule points it at TOML,
+  and it stays JSON anyway.  The boundary that buys is worth having —
+  **a file small enough that its fields need no explanation does not need a
+  format that can explain them.**  It is five live fields, four of them
+  validated by name in `scripts/music-import.mjs`, and not one of them is a
+  judgement that needs defending.  The moment a kit carries reasoning worth
+  a comment — why a song claims `boss`, why a tempo was chosen — that is the
+  moment to split it, which is D33's own "that is the moment" test applied
+  one level up.
   A TOML table is parsed at BUILD time through a Vite virtual-manifest
   plugin (the `nebulaManifestPlugin` / `sfxManifestPlugin` precedent, §6),
   so the parser is a devDependency shipping zero runtime bytes and the
@@ -5777,7 +5874,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `audio.audible` (context exists AND running) is the honest "can this be
   heard" check; `unlocked` alone is not.
 - **`window.__omni*` are DEBUG HANDLES, and nothing in the game reads
-  them.**  `App.tsx` assigns fourteen, once, in its mount effect — except
+  them.**  `App.tsx` assigns fifteen, once, in its mount effect — except
   `__omniStats`, which is re-pointed at every stats push (the only
   per-frame cost).  They exist so the headless Playwright suites in
   `tests/` (§7), the `perf/` harness and the `scripts/` tooling can drive
@@ -5844,6 +5941,8 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     suites (`tests/mass.spec.ts` first).  A projectile a twentieth the
     density of the hull that fires it plays perfectly well; only the
     tables side by side show it.
+  - `__omniDmath` — the deterministic math layer; `headless.spec.ts` hands
+    Chromium the pinned bit table and requires the same bits.
   - `__omniReplay` — the replay harness (`runReplay`, `endReplay`,
     `hashSimState`, `firstDivergence`) and the `rng` stream module.  A
     stream that leaks into the sim still plays perfectly and throws nothing,

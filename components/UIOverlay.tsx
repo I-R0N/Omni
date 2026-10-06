@@ -15,6 +15,8 @@ interface UIOverlayProps {
   stats: EngineStats;
   onCycleWeapon?: () => void;
   onStart?: () => void;
+  /** Erase the save, then start a fresh character (main menu, two-tap confirm). */
+  onNewGame?: () => void;
   onPause?: () => void;
   onScan?: () => void;
   onSetAutoScan?: (on: boolean) => void;
@@ -86,6 +88,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   stats,
   onCycleWeapon,
   onStart,
+  onNewGame,
   onPause,
   onScan,
   onSetAutoScan,
@@ -149,6 +152,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
    *  when this one is not offered here (the home drydock sells nothing), so
    *  a station's services decide what exists and this only remembers a
    *  preference. */
+  // NEW GAME erases a character, so it asks twice: the first tap arms it, the
+  // second does it.  Local state on purpose — it must not survive a re-render
+  // of another screen.
+  const [confirmNewGame, setConfirmNewGame] = useState(false);
   const [stationTab, setStationTab] = useState<'shop' | 'outfit' | 'ship'>('shop');
   // Which Ship Status stat row is expanded to its per-module contributors
   // (A2).  Controlled so it survives the 60 Hz overlay re-render, same as the
@@ -1754,30 +1761,10 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
               </div>
             </div>
 
-            <div className="w-full flex flex-col items-center gap-3">
-              <span className="text-slate-200 text-sm tracking-wide">Difficulty</span>
-              <span className={`text-slate-500 ${T_NOTE} -mt-2 text-center`}>
-                How hard arena waves hit. Saved with your character; the hub has no waves.
-              </span>
-              {/* A 4-up grid rather than a flex row: the buttons then divide
-                  the column's width instead of setting it, so the row can
-                  never overflow a narrow screen. */}
-              <div className="w-full grid grid-cols-4 gap-2">
-                {[0, 1, 2, 3].map(level => (
-                  <button
-                    key={level}
-                    onClick={() => onSetDifficulty && onSetDifficulty(level)}
-                    className={`${CHIP_BASE} ${
-                      difficulty === level
-                        ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg'
-                        : `${CHIP_OFF} hover:border-indigo-400`
-                    }`}
-                  >
-                    {level === 0 ? 'None' : level === 1 ? 'Low' : level === 2 ? 'Med' : 'High'}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* No difficulty picker: each portal carries its own LEVEL, shown in the
+                wave banner on arrival (D-S3-d).  The saved `difficulty` setting
+                survives only so old saves load, and "None" (0) still switches
+                waves off. */}
 
             {/* Controls — the choice made at game start (user directive).
                 Sits with DIFFICULTY because it is the same kind of thing: a
@@ -1825,6 +1812,45 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             >
               {stats.savedGame?.progress ? 'CONTINUE' : 'START'}
             </button>
+
+            {/* NEW GAME — only offered when there is a character to lose.  Two
+                taps (arm, then confirm) because it erases credits, cargo, the
+                loadout, any wreck and the records; settings are kept. */}
+            {stats.savedGame?.progress && (
+              <div className="w-full flex flex-col items-center gap-2">
+                {!confirmNewGame ? (
+                  <button
+                    data-testid="menu-new-game"
+                    onClick={() => setConfirmNewGame(true)}
+                    className={`w-full ${BTN_SECONDARY}`}
+                  >
+                    New game
+                  </button>
+                ) : (
+                  <div className="w-full flex flex-col gap-2" data-testid="menu-new-game-confirm">
+                    <div className={`text-rose-300 text-center ${T_NOTE}`}>
+                      This erases your saved character: Salvage, modules, any wreck and your records.
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        data-testid="menu-new-game-yes"
+                        onClick={() => { setConfirmNewGame(false); onNewGame?.(); }}
+                        className={`flex-1 ${BTN_SECONDARY} !bg-rose-700/70 hover:!bg-rose-600/70`}
+                      >
+                        Erase &amp; start
+                      </button>
+                      <button
+                        data-testid="menu-new-game-cancel"
+                        onClick={() => setConfirmNewGame(false)}
+                        className={`flex-1 ${BTN_SECONDARY}`}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Controls & basics — the same widget the pause menu shows.
                 Collapsed by default: the front door stays DIFFICULTY / START,

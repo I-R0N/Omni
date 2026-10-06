@@ -1,5 +1,6 @@
 
 
+import * as dmath from './systems/dmath';
 import { sim, fxRng, seedRng } from './systems/rng';
 import { resetIdCounter } from './systems/IdAllocator';
 import { installClock, installViewport, nowMs, viewport, clock } from './ports';
@@ -19,11 +20,11 @@ import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
-import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
+import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MapDescriptor, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
 import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
 import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, levelScales, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
 import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
@@ -195,7 +196,7 @@ function recentreFracturedBody(e: GameEntity, remainder: Vector2[], eps: number)
 
   // Compensate in WORLD terms so the body does not jump: the local origin
   // moved by +c, so the world anchor moves by +c rotated into world.
-  const cs = Math.cos(e.rotation), sn = Math.sin(e.rotation);
+  const cs = dmath.cos(e.rotation), sn = dmath.sin(e.rotation);
   e.position.x += c.x * cs - c.y * sn;
   e.position.y += c.x * sn + c.y * cs;
   wrapPosition(e.position);
@@ -1393,6 +1394,8 @@ export class GameEngine {
   public wreck: WreckRecord | null = null;
   /** Held wave state per arena (engine/arenaWaves.ts). */
   public arenaWaves: Record<string, ArenaWaveMemory> = {};
+  /** True only inside `beginSeededRun`: the departing map's wave is not remembered. */
+  public dropArenaStamp = false;
   public wreckEntity: GameEntity | null = null;
   /** The contact currently carrying `wreckGuide` (engine/wreck.ts). */
   public wreckGuideEntity: GameEntity | null = null;
@@ -1418,11 +1421,16 @@ export class GameEngine {
     // A replay must not depend on a save: a fresh character, no wreck.
     this.wreck = null;
     this.arenaWaves = {};
+    // Unloading the previous map would stamp ITS wave back into the memory just
+    // cleared (loadMapFresh stamps before it tears down), and the new run would
+    // start fast-forwarded: a replay must begin from nothing held.
+    this.dropArenaStamp = true;
     this.resetCharacter();
     this.deathPending = false;
     this.deathDelay = 0;
     this.deathSummary = null;
     this.resetAndLoadSelectedMap();
+    this.dropArenaStamp = false;
     this.startGame();
     // A replay starts from a DEFINED state, not from wherever the last run left
     // the ship pointing: map load re-places the player but leaves its heading
@@ -1610,6 +1618,8 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      arenaLevel: this.arenaLevel(),
+      arenaLevelForced: this.dbgArenaLevel !== null,
       portalWarpName: getPortalWarpName(),
       portalSizeName: getPortalSizeName(),
       portalGravityName: getPortalGravityName(),
@@ -1810,13 +1820,33 @@ export class GameEngine {
       this.loadMapSeeded(type);
   }
 
+  /** The descriptor id of the map that is loaded (several descriptors can share
+   *  one MapType: an arena's easy / mid / hard varieties). */
+  mapDescId: string | undefined;
+  /** Set by `transitionToMap` for the one load it is about to make. */
+  private pendingDescId: string | undefined;
+
+  /** The loaded map's own descriptor — the variety the player is IN, which a
+   *  bare MapType cannot say. */
+  currentDescriptor(): MapDescriptor | undefined {
+      const t = this.currentMap?.type;
+      const d = mapDescriptor(this.mapDescId);
+      return d && d.mapType === t ? d : descriptorForMapType(t);
+  }
+
+  /** The descriptor a load of `type` is for: the pending portal target, else the type's default. */
+  private descFor(type: MapType): MapDescriptor | undefined {
+      const d = mapDescriptor(this.pendingDescId);
+      return d && d.mapType === type ? d : descriptorForMapType(type);
+  }
+
   /** Tell the music director which area is being entered, so it picks that
    *  area's theme.  Every map load announces it: `loadMapFresh` (a run, a
    *  portal, a death return) and the menu backdrop swap in `setMapType`, which
    *  loads through `loadMapSeeded` alone and would otherwise start a run on a
    *  picked arena with the hub's song. */
   private announceMusicArea(type: MapType) {
-      const area = descriptorForMapType(type);
+      const area = this.descFor(type);
       this.audio.setMusicArea(area?.id ?? '', area?.kind === 'hub' ? 'hub' : 'arena');
   }
 
@@ -1833,14 +1863,17 @@ export class GameEngine {
       // seed has to determine, and every cache keyed by either was rebuilt
       // or cleared above.  (Debris carried through a portal is re-id'd at
       // capture so it cannot collide with the new map's ids.)
-      const kind = descriptorForMapType(type)?.kind;
+      const desc = this.descFor(type);
+      this.mapDescId = desc?.id;
+      this.pendingDescId = undefined;
+      const kind = desc?.kind;
       if (kind === 'hub') {
         seedRng(HUB_WORLD_SEED);
         this.arenaSeed = null;
       } else {
         // A wreck PINS its arena's seed (D-S2-d1) so S1's seeded generation
         // rebuilds the terrain the ship fell in.  A replay's pinned seed wins.
-        const pinned = wreckSeedFor(this, descriptorForMapType(type)?.id);
+        const pinned = wreckSeedFor(this, desc?.id);
         const seed = (this.pendingRunSeed ?? pinned ?? this.platform.entropy.seed()) >>> 0;
         this.pendingRunSeed = null;
         seedRng(seed);
@@ -2005,7 +2038,7 @@ export class GameEngine {
       // runs below, reads the new value.
       // Where the player is coming FROM, resolved before the map is swapped —
       // used below to put them at the matching rift MOUTH on arrival.
-      const fromId = descriptorForMapType(this.currentMap?.type)?.id;
+      const fromId = this.currentDescriptor()?.id;
 
       // DEBRIS TRAVELS WITH YOU (user call): everything loose within
       // TRANSIT.RADIUS of the ship — mobile shards and collectible drops,
@@ -2048,6 +2081,7 @@ export class GameEngine {
       this.stageClearPending = false;
       this.stageClearDelay = 0;
 
+      this.pendingDescId = dest.id;
       this.loadMapFresh(dest.mapType, true);
       // Emerge WHERE YOU CAME OUT.  If the destination has a rift pointing
       // back at the map just left — which is exactly the hub's per-arena
@@ -2081,7 +2115,7 @@ export class GameEngine {
       if (exitMouth) {
           const ex = wrapDeltaX(exitMouth.position.x, this.player.position.x);
           const ey = wrapDeltaY(exitMouth.position.y, this.player.position.y);
-          const len = Math.hypot(ex, ey);
+          const len = dmath.hypot(ex, ey);
           if (len > 1e-3) {
               const k = playerEjectSpeed(this.currentMap.type) / len;
               this.player.velocity.x = ex * k;
@@ -2397,8 +2431,8 @@ export class GameEngine {
   private tickPlayerRoll(dt: number, moveDir: Vector2) {
     const { YAW_SMOOTHING, MAX_TILT } = PLAYER_ROLL_CONSTANTS;
     const facing = this.player.rotation;
-    const cosF = Math.cos(facing);
-    const sinF = Math.sin(facing);
+    const cosF = dmath.cos(facing);
+    const sinF = dmath.sin(facing);
     const vel = this.player.velocity;
     // TURN tracker — the facing's angular step this tick, wrapped so aiming
     // across the ±π seam is a small swing rather than a full spin, low-passed
@@ -2708,7 +2742,7 @@ export class GameEngine {
    *  wave the ring just placed. */
   viewportHalfDiagonal(): number {
     const zoom = this.camera.zoom || 1;
-    return Math.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
+    return dmath.hypot((viewport().width / 2) / zoom, (viewport().height / 2) / zoom);
   }
 
   /**
@@ -3106,6 +3140,8 @@ export class GameEngine {
       adaptiveTriggerInfo: this.input.adaptiveTriggerDebugInfo(),
       adaptiveTriggerReport: this.input.adaptiveTriggerReportHex(),
       snitchSpeedName: getActiveSnitchSpeedName(),
+      arenaLevel: this.arenaLevel(),
+      arenaLevelForced: this.dbgArenaLevel !== null,
       portalWarpName: getPortalWarpName(),
       portalSizeName: getPortalSizeName(),
       portalGravityName: getPortalGravityName(),
@@ -3562,7 +3598,7 @@ export class GameEngine {
           // normalised; (0,0) means "no direction" and keeps the isotropic
           // jitter, so every existing caller is unchanged.
           const dx = opts?.dirX, dy = opts?.dirY;
-          const dm = dx !== undefined && dy !== undefined ? Math.hypot(dx, dy) : 0;
+          const dm = dx !== undefined && dy !== undefined ? dmath.hypot(dx, dy) : 0;
           this.shakeDirX = dm > 0 ? dx! / dm : 0;
           this.shakeDirY = dm > 0 ? dy! / dm : 0;
       }
@@ -4335,14 +4371,14 @@ export class GameEngine {
       for (let i=0; i<5; i++) {
           const angle = sim.engine() * Math.PI * 2;
           const dist = 500 + sim.engine() * (config.radius - 500);
-          const x = Math.cos(angle) * dist;
-          const y = Math.sin(angle) * dist;
+          const x = dmath.cos(angle) * dist;
+          const y = dmath.sin(angle) * dist;
 
           let safe = true;
           for (const p of pois) {
-              const d2 = (x - p.position.x)**2 + (y - p.position.y)**2;
+              const d2 = (x - p.position.x) * (x - p.position.x) + (y - p.position.y) * (y - p.position.y);
               const safeDist = (p.gravityRange || p.size.x) + 800; 
-              if (d2 < safeDist**2) {
+              if (d2 < safeDist * safeDist) {
                   safe = false;
                   break;
               }
@@ -4431,7 +4467,7 @@ export class GameEngine {
             // — the camera moves with the hit instead of vibrating about it.
             const S = COLLISION_CONFIG.SHAKE;
             const elapsed = CAMERA_CONSTANTS.SHAKE_DECAY - this.shakeTimer;
-            const osc = Math.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
+            const osc = dmath.cos(elapsed * S.DIR_FREQ_HZ * Math.PI * 2);
             const along = mag * osc;
             const jitter = mag * S.DIR_JITTER;
             this.camera.shakeOffset.x = this.shakeDirX * along + (fxRng.render() - 0.5) * jitter;
@@ -4660,11 +4696,11 @@ export class GameEngine {
         if (over <= 0.5) {
             this.player.overSpeedAllow = undefined;
         } else {
-            this.player.overSpeedAllow = maxSpeed + over * Math.pow(HIT_FEEDBACK.PLAYER_KNOCKBACK_DECAY, timeScale);
+            this.player.overSpeedAllow = maxSpeed + over * dmath.pow(HIT_FEEDBACK.PLAYER_KNOCKBACK_DECAY, timeScale);
             speedCap = this.player.overSpeedAllow;
         }
     }
-    const currentSpeed = Math.sqrt(this.player.velocity.x**2 + this.player.velocity.y**2);
+    const currentSpeed = Math.sqrt(this.player.velocity.x * this.player.velocity.x + this.player.velocity.y * this.player.velocity.y);
     if (currentSpeed > speedCap) {
         this.player.velocity.x = (this.player.velocity.x / currentSpeed) * speedCap;
         this.player.velocity.y = (this.player.velocity.y / currentSpeed) * speedCap;
@@ -4708,7 +4744,7 @@ export class GameEngine {
             // (LINE / TRIANGLE) orient consistently with the ship's heading.
             const vx = this.player.velocity.x;
             const vy = this.player.velocity.y;
-            const angle = (vx !== 0 || vy !== 0) ? Math.atan2(vy, vx) : 0;
+            const angle = (vx !== 0 || vy !== 0) ? dmath.atan2(vy, vx) : 0;
             // Trail-extension direction — VELOCITY mode (default) emits at
             // player.position with no per-point velocity, so the trail
             // naturally extends opposite to velocity as the ship moves
@@ -4752,7 +4788,7 @@ export class GameEngine {
     const mousePos = this.input.getMousePosition();
     const cx = viewport().width / 2;
     const cy = viewport().height / 2;
-    this.player.rotation = Math.atan2(mousePos.y - cy, mousePos.x - cx);
+    this.player.rotation = dmath.atan2(mousePos.y - cy, mousePos.x - cx);
 
     // Banking roll — after the rotation update so the lateral decomposition
     // reads this step's facing, not last step's.
@@ -5066,7 +5102,7 @@ export class GameEngine {
       this.applyStatusEffect(target, proj.appliesEffect);
     }
     // Derive impact direction for a slight forward cone bias
-    const impactAngle = Math.atan2(proj.velocity.y, proj.velocity.x);
+    const impactAngle = dmath.atan2(proj.velocity.y, proj.velocity.x);
 
     switch (target.type) {
       case EntityType.ENEMY:
@@ -5262,7 +5298,7 @@ export class GameEngine {
     if (target.type === EntityType.PLAYER) {
       const stacks = (list.find(e => e.kind === payload.kind)?.stacks ?? 0) + 1;
       if (payload.kind === 'corrosion') {
-        this.audio.play('status.corrosion.apply', { pitch: Math.pow(2, (stacks - 1) / 12) });
+        this.audio.play('status.corrosion.apply', { pitch: dmath.pow(2, (stacks - 1) / 12) });
       } else {
         this.audio.play('status.disable.apply');
       }
@@ -5738,7 +5774,7 @@ export class GameEngine {
       if (!def || !svc) return false;
       if (def.group === 'ship' ? !svc.shipShop : !svc.weaponShop) return false;
       const price = this.modulePrice(def.cost);
-      if (def.cost <= 0 || this.credits < price) return false;
+      if (def.cost <= 0 || def.rewardOnly || this.credits < price) return false;
       const inv = this.inventory.indexOf(null);
       if (inv === -1) return false; // inventory full
       this.credits -= price;
@@ -6354,7 +6390,7 @@ export class GameEngine {
       if (from !== undefined) {
           const ax = wrapDeltaX(from.x, target.position.x);
           const ay = wrapDeltaY(from.y, target.position.y);
-          const m = Math.hypot(ax, ay) || 1;
+          const m = dmath.hypot(ax, ay) || 1;
           target.lastImpactVelocity = { x: (ax / m) * 6, y: (ay / m) * 6 };
       }
       if (target.health > 0) {
@@ -6471,8 +6507,8 @@ export class GameEngine {
       // ends the body.
       if (local === undefined) return true;
       const reach2 = grain !== null ? Infinity
-          : (Math.max(target.size.x, target.size.y)
-             * FRACTURE_DETACH.CONTACT_RADIUS_FRAC) ** 2;
+          : dmath.pow(Math.max(target.size.x, target.size.y)
+             * FRACTURE_DETACH.CONTACT_RADIUS_FRAC, 2);
 
       for (let pass = 0; pass <= cells.length; pass++) {
           const living = new Set<number>();
@@ -6749,8 +6785,8 @@ export class GameEngine {
       let dirX = localX, dirY = localY;
       const angleOffset = dent.dentVertexAngleOffset;
       if (angleOffset !== undefined && angleOffset !== 0) {
-          const cosA = Math.cos(angleOffset);
-          const sinA = Math.sin(angleOffset);
+          const cosA = dmath.cos(angleOffset);
+          const sinA = dmath.sin(angleOffset);
           dirX = localX * cosA - localY * sinA;
           dirY = localX * sinA + localY * cosA;
       }
@@ -6980,7 +7016,7 @@ export class GameEngine {
           // flame): damage is measured from the speed a round still has, so
           // bleeding speed is bleeding damage — no curve authored anywhere.
           if (p.speedRetain !== undefined && p.speedRetain < 1 && p.active) {
-              const k = Math.pow(p.speedRetain, dt);
+              const k = dmath.pow(p.speedRetain, dt);
               p.velocity.x *= k; p.velocity.y *= k;
           }
           // CURVING rounds (the flamer): turn by the pellet's own rate plus a
@@ -6988,11 +7024,11 @@ export class GameEngine {
           if (p.curveRate !== undefined && p.active) {
               const age = (p.maxLifetime ?? 0) - (p.lifetime ?? 0);
               const w = p.curveRate + (p.curveWobble ?? 0)
-                  * Math.sin((p.curvePhase ?? 0) + 2 * Math.PI * (p.curveHz ?? 0) * age);
-              const a = w * dt, c = Math.cos(a), sn = Math.sin(a);
+                  * dmath.sin((p.curvePhase ?? 0) + 2 * Math.PI * (p.curveHz ?? 0) * age);
+              const a = w * dt, c = dmath.cos(a), sn = dmath.sin(a);
               const vx = p.velocity.x, vy = p.velocity.y;
               p.velocity.x = vx * c - vy * sn; p.velocity.y = vx * sn + vy * c;
-              p.rotation = Math.atan2(p.velocity.y, p.velocity.x);
+              p.rotation = dmath.atan2(p.velocity.y, p.velocity.x);
           }
           // TWO CRITERIA END A SHELL (user call): its FUSE, and running out of
           // MECHANICAL TRAVEL ENERGY.  PhysicsSystem arms `blastPending`
@@ -7128,6 +7164,19 @@ export class GameEngine {
 
   // --- WAVE SYSTEM ---
 
+  /** DBG ▸ World & Maps ▸ "Arena level": force every arena to this level
+   *  (1..20) from its NEXT wave on; null = each portal's own level. */
+  dbgArenaLevel: number | null = null;
+
+  /** The level the current map's waves run at: the debug override, else the
+   *  map's own descriptor level (each portal is its own dial), else the old
+   *  1-3 setting for a map that has none. */
+  arenaLevel(): number {
+    if (this.dbgArenaLevel !== null) return this.dbgArenaLevel;
+    const d = this.currentDescriptor();
+    return d?.level ?? Math.max(1, this.difficultyLevel);
+  }
+
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
    *  tiny helper so every wave entry point (init / update tick / skip)
    *  goes through the same factory. */
@@ -7140,8 +7189,10 @@ export class GameEngine {
       entities: this.currentMap.entities,
       player: this.player,
       physics: this.physics,
-      enemyScale: this.enemyScale,
-      difficultyLevel: this.difficultyLevel,
+      // The legacy menu "None" (difficulty 0, saved) still switches waves off;
+      // otherwise the ARENA LEVEL sets the spawn amount and the enemy stats.
+      enemyScale: this.enemyScale <= 0 ? 0 : levelScales(this.arenaLevel()).spawn,
+      difficultyLevel: this.arenaLevel(),
       viewportHalfDiagonal,
       forcedEnemy: this.forcedTestEnemy,
       onBossSpawn: this.handleBossSpawn,
@@ -7205,7 +7256,7 @@ export class GameEngine {
       if (reach <= 0) return;
       const dx = wrapDeltaX(px, e.position.x);
       const dy = wrapDeltaY(py, e.position.y);
-      const d = Math.hypot(dx, dy);
+      const d = dmath.hypot(dx, dy);
       if (d < prev || d >= cur || d > reach) return;
       if (auto) {
           e.trackedAt = now;
@@ -7562,13 +7613,13 @@ export class GameEngine {
           const e = item.entity;
           const scatterA = sim.engine() * Math.PI * 2;
           const scatterR = sim.engine() * cfg.SCATTER;
-          e.position.x = this.portalTransitExit.x + Math.cos(scatterA) * scatterR;
-          e.position.y = this.portalTransitExit.y + Math.sin(scatterA) * scatterR;
+          e.position.x = this.portalTransitExit.x + dmath.cos(scatterA) * scatterR;
+          e.position.y = this.portalTransitExit.y + dmath.sin(scatterA) * scatterR;
           wrapPosition(e.position);
           const heading = sim.engine() * Math.PI * 2;
           const speed = cfg.SPEED_MIN + sim.engine() * (cfg.SPEED_MAX - cfg.SPEED_MIN);
-          e.velocity.x = Math.cos(heading) * speed;
-          e.velocity.y = Math.sin(heading) * speed;
+          e.velocity.x = dmath.cos(heading) * speed;
+          e.velocity.y = dmath.sin(heading) * speed;
           if (e.rotationSpeed !== undefined) {
               e.rotationSpeed += (sim.engine() - 0.5) * 1.5;
           }
@@ -7601,8 +7652,8 @@ export class GameEngine {
       const spread = 420 + sim.engine() * 260;
       const a = sim.engine() * Math.PI * 2;
       const pos = {
-          x: this.player.position.x + Math.cos(a) * spread,
-          y: this.player.position.y + Math.sin(a) * spread,
+          x: this.player.position.x + dmath.cos(a) * spread,
+          y: this.player.position.y + dmath.sin(a) * spread,
       };
       wrapPosition(pos);
       const boss = this.waves.spawnAt(subtype, pos, ctx, true);
@@ -7641,13 +7692,13 @@ export class GameEngine {
     // The snitch is wave bookkeeping only in that it pays out + ends the
     // wave on catch; the entity itself persists across wave boundaries
     // (it is never despawned at a wave end), so don't touch it here.
-    const healthInterval = HEALTH_DROP_INTERVAL[this.difficultyLevel] ?? 20;
+    const healthInterval = HEALTH_DROP_INTERVAL[Math.min(3, this.arenaLevel())] ?? 20;
     if ((clearedIndex + 1) % healthInterval === 0) {
       const hAngle = sim.engine() * Math.PI * 2;
       const hDist  = 20 + sim.engine() * 80; // 20–100 units from player
       const hPos   = {
-        x: this.player.position.x + Math.cos(hAngle) * hDist,
-        y: this.player.position.y + Math.sin(hAngle) * hDist,
+        x: this.player.position.x + dmath.cos(hAngle) * hDist,
+        y: this.player.position.y + dmath.sin(hAngle) * hDist,
       };
       this.spawnHealthDrop(hPos, DROP_CONFIG.HEALTH_HEAL_AMOUNT);
     }
@@ -7662,8 +7713,8 @@ export class GameEngine {
       const a = sim.engine() * Math.PI * 2;
       const d = 40 + sim.engine() * 80;
       this.spawnSalvageDrop({
-        x: this.player.position.x + Math.cos(a) * d,
-        y: this.player.position.y + Math.sin(a) * d,
+        x: this.player.position.x + dmath.cos(a) * d,
+        y: this.player.position.y + dmath.sin(a) * d,
       });
     }
   };
@@ -7812,7 +7863,7 @@ export class GameEngine {
    *  is initialised disabled there, exactly like difficulty "None" — and
    *  every arena runs waves.  Unregistered maps default to enabled. */
   get wavesEnabled(): boolean {
-    return descriptorForMapType(this.currentMap?.type)?.wavesEnabled ?? true;
+    return this.currentDescriptor()?.wavesEnabled ?? true;
   }
 
   private initWaveSystem() {
@@ -7824,7 +7875,7 @@ export class GameEngine {
     // An arena remembers where its wave script stood (engine/arenaWaves.ts):
     // exactly, for a few minutes after the player left, then from the top of
     // an ever earlier wave.
-    const held = arenaWaveFor(this, descriptorForMapType(this.currentMap?.type)?.id);
+    const held = arenaWaveFor(this, this.currentDescriptor()?.id);
     this.waves.init(ctx, this.wavesEnabled, held.wave, held.progress);
     if (this.waves.waveState === 'active') this.audio.play('wave.start');
   }
@@ -7848,7 +7899,7 @@ export class GameEngine {
             ? Math.min(this.salvageStreak + 1, SALVAGE_STREAK_MAX) : 0;
         this.salvageStreakAt = now;
         this.audio.play('pickup.salvage', {
-            x: pos.x, y: pos.y, pitch: Math.pow(2, this.salvageStreak / 12),
+            x: pos.x, y: pos.y, pitch: dmath.pow(2, this.salvageStreak / 12),
         });
     } else if (entity.dropType === 'health') {
         this.audio.play('pickup.health', { x: pos.x, y: pos.y });

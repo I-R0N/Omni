@@ -412,6 +412,29 @@ faithful, and is only checkable because `S1` landed.
 
 ### S3 — "The numbers"  (content as data + balance + knob triage)
 
+**STATUS (S3, 2026-10-04).**  PR 1, the invisible one, is BUILT: the three
+tables are `data/*.toml`, parsed at build time into `virtual:table/*` modules
+through ONE loader (`scripts/toml-tables.mjs`) that `vite.config.ts` and
+`scripts/sim-test.mjs` both import; `tests/sim/tables.test.ts` pins the resolved
+values against a golden captured BEFORE the move (commit order: golden + test
+first, passing on the old literals; extraction second).  PR 2 (`dmath`) is ALSO BUILT, rolled
+into the SAME PR at the user's request (to keep the PR count down): separate
+commits, so the invisible table move and the behaviour-moving math layer stay
+reviewable apart.  `engine/systems/dmath.ts` replaces every native libm call and
+`**` in the sim; `tests/sim/guard.test.ts` keeps it out; Node and Chromium now
+agree on the WORLD bit for bit (`tests/headless.spec.ts` asserts it
+unconditionally), and replay hashes were rebaselined by construction (the suites
+compare runs to each other, no hash literals).  simbench before → after is in
+CLAUDE.md §8 and is within container noise.  D-S3-d and D-S3-e are
+answered (2026-10-05, below); the balance harness is next.  Also in this PR, at
+the user's request: a NEW GAME button on the main menu (two-tap confirm; hidden
+when there is no progress) and the debug "Erase save" row moved into Save &
+Records, where it is found.  Two facts worth carrying forward: a table
+NAME that does not resolve (a sprite key, a weapon `extends`, a subtype) fails at
+module load, so `test:sim` and the boot smoke catch it and `vite build` does not;
+and the golden is a one-time migration check that a deliberate rebalance
+re-captures in the same commit.
+
 **Near-term payoff.**  Tuning without a rebuild, and a console port that
 inherits every balanced number instead of retyping it.  With `S2`'s
 headless harness, balance claims become measurements rather than feelings —
@@ -469,10 +492,27 @@ recur rather than complete.
   Held for a later pass, with reasons: `SHARD_VARIANTS` (961 lines, the
   `grainSpecFor` seam and the per-material DBG overrides), `WEAPONS`
   (computed, not data), `MODULE_DEFS` (`BASE_BANK_DIVISOR` pins to it).
-- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32).**  There are
-  **59** `*_CYCLE` tables, not ~90 (measured, PM 2026-10-04).  Triage is
-  scoped to the knobs belonging to the tables being extracted, so each call
-  lands in the PR for the table it concerns and no session faces all 59.
+- ~~**D-S3-b — Knob triage.**~~  **SETTLED, SCOPED (D32); BOTH CALLS MADE
+  (user, in S3 PR 1).**  There are **59** `*_CYCLE` tables, not ~90 (measured, PM
+  2026-10-04).  Triage is scoped to the knobs belonging to the tables being
+  extracted, so each call lands in the PR for the table it concerns and no session
+  faces all 59.  The three tables own two:
+  - **`ENEMY_SCALE_CYCLE` ("Enemy scale") → its steps MOVE INTO `enemies.toml`**
+    (`enemy_scale_cycle`).  The user chose this over keeping it as code or
+    removing it.  The cycle STAYS a cycle: it multiplies `ENEMY_SCALING`, which is
+    not an extracted table and stays in `constants.ts`; the resolver requires
+    index 0 = 1, so the first click is still the A/B.  Done; DBG row unchanged.
+  - **`SWARM_MOVE_MODES` ("Gnat move") stays a cycle, and gains a SEAM.**  The
+    user's answer was a question: does it make sense to add enemy types that wear
+    the alternate move modes, since the modes were never retired and the variety
+    is good?  Yes — it makes sense, and the seam is cheap: `swarmMove?` on an
+    `ENEMY_VARIANTS` row pins that archetype to one steer (absent follows the
+    cycle).  PR 1 lands ONLY the seam, which no row sets, so the invariant holds
+    (`tests/sim/tables.test.ts` pins both halves).  The NEW ENEMY TYPES are
+    gameplay content, not an extraction, so they are NOT in PR 1 and are not
+    `dmath`'s either: each needs an `EnemySubtype`, `ENEMY_ROLE`/`ENEMY_BEHAVIOR`
+    rows, a `shape` (+ `drawEnemyIcon` for the roster dialogue), a sprite, a place
+    in `WAVE_DEFINITIONS`, and a balance pass.  FLAGGED in §8 for the PM to place.
 - ~~**D-S3-c — Data format.**~~  **SETTLED (D32): TOML**, parsed at BUILD
   time through a Vite virtual-manifest plugin (the `nebulaManifestPlugin` /
   `sfxManifestPlugin` precedent), so the parser is a devDependency and ships
@@ -481,18 +521,127 @@ recur rather than complete.
   the format follows who WRITES the file — a generator's output is JSON, a
   hand-authored table is TOML — so the two formats are deliberate and
   neither is to be unified into the other.
-- **D-S3-d — Does the player get more than the 4-level difficulty index?**
-- **D-S3-e — Balance targets, stated as numbers.**  STILL OPEN and the one
-  to put to the user at the moment the harness is built, not before.  How long should wave 5
-  take?  What is a healthy run length?  Consequence: without stated
-  targets the harness has nothing to measure against and the session
-  degenerates into taste.
+- ~~**D-S3-d — Does the player get more than the 4-level difficulty index?**~~
+  **SETTLED (user, 2026-10-05).**  Yes — and the model changes shape:
+  1. **Up to 20 levels, and the new levels EXTEND the range upward.**  Levels
+     1–4 stay what today's four are; 5–20 are harder than today, not a
+     re-spread of the current range.
+  2. **Difficulty belongs to the PORTAL, not the menu.**  Each portal carries
+     its own level, shown when the player arrives.  The start-of-game picker
+     goes away (it is a saved setting today, `settings.difficulty`, so the
+     save needs a migration — S2's file format).
+  3. **Separate dials for alternate arenas** where the enemies are present but
+     NOT the objective (mazes, timed courses).  So difficulty is a vector of
+     dials per arena (enemy count, toughness, income, …), not one scalar.
+  4. **RIVALS enter the difficulty calculation.**  They are currently very
+     prominent at every level (score-cadenced, `RIVAL_CONSTANTS.SCORE_INTERVAL`
+     1000, capped by `MAX_RIVALS`).  The harness must measure how much of a
+     run's pressure and loot-theft they account for before they are re-tuned.
+  5. **FUTURE (not this phase):** difficulty that scales with the player's
+     weapon loadout, harder for stronger loadouts.  Design the dial vector so
+     this is one more input, not a rewrite.
+  6. **Intended weapon bands:** basic weapons start to struggle above level
+     2–3; Mk III above level 10; the 10–20 range is meant for rare Mk IV+
+     modules (extremely rare in shops, rare as boss / maze rewards).
+- ~~**D-S3-e — Balance targets, stated as numbers.**~~  **SETTLED in part
+  (user, 2026-10-05).**  Method: **measure what the game does today and
+  report it first**; targets are then judged against the report.  Stated
+  targets so far (mobile is the design target):
+  - **Run length:** finding a local portal and completing a run takes about
+    **1.5–7.5 minutes**.
+  - **Wave time escalates** with the wave, because time tracks enemy count.
+    Timed arenas (the future mazes) use the same measure.
+  - **Basic weapons kill tier-1 enemies in one shot** today; keep that at the
+    low levels.
+  - **Arenas vary per wave** in difficulty and enemy variety.
+  - **Income is NOT settled** (the user finds it hard).  Constraints given:
+    modules are lost for good on a double death, so they must not be out of
+    reach, and they are powerful, so not cheap; **Mk I–III are never gated
+    behind unlocks**; instead each STATION stocks a different variety, and a
+    higher mark or a rarer kind (Shield, Overcharge) is harder to find and
+    dearer.  That is a per-station catalogue, not an unlock tree.
+
+**D-S3-f (user, settled): module pricing is a factorial, and rare finds are arena
+rewards only.**  A mark costs its number times the mark below (Mk II = 2x, Mk III
+= 6x, Mk IV = 24x, Mk V = 120x Mk I); each family keeps its current Mk I price.
+The shop stops at Mk III; Mk IV and up are `rewardOnly` (boss drops now, maze
+completion and other arena rewards later).  Landed in `constants.ts`
+(`markCost`, `SHOP_MAX_MARK`, `ModuleDef.rewardOnly`), pinned by
+`tests/sim/pricing.test.ts`.  Consequences to carry into the level design: a Mk
+III is now 24-60 units against ~85 per level-3 run (about half a run); the
+Scanner Mk IV / V cost 168 / 840 units, and because a sell-back is 90% of cost a
+rare drop is also a large payout (Mk V sells for 756 units) — whether sell-back
+of reward-only finds should be capped is OPEN.
+
+**D-S3-g (user, settled): the shape of difficulty, and what stays put.**
+(1) **Sell-back stays at 90% for every mark**, reward-only finds included.
+(2) **A boss drops a reward-only mark far more rarely than a uniform draw
+would** (it was 1 in 18, "5% is too high"): `BOSS_REWARD_WEIGHT` makes it about
+1 boss in 200 (`bossRewardTable` / `pickBossReward`).  (3) **The starter gun
+stays relatively hard against the boss, and beatable.**  The bot clears the
+boss 1 time in 12 at level 1 and never at level 3; the user has beaten level 3
+with the starter gun, so that gap is the bot, not the game — no retune.
+(4) **Difficulty adjusts enemy HEALTH and DAMAGE more than it adjusts how many
+spawn** (today the levels move spawn count 3x and HP/damage 1.4x), **and it
+changes the VARIETY of enemies**: the Bulwark is a hard archetype and is placed
+as one, so it belongs to higher levels rather than appearing at every level.
+(5) **Stronger enemy AI is a later difficulty axis** and is parked
+(PARKING_LOT: "Enemy AI as a difficulty axis"), not designed here.
+
+**D-S3-h (user, settled as a starting point; confirmed by playtest only): enemy
+mix is driven by per-enemy ratings and the arena level.**  (1) Provisional,
+awaiting playtest.  (2) A level-3 wave no longer carries Bulwarks in numbers:
+the wave-5 spike (~49 points against 8-12 elsewhere) is gone; the Tank
+(RAMMER_3) stands where the Bulwark was.  (3) Every enemy has a `rating`
+(`data/enemy-difficulty.toml`); a wave is a POINT budget; the level sets a
+roster CEILING (the hardest rating allowed) and the mix is picked at random
+(seeded, `sim.waves`) with evenly split points, 2-4 types a wave, never the
+previous wave's mix.  So kamikaze, turret, nest, swarm and the rest vary by
+arena and wave.  Difficulty is the PORTAL's (`MapDescriptor.level`: Pocket 2,
+Universe 3, Ring 4, Seven Rings 6, field maps 3); the menu picker is gone.
+Levels 1-3 are the old Low/Med/High rows; above that HP and damage grow 1.14x a
+level and spawn 1.03x (capped 1.5x).  Playtest handle: DBG > World & Maps >
+Portals > "Arena level".  Baseline report predates this generator: re-run it.
+
+**D-S3-i (user, settled): the hub layout and arena varieties.**  Each arena map
+has three portals (easy / mid / hard: Pocket L1/2/4, Deep Space 2/3/5, Ring
+World 3/4/6, Seven Rings 5/6/8 — a starting point for the playtest); the eight
+material-field showcase rifts (Indestructible and Tile Heavy included) form a
+gravity-free debug ring just outside the home station; arenas and the three
+shops are spread at even angles over three rings round the home station, the
+easy variety innermost.  The mid variety keeps the original descriptor id.
+
+**PROPOSED (not settled) — the level curve, for the user to confirm.**
+Calibration (baseline report §8, mk3 on POCKET + RING, n = 6 a cell): enemy HP
+and damage x1.0 -> the fully outfitted bot beats the boss 4 times in 6; x1.5 ->
+1 in 6; x2 -> 0; x3 -> 1 (noisy).  The bot is harsher than a person, so
+"Mk III struggles" is placed higher than the bot's x1.5.  Shape: levels 1-3 are
+today's 1-3 unchanged (spawn 0.35 / 0.65 / 1.0, HP and damage 0.7 / 0.85 / 1.0);
+from level 4 the spawn budget grows only gently (about x1.03 a level, capped
+x1.5) while HP and damage grow x1.14 a level — x2.5 at level 10, x9 at level
+20.  Roster: the Bulwark moves from "every stage's wave 5" to "level 3 and up"
+(levels 1-2 put a Shooter 2 there), one Bulwark at level 3 as today, two from
+level 6, three from level 10; Kamikaze, Turret and Nest follow the same idea
+(introduced by level, then more of them).  Portal difficulty is shown on arrival.
+
+**BUILT in S3: the balance harness and today's baseline.**  Instruments:
+`tests/sim/balance.ts` (`playArena`, `duel`, `hubTransit`, `staticTables`),
+`tests/sim/balance-cli.ts`, pinned by `tests/sim/balance.test.ts`; driver
+`scripts/balance.mjs` (`--seeds N --jobs N`, `--ladder` adds the lean start at difficulty 1-2, `--report` re-renders from the
+JSON).  Output: `docs/BALANCE_BASELINE.md` (the table the user judges) and
+`docs/balance-baseline.json` (raw).  Not part of `npm test`/CI (about an hour
+at 3 seeds).  The bot is a YARDSTICK, not a player (perfect aim, fixed kite,
+no dodging, no charged shots); beams are pulled not held; hit attribution
+counts projectile hits only; rival loot theft is inferred from salvage per
+wave.  **NEXT in S3:** the user judges the baseline against the targets
+above; the portal-difficulty model, the level count and the per-station
+catalogues are DESIGNED from that, not before it.
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
 with the numbers visible in the diff.
 
-**Acceptance, as tests to write.**
+**Acceptance, as tests to write.**  *(PR 1: `tests/sim/tables.test.ts` — done.)*
 - for each extracted table, the loaded data is byte-equivalent in effect to
   the previous constants (assert the derived values, not the literals)
 - the existing suites that pin populations and balance (`maps.spec.ts`,
@@ -877,6 +1026,8 @@ who made it, and the consequences for other sessions.
 | D32 | PM | 2026-10-04 | **S3's four pre-flight calls, settled before the brief was written** (user).  (a) **FORMAT: TOML.**  Options weighed: TOML / JSON + a TS schema / data-only TS modules.  The decider was COMMENTS — this repo's tables carry the reasoning behind each number (the grain table's "neither is visible in the row", the bank divisor's two factors), and that commentary is a large part of their value, so JSON would either lose it or scatter it into sibling files.  (b) **FIRST TABLES: `MAP_POPULATION` + `ENEMY_VARIANTS` + `BOSS_DEFS`** — ~560 measured lines, all three DESCRIPTIONS rather than derivations, one small / one medium / one nested-shape, and exactly what a balance harness needs to vary.  (c) **ORDER: tables before `dmath`** (D30 placed dmath in S3; this settles its position WITHIN the session, and does not reopen D30).  (d) **KNOB TRIAGE: only the extracted tables' knobs**, riding each extraction. | **The format choice is cheap here only because of an existing precedent, and that is the brief's load-bearing constraint.**  `vite.config.ts` already resolves two BUILD-TIME virtual manifests (`virtual:nebula-manifest`, `virtual:sfx-manifest`), so a TOML table parses at build time into a typed module: the parser is a devDependency, the bundle ships zero parser bytes, and `scripts/inline-build.mjs`'s single-file standalone — which cannot fetch anything — works for free because the data is already in the module.  THREE consumers must all resolve the new virtual ids or the gates break, and the second is the one that gets forgotten: (1) `vite.config.ts`; (2) `scripts/sim-test.mjs`, whose esbuild shim hardcodes `/^virtual:(nebula\|sfx)-manifest$/`, so `npm run test:sim` fails the moment a table becomes virtual; (3) `playwright.config.ts`'s webServer, which builds, so it is covered by (1).  ORDER rationale: extraction is the session's stated payoff and the lower-risk half, so if `dmath` sprawls (~150 call sites plus a `perf/` number either side) the valuable work has landed, and `dmath` explicitly does not block the mobile release.  The honest cost of that order: `dmath` later shifts the extraction's derived-value assertions in the LAST PLACE, so those assertions need tolerances rather than equality — the brief says so, since discovering it as a red suite is how it turns into a day.  MEASURED AND CORRECTED in §4 while settling these: `constants.ts` is 11,359 lines (the brief said ~1000) and there are 59 `*_CYCLE` tables (it said ~90). |
 | D33 | PM | 2026-10-05 | **THE FORMAT FOLLOWS WHO WRITES THE FILE, NOT WHO READS IT** (user call, after W1's `score/index.json` landed beside D32's TOML and the two could have read as drift).  **A file a GENERATOR rewrites is JSON.  A file only HUMANS write is TOML.**  So W1's song index stays JSON and `S3`'s tuning tables are TOML, and neither is to be "unified" into the other. | The rule is phrased on the WRITER because that is the property that actually decides it: TOML's one advantage here is COMMENTS, and a comment cannot survive a generator rewriting the file — `npm run music:import` adds or replaces songs in `index.json` on every run, so any commentary in it would be destroyed on the next import.  Phrasing the rule on the reader ("engine data is X") would have given the wrong answer for both files.  **THE INDEX IS HONESTLY A MIXED CASE, and it is the exception that proves the rule rather than a counter-example:** its `songs[]` array is generator-written, but its `plan` block (which song plays in the hub, a field map, an arena, a boss fight) is a HAND-AUTHORED editorial choice — and the file pays for being JSON exactly where you would expect, with an `"about"` STRING KEY doing a comment's job at the top.  That is the cost, it is small, and splitting four lines of `plan` into a separate TOML file to satisfy the rule would be churn for nothing.  If `plan` ever grows into real editorial reasoning, THAT is the moment to split it, and this row is the argument for doing so.  Recorded in CLAUDE.md §8 as well as here, so a session that reads only the master spec still sees it. |
 | D34 | PM | 2026-10-06 | **D33's RULE STANDS; ITS "MIXED CASE" CAVEAT IS RETIRED** (PM reconciliation after `6558b71`, not a new call).  The index is NOT a mixed case: `music:import` writes its `plan` block too, so `index.json` is a wholly generator-written file and the rule's own answer for it — JSON — is now the clean case rather than the exception.  Read D33's rule as written and ignore only its mixed-case paragraph. | D33 argued the index "pays for being JSON exactly where you would expect" because `plan` was HAND-AUTHORED editorial choice sitting in generated output.  That was true of the file when D33 was written and is not true of the code: `scripts/music-import.mjs` ends with `for (const role of use) index.plan[role] = meta.id`, so each song's own `use` array decides which roles it claims and the importer stamps them into the index.  **The editorial choice did not disappear — it moved UPSTREAM**, into the kit's hand-authored `song.json`, which is exactly where D33's deciding property says it belongs.  So the rule did better than its own footnote: the one file that looked like a counter-example turned out to obey it.  Two consequences.  (1) `plan` is still hand-EDITABLE (the importer never clears a role), so a human pin survives until a song claims that role — it is generator-written, not generator-owned.  (2) It puts a NEW question where the old caveat was, and that one is the user's, not mine: the kit's `song.json` is hand-written and read by a generator, so comments WOULD survive in it and D33's rule points at TOML — see §8.  Appended rather than editing D33, per §0: the log is append-only, and a correction that rewrites the row it corrects destroys the evidence that the rule was tested. |
+| D35 | PM | 2026-10-06 | **THE KIT'S `song.json` STAYS JSON, AND D33 CARRIES THE EXEMPTION** (user call, taking the PM's recommendation (a) on D34's §8 hand-up).  D33's rule points a hand-written file at TOML; the GarageBand kit's `song.json` is hand-written, read only by `music:import`, and stays JSON.  The rule is not weakened — it gains a stated boundary: **a file small enough that its fields need no explanation does not need a format that can explain them.**  The moment a kit carries reasoning worth a comment — WHY a song claims `boss`, why a tempo was chosen — that is the moment to split it, which is D33's own test applied one level up. | Options weighed were (a) leave it JSON and write the exemption into the rule, (b) move it to TOML for the sake of commentary, (c) TOML upstream with the generator's copy staying JSON.  (b) buys a comment nobody has yet wanted to write, against a change to W1's authoring surface and `docs/MUSIC_PIPELINE.md`; (c) is the most honest about the two files having different writers and the least worth its cost, since it means two formats for one shape.  The deciding fact is that the file is FIVE live fields (`id`, `title`, `bpm`, `bars`, `use`), four of which the importer validates by name, plus two inert ones — nothing in it is a judgement that needs defending.  Recorded in CLAUDE.md §8 beside D33, since that is where the rule is read. |
+| D36 | PM | 2026-10-06 | **D15 NO LONGER DESCRIBES THE BRANCH TOPOLOGY: `S3` PROMOTED TO `main` ON ITS OWN** (PM reconciliation of what happened, not a new call).  PR #113 (`claude/s3-numbers` → `main`, merged 2026-10-06) carried 62 commits and 155 files — `dmath`, the TOML content tables, the balance harness, factorial pricing, per-arena difficulty and the hub layout — so `main` is now AHEAD of the phase branch, which D15 said would not happen until the phase ended.  The user reports the merge was PREMATURE and that `S3` still has work in flight, so this is a topology change to absorb, not a phase completion. | **What is true now:** `main` holds `S1` + `S2` + `S3`; the phase branch holds W1 (the music pipeline), the W2 revert, the Critical Mass import and this plan's own commits — 14 commits `main` lacks.  The two diverged at `33ac6f3`.  **What was done:** `main` was merged INTO the phase branch (three conflicts: this doc twice, `package.json`, `package-lock.json`), so PR #108 is mergeable again and carries the music work forward rather than stranding it.  Both devDependencies survive — W1's `ffmpeg-static` and `S3`'s `smol-toml` — and the lockfile was REGENERATED with npm rather than hand-merged.  **What this costs:** D15's guarantee was that the phase lands as one reviewable promotion; that is gone and cannot be recovered by anything written here.  What replaces it is weaker and worth stating plainly — the phase branch is now a FOLLOWER of `main`, so every session on it must merge `main` before pushing, and a second premature promotion is now the likely failure rather than a hypothetical one.  **Not decided here:** whether the phase branch should keep accumulating at all, or whether the remaining work should go to `main` in PRs the way `S3`'s did.  That is the user's, and it is the one question this topology actually raises. |
 
 ---
 
@@ -887,7 +1038,8 @@ should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
 
-- **W1 → the user (the kit `song.json`'s format).**  D34 moved the music
+- ~~**W1 → the user (the kit `song.json`'s format).**~~  *(SETTLED, D35: the
+  user took option (a) — it stays JSON, and D33 carries the exemption.)*  D34 moved the music
   pipeline's one hand-authored file out of `index.json` and into the GarageBand
   kit's `song.json` — id, title, bpm, bars, `use`, and the two inert fields.
   That file is WRITTEN BY A HUMAN and only READ by a generator, so comments
@@ -1062,3 +1214,35 @@ history stays readable.
   nebula goo step ("a cost measured against one population does not
   survive a change to that population").  A decision for the user when
   variants exist, not now.  *(PM, 2026-10-05)*
+- **S3 → PM (new gnat-flock enemy types need a home).**  The user wants VARIETY
+  from the "Gnat move" modes (boids / vortex / weave / burst), which were never
+  retired: archetypes that each wear one, rather than one global DBG cycle.  S3
+  PR 1 landed only the SEAM (`swarmMove?` on an `ENEMY_VARIANTS` row; no row sets
+  it).  The enemy types themselves are gameplay content — an `EnemySubtype`,
+  role/behaviour rows, a shape + roster icon, a sprite, wave placement and a
+  balance pass — and are not part of the extraction or of `dmath`.  PM to place
+  them: a third S3 PR, or a content item for after the balance harness exists
+  (they would be a natural first customer of it).  *(S3, 2026-10-04)*
+- **S3 → all sessions (content tables are files).**  `MAP_POPULATION`,
+  `ENEMY_VARIANTS` and `BOSS_DEFS` live in `data/*.toml`.  A balance change is a
+  TOML edit that also re-captures `tests/sim/fixtures/tables.golden.json` in the
+  same commit (that is what makes it visible); a new table is an entry in
+  `scripts/toml-tables.mjs` `TABLES`, and BOTH `vite.config.ts` and
+  `scripts/sim-test.mjs` pick it up from there — no second place to register it.
+  Arena layouts as data (S1's earlier flag) can use the same mechanism.
+  *(S3, 2026-10-04)*
+- **S3 → PM (PR 1 and PR 2 are one PR).**  At the user's request `dmath` was
+  rolled into the content-tables PR.  Consequences for later sessions: the
+  Node-vs-Chromium parity assertion is now EXACT for the world (S2's "streams and
+  player only" caveat is retired); any new sim code must use `dmath.*` and avoid
+  `**` or the guard fails; a deliberate change to dmath is a rebaseline.  *(S3,
+  2026-10-04)*
+- **S3 → PM / S2 / S4 (difficulty moves to the portal).**  User call
+  2026-10-05: difficulty is per PORTAL (up to 20 levels, shown on arrival), the
+  start-of-game picker goes away, alternate arenas get their own dial vector,
+  rivals count in the calculation, and weapon-loadout scaling is a later input.
+  Consequences: the SAVE FILE's `settings.difficulty` needs a migration (S2);
+  `WaveSystem` / `ENEMY_SCALING` / `DIFFICULTY_*` read a per-arena level, not
+  `difficultyLevel`; the portal descriptor (`MAP_DESCRIPTORS`) gains a level;
+  the arrival UI needs a level readout (S4 if it owns the mobile HUD).  Not
+  built yet — S3 reports today's numbers first.  *(S3, 2026-10-05)*

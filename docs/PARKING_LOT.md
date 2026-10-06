@@ -200,6 +200,20 @@ for first.
 
 ---
 
+## Enemy AI as a difficulty axis (parked 2026-10-05)
+
+**Context:** the portal difficulty levels (engine-core S3, D-S3-g) scale enemy
+health and damage and change which enemy types appear.  The user wants smarter
+enemy AI to join them eventually — better aim and leading, flanking instead of
+a straight chase, using cover and terrain, coordinating a pack, reacting to
+the player's weapon.  Parked: the first version of the levels changes numbers
+and roster only.  When it comes, it should be one more per-level dial read at
+spawn (like `damageMult`), not a second AI — the same strategies in
+`AISystem` with parameters (reaction lag, aim error, flank bias) that a level
+moves.  `AI_CONFIG` already carries the reaction-lag and aim-jitter terms.
+
+---
+
 ## Bulwark difficulty note (level design)
 
 **Context:** The BULWARK enemy (Stage 0 core roster) is a comparatively HARD

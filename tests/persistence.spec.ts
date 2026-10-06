@@ -71,7 +71,7 @@ test.describe('the death wreck', () => {
     await expect(page.getByTestId('death-wreck')).toBeVisible();
     const rs = (await stats(page)).runSummary!;
     expect(rs.wreck!.modules).toBeGreaterThanOrEqual(2);
-    expect(rs.wreck!.mapName).toBe('Pocket');
+    expect(rs.wreck!.mapName).toBe('Pocket · L2');
     await page.getByTestId('death-respawn').click();
     await waitForStats(page, s => !s.runSummary, 'respawn');
     const after = await engine(page, e => ({

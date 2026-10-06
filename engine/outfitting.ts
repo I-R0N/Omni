@@ -520,7 +520,7 @@ export function outfittingSnapshot(g: GameEngine) {
         statLines: statBreakdown(g),
         // Catalog prices are the prices the shop will actually charge (via
         // modulePrice), so the UI needs no arithmetic.
-        catalog: MODULE_DEFS.filter(d => d.cost > 0).map(d => {
+        catalog: MODULE_DEFS.filter(d => d.cost > 0 && !d.rewardOnly).map(d => {
             const price = modulePrice(d.cost);
             return {
                 id: d.id, group: d.group as string, kind: d.kind as string,

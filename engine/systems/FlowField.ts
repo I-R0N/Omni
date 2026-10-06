@@ -28,6 +28,7 @@
  * vector once on map load for the hot sim path.
  */
 
+import * as dmath from './dmath';
 import { MAP_WIDTH, MAP_HEIGHT, onMapDimensionsChanged } from '../toroidal';
 
 export interface FlowVector {
@@ -39,7 +40,7 @@ export interface FlowVector {
 // exactly (ergodic on the torus) and asteroids keep meandering instead
 // of orbiting one location.
 const PHI_MINUS_ONE = 0.6180339887498949;
-const BASE_ANGLE = Math.atan2(PHI_MINUS_ONE, 1); // ≈ 31.7°
+const BASE_ANGLE = dmath.atan2(PHI_MINUS_ONE, 1); // ≈ 31.7°
 
 // Angle-swing amplitudes (radians).  Combined peak-to-peak swing is
 // ±(AMP_X + AMP_Y) ≈ ±92° around BASE_ANGLE — wide enough for visible
@@ -70,10 +71,10 @@ const _flowScratch: FlowVector = { x: 0, y: 0 };
 
 export function sampleFlow(wx: number, wy: number): FlowVector {
   const theta = BASE_ANGLE
-              + AMP_X * Math.sin(TWO_PI_OVER_W * wx)
-              + AMP_Y * Math.cos(TWO_PI_OVER_H * wy);
-  _flowScratch.x = Math.cos(theta);
-  _flowScratch.y = Math.sin(theta);
+              + AMP_X * dmath.sin(TWO_PI_OVER_W * wx)
+              + AMP_Y * dmath.cos(TWO_PI_OVER_H * wy);
+  _flowScratch.x = dmath.cos(theta);
+  _flowScratch.y = dmath.sin(theta);
   return _flowScratch;
 }
 
@@ -129,13 +130,13 @@ export function samplePattern(pattern: FlowPattern, wx: number, wy: number): Flo
       _flowScratch.x = 0; _flowScratch.y = 1; return _flowScratch;
 
     case FlowPattern.WAVY_HORIZONTAL: {
-      const a = PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_H * PATTERN_WAVES * wy);
-      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
+      const a = PATTERN_WAVE_AMP * dmath.sin(TWO_PI_OVER_H * PATTERN_WAVES * wy);
+      _flowScratch.x = dmath.cos(a); _flowScratch.y = dmath.sin(a); return _flowScratch;
     }
 
     case FlowPattern.WAVY_VERTICAL: {
-      const a = Math.PI / 2 + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * wx);
-      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
+      const a = Math.PI / 2 + PATTERN_WAVE_AMP * dmath.sin(TWO_PI_OVER_W * PATTERN_WAVES * wx);
+      _flowScratch.x = dmath.cos(a); _flowScratch.y = dmath.sin(a); return _flowScratch;
     }
 
     case FlowPattern.CIRCULAR: {
@@ -166,9 +167,9 @@ export function samplePattern(pattern: FlowPattern, wx: number, wy: number): Flo
       const r2 = wx * wx + wy * wy;
       if (r2 < 1e-6) { _flowScratch.x = 1; _flowScratch.y = 0; return _flowScratch; }
       const r = Math.sqrt(r2);
-      const baseA = Math.atan2(-wy, -wx);
-      const a = baseA + PATTERN_WAVE_AMP * Math.sin(TWO_PI_OVER_W * PATTERN_WAVES * r);
-      _flowScratch.x = Math.cos(a); _flowScratch.y = Math.sin(a); return _flowScratch;
+      const baseA = dmath.atan2(-wy, -wx);
+      const a = baseA + PATTERN_WAVE_AMP * dmath.sin(TWO_PI_OVER_W * PATTERN_WAVES * r);
+      _flowScratch.x = dmath.cos(a); _flowScratch.y = dmath.sin(a); return _flowScratch;
     }
 
     case FlowPattern.OUTWARD: {

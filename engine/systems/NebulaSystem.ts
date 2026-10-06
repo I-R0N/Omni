@@ -1,3 +1,4 @@
+import * as dmath from './dmath';
 import { sim } from './rng';
 import { GameEntity, EntityType, NebulaColorStop, Vector2 } from '../../types';
 import { NEBULA_CONSTANTS, nebulaFadeRateScale, SHARD_VARIANTS, COLORS, randomPlasticShardShade, nebulaHueToShardVariant, NEBULA_CONDENSE, nebulaTileShare } from '../../constants';
@@ -640,8 +641,8 @@ export class NebulaSystem {
         }
         raw.sort((a, b) => a.angle - b.angle);
         const polygonPoints = raw.map(p => ({
-            x: Math.cos(p.angle) * p.r,
-            y: Math.sin(p.angle) * p.r,
+            x: dmath.cos(p.angle) * p.r,
+            y: dmath.sin(p.angle) * p.r,
         }));
 
         // Per-variant durability + colour.  HP comes from NEBULA_CONDENSE

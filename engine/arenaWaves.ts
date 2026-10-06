@@ -23,10 +23,9 @@
 import type { GameEngine } from './GameEngine';
 import { ARENA_WAVE_MEMORY } from '../constants';
 import { clock } from './ports';
-import { descriptorForMapType } from './maps/MapDescriptors';
 
 function currentArenaId(g: GameEngine): string | null {
-  const d = descriptorForMapType(g.currentMap?.type);
+  const d = g.currentDescriptor();
   return d && d.kind === 'arena' && d.wavesEnabled ? d.id : null;
 }
 
@@ -34,7 +33,7 @@ function currentArenaId(g: GameEngine): string | null {
  *  ladder is finished.  Cheap; called from every save and every map unload. */
 export function stampArenaWave(g: GameEngine): void {
   const id = currentArenaId(g);
-  if (id === null || g.player.isExploding) return;
+  if (id === null || g.player.isExploding || g.dropArenaStamp) return;
   const w = g.waves;
   if (w.halted) {
     const bossAlive = g.currentMap.entities.some((e) => e.isBoss === true && e.active);
