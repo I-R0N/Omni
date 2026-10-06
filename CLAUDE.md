@@ -2781,7 +2781,24 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     docs/ENGINE_CORE_PLAN.md §5) — immediately after a merge lands — on any
     PR carrying the **`full-tests` label** (the opt-in for pre-merge full
     validation), and on manual dispatch.  Full CI runs took 18–22 minutes
-    in late September 2026.
+    in late September 2026, and 21 minutes in early October.
+    **FULL GREEN ATTACHES TO THE HEAD OF A PUSH BURST, NEVER TO EACH
+    COMMIT IN IT**, and it is easy to misread a run list without knowing
+    why.  `concurrency.group` is
+    `pr-checks-${{ github.event.pull_request.number || github.ref }}`, so a
+    PR push and a long-lived-branch push land in DIFFERENT groups (the PR
+    number against the ref) and the two scopes never cancel each other —
+    but `cancel-in-progress` still means the next push to a full-scope
+    branch kills the full run the previous commit was running, since both
+    share that ref.  Push twice within ~21 minutes and the first commit's
+    full run is cancelled with nothing wrong.  Two consequences: a
+    CANCELLED run is not a failure, and a commit mid-burst simply has no
+    full-scope verdict — so "the full suite passed on this branch" is a
+    claim about ONE commit, which has to be named.  A rolled-up
+    `failure` whose only failing annotation is "The operation was canceled"
+    is the same thing wearing a worse label: GitHub reports an
+    externally-cancelled STEP as a failed run, so read the step list
+    before calling it red.
   A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs whose
   base was `main` used to run FULL — meant for the `plan-completion` →
   `main` promotion — but once PR #93 (2026-09-21) merged that branch every

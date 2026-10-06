@@ -667,7 +667,12 @@ banks (D31), so it composes with them rather than reverting any.
   boss stem grew 532 KB → 852 KB, which is MONO → STEREO (the importer encodes
   80k mono / 128k stereo per layer) and not a length change — all six stems
   measure 53.283 s, so the score is still synchronised.  Gates on it:
-  typecheck 0, `test:sim` 47/47, CI green both scopes.
+  typecheck 0 and `test:sim` 47/47 LOCALLY, CI smoke green — **and the full
+  scope CANCELLED, by the very next push.**  An earlier revision of this entry
+  claimed "CI green both scopes" and that was wrong: the push-event
+  concurrency group is the REF, so my docs commit on top of this one killed the
+  full run that was validating it.  See §7's CI note — full green attaches to
+  the HEAD of a push burst, never to each commit in it.
 
 **Consequence for `S3`.**  `index.json` is a second data format alongside
 `S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
