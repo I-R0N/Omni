@@ -920,6 +920,11 @@ test('layer variants: the decoded budget holds through several contexts', async 
 test('layer variants: a song with none declared behaves as before and fetches nothing extra', async ({ page }) => {
   const asked: string[] = [];
   page.on('request', r => { if (/score\/[a-z-]+\/(atmos|pulse|groove|heavy|apex|boss)-[a-z0-9-]+\.mp3/.test(r.url())) asked.push(r.url()); });
+  // Omni ships atmos variants now, so the shipped index is no longer a song
+  // with none declared: strip them, and the files on disk must go unasked for.
+  const index = JSON.parse(readFileSync(resolve('public/assets/audio/score/index.json'), 'utf8'));
+  for (const song of index.songs) { delete song.variants; delete song.contextPriority; }
+  await page.addInitScript((i) => { (window as unknown as { __omniScoreIndex: unknown }).__omniScoreIndex = i; }, index);
   const watch = await boot(page);
   await page.mouse.click(5, 5);
   await startRun(page);
