@@ -1954,6 +1954,20 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* Live pools (the two stats that MOVE in flight) — the derived
                 per-module breakdown lives in the shared Ship Status widget
                 right below. */}
+            {/* The MAP: its name, size and difficulty, so a player always
+                knows where they are and how much it asks of them. */}
+            {stats.mapInfo && (
+              <div className={PANEL} data-testid="pause-map-info">
+                <h3 className={`text-violet-300 ${HEADING} mb-2`}>Map</h3>
+                <div className={`flex flex-col gap-1 ${T_ROW}`}>
+                  {statLine('Name', stats.mapInfo.name)}
+                  {statLine('Size', `${stats.mapInfo.sizeLabel} · ${stats.mapInfo.span.toLocaleString('en-US')} × ${stats.mapInfo.span.toLocaleString('en-US')}`)}
+                  {statLine('Difficulty', stats.mapInfo.level !== undefined ? `Level ${stats.mapInfo.level}` : 'Safe zone')}
+                  {stats.mapInfo.crowd !== undefined && statLine('Enemy count', `×${stats.mapInfo.crowd.toFixed(2)} for this size`)}
+                </div>
+              </div>
+            )}
+
             <div className={PANEL}>
               <h3 className={`text-sky-300 ${HEADING} mb-2`}>Condition</h3>
               <div className={`flex flex-col gap-1 ${T_ROW}`}>

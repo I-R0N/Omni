@@ -28,7 +28,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer, t
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
-import { renderPortalWarpVeil } from './render/portalWarp';
+import { renderPortalWarpVeil, renderPortalWarpCard } from './render/portalWarp';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic,
@@ -538,6 +538,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  when no transit is in flight.  A number rather than a timer because the
    *  beat is a pure function of progress — see render/portalWarp.ts. */
   portalWarp: number | null = null;
+  portalWarpInfo: { name: string; lines: string[]; color: string } | null = null;
   /** The veil alpha actually painted on the last frame of a transit, 0 when
    *  no transit is in flight.  Published because "the destination is not
    *  visible yet" is a RULE, and the only honest way to check it is to read
@@ -1347,6 +1348,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
         // draws them).  Above the veil, below the ship.
         this.backgroundManager.renderWarpStars(ctx, this.portalWarp, effectiveDpr());
         ctx.setTransform(effectiveDpr(), 0, 0, effectiveDpr(), 0, 0);
+        if (this.portalWarpInfo) renderPortalWarpCard(ctx, width, height, this.portalWarp, this.portalWarpInfo);
 
         // CONTINUITY: the ship rides ON TOP of the tunnel (user call).  The
         // veil takes the whole world away, and without the hull still in

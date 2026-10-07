@@ -88,6 +88,7 @@ export class NullRenderer implements RendererPort {
   bossBarActive = false;
   hudHole: { x: number; y: number; w: number; h: number } | null = null;
   portalWarp: number | null = null;
+  portalWarpInfo: { name: string; lines: string[]; color: string } | null = null;
   lastWarpVeilAlpha = 0;
   stageDepth = 0;
   playerLightToolHalfDeg: number | null = null;

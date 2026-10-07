@@ -231,7 +231,7 @@ export class WaveSystem {
       ? buildBossWaveSpawnList(boss, budget)
       : ctx.forcedEnemy
         ? new Array(budget).fill(ctx.forcedEnemy)
-        : buildLevelWave(ctx.difficultyLevel, index, this.lastMix);
+        : buildLevelWave(ctx.difficultyLevel, index, this.lastMix, ctx.mapSizeScale ?? 1);
     if (!boss && !ctx.forcedEnemy) this.lastMix = Array.from(new Set(this.spawnList));
     this.scheduleSpawns(this.spawnList.length);
 
@@ -671,6 +671,9 @@ export interface WaveSpawnContext {
   /** The ARENA LEVEL (1..20) — what `GameEngine.arenaLevel()` resolves, not the
    *  retired menu setting. */
   difficultyLevel: number;
+  /** How many enemies the map's SIZE buys (`mapSizeScale`), multiplied into an
+   *  ordinary wave's point budget.  Absent = 1. */
+  mapSizeScale?: number;
   /** World-unit half-diagonal of the player's current viewport.  Used by
    *  spawnEnemy() to compute a minimum radial distance that keeps every
    *  enemy outside the visible window on any aspect ratio.  Computed by the

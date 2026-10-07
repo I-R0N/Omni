@@ -44,3 +44,41 @@ test.describe('wave strip', () => {
     await page.screenshot({ path: 'test-results/wavestrip-dialogue.png' });
   });
 });
+
+test.describe('map info', () => {
+  test('the pause menu names the map, its size and its difficulty; a bigger map carries more enemies', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await engine(page, e => e.transitionToMap('arena_pocket_hard'));
+    await waitForTransit(page);
+    const small = await waitForStats(page, s => s.mapInfo?.name === 'Pocket · L4', 'Pocket L4 info');
+    expect(small.mapInfo!.sizeLabel).toBe('Small');
+    expect(small.mapInfo!.level).toBe(4);
+
+    await engine(page, e => e.pauseGame());
+    const panel = page.getByTestId('pause-map-info');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Pocket · L4');
+    await expect(panel).toContainText('Small');
+    await expect(panel).toContainText('Level 4');
+    await engine(page, e => e.resumeGame());
+
+    await engine(page, e => e.transitionToMap('arena_universe_hard'));
+    await waitForTransit(page);
+    const big = await waitForStats(page, s => s.mapInfo?.sizeLabel === 'Huge', 'Deep Space info');
+    expect(big.mapInfo!.crowd!).toBeGreaterThan(small.mapInfo!.crowd!);
+    watch.assertClean();
+  });
+
+  test('the travel animation carries the destination card', async ({ page }) => {
+    await boot(page);
+    await startRun(page);
+    await engine(page, e => e.transitionToMap('arena_ring'));
+    const info = await page.evaluate(() => (window as any).__omniEngine.renderer.portalWarpInfo);
+    expect(info.name).toBe('Ring World · L4');
+    expect(info.lines.join(' ')).toContain('Large');
+    await waitForTransit(page);
+    const after = await page.evaluate(() => (window as any).__omniEngine.renderer.portalWarpInfo);
+    expect(after).toBeNull();
+  });
+});

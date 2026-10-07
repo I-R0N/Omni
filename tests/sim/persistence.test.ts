@@ -432,25 +432,27 @@ test('the way back to the wreck is lit: the wreck itself, else the rift toward i
   assert.equal(a.g.portals.filter((p: any) => p.wreckGuide).length, 1);
 });
 
+// These pin the wave MEMORY on Ring World (12k, the size reference), not Pocket:
+// a small map's waves are smaller, and a held kill count is clamped to the wave.
 test('an arena holds its wave EXACTLY for 5 minutes after you leave it — wave and kills', () => {
   const a = launch(new MemoryStorage());
-  a.g.transitionToMap('arena_pocket');
+  a.g.transitionToMap('arena_ring');
   a.g.stepSim(5);
   a.g.waves.waveIndex = 2;
   a.g.waves.nextSpawnIdx = 3;                    // three of its enemies already spawned and dead
   a.g.transitionToMap('overworld');
   a.platform.clock.advance(4 * 60_000);
-  a.g.transitionToMap('arena_pocket');
+  a.g.transitionToMap('arena_ring');
   assert.equal(a.g.waves.waveIndex, 2, 'the same wave');
   assert.equal(a.g.waves.nextSpawnIdx, 3, 'with the same kills already scored');
-  a.g.transitionToMap('arena_ring');
+  a.g.transitionToMap('arena_universe');
   assert.equal(a.g.waves.waveIndex, 0, 'another arena has its own, fresh');
 });
 
 test('after 5 minutes the wave starts over from its top, and an earlier wave for every hour away', () => {
   const storage = new MemoryStorage();
   const a = launch(storage);
-  a.g.transitionToMap('arena_pocket');
+  a.g.transitionToMap('arena_ring');
   a.g.stepSim(5);
   a.g.waves.waveIndex = 3;
   a.g.waves.nextSpawnIdx = 2;
@@ -460,7 +462,7 @@ test('after 5 minutes the wave starts over from its top, and an earlier wave for
   const enter = (ms: number) => {
     const b = launch(storage, { entropySeed: 5 });
     b.platform.clock.advance(ms);
-    b.g.transitionToMap('arena_pocket');
+    b.g.transitionToMap('arena_ring');
     return { wave: b.g.waves.waveIndex, kills: b.g.waves.nextSpawnIdx };
   };
   assert.deepEqual(enter(4 * MIN), { wave: 3, kills: 2 }, 'held exactly');
@@ -474,14 +476,14 @@ test('after 5 minutes the wave starts over from its top, and an earlier wave for
 test('quitting the app mid-wave counts as leaving: the save carries the wave and when you were last there', () => {
   const storage = new MemoryStorage();
   const a = launch(storage);
-  a.g.transitionToMap('arena_pocket');
+  a.g.transitionToMap('arena_ring');
   a.g.stepSim(5);
   a.g.waves.waveIndex = 1;
   a.g.waves.nextSpawnIdx = 2;
   a.g.saveNow();                                  // an autosave / backgrounding, still in the arena
   const b = launch(storage, { entropySeed: 6 });
   b.platform.clock.advance(60_000);
-  b.g.transitionToMap('arena_pocket');
+  b.g.transitionToMap('arena_ring');
   assert.equal(b.g.waves.waveIndex, 1);
   assert.equal(b.g.waves.nextSpawnIdx, 2);
 });

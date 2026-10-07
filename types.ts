@@ -1808,10 +1808,26 @@ export interface PerfTaskStat {
   manual: number;  // manual override (0 = AUTO)
 }
 
+/** A map's size, name and difficulty, as shown to the player. */
+export interface MapInfo {
+  name: string;
+  kind: 'hub' | 'arena';
+  /** Arena level (1..20); absent on the hub. */
+  level?: number;
+  /** Side length in world units (the maps are square). */
+  span: number;
+  /** 'Small' | 'Medium' | 'Large' | 'Huge'. */
+  sizeLabel: string;
+  /** Enemy-count multiplier the size buys; absent where there are no waves. */
+  crowd?: number;
+}
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
   currentMapName: string;
+  /** What the pause menu and the transit card say about the loaded map. */
+  mapInfo?: MapInfo;
   currentMapType: MapType;
   currentWeapon: string;
   gameState: GameState;
