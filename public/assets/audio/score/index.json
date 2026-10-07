@@ -9,7 +9,44 @@
       "title": "Omni",
       "bpm": 128,
       "bars": 32,
-      "folder": "score/omni/"
+      "folder": "score/omni/",
+      "phraseBars": 8,
+      "variants": {
+        "atmos": [
+          {
+            "name": "station",
+            "when": [
+              "station",
+              "portal"
+            ]
+          },
+          {
+            "name": "deep",
+            "when": [
+              "deep-space"
+            ]
+          },
+          {
+            "name": "treasure",
+            "when": [
+              "rare-item"
+            ]
+          },
+          {
+            "name": "danger",
+            "when": [
+              "danger"
+            ]
+          }
+        ]
+      },
+      "contextPriority": [
+        "danger",
+        "rare-item",
+        "station",
+        "portal",
+        "deep-space"
+      ]
     },
     {
       "id": "event-horizon",
