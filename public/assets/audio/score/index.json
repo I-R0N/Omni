@@ -23,7 +23,8 @@
       "title": "Critical Mass",
       "bpm": 150,
       "bars": 32,
-      "folder": "score/critical-mass/"
+      "folder": "score/critical-mass/",
+      "phraseBars": 8
     }
   ],
   "plan": {
