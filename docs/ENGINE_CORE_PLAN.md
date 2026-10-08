@@ -646,6 +646,18 @@ wave.  **NEXT in S3:** the user judges the baseline against the targets
 above; the portal-difficulty model, the level count and the per-station
 catalogues are DESIGNED from that, not before it.
 
+**S3 status, 2026-10-08 (PROVISIONAL numbers).**  Landed on the PR since the
+baseline: translucent menus and wave dialogue, a wave-roster strip beside the
+wave chip, map name / size / level in the pause menu and on a slower travel
+card, enemy point budgets scaled by map size (`mapSizeScale`, larger maps carry
+more at the same level), calm-bubble edge arrows removed, and the level curve
+shifted +2 (`[level] shift` in `data/enemy-difficulty.toml`; the old level 4
+challenge is now called level 2, so every map keeps its label and gets harder).
+`docs/BALANCE_BASELINE.md` is being regenerated against this curve.  Deferred to
+a follow-up after this session is ready to merge: enemy AI (line of sight,
+getting stuck on tiles and shards, packs) and new map designs (tile-dense
+maze-like maps; wide-open sparse maps with dense star fields and rivals).
+
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
 with the numbers visible in the diff.
