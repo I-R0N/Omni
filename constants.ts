@@ -9573,15 +9573,25 @@ export const ENEMY_RATING: Readonly<Partial<Record<EnemySubtype, number>>> = (()
 
 const WAVE_RULES = RAW_DIFFICULTY.wave as { points: number[]; variety: number[]; maxPerType: number };
 const CEILING_RULES = RAW_DIFFICULTY.ceiling as { base: number; waveBias: number; slope: number; slopePerLevel: number };
-const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number };
+const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number; shift: number };
 
 export const ARENA_LEVEL_MAX = 20;
+
+/** The curve is defined on an INTERNAL scale and a displayed level is shifted
+ *  onto it (`[level] shift`): play-testing found the old level 4 beaten with
+ *  the bare starter gun, so a shown level N is what the curve called N + shift.
+ *  Everything that reads a level (stats, spawn amount, roster ceiling) goes
+ *  through this ONE function. */
+export function curveLevel(level: number): number {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  return L + (LEVEL_RULES.shift ?? 0);
+}
 
 /** Spawn amount and enemy stats for an arena level (1..20).  Levels 1-3 are the
  *  old Low / Med / High rows, unchanged; above that health and damage grow much
  *  faster than the spawn amount (D-S3-g). */
 export function levelScales(level: number): { spawn: number; health: number; speed: number; damage: number } {
-  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  const L = curveLevel(level);
   if (L <= 3) {
     return { spawn: DIFFICULTY_SCALES[L] ?? 1, ...(DIFFICULTY_STAT_SCALES[L] ?? DIFFICULTY_STAT_SCALES[3]) };
   }
@@ -9594,7 +9604,7 @@ export function levelScales(level: number): { spawn: number; health: number; spe
 
 /** The highest-rated enemy a level's wave `index` (0-based) may contain. */
 export function rosterCeiling(level: number, index: number): number {
-  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  const L = curveLevel(level);
   return CEILING_RULES.base + (index + CEILING_RULES.waveBias) * (CEILING_RULES.slope + CEILING_RULES.slopePerLevel * (L - 1));
 }
 
