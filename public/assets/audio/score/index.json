@@ -53,7 +53,8 @@
       "title": "Event Horizon",
       "bpm": 160,
       "bars": 32,
-      "folder": "score/event-horizon/"
+      "folder": "score/event-horizon/",
+      "phraseBars": 8
     },
     {
       "id": "critical-mass",

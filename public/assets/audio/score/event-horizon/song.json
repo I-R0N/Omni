@@ -1,0 +1,11 @@
+{
+  "id": "event-horizon",
+  "title": "Event Horizon",
+  "bpm": 160,
+  "bars": 32,
+  "key": "E minor",
+  "use": [
+    "arena"
+  ],
+  "phraseBars": 8
+}
