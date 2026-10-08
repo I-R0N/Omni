@@ -1117,11 +1117,16 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
         //
         // Gnats (diesOnContact, Swarm) stay excluded whatever the scan finds:
         // a cloud of them would crowd the screen and they are not threats the
-        // player needs steering toward.  Bubbles are included (purple,
-        // blinking red once they hunt you) under their own small budget.
+        // player needs steering toward.  Bubbles get one only while
+        // they are hunting the player (purple, blinking red), under their own small budget.
         if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
                 || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
-            const detect = entity.wreckGuide === true ? 1 : this.detectAlpha(entity.detectedAt);
+            // A bubble is ambient fauna and only earns an arrow once it is
+            // HUNTING the player (user call) — a calm one is not a threat
+            // worth steering toward, and a bloom of them cluttered the edge.
+            const calmBubble = entity.enemyShape === 'bubble'
+                && !(entity.provoked === true && entity.aggroTargetId === 'player');
+            const detect = entity.wreckGuide === true ? 1 : calmBubble ? 0 : this.detectAlpha(entity.detectedAt);
             if (detect > 0) {
                 const distSq = dx*dx + dy*dy;
                 // Whether the entity is currently within the true (unpadded)

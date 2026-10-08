@@ -597,3 +597,30 @@ test.describe('minimap — material layer', () => {
     watch.assertClean();
   });
 });
+
+test.describe('off-screen indicators — bubbles', () => {
+  test('a calm bubble has no arrow; one hunting the player does', async ({ page }) => {
+    const watch = await boot(page);
+    await startRun(page);
+    await waitForStats(page, s => s.currentMapType === 'OVERWORLD', 'the hub');
+    const r = await engine(page, async (e: any) => {
+      const p = e.player;
+      p.position.x = 3000; p.position.y = 3000; p.velocity.x = 0; p.velocity.y = 0;
+      e.camera.position.x = p.position.x; e.camera.position.y = p.position.y;
+      // Far enough to be off screen, near enough to be met by eye.
+      const b = e.waves.spawnAt('BUBBLE', { x: p.position.x + 700, y: p.position.y }, e.waveContext(), false);
+      b.velocity.x = 0; b.velocity.y = 0;
+      const arrow = () => e.renderer._indicatorBuffer.some((i: any) => i.entity === b);
+      const frames = (n: number) => new Promise(res => { let k = 0; const f = () => (++k >= n ? res(null) : requestAnimationFrame(f)); f(); });
+      b.detectedAt = e.simClock; await frames(3);
+      const calm = arrow();
+      b.provoked = true; b.aggroTargetId = 'player'; b.detectedAt = e.simClock; await frames(3);
+      const hunting = arrow();
+      b.active = false;
+      return { calm, hunting };
+    });
+    expect(r.calm, 'a calm bubble gets no arrow').toBe(false);
+    expect(r.hunting, 'a bubble hunting the player does').toBe(true);
+    watch.assertClean();
+  });
+});
