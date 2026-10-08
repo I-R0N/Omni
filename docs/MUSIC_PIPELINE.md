@@ -42,6 +42,11 @@ standalone build inlines it. **Adding or replacing a song needs no code.**
   prints a line naming the file and the stack loudness it leaves, so a dense mix
   that ends up quiet is visible. The balance between layers is the GarageBand
   mix's.
+  Measured on the committed MP3s after all three songs went through this rule
+  (full stack of the six default stems, summed peak): Omni −13.4 LUFS (0.85),
+  Event Horizon −13.4 (0.99), Critical Mass −13.4 (1.24). The levels at partial
+  intensity follow each song's own mix and differ (atmos alone: Omni −20.0,
+  Critical Mass −22.4, Event Horizon −27.3).
 - 32 kHz MP3, mono when a layer is mono. Writes `song.json` beside the stems.
 - Adds or replaces the song in `index.json`; each role in song.json's `use`
   (`hub`, `field`, `arena`, `boss`) points the plan at it.
