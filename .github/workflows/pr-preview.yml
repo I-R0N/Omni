@@ -18,7 +18,9 @@ jobs:
       pull-requests: write
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      PREVIEW_URL: https://raw.githack.com/i-r0n/omni-standalone/main/previews/pr-${{ github.event.pull_request.number }}/index.html
+      # The preview URL is built in the publish step: it is pinned to the mirror
+      # commit SHA and served from rawcdn.githack.com (permanent CDN caching),
+      # because the branch-ref raw.githack.com URL gets rate limited (HTTP 429).
 
     steps:
       - name: Check if event SHA is still the PR head
@@ -63,6 +65,7 @@ jobs:
         run: node scripts/inline-build.mjs
 
       - name: Publish or remove preview
+        id: publish
         if: github.event.action == 'closed' || steps.guard.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ secrets.OMNI_STANDALONE_TOKEN }}
@@ -104,11 +107,18 @@ jobs:
             fi
           fi
 
+          # Pin the link to the mirror commit that holds this build.  HEAD is the
+          # pushed commit (or the latest one when there were no content changes).
+          if [ "$ACTION" != "closed" ]; then
+            MIRROR_SHA=$(git rev-parse HEAD)
+            echo "preview_url=https://rawcdn.githack.com/i-r0n/omni-standalone/${MIRROR_SHA}/${DIR}/index.html" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upsert preview comment on PR
         if: github.event.action == 'closed' || steps.guard.outputs.stale != 'true'
         uses: actions/github-script@v7
         env:
-          PREVIEW_URL: ${{ env.PREVIEW_URL }}
+          PREVIEW_URL: ${{ steps.publish.outputs.preview_url }}
           ACTION: ${{ github.event.action }}
         with:
           script: |

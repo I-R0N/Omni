@@ -6575,7 +6575,7 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
   on every push of a same-repo PR and publishes it to the
   `i-r0n/omni-standalone` mirror, linked from a PR comment as a
-  raw.githack URL — the link to play-test a PR on a phone; not Netlify.
+  SHA-pinned rawcdn.githack.com URL (a branch-ref raw.githack link gets 429-rate-limited) — the link to play-test a PR on a phone; not Netlify.
   A push whose commit message carries `[skip ci]` skips it too, since
   that skips every workflow — so a push meant to refresh the preview
   must not carry it),
