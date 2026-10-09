@@ -523,7 +523,12 @@ engine/
                           docs/SFX_INVENTORY.md, keyed by its stable id
     AdaptiveMusic.ts      The adaptive SCORE: six synchronised stems on the
                           Music bus, faded by intensity (`setMusicThreat`,
-                          `setCombat`); `cueEncounter` returns to bar 1
+                          `setCombat`); `cueEncounter` returns to bar 1.
+                          Also the LAYER-VARIANT director (below)
+    MusicContext.ts       The context TAGS (station / portal / rare-item /
+                          danger / deep-space) the variants are chosen from:
+                          radii in screens with hysteresis, over arrays the
+                          engine already owns
     AudioMix.ts           Bus gains + policy: `busFor`, `survivesPause`,
                           `ducksWorld` (no entity dependencies)
     SfxVoicing.ts         `finishVoice`, the production layer wrapped round
@@ -5848,7 +5853,31 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   score to bar 1 (`cueEncounter`).  The title screen loads only the bed.
   Songs and the plan are DATA in `public/assets/audio/score/index.json`
   (folder per song); `npm run music:import` adds songs from a GarageBand
-  export (`docs/MUSIC_PIPELINE.md`).  Pinned by `tests/audio.spec.ts`;
+  export (`docs/MUSIC_PIPELINE.md`).
+  **LAYER VARIANTS** (optional, per song, data in the index entry): a slot can
+  hold alternative stems `<slot>-<variant>.mp3` — same tempo, length and
+  harmony — each on the same `t0` and sample-locked like any stem, so a switch
+  is a gain crossfade between two sources already in phase.  The intensity
+  model still decides which slots are ON; the director decides which VARIANT
+  fills a slot.  ATMOS follows the CONTEXT TAGS (`station`, `portal`,
+  `rare-item`, `danger`, `deep-space`; `engine/systems/MusicContext.ts`, radii
+  in screens with enter/leave hysteresis in `AUDIO_CONSTANTS.MUSIC_*`, reported
+  every frame by `GameEngine.reportMusicContext` through
+  `audio.setMusicContext`); a COMBAT slot takes the dominant ENEMY FAMILY
+  (`enemy:swarm|heavy|ranged`, summed from the same pressure walk through
+  `MUSIC_ENEMY_FAMILY`) when it ENTERS and LOCKS it, re-picking only when
+  another family has out-weighed it by `MUSIC_FAMILY_MARGIN` for a whole
+  phrase.  Changes commit only on PHRASE boundaries (`phraseBars`, default 8)
+  with a crossfade centred on the bar line (a bar for atmos, a beat for
+  rhythmic slots), and a slot that changed holds for
+  `MUSIC_VARIANT_DWELL_PHRASES`.  Decoded variants live in an LRU cache under
+  `MUSIC_DECODE_BUDGET_MB`: active ones and defaults are never evicted, warm
+  ones (a context inside 1.5× its radius, a family in the alert ring) are
+  pre-decoded, and a variant not decoded by its boundary is tried at the next.
+  A missing variant file falls back to the default and never raises
+  `music.error`; a song with no `variants` takes none of these paths.  The tag
+  and family names are the contract the music is composed against
+  (`docs/MUSIC_PIPELINE.md`).  Pinned by `tests/audio.spec.ts`;
   how-to in `docs/AUDIO_AUTHORING.md`.  PROVENANCE is now mixed, and the
   pipeline is proven both ways: "Critical Mass" (the boss song) came
   through `music:import` from a real GarageBand export, while the other two
@@ -5857,7 +5886,8 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `riser` / `victory` one-shots are the older generated pair, because a
   one-shot absent from an export deliberately keeps the song's existing
   one.  Each imported song also carries a `song.json` beside its stems as
-  the importer's record; `key` and `phraseBars` in it are read by nothing.
+  the importer's record; `phraseBars` in it is carried into the index entry
+  and read by the engine (the layer-variant phrase length), `key` by nothing.
 - **iOS needs three things desktop does not.**  (1) The ring/silent switch
   silences WebAudio, because Safari puts it in the "ambient" session by
   default — the game claims the `playback` session instead, via

@@ -32,6 +32,25 @@
  * arena or a boss's arrival starts a new phrase rather than joining the old
  * one mid-sentence.  A boss arrival also lands an impact hit on that downbeat.
  *
+ * LAYER VARIANTS.  A slot can hold several VARIANTS — complete alternative
+ * stems (same tempo, length and harmony, different orchestration), declared
+ * per song in score/index.json and named `<slot>-<variant>.mp3`.  Intensity
+ * decides which slots are ON; the director here decides which VARIANT fills
+ * each slot that is.  Every variant is just another sample-locked stem with
+ * its own gain, started on the same `t0` by the same `startSource` math, so a
+ * switch is a gain crossfade between two sources already in phase.  What
+ * picks one:
+ *   - CONTEXT TAGS (`station`, `portal`, `rare-item`, `danger`, `deep-space`,
+ *     from MusicContext.ts) choose the ATMOS variant;
+ *   - the dominant ENEMY FAMILY (`enemy:swarm|heavy|ranged`) chooses a combat
+ *     slot's variant — picked when the slot ENTERS and then LOCKED, re-picked
+ *     only when another family has out-weighed it for a whole phrase.
+ * Changes commit only on PHRASE boundaries, and a slot that changed holds its
+ * variant for `MUSIC_VARIANT_DWELL_PHRASES`.  Variant buffers live in a small
+ * LRU cache under a decode budget; one that is not decoded by its boundary is
+ * simply tried at the next, and a song with no variants takes none of these
+ * paths.  docs/MUSIC_PIPELINE.md is the contract.
+ *
  * WHY DECODED BUFFERS.  Sample-accurate sync between stems needs every stem
  * on the AudioContext clock; separate <audio> elements drift.  Stems decode
  * at `DECODE_RATE` (25 kHz — the music bus never needs more, and it is
@@ -46,6 +65,8 @@
  * seamlessly.  An MP3 decoder that does or does not trim encoder delay only
  * shifts every stem by the same few milliseconds; nothing clicks.
  */
+
+import { AUDIO_CONSTANTS } from '../../constants';
 
 export type MusicLayerId = 'atmos' | 'pulse' | 'groove' | 'heavy' | 'apex' | 'boss';
 
@@ -72,7 +93,30 @@ export interface MusicThreat {
  *  `npm run music:import` maintains (docs/MUSIC_PIPELINE.md).  Adding a song
  *  is a folder and an index entry — no code.  These built-in values are only
  *  the fallback used until (or unless) the index loads. */
-export interface SongSpec { id: string; title: string; bpm: number; bars: number; folder: string }
+export interface VariantSpec { name: string; when: string[] }
+export interface SongSpec {
+  id: string; title: string; bpm: number; bars: number; folder: string;
+  /** Bars per PHRASE — the grid variant changes commit on (default 8). */
+  phraseBars?: number;
+  /** Alternative stems per slot; the default stem is always `<slot>.mp3`. */
+  variants?: Partial<Record<MusicLayerId, VariantSpec[]>>;
+  /** Tag precedence, highest first (default `DEFAULT_CONTEXT_PRIORITY`). */
+  contextPriority?: string[];
+}
+/** What the engine reports about the player's surroundings, every frame. */
+export interface MusicContextSnapshot {
+  /** Active context tags (`station`, `portal`, …). */
+  tags: readonly string[];
+  /** Contexts close to triggering — their variants are worth pre-decoding. */
+  warm: readonly string[];
+  /** Pressure weight of nearby hostiles, per enemy family. */
+  families: Readonly<Record<string, number>>;
+}
+export const DEFAULT_CONTEXT_PRIORITY: readonly string[] = ['danger', 'rare-item', 'station', 'portal', 'deep-space'];
+/** Every tag a variant's `when` may name — for the debug force cycle. */
+export const MUSIC_CONTEXT_TAGS: readonly string[] = [
+  ...DEFAULT_CONTEXT_PRIORITY, ...AUDIO_CONSTANTS.MUSIC_FAMILIES.map(f => `enemy:${f}`),
+];
 export const SONGS: readonly SongSpec[] = [
   { id: 'omni', title: 'Omni', bpm: 128, bars: 32, folder: 'score/omni/' },
   { id: 'event-horizon', title: 'Event Horizon', bpm: 160, bars: 32, folder: 'score/event-horizon/' },
@@ -95,6 +139,27 @@ const DEFAULT_IMPACT = 'score/impact.mp3';
 
 interface ScoreIndex { songs?: SongSpec[]; plan?: Partial<MusicPlan>; impact?: string }
 
+const SLOT_IDS: readonly string[] = ['atmos', 'pulse', 'groove', 'heavy', 'apex', 'boss'];
+const VARIANT_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+/** Keep only well-formed variant declarations: a malformed one is dropped
+ *  rather than allowed to break the song. */
+function cleanVariants(raw: unknown): SongSpec['variants'] {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: NonNullable<SongSpec['variants']> = {};
+  for (const [slot, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (!SLOT_IDS.includes(slot) || !Array.isArray(list)) continue;
+    const ok: VariantSpec[] = [];
+    for (const v of list as Partial<VariantSpec>[]) {
+      if (!v || typeof v.name !== 'string' || !VARIANT_NAME.test(v.name) || !Array.isArray(v.when)) continue;
+      if (ok.some(x => x.name === v.name)) continue;
+      ok.push({ name: v.name, when: v.when.filter(t => typeof t === 'string') });
+    }
+    if (ok.length) out[slot as MusicLayerId] = ok;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Seconds the outgoing and incoming songs overlap across a change. */
 const SONG_XFADE = 0.3;
 /** A victory hands back to the area theme no sooner than this after the
@@ -103,6 +168,9 @@ const VICTORY_HANDBACK_SEC = 1.6;
 
 interface PendingSong {
   idx: number;
+  /** Variant stems this song would start on (optional: never awaited). */
+  vbuffers: Map<string, AudioBuffer>;
+  vinfo: Map<string, { layer: MusicLayerId; name: string }>;
   stinger: OneShotId | null;
   notBefore: number;
   needed: Set<MusicLayerId>;
@@ -183,16 +251,59 @@ const LOOKAHEAD = 0.03;
 /** At most one impact on a heavy entry per this many bars. */
 const IMPACT_COOLDOWN_BARS = 8;
 
+const sameList = (a: readonly string[], b: readonly string[]) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+const bufBytes = (b: AudioBuffer) => b.length * b.numberOfChannels * 4;
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const mod = (a: number, n: number) => ((a % n) + n) % n;
+
+/** One stem of a slot, playing (or ready to): the default (`name` '') or a
+ *  variant.  source → sg (entry / song-change fades) → mix (the variant
+ *  crossfade) → the layer's gain. */
+interface Voice {
+  name: string;
+  mix: GainNode;
+  source: AudioBufferSourceNode | null;
+  sg: GainNode | null;
+}
+
+/** A slot's variant state.  `cur` '' = the default stem. */
+interface SlotState {
+  cur: string;
+  /** A switch scheduled to land at `switchAt` (the phrase boundary). */
+  to: string | null;
+  switchAt: number;
+  fadeEnd: number;
+  lastChangeAt: number;
+  /** The boundary a decision was last taken for. */
+  decidedT: number;
+  /** Combat slots: the enemy family the slot is locked to, and the
+   *  challenger that has out-weighed it since `streakSince`. */
+  locked: string | null;
+  streakFam: string | null;
+  streakSince: number;
+}
+const freshSlot = (): SlotState => ({
+  cur: '', to: null, switchAt: 0, fadeEnd: 0, lastChangeAt: -Infinity, decidedT: -Infinity,
+  locked: null, streakFam: null, streakSince: 0,
+});
+
+/** A decoded variant buffer in the LRU cache. */
+interface CachedVariant { buf: AudioBuffer; bytes: number; layer: MusicLayerId; name: string; touched: number }
 
 interface Layer {
   spec: LayerSpec;
   gain: GainNode;
-  source: AudioBufferSourceNode | null;
-  sourceGain: GainNode | null;
+  voices: Map<string, Voice>;
+  v: SlotState;
   on: boolean;
 }
+
+/** Start deciding a boundary this long before its crossfade begins. */
+const DECIDE_WINDOW = 0.6;
 
 type OfflineCtor = new (channels: number, length: number, rate: number) => OfflineAudioContext;
 
@@ -201,6 +312,22 @@ export class AdaptiveMusic {
   private readonly fx: GainNode;
   private readonly layers = new Map<MusicLayerId, Layer>();
   private readonly buffers = new Map<string, AudioBuffer>();
+  /** Decoded VARIANT stems, by file (the default stems live in `buffers`). */
+  private readonly vcache = new Map<string, CachedVariant>();
+  private readonly vloading = new Set<string>();
+  /** Variant files that failed to load: never retried, never an error. */
+  private readonly vmissing = new Set<string>();
+  private ctxTags = new Set<string>();
+  private ctxWarm = new Set<string>();
+  private famW: Record<string, number> = {};
+  private forcedCtx: string | null = null;
+  private realTags: readonly string[] = [];
+  private realWarm: readonly string[] = [];
+  private realFam: Record<string, number> = {};
+  private _variantChanges = 0;
+  private vDirty = true;
+  private budgetMB: number = AUDIO_CONSTANTS.MUSIC_DECODE_BUDGET_MB;
+  private vLastManage = 0;
   /** In-flight fetches, by FILE (two songs never share a key). */
   private readonly loading = new Set<string>();
   private songIdx = 0;
@@ -265,7 +392,7 @@ export class AdaptiveMusic {
       const gain = ctx.createGain();
       gain.gain.value = 0;
       gain.connect(this.out);
-      this.layers.set(spec.id, { spec, gain, source: null, sourceGain: null, on: false });
+      this.layers.set(spec.id, { spec, gain, voices: new Map(), v: freshSlot(), on: false });
     }
     void this.loadIndex();
   }
@@ -281,7 +408,8 @@ export class AdaptiveMusic {
         if (!res.ok) return;
         idx = await res.json() as ScoreIndex;
       }
-      const songs = (idx.songs ?? []).filter(x => x && x.id && x.folder && x.bpm > 0 && x.bars > 0);
+      const songs = (idx.songs ?? []).filter(x => x && x.id && x.folder && x.bpm > 0 && x.bars > 0)
+        .map(x => ({ ...x, variants: cleanVariants(x.variants) }));
       if (!songs.length) return;
       const current = this.song.id;
       this.songs = songs;
@@ -412,17 +540,22 @@ export class AdaptiveMusic {
     const now = this.ctx.currentTime;
     this.t0 = at;
     this.jumpAt = at;
+    // The phrase grid restarts with t0, so a variant crossfade still in
+    // flight is completed on the spot rather than left on the old grid.
+    this.settleAll(true);
     for (const layer of this.layers.values()) {
-      if (!layer.source || !layer.sourceGain) continue;
       const fade = layer.spec.jumpFade;
-      const old = layer.source, oldGain = layer.sourceGain;
-      oldGain.gain.cancelScheduledValues(now);
-      oldGain.gain.setValueAtTime(1, Math.max(now, at - fade));
-      oldGain.gain.linearRampToValueAtTime(0, at + fade);
-      old.stop(at + fade + 0.05);
-      layer.source = null;
-      layer.sourceGain = null;
-      this.startSource(layer, at, fade);
+      for (const voice of [...layer.voices.values()]) {
+        if (!voice.source || !voice.sg) continue;
+        const old = voice.source, oldGain = voice.sg;
+        oldGain.gain.cancelScheduledValues(now);
+        oldGain.gain.setValueAtTime(1, Math.max(now, at - fade));
+        oldGain.gain.linearRampToValueAtTime(0, at + fade);
+        old.stop(at + fade + 0.05);
+        voice.source = null;
+        voice.sg = null;
+        this.startSource(layer, at, fade, voice.name);
+      }
     }
     if (kind === 'boss') { this.playOneShot('impact', at); this._lastStinger = 'impact'; }
   }
@@ -477,7 +610,7 @@ export class AdaptiveMusic {
       return true;
     }
     if (!this.running) return this.swapNow(idx);
-    const p: PendingSong = { idx, stinger, notBefore, buffers: new Map(), needed: new Set() };
+    const p: PendingSong = { idx, stinger, notBefore, buffers: new Map(), needed: new Set(), vbuffers: new Map(), vinfo: new Map() };
     p.needed.add('atmos');
     for (const layer of this.layers.values()) if (layer.on) p.needed.add(layer.spec.id);
     if (this.bossActive || this.threat.boss) {
@@ -488,7 +621,24 @@ export class AdaptiveMusic {
     if (stinger === 'impact' && this.buffers.has('impact')) p.buffers.set('impact', this.buffers.get('impact')!);
     this.pending = p;
     for (const id of p.needed) this.loadPending(p, id);
+    // The variants the new song would START on are fetched alongside — but
+    // never awaited: a commit does not wait for one (the default stem plays,
+    // and the variant is tried again at a later phrase boundary).
+    for (const id of p.needed) {
+      const name = this.pickFor(this.songs[idx], id);
+      if (name) this.loadPendingVariant(p, id, name);
+    }
     return true;
+  }
+
+  private loadPendingVariant(p: PendingSong, id: MusicLayerId, name: string) {
+    const file = this.variantFile(this.songs[p.idx], id, name);
+    if (this.vmissing.has(file)) return;
+    void this.fetchDecode(file).then(buf => {
+      if (this.pending !== p) return;
+      p.vbuffers.set(file, buf);
+      p.vinfo.set(file, { layer: id, name });
+    }, () => { this.vmissing.add(file); });
   }
 
   private loadPending(p: PendingSong, id: MusicLayerId) {
@@ -508,14 +658,17 @@ export class AdaptiveMusic {
     const now = this.ctx.currentTime;
     // Old song out across the seam…
     for (const layer of this.layers.values()) {
-      if (!layer.source || !layer.sourceGain) continue;
-      const g = layer.sourceGain.gain;
-      g.cancelScheduledValues(now);
-      g.setValueAtTime(1, Math.max(now, at - SONG_XFADE * 0.5));
-      g.linearRampToValueAtTime(0, at + SONG_XFADE * 0.5);
-      layer.source.stop(at + SONG_XFADE);
-      layer.source = null;
-      layer.sourceGain = null;
+      for (const voice of layer.voices.values()) {
+        if (!voice.source || !voice.sg) continue;
+        const g = voice.sg.gain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(1, Math.max(now, at - SONG_XFADE * 0.5));
+        g.linearRampToValueAtTime(0, at + SONG_XFADE * 0.5);
+        voice.source.stop(at + SONG_XFADE);
+        voice.source = null;
+        voice.sg = null;
+      }
+      this.retireVoices(layer);
     }
     // …new song in at its bar 1.
     this.songIdx = p.idx;
@@ -527,7 +680,24 @@ export class AdaptiveMusic {
     this.jumpAt = at;
     this.held = 0;
     this._songChanges++;
-    for (const layer of this.layers.values()) this.startSource(layer, at, Math.max(layer.spec.jumpFade, SONG_XFADE * 0.5));
+    // A NEW SONG RESETS EVERY SLOT to its appropriate variant at bar 1: the
+    // old song's variants are gone, and a variant the new song would start on
+    // is adopted if it decoded in time (otherwise the default plays and the
+    // variant is tried at a later phrase boundary).
+    this.vcache.clear();
+    this.vloading.clear();
+    for (const [file, buf] of p.vbuffers) {
+      const info = p.vinfo.get(file)!;
+      this.vcache.set(file, { buf, bytes: bufBytes(buf), layer: info.layer, name: info.name, touched: now });
+    }
+    for (const layer of this.layers.values()) {
+      layer.v = freshSlot();
+      const pick = this.pickFor(this.song, layer.spec.id);
+      if (pick && this.vcache.has(this.variantFile(this.song, layer.spec.id, pick))) layer.v.cur = pick;
+      if (layer.spec.id !== 'atmos' && layer.on) layer.v.locked = this.dominantFamily;
+    }
+    this.vDirty = true;
+    for (const layer of this.layers.values()) this.startVoices(layer, at, Math.max(layer.spec.jumpFade, SONG_XFADE * 0.5));
     if (p.stinger) { this.playOneShot(p.stinger, at); this._lastStinger = p.stinger; }
     this.loadSongRest();
     this.evaluate();
@@ -566,10 +736,15 @@ export class AdaptiveMusic {
     this.pending = null;
     this._songChanges++;
     for (const id of [...this.buffers.keys()]) if (id !== 'impact') this.buffers.delete(id);
+    this.vcache.clear();
+    this.vloading.clear();
+    this.vDirty = true;
     this.held = 0;
     this.jumpAt = -Infinity;
     this.atmosLevel = -1;
     for (const layer of this.layers.values()) {
+      layer.v = freshSlot();
+      this.retireVoices(layer);
       layer.on = false;
       this.fade(layer.gain.gain, 0, stopAt, 0.001);
     }
@@ -621,8 +796,26 @@ export class AdaptiveMusic {
   /** Bytes of decoded PCM the score holds right now. */
   public get decodedBytes(): number {
     let b = 0;
-    for (const buf of this.buffers.values()) b += buf.length * buf.numberOfChannels * 4;
+    for (const buf of this.buffers.values()) b += bufBytes(buf);
+    for (const c of this.vcache.values()) b += c.bytes;
     return b;
+  }
+  /** Active context tags (`station`, …, plus `enemy:<family>`). */
+  public get contexts(): string[] { return [...this.ctxTags]; }
+  /** The variant sounding in a slot: its name, or 'default' for `<slot>.mp3`. */
+  public activeVariant(slot: MusicLayerId): string {
+    this.settleAll();
+    return this.layers.get(slot)?.v.cur || 'default';
+  }
+  /** The enemy family with the most pressure nearby, or null. */
+  public get dominantFamily(): string | null { return this._dominant; }
+  /** Variant changes that have landed (tests, debug). */
+  public get variantChanges(): number { return this._variantChanges; }
+  /** The variant sounding in every slot that declares any. */
+  public get variantMap(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of Object.keys(this.song.variants ?? {}) as MusicLayerId[]) out[id] = this.activeVariant(id);
+    return out;
   }
   /** The battle stack is up: the groove is in. */
   public get battleActive(): boolean { return this.isLayerOn('groove'); }
@@ -632,6 +825,296 @@ export class AdaptiveMusic {
   public get beat(): number { return 60 / this.song.bpm; }
   public get barSec(): number { return this.beat * 4; }
   public get loopSec(): number { return this.barSec * this.song.bars; }
+
+  // ── layer variants ────────────────────────────────────────────────────────
+
+  /** The engine's per-frame picture of the player's surroundings. */
+  public setContext(c: MusicContextSnapshot) {
+    let changed = !sameList(c.tags, this.realTags) || !sameList(c.warm, this.realWarm);
+    if (changed) { this.realTags = [...c.tags]; this.realWarm = [...c.warm]; }
+    // Family weights change continuously; copy them into fixed keys (no alloc).
+    for (const f of AUDIO_CONSTANTS.MUSIC_FAMILIES) this.realFam[f] = c.families[f] ?? 0;
+    if (changed) this.rebuildContext();
+    else this.refreshDominant();
+    this.evaluate();
+  }
+
+  /** Debug: pin one context tag (`null` = follow the game).  `enemy:<family>`
+   *  also pins that family as the only one present. */
+  public setForcedContext(tag: string | null) {
+    this.forcedCtx = tag;
+    this.rebuildContext();
+    this.evaluate();
+  }
+  public get forcedContext(): string | null { return this.forcedCtx; }
+  /** Debug / tests: the decoded-PCM budget in MB (default
+   *  `MUSIC_DECODE_BUDGET_MB`); evicts down to it at the next pass. */
+  public setDecodeBudgetMB(mb: number) { this.budgetMB = mb; this.vDirty = true; }
+
+  private rebuildContext() {
+    const forced = this.forcedCtx;
+    this.ctxTags = new Set(forced ? [forced] : this.realTags);
+    this.ctxWarm = new Set(forced ? [forced] : this.realWarm);
+    this.refreshDominant(true);
+  }
+
+  private _dominant: string | null = null;
+  private refreshDominant(force = false) {
+    const forced = this.forcedCtx;
+    let best: string | null = null, bw = 0;
+    for (const f of AUDIO_CONSTANTS.MUSIC_FAMILIES) {
+      const w = forced?.startsWith('enemy:') ? (forced === `enemy:${f}` ? 5 : 0) : (this.realFam[f] ?? 0);
+      this.famW[f] = w;
+      if (w >= AUDIO_CONSTANTS.MUSIC_FAMILY_MIN_WEIGHT && w > bw) { best = f; bw = w; }
+    }
+    if (best !== this._dominant || force) {
+      if (this._dominant) this.ctxTags.delete(`enemy:${this._dominant}`);
+      this._dominant = best;
+      if (best) this.ctxTags.add(`enemy:${best}`);
+      this.vDirty = true;
+    }
+  }
+
+  private variantFile(song: SongSpec, id: MusicLayerId, name: string): string {
+    return `${song.folder}${id}-${name}.mp3`;
+  }
+
+  /** The variant of `id` a tag set calls for, or '' (the default stem).
+   *  PRECEDENCE: tags are tried in `contextPriority` order (enemy tags after),
+   *  and the first one some variant of the slot claims wins — the first such
+   *  variant in list order.  A tag the slot has no variant for is passed over
+   *  rather than forcing the default, so a slot that only scores `station`
+   *  still scores it while `danger` is also up.  A variant whose file is known
+   *  to be missing is never chosen. */
+  private matchVariant(song: SongSpec, id: MusicLayerId, has: (tag: string) => boolean): string {
+    const list = song.variants?.[id];
+    if (!list) return '';
+    const claim = (t: string): string | null => {
+      for (const v of list) {
+        if (v.when.includes(t) && !this.vmissing.has(this.variantFile(song, id, v.name))) return v.name;
+      }
+      return null;
+    };
+    for (const t of song.contextPriority ?? DEFAULT_CONTEXT_PRIORITY) {
+      if (has(t)) { const r = claim(t); if (r !== null) return r; }
+    }
+    for (const f of AUDIO_CONSTANTS.MUSIC_FAMILIES) {
+      const t = `enemy:${f}`;
+      if (has(t)) { const r = claim(t); if (r !== null) return r; }
+    }
+    return '';
+  }
+
+  /** The variant a slot of `song` would start on right now. */
+  private pickFor(song: SongSpec, id: MusicLayerId): string {
+    if (!song.variants?.[id]) return '';
+    if (id === 'atmos') return this.matchVariant(song, id, t => this.ctxTags.has(t));
+    if (!this.layers.get(id)!.on) return '';
+    const f = this._dominant;
+    return f ? this.matchVariant(song, id, t => t === `enemy:${f}`) : '';
+  }
+
+  /** A combat slot ENTERS: lock it to the family present, and (if its layer is
+   *  still silent and the stem is decoded) start on that variant outright. */
+  private enterSlot(layer: Layer) {
+    const id = layer.spec.id;
+    if (id === 'atmos' || !this.song.variants?.[id]) return;
+    const v = layer.v;
+    v.locked = this._dominant;
+    v.streakFam = null;
+    const want = this.pickFor(this.song, id);
+    if (want !== (v.to ?? v.cur) && layer.gain.gain.value < 0.05 && this.canPlay(layer, want)) {
+      const now = this.ctx.currentTime;
+      for (const voice of layer.voices.values()) {
+        voice.mix.gain.cancelScheduledValues(now);
+        voice.mix.gain.setValueAtTime(voice.name === want ? 1 : 0, now);
+      }
+      v.cur = want; v.to = null; v.lastChangeAt = now;
+      this._variantChanges++;
+    }
+  }
+
+  private canPlay(layer: Layer, name: string): boolean {
+    return name === '' || (this.running && !!layer.voices.get(name)?.source);
+  }
+
+  private get phraseSec(): number { return this.barSec * Math.max(1, this.song.phraseBars ?? 8); }
+
+  /** Land a scheduled switch whose boundary has passed — or, with `now`, land
+   *  every one at once (a jump restarts the grid they were timed on). */
+  private settleAll(immediately = false) {
+    const now = this.ctx.currentTime;
+    for (const layer of this.layers.values()) {
+      const v = layer.v;
+      if (v.to === null || (!immediately && now < v.switchAt)) continue;
+      if (immediately) {
+        for (const voice of layer.voices.values()) {
+          voice.mix.gain.cancelScheduledValues(now);
+          voice.mix.gain.setValueAtTime(voice.name === v.to ? 1 : 0, now);
+        }
+      }
+      v.lastChangeAt = immediately ? now : v.switchAt;
+      v.cur = v.to; v.to = null;
+      v.fadeEnd = 0;
+      this._variantChanges++;
+    }
+  }
+
+  /** The variant decisions, taken once per slot per PHRASE BOUNDARY, a little
+   *  ahead of it so the crossfade can be centred on the bar line. */
+  private directVariants() {
+    const song = this.song;
+    const vs = song.variants;
+    if (!vs) return;
+    this.settleAll();
+    const now = this.ctx.currentTime;
+    if (this.running) {
+      const phrase = this.phraseSec;
+      const dwell = AUDIO_CONSTANTS.MUSIC_VARIANT_DWELL_PHRASES * phrase;
+      for (const layer of this.layers.values()) {
+        const id = layer.spec.id;
+        if (!vs[id]) continue;
+        const v = layer.v;
+        const combat = id !== 'atmos';
+        if (combat && layer.on) this.trackStreak(layer, now);
+        const xf = combat ? this.beat : this.barSec;
+        const k = Math.max(0, Math.ceil((now + LOOKAHEAD + xf / 2 - this.t0) / phrase - 1e-6));
+        const T = this.t0 + k * phrase;
+        if (Math.abs(T - v.decidedT) < 1e-3 || now < T - xf / 2 - DECIDE_WINDOW) continue;
+        v.decidedT = T;
+        if (combat && !layer.on) continue;                  // a slot picks when it enters
+        if (now < v.fadeEnd) continue;                      // still crossfading
+        if (combat && v.streakFam && now - v.streakSince >= phrase * 0.98) {
+          v.locked = v.streakFam;                           // out-weighed for a whole phrase
+          v.streakFam = null;
+        }
+        const want = combat
+          ? (v.locked ? this.matchVariant(song, id, t => t === `enemy:${v.locked}`) : '')
+          : this.pickFor(song, id);
+        if (want === v.cur) continue;
+        if (T < v.lastChangeAt + dwell - 1e-6) continue;    // minimum dwell
+        if (!this.canPlay(layer, want)) { this.vDirty = true; continue; }   // not decoded: next boundary
+        const a = T - xf / 2, b = T + xf / 2;
+        for (const voice of layer.voices.values()) {
+          const g = voice.mix.gain;
+          const isTo = voice.name === want, isFrom = voice.name === v.cur;
+          if (!isTo && !isFrom) continue;
+          g.cancelScheduledValues(now);
+          g.setValueAtTime(g.value, now);
+          g.setValueAtTime(isTo ? 0 : 1, a);
+          g.linearRampToValueAtTime(isTo ? 1 : 0, b);
+        }
+        v.to = want; v.switchAt = T; v.fadeEnd = b;
+      }
+    }
+    if (this.vDirty ? now - this.vLastManage > 0.1 : now - this.vLastManage > 1) this.manageVariants(now);
+  }
+
+  /** A combat slot's challenger: the heaviest OTHER family, once it has
+   *  out-weighed the locked one by the margin.  Any frame it has not, the
+   *  streak starts over — it must hold for a whole phrase. */
+  private trackStreak(layer: Layer, now: number) {
+    const v = layer.v;
+    const lw = v.locked ? (this.famW[v.locked] ?? 0) : 0;
+    let cand: string | null = null, cw = 0;
+    for (const f of AUDIO_CONSTANTS.MUSIC_FAMILIES) {
+      if (f === v.locked) continue;
+      const w = this.famW[f] ?? 0;
+      if (w > cw) { cand = f; cw = w; }
+    }
+    const ok = cand !== null && cw >= AUDIO_CONSTANTS.MUSIC_FAMILY_MIN_WEIGHT && cw > AUDIO_CONSTANTS.MUSIC_FAMILY_MARGIN * lw;
+    if (!ok) v.streakFam = null;
+    else if (v.streakFam !== cand) { v.streakFam = cand; v.streakSince = now; }
+  }
+
+  /** RESIDENCY.  Keep decoded: whatever is playing or fading, what the slot
+   *  would pick now, and WARM candidates (a context inside its prefetch
+   *  radius, an enemy family in the alert ring).  Load what is missing if it
+   *  fits the budget; evict the least recently wanted non-active buffers when
+   *  over it.  Default stems are not in this cache and are never evicted. */
+  private manageVariants(now: number) {
+    this.vDirty = false;
+    this.vLastManage = now;
+    const song = this.song, vs = song.variants;
+    if (!vs) return;
+    const wanted = new Map<string, { layer: Layer; name: string; must: boolean }>();
+    const add = (layer: Layer, name: string, must: boolean) => {
+      if (!name) return;
+      const file = this.variantFile(song, layer.spec.id, name);
+      const w = wanted.get(file);
+      if (w) w.must = w.must || must; else wanted.set(file, { layer, name, must });
+    };
+    for (const [id, list] of Object.entries(vs) as [MusicLayerId, VariantSpec[]][]) {
+      const layer = this.layers.get(id)!;
+      add(layer, layer.v.cur, true);
+      if (layer.v.to) add(layer, layer.v.to, true);
+      add(layer, this.pickFor(song, id), true);
+      for (const v of list) {
+        const near = id === 'atmos'
+          ? v.when.some(t => this.ctxTags.has(t) || this.ctxWarm.has(t))
+          : this.active && v.when.some(t => t.startsWith('enemy:') && (this.famW[t.slice(6)] ?? 0) > 0);
+        if (near) add(layer, v.name, false);
+      }
+    }
+    for (const [file, w] of wanted) {
+      const hit = this.vcache.get(file);
+      if (hit) { hit.touched = now; continue; }
+      if (this.vloading.has(file) || this.vmissing.has(file)) continue;
+      const def = this.buffers.get(w.layer.spec.id);
+      const est = def ? bufBytes(def) : 9e6;     // a variant is the same length as its default
+      if (!this.makeRoom(est, wanted, w.must)) continue;
+      this.loadVariant(w.layer, w.name, file);
+    }
+    this.makeRoom(0, wanted, false);
+  }
+
+  /** Evict until `extra` more bytes fit the budget.  Never a buffer that is
+   *  audible, nor a `must` one; warm ones only when `warmToo`. */
+  private makeRoom(extra: number, wanted: Map<string, { must: boolean }>, warmToo: boolean): boolean {
+    const budget = this.budgetMB * 1024 * 1024;
+    while (this.decodedBytes + extra > budget) {
+      let victim: string | null = null, oldest = Infinity;
+      for (const [file, c] of this.vcache) {
+        const w = wanted.get(file);
+        if (w?.must) continue;
+        if (w && !warmToo) continue;
+        if ((this.layers.get(c.layer)!.voices.get(c.name)?.mix.gain.value ?? 0) > 0.001) continue;
+        if (c.touched < oldest) { oldest = c.touched; victim = file; }
+      }
+      if (victim === null) return false;
+      this.evictVariant(victim);
+    }
+    return true;
+  }
+
+  private evictVariant(file: string) {
+    const c = this.vcache.get(file);
+    if (!c) return;
+    this.vcache.delete(file);
+    const layer = this.layers.get(c.layer)!;
+    const voice = layer.voices.get(c.name);
+    if (voice) {
+      if (voice.source) { try { voice.source.stop(); } catch { /* already stopped */ } }
+      try { voice.mix.disconnect(); } catch { /* gone */ }
+      layer.voices.delete(c.name);
+    }
+  }
+
+  private loadVariant(layer: Layer, name: string, file: string) {
+    const gen = this.generation;
+    this.vloading.add(file);
+    void this.fetchDecode(file).then(buf => {
+      if (gen !== this.generation) return;          // belongs to a song no longer resident
+      this.vcache.set(file, { buf, bytes: bufBytes(buf), layer: layer.spec.id, name, touched: this.ctx.currentTime });
+      if (this.running) this.startSource(layer, this.ctx.currentTime + 0.05, 0.02, name);
+      this.vDirty = true;
+    }, () => {
+      // Optional by design: a song may declare a variant whose file has not
+      // arrived yet.  The default stem plays; no error is raised.
+      this.vmissing.add(file);
+      this.vDirty = true;
+    }).finally(() => { this.vloading.delete(file); });
+  }
 
   // ── intensity ─────────────────────────────────────────────────────────────
 
@@ -677,9 +1160,11 @@ export class AdaptiveMusic {
       else want = this.active && (layer.on ? level >= s.off : level >= s.on);
       if (want !== layer.on) {
         layer.on = want;
+        if (want) { this.enterSlot(layer); this.vDirty = true; }
         this.scheduleLayer(layer);
       }
     }
+    this.directVariants();
     const atmos = !this.active ? ATMOS_MENU
       : this.layers.get('groove')!.on ? ATMOS_COMBAT : ATMOS_EXPLORE;
     if (atmos !== this.atmosLevel) {
@@ -749,7 +1234,7 @@ export class AdaptiveMusic {
     this.t0 = at - this.held;
     this.running = true;
     this.jumpAt = -Infinity;
-    for (const layer of this.layers.values()) this.startSource(layer, at, 0.02);
+    for (const layer of this.layers.values()) this.startVoices(layer, at, 0.02);
   }
 
   private stopTransport(when: number) {
@@ -757,16 +1242,20 @@ export class AdaptiveMusic {
     this.held = this.position;
     this.running = false;
     for (const layer of this.layers.values()) {
-      if (layer.source) { try { layer.source.stop(when); } catch { /* already stopped */ } }
-      layer.source = null;
-      layer.sourceGain = null;
+      for (const voice of layer.voices.values()) {
+        if (voice.source) { try { voice.source.stop(when); } catch { /* already stopped */ } }
+        voice.source = null;
+        voice.sg = null;
+      }
     }
   }
 
   /** Start a layer's loop so that it is exactly in phase with t0. */
-  private startSource(layer: Layer, when: number, fade: number) {
-    const buf = this.buffers.get(layer.spec.id);
-    if (!buf || !this.running || layer.source) return;
+  private startSource(layer: Layer, when: number, fade: number, name = '') {
+    const voice = this.voiceOf(layer, name);
+    const buf = name === '' ? this.buffers.get(layer.spec.id)
+      : this.vcache.get(this.variantFile(this.song, layer.spec.id, name))?.buf;
+    if (!buf || !this.running || voice.source) return;
     when = Math.max(when, this.jumpAt, this.ctx.currentTime + 0.01);
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
@@ -778,10 +1267,39 @@ export class AdaptiveMusic {
     sg.gain.setValueAtTime(0, Math.max(0, when - fade));
     sg.gain.linearRampToValueAtTime(1, when + fade);
     src.connect(sg);
-    sg.connect(layer.gain);
+    sg.connect(voice.mix);
     src.start(when, SCORE.LOOP_START + mod(when - this.t0, this.loopSec));
-    layer.source = src;
-    layer.sourceGain = sg;
+    voice.source = src;
+    voice.sg = sg;
+  }
+
+  /** The layer's voice for `name`, created on first use.  Its mix gain starts
+   *  at 1 only if it is the slot's current variant. */
+  private voiceOf(layer: Layer, name: string): Voice {
+    let voice = layer.voices.get(name);
+    if (!voice) {
+      const mix = this.ctx.createGain();
+      mix.gain.value = layer.v.cur === name ? 1 : 0;
+      mix.connect(layer.gain);
+      voice = { name, mix, source: null, sg: null };
+      layer.voices.set(name, voice);
+    }
+    return voice;
+  }
+
+  /** Start every resident stem of a slot — the default and any variant that
+   *  is decoded — all on the same t0, all in phase. */
+  private startVoices(layer: Layer, when: number, fade: number) {
+    this.startSource(layer, when, fade, '');
+    for (const c of this.vcache.values()) if (c.layer === layer.spec.id) this.startSource(layer, when, fade, c.name);
+  }
+
+  /** Drop a slot's voices (their sources already stopped or scheduled to).
+   *  The mix nodes disconnect once the tail has played out. */
+  private retireVoices(layer: Layer) {
+    const old = [...layer.voices.values()];
+    layer.voices.clear();
+    if (old.length) setTimeout(() => { for (const v of old) { try { v.mix.disconnect(); } catch { /* gone */ } } }, 1500);
   }
 
   private playOneShot(id: OneShotId, at: number, endsAt = false) {
@@ -855,6 +1373,7 @@ export class AdaptiveMusic {
     if (id === 'atmos') { if (this.enabled && !document.hidden) this.startTransport(); }
     const layer = this.layers.get(id as MusicLayerId);
     if (layer && this.running) this.startSource(layer, this.ctx.currentTime + 0.05, 0.05);
+    this.vDirty = true;
     this.evaluate();
   }
 }
