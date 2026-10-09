@@ -646,6 +646,20 @@ wave.  **NEXT in S3:** the user judges the baseline against the targets
 above; the portal-difficulty model, the level count and the per-station
 catalogues are DESIGNED from that, not before it.
 
+**S3 status, 2026-10-08 (PROVISIONAL numbers).**  Landed on the PR since the
+baseline: translucent menus and wave dialogue, a wave-roster strip beside the
+wave chip, map name / size / level in the pause menu and on a slower travel
+card, enemy point budgets scaled by map size (`mapSizeScale`, larger maps carry
+more at the same level), calm-bubble edge arrows removed, and the level curve
+shifted +2 (`[level] shift` in `data/enemy-difficulty.toml`; the old level 4
+challenge is now called level 2, so every map keeps its label and gets harder).
+`docs/BALANCE_BASELINE.md` is being regenerated against this curve.  Deferred to
+a follow-up after this session is ready to merge: enemy AI (line of sight,
+getting stuck on tiles and shards, packs; and the TURRET (sentry) may MOVE, slowly — `maxSpeed` 0 and the AISystem no-move branch go, it
+crawls toward the player, tank-like, slower still than the Bulwark/Tank class, keeping its rotate-to-aim and homing
+missiles) and new map designs (tile-dense
+maze-like maps; wide-open sparse maps with dense star fields and rivals).
+
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
 with the numbers visible in the diff.
@@ -927,6 +941,17 @@ phase** rather than trusting that the brief was followed, for the same reason
 the branch-point mitigation lives with the PM: it does not depend on a work
 session noticing anything.
 
+**ONE EXCEPTION, AND IT IS NARROW: REPO PLUMBING MAY LAND DIRECTLY** (PM
+reading, D38 — flagged in §8 for the user to correct).  The rule above is
+about a session's WORK: anything touching the sim, the content tables or this
+plan goes through a PR based on the phase branch, no exceptions.  A change to
+the CI or preview PLUMBING may be pushed straight to the integration branch,
+because the branch sits in `pr-checks.yml`'s `push.branches` — so such a push
+runs the FULL suite there exactly as a merge into it does, which is the
+testing the user asked for.  What it gives up is the per-change preview.  Each
+one is recorded in §7 so the branch never carries a commit nothing accounts
+for; `f1384a1` (the SHA-pinned preview link) is the first.
+
 Two things about the NAME, so nobody reads meaning into it.  It is the
 planning session's own branch, named for the Steam question that opened that
 conversation before D0 settled on mobile — so it describes this phase
@@ -1085,6 +1110,7 @@ who made it, and the consequences for other sessions.
 | D35 | PM | 2026-10-06 | **THE KIT'S `song.json` STAYS JSON, AND D33 CARRIES THE EXEMPTION** (user call, taking the PM's recommendation (a) on D34's §8 hand-up).  D33's rule points a hand-written file at TOML; the GarageBand kit's `song.json` is hand-written, read only by `music:import`, and stays JSON.  The rule is not weakened — it gains a stated boundary: **a file small enough that its fields need no explanation does not need a format that can explain them.**  The moment a kit carries reasoning worth a comment — WHY a song claims `boss`, why a tempo was chosen — that is the moment to split it, which is D33's own test applied one level up. | Options weighed were (a) leave it JSON and write the exemption into the rule, (b) move it to TOML for the sake of commentary, (c) TOML upstream with the generator's copy staying JSON.  (b) buys a comment nobody has yet wanted to write, against a change to W1's authoring surface and `docs/MUSIC_PIPELINE.md`; (c) is the most honest about the two files having different writers and the least worth its cost, since it means two formats for one shape.  The deciding fact is that the file is FIVE live fields (`id`, `title`, `bpm`, `bars`, `use`), four of which the importer validates by name, plus two inert ones — nothing in it is a judgement that needs defending.  Recorded in CLAUDE.md §8 beside D33, since that is where the rule is read. |
 | D36 | PM | 2026-10-06 | **D15 NO LONGER DESCRIBES THE BRANCH TOPOLOGY: `S3` PROMOTED TO `main` ON ITS OWN** (PM reconciliation of what happened, not a new call).  PR #113 (`claude/s3-numbers` → `main`, merged 2026-10-06) carried 62 commits and 155 files — `dmath`, the TOML content tables, the balance harness, factorial pricing, per-arena difficulty and the hub layout — so `main` is now AHEAD of the phase branch, which D15 said would not happen until the phase ended.  The user reports the merge was PREMATURE and that `S3` still has work in flight, so this is a topology change to absorb, not a phase completion. | **What is true now:** `main` holds `S1` + `S2` + `S3`; the phase branch holds W1 (the music pipeline), the W2 revert, the Critical Mass import and this plan's own commits — 14 commits `main` lacks.  The two diverged at `33ac6f3`.  **What was done:** `main` was merged INTO the phase branch (three conflicts: this doc twice, `package.json`, `package-lock.json`), so PR #108 is mergeable again and carries the music work forward rather than stranding it.  Both devDependencies survive — W1's `ffmpeg-static` and `S3`'s `smol-toml` — and the lockfile was REGENERATED with npm rather than hand-merged.  **What this costs:** D15's guarantee was that the phase lands as one reviewable promotion; that is gone and cannot be recovered by anything written here.  What replaces it is weaker and worth stating plainly — the phase branch is now a FOLLOWER of `main`, so every session on it must merge `main` before pushing, and a second premature promotion is now the likely failure rather than a hypothetical one.  **Not decided here:** whether the phase branch should keep accumulating at all, or whether the remaining work should go to `main` in PRs the way `S3`'s did.  That is the user's, and it is the one question this topology actually raises. |
 | D37 | PM | 2026-10-06 | **EVERY FUTURE PR IN THIS PHASE IS BASED ON `claude/steam-game-publishing-xhnui2`, AND THE BASE IS NOW A STATED PART OF EVERY BRIEF** (user call, settling D36's open question).  `S3`'s work was always INTENDED for the integration branch — the merge to `main` was a mistake, not a change of plan — so D15's model stands: the phase branch accumulates every session and workstream, is tested whole, and rolls into `main` once.  What is new is the mechanism that failed. | **WHY IT HAPPENED, because it will recur otherwise:** §5's brief hygiene covered the BRANCH POINT (`git checkout -B <branch> origin/claude/steam-game-publishing-xhnui2`, carried verbatim in every brief after the `S1` near-miss) and said NOTHING about the PR BASE — and `gh pr create` defaults the base to the repository's DEFAULT branch, which is `main`.  So a session that branched correctly still opened its PR at `main` by doing nothing wrong, and PR #113 (62 commits, 155 files) merged there.  A convention that depends on a tool's default being what you want is not a convention; §5 now carries the base as its own hygiene item, with `--base` written out.  **WHAT IS ALREADY TRUE AND NEEDS NO WIRING:** the phase branch sits in `pr-checks.yml`'s `push.branches`, so a merge INTO it runs the FULL suite while each PR push into it runs the cheap smoke — which is exactly the user's "merge these changes to this branch and test before rolling into main".  And the branch is a sound base again: `227afc5` merged `main` into it, so it now CONTAINS every commit `main` has (verified: 0 commits main-ahead, 15 phase-ahead) and a PR based on it carries `S3`'s work as well as the music work.  **WHAT THIS COSTS, stated plainly:** `main` already carries `S1`–`S3`, so the phase no longer promotes as one reviewable diff — D15's original guarantee is spent and D36 records that.  The model from here is the one the user asked for and it is the weaker, workable version: the phase branch stays the integration point and the place the whole net runs, and what eventually reaches `main` is the remainder. |
+| D38 | PM | 2026-10-08 | **D37 GOVERNS A SESSION'S WORK, NOT REPO PLUMBING — AND ONE DIRECT PUSH TO THE INTEGRATION BRANCH HAS ALREADY LANDED UNDER THAT READING** (PM reading of D37's scope, flagged in §8 for the user to correct).  `f1384a1` — an UNNUMBERED tooling session, not `S1`–`S4`/`S6` — pushed straight to `claude/steam-game-publishing-xhnui2`: `pr-preview.yml` now records the mirror commit and the PR comment links a SHA-pinned `rawcdn.githack.com` URL, because the BRANCH-REF `raw.githack.com` link was returning HTTP 429 and a commit URL is cached permanently.  CLAUDE.md §9 and README were updated with it. | **WHY IT IS LET STAND rather than reverted and re-opened as a PR:** the link it fixes is the user's ONLY way to play the game (iPhone, no local checkout), so a rate-limited preview is not a cosmetic defect — it stops the play-testing every gameplay decision in this plan depends on.  It is also self-contained (one workflow, two doc lines), documented in the commit, and `typecheck · build · test` is green on it in BOTH scopes.  **WHY A DIRECT PUSH DOES NOT DEFEAT D37:** the user's stated purpose is “merge all of these changes to this branch and test before rolling into main”, and the phase branch sits in `pr-checks.yml`'s `push.branches` — so a direct push runs the FULL suite on the integration branch exactly as a merge into it does.  What a direct push gives up is the per-change PREVIEW and a reviewable diff.  **THE BOUNDARY, stated so it is usable:** anything touching the SIM, the content tables or this plan goes through a PR based on the phase branch, no exceptions — that is D37 and it is unchanged.  A change to the CI / preview PLUMBING may land directly, and the PM records each one in this log, so the branch never carries a commit nothing accounts for.  **THE COST:** PR #108's diff grows by commits that were never previewed on a phone, and a plumbing change is the kind that fails only once it is on the branch the workflow fires for — which is an argument FOR landing it there and also why it must be watched after landing rather than before. |
 
 ---
 
@@ -1094,6 +1120,21 @@ Work sessions append here when a decision changes what a *later* session
 should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
+
+- **PM → the user (how wide D37 is).**  D37 says every future PR in this
+  phase is based on the integration branch.  It does not say whether a
+  non-PR push to that branch is allowed at all, and on 2026-10-08 one
+  happened: an unnumbered tooling session pushed `f1384a1` directly, fixing
+  the 429 on the play-test preview link.  I let it stand and wrote the
+  reading into §5 and D38 — **work goes through a PR; CI / preview plumbing
+  may land directly, and the PM logs each one.**  My reasons are that the
+  phase branch runs the FULL suite on a direct push just as it does on a
+  merge (so the testing D37 exists for still happens), and that the link it
+  fixed is the only way you can play the game.  **The alternative, if you
+  want it, is one line: “everything goes through a PR, plumbing included.”**
+  That costs a round trip per workflow fix and buys a previewed, reviewable
+  diff for every commit on the branch.  Say which and I will amend §5; until
+  then the reading above is what the briefs will carry.
 
 - ~~**W1 → the user (the kit `song.json`'s format).**~~  *(SETTLED, D35: the
   user took option (a) — it stays JSON, and D33 carries the exemption.)*  D34 moved the music

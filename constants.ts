@@ -7746,7 +7746,7 @@ export function cyclePortalLens(): number {
 // stretch to six seconds is how you inspect a frame of it without a
 // screenshot harness.
 export const PORTAL_WARP_CYCLE: ReadonlyArray<number> =
-  [1.4, 0.9, 0.6, 2.2, 3.5, 6.0, 10.0, 0] as const;
+  [2.0, 1.4, 0.9, 0.6, 3.5, 6.0, 10.0, 0] as const;
 let activePortalWarpIndex = 0;
 export function getPortalWarpDuration(): number { return PORTAL_WARP_CYCLE[activePortalWarpIndex]; }
 export function getPortalWarpName(): string {
@@ -8263,7 +8263,7 @@ export const PORTAL_CONSTANTS = {
   // part of, and the streaks alone carry the motion.
   WARP: {
     DURATION: 1.1,          // UNREAD — the live length is PORTAL_WARP_CYCLE
-                            // (1.4 s ships)
+                            // (2.0 s ships)
     // How far the sky is swept outward over the beat: every star's distance
     // from the vanishing point is multiplied by 1 -> EXPAND.  At 1 the field
     // is EXACTLY the sky already on screen, which is what makes the opening
@@ -9621,15 +9621,25 @@ export const ENEMY_RATING: Readonly<Partial<Record<EnemySubtype, number>>> = (()
 
 const WAVE_RULES = RAW_DIFFICULTY.wave as { points: number[]; variety: number[]; maxPerType: number };
 const CEILING_RULES = RAW_DIFFICULTY.ceiling as { base: number; waveBias: number; slope: number; slopePerLevel: number };
-const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number };
+const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number; shift: number };
 
 export const ARENA_LEVEL_MAX = 20;
+
+/** The curve is defined on an INTERNAL scale and a displayed level is shifted
+ *  onto it (`[level] shift`): play-testing found the old level 4 beaten with
+ *  the bare starter gun, so a shown level N is what the curve called N + shift.
+ *  Everything that reads a level (stats, spawn amount, roster ceiling) goes
+ *  through this ONE function. */
+export function curveLevel(level: number): number {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  return L + (LEVEL_RULES.shift ?? 0);
+}
 
 /** Spawn amount and enemy stats for an arena level (1..20).  Levels 1-3 are the
  *  old Low / Med / High rows, unchanged; above that health and damage grow much
  *  faster than the spawn amount (D-S3-g). */
 export function levelScales(level: number): { spawn: number; health: number; speed: number; damage: number } {
-  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  const L = curveLevel(level);
   if (L <= 3) {
     return { spawn: DIFFICULTY_SCALES[L] ?? 1, ...(DIFFICULTY_STAT_SCALES[L] ?? DIFFICULTY_STAT_SCALES[3]) };
   }
@@ -9642,14 +9652,44 @@ export function levelScales(level: number): { spawn: number; health: number; spe
 
 /** The highest-rated enemy a level's wave `index` (0-based) may contain. */
 export function rosterCeiling(level: number, index: number): number {
-  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  const L = curveLevel(level);
   return CEILING_RULES.base + (index + CEILING_RULES.waveBias) * (CEILING_RULES.slope + CEILING_RULES.slopePerLevel * (L - 1));
 }
 
-/** Points a level's wave `index` spends. */
-export function waveTargetPoints(level: number, index: number): number {
+/** HOW MANY ENEMIES A MAP'S SIZE BUYS (user call: at the same difficulty
+ *  level a larger map carries more enemies than a smaller one).  The arena
+ *  level fixes what each enemy IS and what a wave is worth in points; the map
+ *  scales that point budget by `(span / REF_SPAN) ^ EXPONENT`, so the 12k
+ *  Ring World / Seven Rings are the 1.0 reference every level was tuned on,
+ *  Deep Space (16k) carries ~1.19x, the 6k showcases ~0.66x and Pocket (4k)
+ *  ~0.52x.  A power below 1 on a LINEAR span is deliberate: enemy density per
+ *  area falls as maps grow (a 16k map is 1.8x the width of a 12k one but 1.8x
+ *  the enemies would be a crowd, not a stretch of open space). PROVISIONAL —
+ *  pending a play-test. */
+export const MAP_SIZE = {
+  REF_SPAN: 12000,
+  EXPONENT: 0.6,
+  MIN: 0.5,
+  MAX: 1.5,
+  /** Upper span bound (exclusive) of each named size class. */
+  CLASSES: [[5000, 'Small'], [8000, 'Medium'], [13000, 'Large'], [Infinity, 'Huge']] as ReadonlyArray<readonly [number, string]>,
+} as const;
+
+export function mapSizeScale(span: number): number {
+  if (!(span > 0)) return 1;
+  const k = dmath.pow(span / MAP_SIZE.REF_SPAN, MAP_SIZE.EXPONENT);
+  return Math.min(MAP_SIZE.MAX, Math.max(MAP_SIZE.MIN, k));
+}
+
+export function mapSizeLabel(span: number): string {
+  for (const [upTo, name] of MAP_SIZE.CLASSES) if (span < upTo) return name;
+  return MAP_SIZE.CLASSES[MAP_SIZE.CLASSES.length - 1][1];
+}
+
+/** Points a level's wave `index` spends (`sizeScale`: see `mapSizeScale`). */
+export function waveTargetPoints(level: number, index: number, sizeScale: number = 1): number {
   const w = Math.min(index, WAVE_RULES.points.length - 1);
-  return WAVE_RULES.points[w] * levelScales(level).spawn;
+  return WAVE_RULES.points[w] * levelScales(level).spawn * sizeScale;
 }
 
 /**
@@ -9666,9 +9706,9 @@ export function waveTargetPoints(level: number, index: number): number {
  *  4. SHUFFLE — so the types stream in mixed, not in blocks.
  * Every draw is the seeded `waves` stream, so an arena's seed fixes its waves.
  */
-export function buildLevelWave(level: number, index: number, prev: readonly EnemySubtype[] = []): EnemySubtype[] {
+export function buildLevelWave(level: number, index: number, prev: readonly EnemySubtype[] = [], sizeScale: number = 1): EnemySubtype[] {
   const rate = (s: EnemySubtype) => ENEMY_RATING[s] ?? 1;
-  const target = waveTargetPoints(level, index);
+  const target = waveTargetPoints(level, index, sizeScale);
   const ceiling = rosterCeiling(level, index);
   const all = (Object.keys(ENEMY_RATING) as EnemySubtype[]).sort((a, b) => rate(b) - rate(a) || (a < b ? -1 : 1));
   let pool = all.filter(s => rate(s) <= ceiling + 1e-9);
@@ -9688,6 +9728,11 @@ export function buildLevelWave(level: number, index: number, prev: readonly Enem
   const anchor = freshFirst(shuffle([...top]))[0];
   const rest = freshFirst(shuffle(pool.filter(s => s !== anchor)));
   const chosen = [anchor, ...rest.slice(0, k - 1)];
+  // A wave cannot buy more kinds than its budget holds one of each: on a small
+  // map at a low level the target is a handful of points, and the one-of-each
+  // floor below would otherwise swamp the size scale (the cheapest tail goes).
+  const oneEach = () => chosen.reduce((a, s) => a + rate(s), 0);
+  while (chosen.length > 1 && oneEach() > target * 1.25) chosen.pop();
 
   const per = target / chosen.length;
   const counts = chosen.map(s => Math.min(WAVE_RULES.maxPerType, Math.max(1, Math.round(per / rate(s)))));

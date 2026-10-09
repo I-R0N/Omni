@@ -6506,6 +6506,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
      and teal on the map is two contacts as far as the player is
      concerned.  Drops stay excluded entirely.
 
+- **MAP SIZE, NAME AND DIFFICULTY ARE SHOWN, AND SIZE BUYS ENEMIES** (user call).  `EngineStats.mapInfo` (`GameEngine.mapInfo()`, cached on map + descriptor + level) carries the name, `MAP_SPANS` size, its class (`mapSizeLabel`: Small < 5k, Medium < 8k, Large < 13k, Huge) and the arena level; the pause menu's MAP panel prints it and the transit warp draws it as a destination card (`renderPortalWarpCard`, fades in and out inside the beat; the shipped warp is 2.0 s, slowed from 1.4).  At the SAME level a larger map carries more enemies: `mapSizeScale(span)` = `(span / 12000)^0.6` clamped to 0.5..1.5 (Pocket 0.52, the 6k showcases 0.66, Ring World / Seven Rings 1.0, Deep Space 1.19) multiplies an ordinary wave's POINT budget (`waveTargetPoints` / `buildLevelWave`'s `sizeScale`, passed through `WaveSpawnContext.mapSizeScale`); a capstone's escort and the enemy STATS are untouched.  `buildLevelWave` also drops trailing types a budget cannot buy one of each of.  PROVISIONAL pending a play-test.
+- **A SHOWN LEVEL IS THE CURVE'S LEVEL + 2** (`[level] shift` in `data/enemy-difficulty.toml`, `curveLevel()` in constants.ts — the ONE place a level is mapped; stats, spawn amount and roster ceiling all read it).  Play-test: the bare starter gun cleared the old level 4, so that challenge is now called level 2 and the old L3 row is level 1; every map keeps its label and so gets harder.  PROVISIONAL.
+- **THE WAVE STRIP**: the wave chip carries a miniature of the roster — `EngineStats.enemyRoster` (`WaveSystem.remainingRoster`: unspawned + live, per archetype, first-appearance order) drawn as a flat silhouette + count (`WaveStripIcon` in UIOverlay, `drawEnemyIcon`).  Counts fall as enemies die; a type drops off at zero.  `tests/wavestrip.spec.ts`.
 - **A wave start is a ROSTER DIALOGUE, not a banner** (`WaveAnnouncement.roster`, set by `WaveSystem.startWave` from the spawn list plus a capstone's boss): ONE panel above centre (`renderWaveRosterDialogue`, `render/hud.ts`, middle at 30% of the height) that leads with the enemies — each subtype that must die as its flat silhouette (`drawEnemyIcon`, `render/enemyShapes.ts`) and a large "xN" — under a small "WAVE n · DESTROY N" heading.  It holds `WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD` (3.2 s) rather than the banner's 1 s, so `renderWaveAnnouncements` reads each announcement's own `maxLifetime` for its hold.  Cells shrink to fit the width; a wave resumed from the arena memory shows its full roster.  Announcements without a roster (clears, snitch, boss phases) are still the plain banner.
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
@@ -6558,8 +6561,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   beside it because the band is width-bound: a column costs the chips
   nothing, and costs the arrows only `CONTROL_COLUMN_INSET`.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
-  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/55` +
-  `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
+  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/35` + the
+  debug panel's text outline, NO blur — user call: every menu reads like the
+  debug panel) is used by all five — main menu, pause, station,
   death, stage-clear — so the game never has two ideas of how much world
   shows through (user call: menus keep displaying the dynamic map).  Two
   things about it are load-bearing rather than taste: the ALPHA is a
@@ -6605,7 +6609,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
   on every push of a same-repo PR and publishes it to the
   `i-r0n/omni-standalone` mirror, linked from a PR comment as a
-  raw.githack URL — the link to play-test a PR on a phone; not Netlify.
+  SHA-pinned rawcdn.githack.com URL — the link to play-test a PR on a
+  phone; not Netlify.  SHA-PINNED because a BRANCH-REF raw.githack link
+  gets HTTP 429 rate-limited, while a commit URL is cached permanently
+  by the CDN.
   A push whose commit message carries `[skip ci]` skips it too, since
   that skips every workflow — so a push meant to refresh the preview
   must not carry it),

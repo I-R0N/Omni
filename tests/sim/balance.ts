@@ -32,10 +32,10 @@ import { syncLoadoutFromSlots } from '../../engine/outfitting';
 import {
   MODULE_DEFS, SALVAGE_CONSTANTS, DROP_CONFIG, SCORE_CONSTANTS, ENEMY_VARIANTS, ENEMY_SCALING,
   DIFFICULTY_SCALES, DIFFICULTY_STAT_SCALES, RIVAL_CONSTANTS, WEAPONS, HUB_PORTAL_SITES,
-  PORTAL_CONSTANTS, enemyHpMult, enemyDamageMult, getWaveDurationSec, getWaveSpawnBudget,
+  PORTAL_CONSTANTS, enemyHpMult, enemyDamageMult, getWaveDurationSec, buildLevelWave, waveTargetPoints, rosterCeiling, levelScales, ENEMY_RATING,
   STAGE_WAVE_COUNT, BOSS_DEFS, BOSS_ROTATION, TIMED_WAVE_CONFIG,
 } from '../../constants';
-import { createHeadlessEngine } from './harness';
+import { createHeadlessEngine, rng } from './harness';
 
 export type Loadout = 'lean' | 'mk3';
 type AnyEngine = any;
@@ -349,11 +349,36 @@ export function hubTransit(portalId: string, seed = 1): TransitReport {
 
 // ── 4. the static tables ─────────────────────────────────────────────────────
 
+/** What the level generator deals, per level and wave: the point target, the roster
+ *  ceiling and three seeded sample mixes (a wave never repeats its predecessor's types). */
+function levelWaveTable() {
+  const out: any[] = [];
+  for (const level of [1, 2, 3, 4, 6, 8, 10, 15, 20]) {
+    const sc = levelScales(level);
+    const waves: any[] = [];
+    for (let w = 0; w < 5; w++) {
+      const samples: string[] = [];
+      for (let seed = 1; seed <= 3; seed++) {
+        (rng as any).seedRng(seed * 101 + level);
+        let prev: any[] = [];
+        let list: any[] = [];
+        for (let k = 0; k <= w; k++) { list = buildLevelWave(level, k, prev); prev = list; }
+        const counts: Record<string, number> = {};
+        for (const e of list) counts[e] = (counts[e] ?? 0) + 1;
+        samples.push(Object.entries(counts).map(([k, n]) => `${n}x${k}`).join(' '));
+      }
+      waves.push({ wave: w + 1, points: Math.round(waveTargetPoints(level, w) * 10) / 10, ceiling: Math.round(rosterCeiling(level, w) * 100) / 100, samples });
+    }
+    out.push({ level, hpDmg: Math.round(sc.health * 100) / 100, spawn: Math.round(sc.spawn * 100) / 100, waves });
+  }
+  return out;
+}
+
 export function staticTables() {
   const waves = [];
   for (let i = 0; i < STAGE_WAVE_COUNT; i++) {
     waves.push({
-      wave: i + 1, windowSec: getWaveDurationSec(i), budget: getWaveSpawnBudget(i),
+      wave: i + 1, windowSec: getWaveDurationSec(i), budget: i < 5 ? Math.round(waveTargetPoints(3, i)) : null,
       hpMult: enemyHpMult(i), dmgMult: enemyDamageMult(i),
     });
   }
@@ -376,6 +401,8 @@ export function staticTables() {
     rivalMax: RIVAL_CONSTANTS.MAX_RIVALS,
     rivalWeights: RIVAL_CONSTANTS.WEIGHTS,
     waves, modules, enemies,
+    ratings: ENEMY_RATING,
+    levelWaves: levelWaveTable(),
     enemyScaling: ENEMY_SCALING,
     difficulty: { spawn: DIFFICULTY_SCALES, stats: DIFFICULTY_STAT_SCALES },
     timedWave: { window: TIMED_WAVE_CONFIG },
