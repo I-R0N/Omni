@@ -657,7 +657,12 @@ challenge is now called level 2, so every map keeps its label and gets harder).
 a follow-up after this session is ready to merge: enemy AI (line of sight,
 getting stuck on tiles and shards, packs; and the TURRET (sentry) may MOVE, slowly — `maxSpeed` 0 and the AISystem no-move branch go, it
 crawls toward the player, tank-like, slower still than the Bulwark/Tank class, keeping its rotate-to-aim and homing
-missiles) and new map designs (tile-dense
+missiles; and TRAILS on enemies and rivals — velocity-based, built on the existing trail systems
+(`TrailSystem`, `PLAYER_TRAIL_CONSTANTS`/`TRAIL_CONSTANTS`, the player's trail shape modes in `render/effects.ts`)
+and reusing their styles rather than inventing new ones.  Enemy trails are RED; a rival's trail takes its AGGRO
+colour (hostile / ally / neutral, `RIVAL_CONSTANTS.COLORS`, flipping when a neutral is provoked); the trail STYLE
+varies by enemy type.  Must be A/B tested for performance: a DBG on/off row plus a `perf/` scene with dozens of
+enemies, measured before it ships, and any per-enemy trail state pooled per the §8 render-bucket rule) and new map designs (tile-dense
 maze-like maps; wide-open sparse maps with dense star fields and rivals).
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
