@@ -1274,9 +1274,12 @@ function renderWaveRosterDialogue(
     const n = roster.length;
     const safe = Math.max(80, width - WAVE_ANNOUNCE_CONSTANTS.SIDE_MARGIN * 2);
     const pad = 12;
-    const cell = Math.min(110, (safe - pad * 2) / n);
-    const iconR = Math.max(9, Math.min(30, cell * 0.28));
-    const numPx = Math.max(14, Math.min(32, Math.floor(cell * 0.3)));
+    const cell = Math.min(96, (safe - pad * 2) / n);
+    // Icon + gap + "xN" must fit one cell, or neighbours overlap on a phone:
+    // the label is sized first, then the icon takes what the cell has left.
+    const numPx = Math.max(11, Math.min(22, Math.floor(cell * 0.22)));
+    const labelW = numPx * 0.62 * 3;   // monospace, "x" + up to two digits
+    const iconR = Math.max(5, Math.min(16, (cell - labelW - 10) / 2));
     const head = a.subtext ? `${a.text}  ·  ${a.subtext}` : a.text;
     const headPx = fitFontPx(ctx, head, safe - pad * 2, 12, 9);
     const headH = headPx + 8;
@@ -1290,9 +1293,12 @@ function renderWaveRosterDialogue(
     // Above centre: the panel's middle sits at 30% of the screen.
     const py = Math.max(8, height * 0.3 - panelH / 2);
 
+    // Translucent, like the debug panel: the fill lets the fight show through.
+    ctx.globalAlpha *= 0.45;
     ctx.fillStyle = UI_CONSTANTS.HUD.PANEL_FILL;
     roundRectPath(ctx, px, py, panelW, panelH, 12);
     ctx.fill();
+    ctx.globalAlpha /= 0.45;
     ctx.strokeStyle = a.color === '#ffffff' ? UI_CONSTANTS.HUD.RULE_COLOR : a.color;
     ctx.lineWidth = 1.5;
     ctx.stroke();

@@ -101,3 +101,59 @@ export function renderPortalWarpVeil(
   ctx.globalAlpha = 1;
   return a;
 }
+
+/** How visible the destination card is at this progress, 0..1: it fades in
+ *  once the sky is moving, holds through the middle of the flight, and is
+ *  gone before the veil lifts — so the player reads where they are going
+ *  while the tunnel is up and is never reading it over the arena itself. */
+export function warpCardAlpha(p: number): number {
+  const IN0 = 0.12, IN1 = 0.30, OUT0 = 0.68, OUT1 = 0.84;
+  if (p <= IN0 || p >= OUT1) return 0;
+  if (p < IN1) return (p - IN0) / (IN1 - IN0);
+  if (p > OUT0) return (OUT1 - p) / (OUT1 - OUT0);
+  return 1;
+}
+
+/** The destination card: the map's NAME large, its size / level / crowd lines
+ *  beneath.  Screen space, above the streaking sky, fitted to the width. */
+export function renderPortalWarpCard(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  p: number,
+  info: { name: string; lines: string[]; color: string },
+): void {
+  const a = warpCardAlpha(p);
+  if (a <= 0) return;
+  const safe = Math.max(80, w - 40);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let namePx = 30;
+  ctx.font = `bold ${namePx}px monospace`;
+  const nw = ctx.measureText(info.name.toUpperCase()).width;
+  if (nw > safe) namePx = Math.max(14, Math.floor(namePx * safe / nw));
+  const cy = h * 0.2;
+  ctx.font = `bold ${namePx}px monospace`;
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillStyle = info.color;
+  ctx.strokeText(info.name.toUpperCase(), w / 2, cy);
+  ctx.fillText(info.name.toUpperCase(), w / 2, cy);
+  let y = cy + namePx * 0.5 + 18;
+  for (const line of info.lines) {
+    let px = 14;
+    ctx.font = `${px}px monospace`;
+    const lw = ctx.measureText(line).width;
+    if (lw > safe) px = Math.max(10, Math.floor(px * safe / lw));
+    ctx.font = `${px}px monospace`;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(line, w / 2, y);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(line, w / 2, y);
+    y += px + 8;
+  }
+  ctx.restore();
+}

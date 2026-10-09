@@ -103,6 +103,29 @@ export class WaveSystem {
     return (this.spawnList.length - this.nextSpawnIdx) + this.countLiveTracked(entities);
   }
 
+  /** What is still left to kill, per subtype: the unspawned remainder of the
+   *  spawn list plus the live tracked enemies — the same two terms
+   *  `enemiesRemaining` sums, split by archetype for the HUD's wave strip.
+   *  First-appearance order; empty outside the active phase.  Allocates one
+   *  small array per call, which the stats push already does per frame. */
+  public remainingRoster(entities: GameEntity[]): { subtype: EnemySubtype; count: number }[] {
+    const out: { subtype: EnemySubtype; count: number }[] = [];
+    if (this.waveState !== 'active') return out;
+    const bump = (subtype: EnemySubtype) => {
+      for (let k = 0; k < out.length; k++) {
+        if (out[k].subtype === subtype) { out[k].count++; return; }
+      }
+      out.push({ subtype, count: 1 });
+    };
+    for (let i = this.nextSpawnIdx; i < this.spawnList.length; i++) bump(this.spawnList[i]);
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (this.waveEnemyIds.has(e.id) && e.active && !e.isExploding
+          && e.countsTowardWave !== false && e.enemySubtype) bump(e.enemySubtype);
+    }
+    return out;
+  }
+
   /** Reset all wave state and start wave 0.  Skipped entirely when
    *  enemyScale is 0 (difficulty "None") or `enabled` is false (wave-free
    *  maps, e.g. the Overworld) — the map loads with waves disabled: no
@@ -208,7 +231,7 @@ export class WaveSystem {
       ? buildBossWaveSpawnList(boss, budget)
       : ctx.forcedEnemy
         ? new Array(budget).fill(ctx.forcedEnemy)
-        : buildLevelWave(ctx.difficultyLevel, index, this.lastMix);
+        : buildLevelWave(ctx.difficultyLevel, index, this.lastMix, ctx.mapSizeScale ?? 1);
     if (!boss && !ctx.forcedEnemy) this.lastMix = Array.from(new Set(this.spawnList));
     this.scheduleSpawns(this.spawnList.length);
 
@@ -648,6 +671,9 @@ export interface WaveSpawnContext {
   /** The ARENA LEVEL (1..20) — what `GameEngine.arenaLevel()` resolves, not the
    *  retired menu setting. */
   difficultyLevel: number;
+  /** How many enemies the map's SIZE buys (`mapSizeScale`), multiplied into an
+   *  ordinary wave's point budget.  Absent = 1. */
+  mapSizeScale?: number;
   /** World-unit half-diagonal of the player's current viewport.  Used by
    *  spawnEnemy() to compute a minimum radial distance that keeps every
    *  enemy outside the visible window on any aspect ratio.  Computed by the

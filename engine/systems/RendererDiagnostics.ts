@@ -51,6 +51,9 @@ export interface RendererDiagnostics {
   /** Transit-warp progress 0->1 while a wormhole flight is in flight; null
    *  otherwise.  Pushed per frame by GameEngine.draw. */
   portalWarp: number | null;
+  /** The destination card drawn over the transit: name, then size / level
+   *  lines.  Set once when the beat starts; null otherwise. */
+  portalWarpInfo: { name: string; lines: string[]; color: string } | null;
   /** Veil alpha painted on the last transit frame; 0 when not in transit. */
   lastWarpVeilAlpha: number;
   stageDepth: number;

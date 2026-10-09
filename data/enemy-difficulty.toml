@@ -51,3 +51,7 @@ slopePerLevel = 0.12
 hpDmgGrowth = 1.14
 spawnGrowth = 1.03
 spawnCap = 1.5
+# The curve above is on an INTERNAL scale; a shown level N runs the curve at
+# N + shift.  Play-test (user): the bare starter gun cleared the old level 4, so
+# the old 4 is now level 2 (and the old L3 "High" row is level 1).
+shift = 2

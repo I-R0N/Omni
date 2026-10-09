@@ -1808,10 +1808,26 @@ export interface PerfTaskStat {
   manual: number;  // manual override (0 = AUTO)
 }
 
+/** A map's size, name and difficulty, as shown to the player. */
+export interface MapInfo {
+  name: string;
+  kind: 'hub' | 'arena';
+  /** Arena level (1..20); absent on the hub. */
+  level?: number;
+  /** Side length in world units (the maps are square). */
+  span: number;
+  /** 'Small' | 'Medium' | 'Large' | 'Huge'. */
+  sizeLabel: string;
+  /** Enemy-count multiplier the size buys; absent where there are no waves. */
+  crowd?: number;
+}
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
   currentMapName: string;
+  /** What the pause menu and the transit card say about the loaded map. */
+  mapInfo?: MapInfo;
   currentMapType: MapType;
   currentWeapon: string;
   gameState: GameState;
@@ -1829,6 +1845,9 @@ export interface EngineStats {
   /** Enemies left to destroy this wave (unspawned remainder + alive).
    *  Completion model: the wave ends only when this reaches 0. */
   enemiesRemaining?: number;
+  /** The same count split by archetype (first-appearance order) — what the
+   *  HUD's wave strip draws.  Present only while a wave is active. */
+  enemyRoster?: { subtype: EnemySubtype; count: number }[];
   /** Live boss readout ((h)) — present only while a capstone boss is alive,
    *  so the HUD can show a named bar with its phase pips.  `healthFrac` /
    *  `shieldFrac` are 0..1; `phase` is the 0-based BOSS_DEFS phase index. */
