@@ -655,7 +655,9 @@ shifted +2 (`[level] shift` in `data/enemy-difficulty.toml`; the old level 4
 challenge is now called level 2, so every map keeps its label and gets harder).
 `docs/BALANCE_BASELINE.md` is being regenerated against this curve.  Deferred to
 a follow-up after this session is ready to merge: enemy AI (line of sight,
-getting stuck on tiles and shards, packs) and new map designs (tile-dense
+getting stuck on tiles and shards, packs; and the TURRET (sentry) may MOVE, slowly — `maxSpeed` 0 and the AISystem no-move branch go, it
+crawls toward the player, tank-like, slower still than the Bulwark/Tank class, keeping its rotate-to-aim and homing
+missiles) and new map designs (tile-dense
 maze-like maps; wide-open sparse maps with dense star fields and rivals).
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
