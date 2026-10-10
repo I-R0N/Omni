@@ -29,7 +29,7 @@ import type { ControlScheme } from '../types';
 export const SAVE_KEY = 'omni.save';
 /** Where an unreadable save's raw text is parked before a fresh one is begun. */
 export const SAVE_BACKUP_KEY = 'omni.save.unreadable';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface WreckRecord {
   /** MAP_DESCRIPTORS id of the map the ship fell in (the hub's, or an arena's). */
@@ -70,6 +70,11 @@ export interface CharacterSave {
   weaponSlots: (string | null)[];
   shipSlotsUnlocked: number;
   weaponSlotsUnlocked: number;
+  /** How many snitches this character has CAUGHT.  Live character state, not a
+   *  record: it feeds the snitch's speed ramp (SNITCH_CONSTANTS.WAVE_SPEED_STEP
+   *  per catch), so it must survive a relaunch and be able to go DOWN (the
+   *  TRADE HUB's reset).  Added in version 2. */
+  snitchCatches: number;
 }
 
 /** What an ARENA remembers of its wave script after the player leaves it
@@ -110,6 +115,7 @@ export function emptyCharacter(): CharacterSave {
     weaponSlots: weapon,
     shipSlotsUnlocked: MODULE_SLOT_UNLOCK.START,
     weaponSlotsUnlocked: MODULE_SLOT_UNLOCK.START,
+    snitchCatches: 0,
   };
 }
 
@@ -120,9 +126,16 @@ export function emptySave(): SaveFile {
 // ── migrations ──────────────────────────────────────────────────────────
 
 /** `MIGRATIONS[n]` upgrades a version-n document to n + 1, on plain JSON.
- *  Empty today: version 1 is the first format.  The first format change adds
- *  `MIGRATIONS[1]` and bumps SAVE_VERSION; the rest of this file does not move. */
-export const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string, unknown>> = {};
+ *  1 → 2 adds `character.snitchCatches` (the snitch speed ramp became
+ *  character state).  A version-1 character has caught nothing the save knows
+ *  of, so it arrives at 0. */
+export const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record<string, unknown>> = {
+  1: (doc) => {
+    const character = typeof doc.character === 'object' && doc.character !== null && !Array.isArray(doc.character)
+      ? (doc.character as Record<string, unknown>) : {};
+    return { ...doc, version: 2, character: { ...character, snitchCatches: 0 } };
+  },
+};
 
 // ── validation ──────────────────────────────────────────────────────────
 
@@ -154,6 +167,7 @@ function validCharacter(raw: unknown): CharacterSave {
     weaponSlots: slots(raw.weaponSlots, MODULE_SLOT_COUNT, d.weaponSlots),
     shipSlotsUnlocked: int(raw.shipSlotsUnlocked, d.shipSlotsUnlocked, 1, MODULE_SLOT_UNLOCK.MAX),
     weaponSlotsUnlocked: int(raw.weaponSlotsUnlocked, d.weaponSlotsUnlocked, 1, MODULE_SLOT_UNLOCK.MAX),
+    snitchCatches: int(raw.snitchCatches, 0, 0, 1e6),
   };
 }
 

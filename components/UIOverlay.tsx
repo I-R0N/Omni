@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EngineStats, MapType, GameState, ControlScheme } from '../types';
-import { CONTROL_SCHEMES, controlSchemeDef, ENEMY_VARIANTS } from '../constants';
+import { CONTROL_SCHEMES, controlSchemeDef, ENEMY_VARIANTS, SNITCH_CONSTANTS, snitchHeadlineFrac } from '../constants';
 import { drawEnemyIcon } from '../engine/systems/render/enemyShapes';
 import type { GameEngine } from '../engine/GameEngine';
 import DebugMenu, { DebugLauncher } from './DebugMenu';
@@ -82,6 +82,8 @@ interface UIOverlayProps {
   /** A5 — buy the next hex of one flower.  Station commerce like a module
    *  purchase; the engine gates it on the matching shop. */
   onPurchaseSlot?: (group: 'ship' | 'weapon') => void;
+  /** TRADE HUB — pay to clear the snitch catch count (and so its speed ramp). */
+  onResetSnitch?: () => void;
   // Module resale, INVENTORY tiles only: sell-back (90% of cost) needs a
   // station — any, every station drydocks; scrap (9%) works from anywhere
   // on the map (the pause-menu cargo panel's only cash-out).
@@ -132,6 +134,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onMoveModule,
   onPurchaseModule,
   onPurchaseSlot,
+  onResetSnitch,
   onSellModule,
   onScrapModule,
   onUndock,
@@ -1429,6 +1432,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* ── SHIP: condition + the full derived-stat breakdown ────── */}
             {tab === 'ship' && (
             <>
+            {/* Snitch catch count: only where it can be spent (TRADE HUB) and
+                only while there is a count to clear.  The button disables and
+                says why rather than being offered and refused. */}
+            {out?.snitchReset && (
+            <div className={`${panelAccent('border-amber-500/30')} flex items-center justify-between gap-3 flex-wrap`}>
+              <div className={T_ROW}>
+                <h3 className={`text-amber-300 ${HEADING} mb-1`}>Snitch Debt</h3>
+                <span className="text-slate-400">Catches </span>
+                <span className="text-white font-bold tabular-nums">{out.snitchReset.count}</span>
+                <span className={`text-slate-500 ml-2 ${T_NOTE}`}>
+                  snitch flies at {(snitchHeadlineFrac(out.snitchReset.count)).toFixed(2)}× cruise · {out.snitchReset.available ? 'reset to 0' : 'reset offered at the TRADE HUB only'}
+                </span>
+              </div>
+              <button
+                disabled={!out.snitchReset.available || !out.snitchReset.affordable}
+                onClick={onResetSnitch}
+                className={`${BTN_COMPACT} ${
+                  out.snitchReset.available && out.snitchReset.affordable
+                    ? 'bg-amber-700/60 hover:bg-amber-600/70 text-amber-100'
+                    : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                RESET ◈{out.snitchReset.cost.toLocaleString()}
+              </button>
+            </div>
+            )}
             {svc?.repair && (
             <div className={`${panelAccent('border-rose-600/30')} flex items-center justify-between gap-3 flex-wrap`}>
               <div className={T_ROW}>
@@ -1974,6 +2003,18 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
                 {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
                 {statLine('Weight', `${(ps?.shipWeight ?? 0).toFixed(1)}`)}
+                {/* The snitch ramp is permanent character state, so the count
+                    sits beside the speed it buys: a bare number would not say
+                    the snitch is now flying at 0.40× cruise. */}
+                {statLine('Snitch catches', (
+                  <>
+                    {ps?.snitchCatches ?? 0}
+                    <span className={`text-slate-500 font-normal ml-1.5 ${T_NOTE}`}>
+                      {`snitch flies at ${(ps?.snitchSpeedFrac ?? 0).toFixed(2)}× cruise${
+                        (ps?.snitchSpeedFrac ?? 0) >= SNITCH_CONSTANTS.WAVE_SPEED_MAX ? ' (max)' : ''}`}
+                    </span>
+                  </>
+                ))}
                 {statLine('Location', (
                   <>
                     {stats.currentMapName}

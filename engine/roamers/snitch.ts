@@ -15,7 +15,7 @@ import { sim, fxRng } from '../systems/rng';
 import type { GameEngine } from '../GameEngine';
 import { GameEntity, EntityType } from '../../types';
 import {
-    SNITCH_CONSTANTS, SCORE_CONSTANTS, SALVAGE_CONSTANTS, TRAIL_CONSTANTS,
+    SNITCH_CONSTANTS, snitchHeadlineFrac, SCORE_CONSTANTS, SALVAGE_CONSTANTS, TRAIL_CONSTANTS,
     PLAYER_MOVEMENT_CONFIG, getActivePlayerThrustMult, getActiveSnitchSpeedMult,
 } from '../../constants';
 import { wrapDeltaX, wrapDeltaY, wrapPosition } from '../toroidal';
@@ -105,10 +105,7 @@ export function updateSnitch(g: GameEngine, dt: number) {
   // Per-wave speed ramp: headline (dart) speed grows WAVE_SPEED_STEP×
   // cruise per wave, capped; coast is a fixed fraction of it.  Read live
   // from the wave counter so the persistent snitch speeds up each wave.
-  const waveBase = Math.min(
-    SNITCH_CONSTANTS.WAVE_SPEED_MAX,
-    SNITCH_CONSTANTS.WAVE_SPEED_STEP * (g.snitchCatchCount + 1),
-  );
+  const waveBase = snitchHeadlineFrac(g.snitchCatchCount);
   const speedTarget = waveBase * (darting ? SNITCH_CONSTANTS.DART_RATIO : SNITCH_CONSTANTS.COAST_RATIO);
   const ease = darting ? SNITCH_CONSTANTS.SPEED_EASE_DART : SNITCH_CONSTANTS.SPEED_EASE_COAST;
   g.snitchSpeedMult += (speedTarget - g.snitchSpeedMult) * Math.min(1, ease * dt);
@@ -230,10 +227,7 @@ function spawnSnitch(g: GameEngine) {
   g.snitchAiTimer = SNITCH_CONSTANTS.COAST_DURATION_MIN
       + sim.roamers() * (SNITCH_CONSTANTS.COAST_DURATION_MAX - SNITCH_CONSTANTS.COAST_DURATION_MIN);
   g.snitchPanicCooldown = 0;
-  const waveBase = Math.min(
-    SNITCH_CONSTANTS.WAVE_SPEED_MAX,
-    SNITCH_CONSTANTS.WAVE_SPEED_STEP * (g.snitchCatchCount + 1),
-  );
+  const waveBase = snitchHeadlineFrac(g.snitchCatchCount);
   g.snitchSpeedMult = waveBase * SNITCH_CONSTANTS.COAST_RATIO;
   g.snitchDartAway = false;
 }

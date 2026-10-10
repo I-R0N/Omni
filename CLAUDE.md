@@ -625,9 +625,10 @@ state on the way).
 
 - `resetAndLoadSelectedMap()` (new run: quit to menu / mid-game map
   switch) adds the RUN-SCOPED reset — score + combo, hull/shield refill,
-  status effects, camera zoom, and the per-run counters (`snitchCatchCount`,
-  `dragonsKilled`, `nextRivalScore`).  It does NOT touch the CHARACTER —
-  credits, cargo, the installed loadout and the purchased hex slots persist
+  status effects, camera zoom, and the per-run counters (`dragonsKilled`,
+  `nextRivalScore`).  It does NOT touch the CHARACTER —
+  credits, cargo, the installed loadout, the purchased hex slots and the
+  snitch catch count (`snitchCatchCount`) persist
   (§8, persistence); `resetCharacter()` is a new character, used by the
   replay entry and DBG ▸ Economy ▸ Erase save.
 - `transitionToMap(descriptorId)` (portal travel) adds NOTHING of the
@@ -1856,7 +1857,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (dart) speed = 0.05× player cruise × (catchCount + 1) (capped at
   1.2×), with coast drifting at 0.30× of that — so the first snitch is
   nearly stationary and each CATCH makes the next one faster, letting
-  the player defer the catch to keep it slow.  Darts fire on a random
+  the player defer the catch to keep it slow (`snitchHeadlineFrac` is the one
+  definition of that fraction).  THE COUNT IS CHARACTER STATE: it is saved
+  (`CharacterSave.snitchCatches`) and a new run keeps it, so the ramp is a
+  PERMANENT ratchet — at 24 catches it sits at `WAVE_SPEED_MAX` for good.  The
+  only way down is the TRADE HUB's `snitchReset` station service
+  (`GameEngine.resetSnitchCatches`, `SNITCH_CONSTANTS.RESET_COST` through
+  `modulePrice`, a full reset to 0; refused undocked, at any other station,
+  at zero catches or unaffordable), offered on the docked SHIP tab and
+  mirrored as `outfitting.snitchReset`.  The pause menu's Condition block
+  shows the count beside the speed it buys (`playerStats.snitchCatches` /
+  `snitchSpeedFrac`).  Darts fire on a random
   timer or when the player closes
   inside PANIC_RADIUS (panic darts bias away from the player; a
   cooldown guarantees coast windows between them).  The whole ramp is
@@ -3053,8 +3064,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   2.51 → 2.49.
 - **THE SAVE FILE AND THE WRECK** (plan D10, D14, D20–D24; `engine/save.ts`,
   `engine/wreck.ts`).  What persists, through the `Storage` port under one key
-  (`omni.save`): the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
-  hex-slot counts — the outstanding WRECK, lifetime RECORDS (high score, best
+  (`omni.save`, `SAVE_VERSION` 2 — `MIGRATIONS[1]` added the snitch catch count):
+  the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
+  hex-slot counts, the snitch catch count — the outstanding WRECK, lifetime RECORDS (high score, best
   wave / combo, bosses, dragons, deaths) and SETTINGS (audio volumes + mute,
   control scheme, difficulty).  NOT saved: any arena's world (arenas regenerate
   per entry, D8), the hub's terrain (a fixed `HUB_WORLD_SEED` regenerates it

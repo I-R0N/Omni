@@ -463,6 +463,10 @@ const App: React.FC = () => {
       if (engineRef.current) engineRef.current.purchaseSlot(group);
   };
 
+  const handleResetSnitch = () => {
+      if (engineRef.current) engineRef.current.resetSnitchCatches();
+  };
+
   const handleSellModule = (idx: number) => {
       if (engineRef.current) engineRef.current.sellModule(idx);
   };
@@ -547,6 +551,7 @@ const App: React.FC = () => {
         onMoveModule={handleMoveModule}
         onPurchaseModule={handlePurchaseModule}
         onPurchaseSlot={handlePurchaseSlot}
+        onResetSnitch={handleResetSnitch}
         onSellModule={handleSellModule}
         onScrapModule={handleScrapModule}
         onUndock={handleUndock}
