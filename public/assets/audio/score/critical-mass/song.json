@@ -1,0 +1,11 @@
+{
+  "id": "critical-mass",
+  "title": "Critical Mass",
+  "bpm": 150,
+  "bars": 32,
+  "key": "C minor",
+  "use": [
+    "boss"
+  ],
+  "phraseBars": 8
+}

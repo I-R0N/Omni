@@ -7317,6 +7317,54 @@ export const AUDIO_CONSTANTS = {
   MUSIC_WEIGHT_MIN: 0.5,
   MUSIC_WEIGHT_MAX: 3,
   MUSIC_BOSS_WEIGHT: 3,
+
+  /** LAYER VARIANTS (AdaptiveMusic, docs/MUSIC_PIPELINE.md).  The CONTEXT
+   *  TAGS — `station`, `portal`, `rare-item`, `danger`, `deep-space` — are
+   *  measured in SCREENS like the rest of this block (see MusicContext.ts for
+   *  the signal behind each).  Each has an ENTER radius and a wider LEAVE
+   *  radius, so hovering at an edge cannot flip it.  PREFETCH_MULT is how much
+   *  wider than ENTER a context counts as "warm" — close enough that the
+   *  director pre-decodes its variants. */
+  MUSIC_STATION_ENTER_SCREENS: 1.6,
+  MUSIC_STATION_LEAVE_SCREENS: 2.2,
+  MUSIC_PORTAL_ENTER_SCREENS: 1.2,
+  MUSIC_PORTAL_LEAVE_SCREENS: 1.7,
+  MUSIC_RARE_ENTER_SCREENS: 1.0,
+  MUSIC_RARE_LEAVE_SCREENS: 1.4,
+  MUSIC_DANGER_ENTER_SCREENS: 0.8,
+  MUSIC_DANGER_LEAVE_SCREENS: 1.2,
+  MUSIC_PREFETCH_MULT: 1.5,
+  /** Sim seconds with no other context before `deep-space` is claimed. */
+  MUSIC_DEEP_SPACE_DWELL_SEC: 20,
+  /** A salvage drop is a RARE ITEM from this many units up (merges sum). */
+  MUSIC_RARE_DROP_VALUE: 6,
+  /** Once a slot changes variant it holds it for this many PHRASES. */
+  MUSIC_VARIANT_DWELL_PHRASES: 2,
+  /** A combat slot LOCKS its variant to the enemy family present when it
+   *  enters, and re-picks only if another family's weight has exceeded the
+   *  locked one's by this factor (and at least `FAMILY_MIN_WEIGHT`) for a whole
+   *  phrase. */
+  MUSIC_FAMILY_MARGIN: 1.5,
+  MUSIC_FAMILY_MIN_WEIGHT: 0.5,
+  /** Decoded-PCM ceiling for the score (default stems + variant cache), MB.
+   *  Only non-active variant buffers are evicted (least recently wanted
+   *  first); a variant that would not fit is simply not loaded. */
+  MUSIC_DECODE_BUDGET_MB: 110,
+  /** ENEMY FAMILIES — the musical grouping of the roster, and the contract
+   *  `enemy:<family>` variant tags are composed against.  `swarm`: many
+   *  cheap, fast bodies that crowd the player; `heavy`: slow, high-health
+   *  bodies that must be ground down; `ranged`: things that hold off and
+   *  shoot.  A subtype missing here falls to `MUSIC_FAMILY_DEFAULT`; a rival
+   *  (a player-like privateer, which has no archetype of its own) is `ranged`. */
+  MUSIC_FAMILIES: ['swarm', 'heavy', 'ranged'] as readonly string[],
+  MUSIC_FAMILY_DEFAULT: 'heavy',
+  MUSIC_FAMILY_RIVAL: 'ranged',
+  MUSIC_ENEMY_FAMILY: {
+    RAMMER_1: 'swarm', RAMMER_2: 'swarm', KAMIKAZE: 'swarm', SWARM: 'swarm', NEST: 'swarm',
+    RAMMER_3: 'heavy', BULWARK: 'heavy', BUBBLE: 'heavy', DRAGON: 'heavy',
+    SHOOTER_1: 'ranged', SHOOTER_2: 'ranged', SHOOTER_3: 'ranged', TURRET: 'ranged',
+    BOSS_WARDEN: 'heavy', BOSS_SCATTER: 'swarm', BOSS_SIEGE: 'ranged',
+  } as Readonly<Record<string, string>>,
 } as const;
 
 // ─── DBG: voice COLLAPSE mode ────────────────────────────────────────────────
@@ -7406,8 +7454,17 @@ export const SNITCH_CONSTANTS = {
   // it to keep it slow.  Coast drifts at COAST_RATIO of the dart speed,
   // preserving the burst/coast catch window.  The DBG SNITCH_SPEED_CYCLE
   // multiplier scales the whole thing on top.
+  //
+  // The catch count is CHARACTER state (saved), so this ramp is permanent: at
+  // WAVE_SPEED_MAX / WAVE_SPEED_STEP = 24 catches the snitch is at its cap for
+  // good.  The only way down is the TRADE HUB's RESET_COST service.
   WAVE_SPEED_STEP: 0.05,
   WAVE_SPEED_MAX: 1.2,
+  /** Catalog price of resetting the catch count to 0 (TRADE HUB only; routed
+   *  through `modulePrice`).  "Very expensive and rare" (user call): above the
+   *  top hex-slot unlock (MODULE_SLOT_UNLOCK.PRICES, 30k..120k).  PROVISIONAL
+   *  pending a play-test. */
+  RESET_COST: 150000,
   COAST_RATIO: 0.30,
   DART_RATIO: 1.0,
   SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
@@ -7440,6 +7497,13 @@ export const SNITCH_CONSTANTS = {
   SPARKLE_COLORS: ['#fde047', '#fbbf24', '#fff7cc', '#f59e0b'] as string[],
   CATCH_BURST_COUNT: 40, // gold particle burst on catch
 };
+
+/** The snitch's headline (dart) speed as a fraction of player cruise after
+ *  `catchCount` catches — THE one definition the AI (`roamers/snitch.ts`), the
+ *  pause menu's Condition note and the tests share. */
+export function snitchHeadlineFrac(catchCount: number): number {
+  return Math.min(SNITCH_CONSTANTS.WAVE_SPEED_MAX, SNITCH_CONSTANTS.WAVE_SPEED_STEP * (catchCount + 1));
+}
 
 // DBG snitch-speed multiplier on both AI speed states (coast + dart).
 // Cycled live from the DBG panel (Enemies & Bosses ▸ Snitch ▸ "Snitch spd")
@@ -7698,7 +7762,7 @@ export function cyclePortalLens(): number {
 // stretch to six seconds is how you inspect a frame of it without a
 // screenshot harness.
 export const PORTAL_WARP_CYCLE: ReadonlyArray<number> =
-  [1.4, 0.9, 0.6, 2.2, 3.5, 6.0, 10.0, 0] as const;
+  [2.0, 1.4, 0.9, 0.6, 3.5, 6.0, 10.0, 0] as const;
 let activePortalWarpIndex = 0;
 export function getPortalWarpDuration(): number { return PORTAL_WARP_CYCLE[activePortalWarpIndex]; }
 export function getPortalWarpName(): string {
@@ -7986,16 +8050,17 @@ export const STATION_CONSTANTS = {
 // service flags.
 export type StationKind = 'home' | 'shipwright' | 'armory' | 'tradehub';
 export interface StationServices {
+  snitchReset: boolean; // resets the snitch catch count (SNITCH_CONSTANTS.RESET_COST) — TRADE HUB only
   drydock: boolean;    // move/install modules (inventory ↔ hex slots) — true everywhere today
   repair: boolean;     // pay-per-HP hull repair (part of drydock work)
   shipShop: boolean;   // sells ship-group modules
   weaponShop: boolean; // sells weapon-group modules
 }
 export const STATION_VARIANTS: Record<StationKind, { name: string; color: string; services: StationServices }> = {
-  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true, repair: true, shipShop: false, weaponShop: false } },
-  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: true, repair: true, shipShop: true,  weaponShop: false } },
-  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true } },
-  tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true } },
+  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true, repair: true, shipShop: false, weaponShop: false, snitchReset: false } },
+  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: true, repair: true, shipShop: true,  weaponShop: false, snitchReset: false } },
+  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true, snitchReset: false } },
+  tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true, snitchReset: true } },
 };
 /** THE HUB LAYOUT — where every station and rift sits on the 12k Overworld.
  *
@@ -8215,7 +8280,7 @@ export const PORTAL_CONSTANTS = {
   // part of, and the streaks alone carry the motion.
   WARP: {
     DURATION: 1.1,          // UNREAD — the live length is PORTAL_WARP_CYCLE
-                            // (1.4 s ships)
+                            // (2.0 s ships)
     // How far the sky is swept outward over the beat: every star's distance
     // from the vanishing point is multiplied by 1 -> EXPAND.  At 1 the field
     // is EXACTLY the sky already on screen, which is what makes the opening
@@ -9573,15 +9638,25 @@ export const ENEMY_RATING: Readonly<Partial<Record<EnemySubtype, number>>> = (()
 
 const WAVE_RULES = RAW_DIFFICULTY.wave as { points: number[]; variety: number[]; maxPerType: number };
 const CEILING_RULES = RAW_DIFFICULTY.ceiling as { base: number; waveBias: number; slope: number; slopePerLevel: number };
-const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number };
+const LEVEL_RULES = RAW_DIFFICULTY.level as { hpDmgGrowth: number; spawnGrowth: number; spawnCap: number; shift: number };
 
 export const ARENA_LEVEL_MAX = 20;
+
+/** The curve is defined on an INTERNAL scale and a displayed level is shifted
+ *  onto it (`[level] shift`): play-testing found the old level 4 beaten with
+ *  the bare starter gun, so a shown level N is what the curve called N + shift.
+ *  Everything that reads a level (stats, spawn amount, roster ceiling) goes
+ *  through this ONE function. */
+export function curveLevel(level: number): number {
+  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  return L + (LEVEL_RULES.shift ?? 0);
+}
 
 /** Spawn amount and enemy stats for an arena level (1..20).  Levels 1-3 are the
  *  old Low / Med / High rows, unchanged; above that health and damage grow much
  *  faster than the spawn amount (D-S3-g). */
 export function levelScales(level: number): { spawn: number; health: number; speed: number; damage: number } {
-  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  const L = curveLevel(level);
   if (L <= 3) {
     return { spawn: DIFFICULTY_SCALES[L] ?? 1, ...(DIFFICULTY_STAT_SCALES[L] ?? DIFFICULTY_STAT_SCALES[3]) };
   }
@@ -9594,14 +9669,44 @@ export function levelScales(level: number): { spawn: number; health: number; spe
 
 /** The highest-rated enemy a level's wave `index` (0-based) may contain. */
 export function rosterCeiling(level: number, index: number): number {
-  const L = Math.min(ARENA_LEVEL_MAX, Math.max(1, Math.round(level)));
+  const L = curveLevel(level);
   return CEILING_RULES.base + (index + CEILING_RULES.waveBias) * (CEILING_RULES.slope + CEILING_RULES.slopePerLevel * (L - 1));
 }
 
-/** Points a level's wave `index` spends. */
-export function waveTargetPoints(level: number, index: number): number {
+/** HOW MANY ENEMIES A MAP'S SIZE BUYS (user call: at the same difficulty
+ *  level a larger map carries more enemies than a smaller one).  The arena
+ *  level fixes what each enemy IS and what a wave is worth in points; the map
+ *  scales that point budget by `(span / REF_SPAN) ^ EXPONENT`, so the 12k
+ *  Ring World / Seven Rings are the 1.0 reference every level was tuned on,
+ *  Deep Space (16k) carries ~1.19x, the 6k showcases ~0.66x and Pocket (4k)
+ *  ~0.52x.  A power below 1 on a LINEAR span is deliberate: enemy density per
+ *  area falls as maps grow (a 16k map is 1.8x the width of a 12k one but 1.8x
+ *  the enemies would be a crowd, not a stretch of open space). PROVISIONAL —
+ *  pending a play-test. */
+export const MAP_SIZE = {
+  REF_SPAN: 12000,
+  EXPONENT: 0.6,
+  MIN: 0.5,
+  MAX: 1.5,
+  /** Upper span bound (exclusive) of each named size class. */
+  CLASSES: [[5000, 'Small'], [8000, 'Medium'], [13000, 'Large'], [Infinity, 'Huge']] as ReadonlyArray<readonly [number, string]>,
+} as const;
+
+export function mapSizeScale(span: number): number {
+  if (!(span > 0)) return 1;
+  const k = dmath.pow(span / MAP_SIZE.REF_SPAN, MAP_SIZE.EXPONENT);
+  return Math.min(MAP_SIZE.MAX, Math.max(MAP_SIZE.MIN, k));
+}
+
+export function mapSizeLabel(span: number): string {
+  for (const [upTo, name] of MAP_SIZE.CLASSES) if (span < upTo) return name;
+  return MAP_SIZE.CLASSES[MAP_SIZE.CLASSES.length - 1][1];
+}
+
+/** Points a level's wave `index` spends (`sizeScale`: see `mapSizeScale`). */
+export function waveTargetPoints(level: number, index: number, sizeScale: number = 1): number {
   const w = Math.min(index, WAVE_RULES.points.length - 1);
-  return WAVE_RULES.points[w] * levelScales(level).spawn;
+  return WAVE_RULES.points[w] * levelScales(level).spawn * sizeScale;
 }
 
 /**
@@ -9618,9 +9723,9 @@ export function waveTargetPoints(level: number, index: number): number {
  *  4. SHUFFLE — so the types stream in mixed, not in blocks.
  * Every draw is the seeded `waves` stream, so an arena's seed fixes its waves.
  */
-export function buildLevelWave(level: number, index: number, prev: readonly EnemySubtype[] = []): EnemySubtype[] {
+export function buildLevelWave(level: number, index: number, prev: readonly EnemySubtype[] = [], sizeScale: number = 1): EnemySubtype[] {
   const rate = (s: EnemySubtype) => ENEMY_RATING[s] ?? 1;
-  const target = waveTargetPoints(level, index);
+  const target = waveTargetPoints(level, index, sizeScale);
   const ceiling = rosterCeiling(level, index);
   const all = (Object.keys(ENEMY_RATING) as EnemySubtype[]).sort((a, b) => rate(b) - rate(a) || (a < b ? -1 : 1));
   let pool = all.filter(s => rate(s) <= ceiling + 1e-9);
@@ -9640,6 +9745,11 @@ export function buildLevelWave(level: number, index: number, prev: readonly Enem
   const anchor = freshFirst(shuffle([...top]))[0];
   const rest = freshFirst(shuffle(pool.filter(s => s !== anchor)));
   const chosen = [anchor, ...rest.slice(0, k - 1)];
+  // A wave cannot buy more kinds than its budget holds one of each: on a small
+  // map at a low level the target is a handful of points, and the one-of-each
+  // floor below would otherwise swamp the size scale (the cheapest tail goes).
+  const oneEach = () => chosen.reduce((a, s) => a + rate(s), 0);
+  while (chosen.length > 1 && oneEach() > target * 1.25) chosen.pop();
 
   const per = target / chosen.length;
   const counts = chosen.map(s => Math.min(WAVE_RULES.maxPerType, Math.max(1, Math.round(per / rate(s)))));

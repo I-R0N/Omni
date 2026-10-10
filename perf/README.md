@@ -26,6 +26,7 @@ the rest exit with a hint unless one is already up:
 | `uiprobe.mjs` | React reconciliation cost — needs `OMNI_PROFILE_REACT=1 npx vite build`; `--mode attribute` (default) / `ablate` (`validate` needs its ballast re-mounted — see the header) |
 | `starfield.mjs` | the star field: structure, density per area, draw calls, blit audit; `--browser webkit`, `--bench`, `--shot` |
 | `impact-audit.mjs` | BALANCE, not frame time — below |
+| `audio-mem.mjs` | AUDIO MEMORY, not frame time — decoded PCM the game holds (SFX banks + the score's stems and layer-variant cache), walked across the title screen, the hub and every forced music context |
 
 Numbers from a real device come from the in-game Perf REC recorder — see the
 last section.
@@ -85,6 +86,34 @@ quoting those numbers after any grain, weapon or crash-gate change; a run is
 a few seconds and the derived-HP figures are pattern-dependent (tiles vary
 ±2..11% body to body, shards ±17..38%), so ram counts move a step or two run
 to run without anything having changed.
+
+## audio-mem.mjs — not a performance capture either
+
+The second odd one out, and here for the same reason: it shares the harness,
+not the subject.  It measures **decoded PCM bytes** — the only term of the
+process's memory this repo controls and the one number here that is
+device-independent and exact.
+
+    node perf/audio-mem.mjs            # starts its own preview on 4184
+
+Two sources, read straight off the live engine rather than inferred:
+`AudioSystem.decodedBankBytes` (the four MP3 cue banks, which decode LAZILY
+— one per bank, on the first id asked for in it) and
+`AdaptiveMusic.decodedBytes` (the score's stems and one-shots plus the
+layer-variant LRU).  It samples at the title screen before and after the
+first gesture, in the hub under the real context, and then with each music
+context TAG forced in turn — 45 s a tag, because a variant change commits
+only on a phrase boundary and then dwells two phrases, so a shorter wait
+measures the variant that was already resident.
+
+**What it cannot tell you is whether iOS will kill the tab.** That is RSS,
+which includes the decoder, the canvas backing store and the JS heap, and
+this container cannot produce a figure comparable to a phone's.  What this
+answers is narrower and still the question worth asking: how much decoded
+audio is resident at the peak, and whether the score's own eviction budget
+(`AUDIO_CONSTANTS.MUSIC_DECODE_BUDGET_MB`) is holding.  A budget that is
+never reached has never been tested, which is the state it was in until the
+hub song started declaring real layer variants.
 
 ## Lighting columns and scenes
 

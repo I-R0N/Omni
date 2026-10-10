@@ -26,6 +26,12 @@ the document you were just told to read.
 - **Format: TOML.** The decider was comments: this repo's tables carry the
   reasoning behind each number, and that commentary is a large part of their
   value.
+  **You will meet a second format and it is not drift.** W1's music
+  pipeline landed `public/assets/audio/score/index.json` on this branch.
+  **D33: the format follows who WRITES the file** — a file a generator
+  rewrites is JSON (a comment cannot survive the rewrite; `npm run
+  music:import` rewrites that index on every run), a file only humans write
+  is TOML. Do not unify them.
 - **First tables: `MAP_POPULATION` (126 lines) + `ENEMY_VARIANTS` (317) +
   `BOSS_DEFS` (117).** Deliberately held for a later pass:
   `SHARD_VARIANTS` (961 lines, the `grainSpecFor` seam and per-material DBG

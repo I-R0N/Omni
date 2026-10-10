@@ -16,18 +16,20 @@ import { WaveSystem, WaveSpawnContext } from './systems/WaveSystem';
 import { NebulaSystem } from './systems/NebulaSystem';
 import { ShardSystem, shardVariantOf } from './systems/ShardSystem';
 import { ShardVariantId } from './systems/ShardSystem.types';
+import { MusicContextTracker } from './systems/MusicContext';
+import type { MusicContextSnapshot } from './systems/AdaptiveMusic';
 import { EntityIndex } from './systems/EntityIndex';
 import { PerfController } from './systems/PerfController';
 import { PerfRecorder } from './systems/PerfRecorder';
 import { nextId } from './systems/IdAllocator';
 import { mapDescriptor, descriptorForMapType, HUB_DESCRIPTOR, MapDescriptor, MAP_DESCRIPTORS, HUB_WORLD_SEED } from './maps/MapDescriptors';
-import { BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
+import { MAP_SPANS, BaseMapLayer, OverworldMap, UniverseMap, RingMap, SevenRingsMap, PocketMap, AsteroidFieldMap, GlassFieldMap, PlasticFieldMap, MetalFieldMap, IndestructibleFieldMap, NebulaFieldMap, RockFieldMap, TileHeavyMap } from './maps/MapClasses';
 import { TileGenerator, assertPolygonsUnaliased } from './maps/TileGenerator';
-import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind } from '../types';
-import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, levelScales, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
+import { GameEntity, EntityType, MapType, CameraState, EngineStats, PerfSnapshot, Vector2, WeaponType, WeaponConfig, DamageText, GameState, DropCompositionEntry, PlayerHUDMessage, WaveAnnouncement, TrailPoint, TrailShape, TrailEmitMode, EffectPayload, EnemySubtype, ConsumeConfig, ControlScheme, RumbleKind, MapInfo } from '../types';
+import { COLORS, PHYSICS_CONSTANTS, weaponConfig, resolveWeaponKey, parseWeaponKey, MINIMAP_CONSTANTS, PLAYER_MOVEMENT_CONFIG, DAMAGE_TEXT_CONSTANTS, getRockShardFreeSpawn, TRAIL_CONSTANTS, PLAYER_TRAIL_CONSTANTS, PARTICLE_CONSTANTS, CAMERA_CONSTANTS, SPRITE_CONSTANTS, EXPLOSION_CONSTANTS, UI_CONSTANTS, DIFFICULTY_SCALES, levelScales, mapSizeScale, mapSizeLabel, DROP_CONFIG, SALVAGE_CONSTANTS, STRUCTURE_CONSTANTS, AI_CONFIG, LOADOUT_HUD_CONSTANTS, computeLoadoutHUDLayout, SHIELD_CONSTANTS, HEALTH_DROP_INTERVAL, SCORE_CONSTANTS, SNITCH_CONSTANTS, snitchHeadlineFrac, REGEN_POP_CONSTANTS, SIMULATION_CONSTANTS, INPUT_CONSTANTS, COLLISION_CONFIG, HIT_FEEDBACK, SHARD_PAIR_CONSTANTS, SHARD_TILE_PAIR_CONSTANTS, SHARD_VARIANTS, NEBULA_CONSTANTS, randomPlasticShade, randomPlasticShardShade, cyclePlasticPalette, getActivePlasticPaletteName, cyclePlasticShardPalette, getActivePlasticShardPaletteName, cyclePlasticGlowBrightness, getActivePlasticGlowBrightnessName, cycleNebulaPalette, getActiveNebulaPaletteName, cycleNebulaStretch, getActiveNebulaStretchName, getActiveNebulaSpriteName, getActiveNebulaDampName,
   getActiveNebulaSpinDampName, getActiveNebulaBondName, getActiveNebulaTileShareName, getActiveNebulaDrainName, togglePlasticAutomataBrighten, isPlasticAutomataBrighten, PLASTIC_SHARD_FLOW_MULT, FLOW_VARIABILITY, MERGE_BLOWBACK, cycleShatterGrace, getActiveShatterGraceName, cyclePlayerThrust, getActivePlayerThrustName, getActivePlayerThrustMult, cyclePlayerSpeed, getActivePlayerSpeedName, getActivePlayerSpeedMult, cycleSnitchSpeed, getActiveSnitchSpeedName, getActiveSnitchSpeedMult, getPortalWarpDuration, getPortalWarpName, getPortalSizeName, getPortalGravityName, getPortalGravityRangeName, getPortalLensName, getPortalLensSpinName, getPortalLensRadiusName, getPortalTuningInfo, cycleSwarmMove, getActiveSwarmMoveName, getActiveMinimapMaterialName, getActiveLightingMode, getActiveLightingTier, getShardShadowsEnabled, getRefractionEnabled, getRefractBrightnessName, getLightBrightnessName, getEmissiveEnabled, getWorldLightsEnabled, getDepthAmbientEnabled, getEmitBrightnessName, getEmitShadowsEnabled, getEmitShadowTierName, getEmitFadeName, getCausticFadeName, getFlashlightName, getLightColorName, getTintMixName, getFogName, getShadowSoftnessName, getActiveRockPaletteName, getActiveStarDensityName, getActiveStarSizeName, getActiveStarBandsName, getActiveStarParallaxName, getActiveCollapseModeName, getWaveDurationSec, cycleEnemyScale, getActiveEnemyScaleName, cycleSimRate, getActiveSimRateName, getSimDt, getMaxSubsteps, cycleHudRate, getActiveHudRateName, getActiveHudRate, cycleSubstepCap, getActiveSubstepCapName, getActiveRenderScaleName, effectiveDpr, enemyHpMult, enemyDamageMult, hitReactStrength, CORROSION, DISABLE, ROCK_CHIP, ENEMY_NEBULA_BURST, KAMIKAZE_DETONATE_BUFFER, isCollectibleDrop, ENEMY_VARIANTS, BUBBLE_CONSTANTS, StructureVariant, RIVAL_CONSTANTS, RivalDisposition, PERF_CONTROLLER_CONSTANTS, STATION_CONSTANTS, OVERWORLD_CONSTANTS, MODULE_DEFS, ModuleDef, ModuleFamily, ModuleGroup, moduleDef, moduleFitsSlot, MODULE_SLOT_UNLOCK, slotUnlockCost, MODULE_SLOT_COUNT, MAX_INSTALLED_GUNS, SHIP_WEIGHT, INVENTORY_CAPACITY, COOLDOWN_FLOOR, MODULE_RESALE, MODULE_REQUIREMENTS, HEX_ADJACENCY, StationKind, StationServices, STATION_VARIANTS, OVERWORLD_STATIONS, PORTAL_CONSTANTS, HUB_PORTAL_SITES, BOSS_CONSTANTS, BOSS_DEFS, BOSS_ROTATION, STAGE_WAVE_COUNT, BossDef, WAVE_ANNOUNCE_CONSTANTS, noteTraitDamage, WEAPON_TRIGGERS, chargeTrigger, THRUST_TRIGGER, AUDIO_CONSTANTS, EXPLOSION_PROFILES, ExplosionProfile, computeMinimapRect, markDamaged, playerEjectSpeed, FLASHLIGHT_TOOL_LEVELS, setLightingTierOverride, getNebulaWakeSpinMode, PLAYER_ROLL_CONSTANTS, getActivePlayerRollAngle, getActivePlayerRollName, getActivePlayerHullName, getActiveRollDampingMult, getActiveRollDampingName, getActiveTiltMode, getActiveTiltModeName, getActiveLeanDirSign, getActiveLeanDirName, getActiveTiltSource, getActiveTiltSourceName, getActiveVelGainMult, getActiveVelGainName, getActiveShardCoatName, getActiveImpactVelocityName, getCrashEnergyName, getActiveBlastEnergyName, getHullDensityName, cycleFractureMode, getActiveFractureMode, FRACTURE_DETACH, MATERIAL_DAMAGE_CRACKS, crackConfigForVariant, isProgressiveFracture, getFractureRelaxName, getFractureSeparationName, getFractureSiteScaleName, getFractureBiasName, getBoundaryStrengthName, GRAIN_KNOB_LIST, getGrainMaterial, getGrainKnobName, getGrainOverride, GRAIN_MATERIALS, getDamageSpreadName, getChipDustPool, getChipDustPoolName, SCANNER, detectTierFor, isAlwaysCharted, isRetainedContact, getScanRevealAll, toggleScanRevealAll } from '../constants';
 import { TRIGGER_OFF } from './systems/DualSenseHID';
-import { SAVE_KEY, SAVE_BACKUP_KEY, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
+import { SAVE_KEY, SAVE_BACKUP_KEY, SAVE_VERSION, parseSave, serializeSave, emptyCharacter, emptyRecords, type SaveFile, type WreckRecord, type ArenaWaveMemory, type Records, type CharacterSave, type SaveStatus } from './save';
 import { stampArenaWave, arenaWaveFor } from './arenaWaves';
 import { leaveWreck, spawnWreckEntity, updateWreck, updateWreckGuide, wreckSeedFor, wreckMapName, wreckModuleCount } from './wreck';
 import { ASSETS } from '../assets';
@@ -223,6 +225,10 @@ function grainOverrideCountSnapshot(): number {
   }
   return n;
 }
+
+/** What the score is told outside live play: no context at all. */
+const EMPTY_TAGS: readonly string[] = [];
+const EMPTY_FAMILIES: Readonly<Record<string, number>> = {};
 
 export class GameEngine {
   /** Not `private`: DebugControls reaches it for the joystick DBG toggle,
@@ -579,8 +585,11 @@ export class GameEngine {
   snitch: GameEntity | null = null;
   // Wander clock for the weave oscillation (sim-time accumulated).
   snitchTime: number = 0;
-  // Snitches CAUGHT this run — drives the speed ramp (NOT the wave number),
-  // so the player can defer the snitch to keep it slow.  Reset per run.
+  // Snitches CAUGHT by this CHARACTER — drives the speed ramp (NOT the wave
+  // number), so the player can defer the snitch to keep it slow.  It is
+  // SAVED (CharacterSave.snitchCatches) and survives runs; only a new
+  // character (`resetCharacter`) or the TRADE HUB's reset
+  // (`resetSnitchCatches`) brings it down.
   snitchCatchCount: number = 0;
   // Catch interaction — DBG-toggleable while playtesting collide vs shoot.
   snitchCatchMode: 'collide' | 'shoot' = 'collide';
@@ -842,6 +851,12 @@ export class GameEngine {
   private musicAlert = false;
   private musicBoss = false;
   private musicPressure = 0;
+  /** The same pressure, split by ENEMY FAMILY (AUDIO_CONSTANTS.MUSIC_ENEMY_FAMILY)
+   *  — the keys are fixed, so it is rewritten in place every frame. */
+  private readonly musicFamilies: Record<string, number> = {};
+  /** Where the player is, as context tags (`station`, `portal`, …). */
+  private readonly musicContext = new MusicContextTracker();
+  private readonly musicSnapshot: MusicContextSnapshot = { tags: [], warm: [], families: {} };
   // ── React reconciliation cost, reported IN by the UI layer ────────────
   //
   // Written by the `<Profiler onRender>` wrapped around `<UIOverlay>` in
@@ -1163,6 +1178,7 @@ export class GameEngine {
     this.weaponSlots = c.weaponSlots.slice();
     this.shipSlotsUnlocked = c.shipSlotsUnlocked;
     this.weaponSlotsUnlocked = c.weaponSlotsUnlocked;
+    this.snitchCatchCount = c.snitchCatches;
     this.player.currentWeapon = 'projectile';
     this.currentWeaponIndex = 0;
     syncLoadoutFromSlots(this);
@@ -1179,7 +1195,7 @@ export class GameEngine {
 
   public snapshotSave(): SaveFile {
     return {
-      version: 1,
+      version: SAVE_VERSION,
       character: {
         credits: this.credits,
         inventory: this.inventory.slice(),
@@ -1187,6 +1203,7 @@ export class GameEngine {
         weaponSlots: this.weaponSlots.slice(),
         shipSlotsUnlocked: this.shipSlotsUnlocked,
         weaponSlotsUnlocked: this.weaponSlotsUnlocked,
+        snitchCatches: this.snitchCatchCount,
       },
       wreck: this.wreck,
       arenaWaves: this.arenaWaves,
@@ -1467,6 +1484,7 @@ export class GameEngine {
       fps: 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || '',
+      mapInfo: this.mapInfo(),
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
       currentWeapon: this.player.currentWeapon !== undefined ? weaponConfig(this.player.currentWeapon).name : 'None',
       gameState: this.gameState,
@@ -1477,6 +1495,7 @@ export class GameEngine {
       waveGraceTimer: undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
+      enemyRoster: this.waveState === 'active' && this.currentMap ? this.waves.remainingRoster(this.currentMap.entities) : undefined,
       boss: bossStatsSnapshot(this),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
@@ -1514,6 +1533,8 @@ export class GameEngine {
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.moduleSpeedMult,
         shipWeight: this.shipWeight,
+        snitchCatches: this.snitchCatchCount,
+        snitchSpeedFrac: snitchHeadlineFrac(this.snitchCatchCount),
         position: {
           x: Math.round(this.player.position.x),
           y: Math.round(this.player.position.y),
@@ -1881,6 +1902,7 @@ export class GameEngine {
       }
       resetIdCounter();
       this.simClock = 0;
+      this.musicContext.reset();     // its distances were to the old map's entities
       this.loadMap(this.buildMap(type));
       if (kind === 'hub') {
         // The hub's terrain is fixed; what happens IN it afterwards (ambient
@@ -1923,9 +1945,9 @@ export class GameEngine {
 
       // ── Run-scoped reset — the half a portal transition SKIPS ──────────
       // Per-run counters that ride with the score/economy rather than with
-      // the map: the snitch speed ramp, the doubling dragon payout, and the
-      // score-cadence rival warp-ins.
-      this.snitchCatchCount = 0;
+      // the map: the doubling dragon payout and the score-cadence rival
+      // warp-ins.  (The snitch catch count is NOT here any more — it is
+      // character state, saved, and a new run keeps it.)
       this.dragonsKilled = 0;
       this.nextRivalScore = RIVAL_CONSTANTS.SCORE_INTERVAL;
       // Boss state ((h)) is run-scoped like the score and credits its payout
@@ -2175,6 +2197,17 @@ export class GameEngine {
       // changes nothing but the look.
       this.portalWarpDuration = getPortalWarpDuration();
       this.portalWarpTimer = this.portalWarpDuration;
+      // The destination card: where, how big, how hard.  Built from the
+      // DESTINATION's descriptor (the map is already swapped), shown over the
+      // flight by the renderer and gone before the veil lifts.
+      const wi = this.mapInfo();
+      if (wi) {
+        const lines = [`${wi.sizeLabel} · ${wi.span.toLocaleString('en-US')} × ${wi.span.toLocaleString('en-US')}`];
+        if (wi.level !== undefined) lines.push(`Difficulty  Level ${wi.level}`);
+        else lines.push('Safe zone');
+        if (wi.crowd !== undefined) lines.push(`Enemy count  ×${wi.crowd.toFixed(2)}`);
+        this.renderer.portalWarpInfo = { name: wi.name, lines, color: '#c4b5fd' };
+      }
 
       this.prepareFrameEntities();
       // Accumulator hygiene — the map load is wall-clock work; don't
@@ -2779,6 +2812,8 @@ export class GameEngine {
     const px = this.player.position.x, py = this.player.position.y;
     const enemies = this.entityIndex.enemies;
     let near = false, alert = false, boss = false, pressure = 0;
+    const fam = this.musicFamilies;
+    for (const f of AUDIO_CONSTANTS.MUSIC_FAMILIES) fam[f] = 0;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (e.isExploding) continue;
@@ -2789,6 +2824,7 @@ export class GameEngine {
       if (e.isBoss === true) {
         near = alert = boss = true;
         pressure += AUDIO_CONSTANTS.MUSIC_BOSS_WEIGHT;
+        fam[this.musicFamilyOf(e)] += AUDIO_CONSTANTS.MUSIC_BOSS_WEIGHT;
         continue;
       }
       if (e.thirdParty === true || e.isRival === true) {
@@ -2807,11 +2843,39 @@ export class GameEngine {
       const w = Math.min(AUDIO_CONSTANTS.MUSIC_WEIGHT_MAX, Math.max(AUDIO_CONSTANTS.MUSIC_WEIGHT_MIN,
         Math.sqrt(Math.max(1, e.maxHealth) / AUDIO_CONSTANTS.MUSIC_WEIGHT_REF_HP)));
       pressure += w * falloff;
+      fam[this.musicFamilyOf(e)] += w * falloff;
     }
     this.musicAlert = alert;
     this.musicBoss = boss;
     this.musicPressure = pressure;
     return near;
+  }
+
+  /** An enemy's musical family (`MUSIC_ENEMY_FAMILY`; a rival has no
+   *  archetype of its own and is `ranged`). */
+  private musicFamilyOf(e: GameEntity): string {
+    if (e.isRival === true) return AUDIO_CONSTANTS.MUSIC_FAMILY_RIVAL;
+    return AUDIO_CONSTANTS.MUSIC_ENEMY_FAMILY[e.enemySubtype ?? ''] ?? AUDIO_CONSTANTS.MUSIC_FAMILY_DEFAULT;
+  }
+
+  /** The player's surroundings as context tags, for the score's layer
+   *  variants.  Reported EMPTY outside live play, like the threat. */
+  private reportMusicContext(live: boolean) {
+    const snap = this.musicSnapshot;
+    if (live) {
+      this.musicContext.update({
+        px: this.player.position.x, py: this.player.position.y,
+        screens: this.viewportHalfDiagonal(), now: this.simClock,
+        stations: this.stations, portals: this.portals, drops: this.activeDrops,
+        snitch: this.snitch, enemies: this.entityIndex.enemies,
+      });
+      snap.tags = this.musicContext.tags;
+      snap.warm = this.musicContext.warm;
+      snap.families = this.musicFamilies;
+    } else {
+      snap.tags = EMPTY_TAGS; snap.warm = EMPTY_TAGS; snap.families = EMPTY_FAMILIES;
+    }
+    this.audio.setMusicContext(snap);
   }
 
   /** The battle layer's ducking signal: a hostile is near, or was recently
@@ -2976,6 +3040,7 @@ export class GameEngine {
       fps: frameTime > 0 ? Math.round(1 / frameTime) : 0,
       entityCount: (this.currentMap?.entities.length || 0) + 1,
       currentMapName: this.currentMap?.name || 'Loading...',
+      mapInfo: this.mapInfo(),
       currentMapType: this.currentMap?.type || MapType.UNIVERSE,
       currentWeapon: this.player.currentWeapon !== undefined ? weaponConfig(this.player.currentWeapon).name : 'None',
       gameState: this.gameState,
@@ -2986,6 +3051,7 @@ export class GameEngine {
       waveGraceTimer: this.waveGraceTimer > 0 ? Math.ceil(this.waveGraceTimer) : undefined,
       waveElapsedSec: this.waveState === 'active' ? Math.floor(this.waves.elapsedSecPublic) : undefined,
       enemiesRemaining: this.waveState === 'active' && this.currentMap ? this.waves.enemiesRemaining(this.currentMap.entities) : undefined,
+      enemyRoster: this.waveState === 'active' && this.currentMap ? this.waves.remainingRoster(this.currentMap.entities) : undefined,
       boss: bossStatsSnapshot(this),
       score: Math.round(this.displayScore),
       comboMultiplier: this.comboMultiplier(),
@@ -3023,6 +3089,8 @@ export class GameEngine {
         cooldownMult: this.player.cooldownMult ?? 1,
         speedMult: this.moduleSpeedMult,
         shipWeight: this.shipWeight,
+        snitchCatches: this.snitchCatchCount,
+        snitchSpeedFrac: snitchHeadlineFrac(this.snitchCatchCount),
         position: {
           x: Math.round(this.player.position.x),
           y: Math.round(this.player.position.y),
@@ -3215,6 +3283,14 @@ export class GameEngine {
           songPinned: this.audio.music.songMode !== 'auto',
           songMode: this.audio.music.songMode,
           pending: this.audio.music.pendingSong?.title ?? null,
+          // The LIVE song list (score/index.json), so songs added by
+          // `npm run music:import` show up in the debug panel's Play song.
+          songs: this.audio.music.songList.map(s => ({ id: s.id, title: s.title, bpm: s.bpm })),
+          contexts: this.audio.music.contexts,
+          contextForced: this.audio.music.forcedContext,
+          variants: this.audio.music.variantMap,
+          family: this.audio.music.dominantFamily,
+          decodedMB: this.audio.music.decodedBytes / (1024 * 1024),
         } : null,
       },
     });
@@ -3251,6 +3327,7 @@ export class GameEngine {
     // exploration / menu level whatever was last measured.
     const live = this.gameState === GameState.PLAYING && !this.dockedAtStation && !debugFrozen;
     const maxEhp = Math.max(1, this.player.maxHealth + (this.player.maxShield ?? 0));
+    this.reportMusicContext(live);
     this.audio.setMusicThreat({
       alert: live && this.musicAlert,
       pressure: live ? this.musicPressure : 0,
@@ -5586,6 +5663,7 @@ export class GameEngine {
       progress: this.hasSavedProgress(),
       credits: this.credits,
       modules,
+      snitchCatches: this.snitchCatchCount,
       wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
       arenaWaves: Object.entries(this.arenaWaves).map(([id, m]) => ({ mapName: mapDescriptor(id)?.name ?? id, wave: m.wave, progress: m.progress, awaySec: Math.max(0, Math.round((clock().wallMs() - m.leftAt) / 1000)) })),
       records: { ...this.records, highScore: Math.max(this.records.highScore, Math.floor(this.score)) },
@@ -5800,6 +5878,24 @@ export class GameEngine {
       this.credits -= price;
       if (group === 'ship') this.shipSlotsUnlocked = unlocked + 1;
       else this.weaponSlotsUnlocked = unlocked + 1;
+      this.audio.play('poi.purchase');
+      return true;
+  }
+
+  /** TRADE HUB service: pay `SNITCH_CONSTANTS.RESET_COST` to clear the
+   *  character's snitch catch count back to zero, which drops the snitch's
+   *  speed ramp with it.  Station commerce like every other purchase: it needs
+   *  the docked station's `snitchReset` service, a non-zero count to clear
+   *  and the credits, and REJECTS everywhere else.  Priced through
+   *  `modulePrice` like the rest.  The live snitch is left flying at the
+   *  speed it already has; the NEXT one spawns at the base speed. */
+  public resetSnitchCatches(): boolean {
+      if (!this.dockedServices()?.snitchReset) return false;
+      if (this.snitchCatchCount <= 0) return false;
+      const price = this.modulePrice(SNITCH_CONSTANTS.RESET_COST);
+      if (price <= 0 || this.credits < price) return false;
+      this.credits -= price;
+      this.snitchCatchCount = 0;
       this.audio.play('poi.purchase');
       return true;
   }
@@ -7174,6 +7270,38 @@ export class GameEngine {
     return d?.level ?? Math.max(1, this.difficultyLevel);
   }
 
+  /** The loaded map as the player is told about it: name, size and level.
+   *  Cached on (map, descriptor, level) so the per-frame stats push reuses
+   *  one object. */
+  private _mapInfo: MapInfo | undefined;
+  private _mapInfoKey = '';
+  mapInfoFor(descId: string | undefined, type: MapType): MapInfo {
+    const d = mapDescriptor(descId);
+    const span = MAP_SPANS[type];
+    const arena = d?.kind === 'arena' && d.wavesEnabled;
+    const level = arena ? this.arenaLevel() : undefined;
+    return {
+      name: d?.name ?? (this.currentMap?.name || ''),
+      kind: d?.kind ?? 'arena',
+      level,
+      span,
+      sizeLabel: mapSizeLabel(span),
+      crowd: arena ? mapSizeScale(span) : undefined,
+    };
+  }
+
+  mapInfo(): MapInfo | undefined {
+    const t = this.currentMap?.type;
+    if (t === undefined) return undefined;
+    const id = this.currentDescriptor()?.id;
+    const key = `${t}|${id}|${this.arenaLevel()}`;
+    if (key !== this._mapInfoKey || !this._mapInfo) {
+      this._mapInfoKey = key;
+      this._mapInfo = this.mapInfoFor(id, t);
+    }
+    return this._mapInfo;
+  }
+
   /** Build the per-call spawn context that WaveSystem needs.  Kept as a
    *  tiny helper so every wave entry point (init / update tick / skip)
    *  goes through the same factory. */
@@ -7190,6 +7318,7 @@ export class GameEngine {
       // otherwise the ARENA LEVEL sets the spawn amount and the enemy stats.
       enemyScale: this.enemyScale <= 0 ? 0 : levelScales(this.arenaLevel()).spawn,
       difficultyLevel: this.arenaLevel(),
+      mapSizeScale: mapSizeScale(MAP_SPANS[this.currentMap.type]),
       viewportHalfDiagonal,
       forcedEnemy: this.forcedTestEnemy,
       onBossSpawn: this.handleBossSpawn,
@@ -8073,6 +8202,7 @@ export class GameEngine {
       this.renderer.portalWarp = this.portalWarpTimer > 0 && this.portalWarpDuration > 0
           ? Math.max(0, Math.min(0.999999, 1 - this.portalWarpTimer / this.portalWarpDuration))
           : null;
+      if (this.renderer.portalWarp === null) this.renderer.portalWarpInfo = null;
 
       // A7 — hand the renderer the run's depth.  One field write per frame;
       // the fog folds it into its dark level (deeper = darker).

@@ -12,7 +12,8 @@
     "test:smoke": "playwright test tests/boot.spec.ts tests/loop.spec.ts",
     "test:full": "playwright test",
     "test:audio": "playwright test tests/audio.spec.ts",
-    "test:sim": "node scripts/sim-test.mjs"
+    "test:sim": "node scripts/sim-test.mjs",
+    "music:import": "node scripts/music-import.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -23,6 +24,7 @@
     "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "ffmpeg-static": "^5.3.0",
     "smol-toml": "^1.9.0",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.8.2",

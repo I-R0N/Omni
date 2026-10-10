@@ -11,8 +11,8 @@
 
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { test, expect } from '@playwright/test';
-import { advanceSim, boot, engine, startRun, waitForStats, waitForTransit } from './helpers';
+import { test, expect, type Page } from '@playwright/test';
+import { advanceSim, boot, engine, quietScene, startRun, waitForStats, waitForTransit } from './helpers';
 
 /* THE INVENTORY IS THE CONTRACT (CLAUDE.md §8: adding a sound means adding its
  * row first), so it and the registry must agree in BOTH directions: a
@@ -378,6 +378,10 @@ test('intensity brings the layers in in order, and the stems stay in budget', as
     { timeout: 4000 }).toBeGreaterThan(0.5);
   expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(96 * 1024 * 1024);
   expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  // The song list comes from public/assets/audio/score/index.json (DATA,
+  // maintained by `npm run music:import`), not from code.
+  expect(await engine(page, e => e.audio.music.songList.map((s: { id: string }) => s.id)))
+    .toEqual(expect.arrayContaining(['omni', 'event-horizon', 'critical-mass']));
   watch.assertClean();
 });
 
@@ -705,5 +709,261 @@ test('iOS ring switch: without navigator.audioSession, a silent <audio> in the d
   expect(shim!.volume, 'but not zero, which can be optimised away').toBeGreaterThan(0);
   expect(shim!.decodes, 'a real, decodable WAV').toBe(true);
   expect(await shims(), 'and only one').toBe(1);
+  watch.assertClean();
+});
+
+
+/* LAYER VARIANTS (AdaptiveMusic: alternative stems per slot, picked by
+ * context tags and enemy family, switched only on phrase boundaries).  These
+ * test the LOGIC, not the sound: an injected score index gives Omni variants
+ * whose files are stood in by routing each request to a stem Omni already has,
+ * so nothing is added under public/.  Phrases are shortened to bars so a
+ * boundary arrives every couple of seconds. */
+type VariantList = Record<string, { name: string; when: string[] }[]>;
+const FIXTURE_VARIANTS: VariantList = {
+  atmos: [
+    { name: 'station', when: ['station', 'portal'] },
+    { name: 'deep', when: ['deep-space'] },
+    { name: 'treasure', when: ['rare-item'] },
+    { name: 'danger', when: ['danger'] },
+  ],
+  pulse: [{ name: 'swarm', when: ['enemy:swarm'] }, { name: 'heavy', when: ['enemy:heavy'] }],
+  heavy: [{ name: 'swarm', when: ['enemy:swarm'] }, { name: 'heavy', when: ['enemy:heavy'] }],
+};
+const STAND_INS = ['pulse', 'groove', 'heavy', 'apex'];
+
+async function withVariants(page: Page, opts: { phraseBars?: number; variants?: VariantList; missing?: string[] } = {}) {
+  const index = JSON.parse(readFileSync(resolve('public/assets/audio/score/index.json'), 'utf8'));
+  const omni = index.songs.find((x: { id: string }) => x.id === 'omni');
+  omni.phraseBars = opts.phraseBars ?? 1;
+  omni.variants = opts.variants ?? FIXTURE_VARIANTS;
+  await page.addInitScript((i) => { (window as unknown as { __omniScoreIndex: unknown }).__omniScoreIndex = i; }, index);
+  let n = 0;
+  const seen = new Map<string, string>();
+  await page.route('**/assets/audio/score/omni/*-*.mp3', route => {
+    const m = /omni\/([a-z]+)-([a-z0-9-]+)\.mp3/.exec(route.request().url());
+    if (!m) return route.fallback();
+    if (opts.missing?.includes(m[2])) return route.fulfill({ status: 404, body: '' });
+    if (!seen.has(m[0])) seen.set(m[0], STAND_INS[n++ % STAND_INS.length]);
+    return route.fulfill({ path: resolve(`public/assets/audio/score/omni/${seen.get(m[0])}.mp3`), contentType: 'audio/mpeg' });
+  });
+}
+
+/** Take over the context feed: the engine's own scan stops, and the test
+ *  hands the score exactly the tags and family weights it wants. */
+async function driveContext(page: Page) {
+  await engine(page, e => { (e as unknown as { reportMusicContext: () => void }).reportMusicContext = () => {}; });
+}
+const setCtx = (page: Page, tags: string[], families: Record<string, number> = {}) =>
+  engine(page, (e, a) => e.audio.music.setContext({ tags: a.tags, warm: [], families: a.families }), { tags, families });
+const variantOf = (page: Page, slot: string) => engine(page, (e, sl) => e.audio.music.activeVariant(sl), slot);
+
+async function startOmni(page: Page) {
+  const watch = await boot(page);
+  // Before the run starts: otherwise the real scan reports the home station
+  // beside the spawn and a `station` switch is already under way.
+  await driveContext(page);
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => window.__omniEngine.audio.music);
+  await setCtx(page, []);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.playing
+    && window.__omniEngine.audio.music.song.id === 'omni' && window.__omniEngine.audio.music.isLoaded('atmos'),
+    null, { timeout: 30000 });
+  return watch;
+}
+
+test('layer variants: a context picks the atmos variant, and it lands on a phrase boundary', async ({ page }) => {
+  await withVariants(page, { phraseBars: 2 });
+  const watch = await startOmni(page);
+  expect(await variantOf(page, 'atmos'), 'no context, no variant').toBe('default');
+  await engine(page, e => e.audio.music.setForcedContext('station'));
+  expect(await variantOf(page, 'atmos'), 'a change never lands mid-phrase: it is still the default now').toBe('default');
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('atmos') === 'station',
+    null, { timeout: 30000, polling: 'raf' });
+  const phase = await engine(page, e => {
+    const m = e.audio.music;
+    const phrase = m.barSec * 2;
+    return { sinceBoundary: m.position % phrase, phrase };
+  });
+  expect(phase.sinceBoundary < 0.4 || phase.sinceBoundary > phase.phrase - 0.1,
+    `landed ${phase.sinceBoundary.toFixed(2)} s into a ${phase.phrase.toFixed(2)} s phrase`).toBe(true);
+  expect(await engine(page, e => e.audio.music.variantMap)).toEqual({ atmos: 'station', pulse: 'default', heavy: 'default' });
+  expect(await engine(page, e => e.audio.music.contexts)).toContain('station');
+  // The default stem is untouched and every variant plays in phase: the same
+  // loop position serves all of them (one clock), so there is one `position`.
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
+test('layer variants: the highest-priority context wins, and a tag with no variant is passed over', async ({ page }) => {
+  await withVariants(page, {
+    variants: { atmos: [{ name: 'station', when: ['station'] }, { name: 'danger', when: ['danger'] }, { name: 'deep', when: ['deep-space'] }] },
+  });
+  const watch = await startOmni(page);
+  await setCtx(page, ['station', 'danger']);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('atmos') !== 'default',
+    null, { timeout: 30000, polling: 'raf' });
+  expect(await variantOf(page, 'atmos'), 'danger outranks station').toBe('danger');
+  // `portal` is active but no atmos variant claims it: the next tag it does claim.
+  await setCtx(page, ['portal', 'station']);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('atmos') === 'station',
+    null, { timeout: 30000, polling: 'raf' });
+  watch.assertClean();
+});
+
+test('layer variants: a flickering context cannot change a slot more than once per dwell', async ({ page }) => {
+  await withVariants(page);
+  const watch = await startOmni(page);
+  await setCtx(page, ['station']);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('atmos') === 'station',
+    null, { timeout: 30000, polling: 'raf' });
+  const dwellSec = await engine(page, e => e.audio.music.barSec * 1 * 2);   // phraseBars 1 × MUSIC_VARIANT_DWELL_PHRASES 2
+  // Flip the context every 250 ms for ~9 s, logging when the sounding variant changes.
+  const log = await page.evaluate(({ ms }) => new Promise<{ t: number; v: string }[]>(done => {
+    const e = window.__omniEngine;
+    const out: { t: number; v: string }[] = [];
+    let last = e.audio.music.activeVariant('atmos'), flip = false;
+    const t0 = performance.now();
+    const poll = setInterval(() => {
+      const v = e.audio.music.activeVariant('atmos');
+      if (v !== last) { out.push({ t: (performance.now() - t0) / 1000, v }); last = v; }
+    }, 20);
+    const toggle = setInterval(() => {
+      flip = !flip;
+      e.audio.music.setContext({ tags: flip ? ['danger'] : ['station'], warm: [], families: {} });
+    }, 250);
+    setTimeout(() => { clearInterval(poll); clearInterval(toggle); done(out); }, ms);
+  }), { ms: 9000 });
+  expect(log.length, 'the music did move at all').toBeGreaterThan(0);
+  for (let i = 1; i < log.length; i++) {
+    expect(log[i].t - log[i - 1].t, `change ${i} came ${(log[i].t - log[i - 1].t).toFixed(2)} s after the last`)
+      .toBeGreaterThanOrEqual(dwellSec - 0.4);
+  }
+  expect(log.length, 'at most one change per dwell window').toBeLessThanOrEqual(Math.ceil(9 / dwellSec) + 1);
+  watch.assertClean();
+});
+
+test('layer variants: a combat slot picks its variant from the dominant family and keeps it through a short change', async ({ page }) => {
+  await withVariants(page);
+  const watch = await startOmni(page);
+  await page.waitForFunction(() => ['pulse', 'groove', 'heavy'].every(id => window.__omniEngine.audio.music.isLoaded(id)),
+    null, { timeout: 30000 });
+  await setCtx(page, [], { swarm: 2 });
+  expect(await engine(page, e => e.audio.music.dominantFamily)).toBe('swarm');
+  expect(await engine(page, e => e.audio.music.contexts)).toContain('enemy:swarm');
+  await engine(page, e => e.audio.setMusicDebugIntensity(0.5));
+  expect(await engine(page, e => e.audio.music.isLayerOn('pulse'))).toBe(true);
+  // The slot ENTERED under swarm: it takes the swarm variant (as soon as it is decoded) and locks.
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('pulse') === 'swarm',
+    null, { timeout: 30000, polling: 'raf' });
+  // A family change shorter than a phrase (1 bar here) does not move it.
+  await setCtx(page, [], { swarm: 1, heavy: 3 });
+  await page.waitForTimeout(900);
+  await setCtx(page, [], { swarm: 2 });
+  await page.waitForTimeout(5000);                                   // several boundaries later
+  expect(await variantOf(page, 'pulse'), 'locked through a short change').toBe('swarm');
+  // One that outlasts a whole phrase does.
+  await setCtx(page, [], { swarm: 1, heavy: 3 });
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('pulse') === 'heavy',
+    null, { timeout: 40000, polling: 'raf' });
+  expect(await variantOf(page, 'pulse')).toBe('heavy');
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
+test('layer variants: missing variant files fall back to the default, with no error', async ({ page }) => {
+  await withVariants(page, { missing: ['treasure'] });
+  const watch = await startOmni(page);
+  await setCtx(page, ['rare-item']);
+  await page.waitForTimeout(6000);                                   // several boundaries, plenty to fetch and fail
+  expect(await variantOf(page, 'atmos')).toBe('default');
+  expect(await engine(page, e => e.audio.music.error), 'optional, like the riser').toBeNull();
+  expect(await engine(page, e => e.audio.music.playing)).toBe(true);
+  // Another context still works afterwards.
+  await setCtx(page, ['danger']);
+  await page.waitForFunction(() => window.__omniEngine.audio.music.activeVariant('atmos') === 'danger',
+    null, { timeout: 30000, polling: 'raf' });
+  // The browser itself logs the 404 of the file that is not there; that is the
+  // one console line this scenario is allowed.
+  expect(watch.errors.filter(m => !/status of 404/.test(m)), 'nothing else on the console').toEqual([]);
+});
+
+test('layer variants: the decoded budget holds through several contexts', async ({ page }) => {
+  await withVariants(page);
+  const watch = await startOmni(page);
+  // Measure with the whole default set decoded (the combat stems and one-shots
+  // arrive in the background after the run starts).
+  await page.waitForFunction(() => ['pulse', 'groove', 'heavy', 'apex', 'riser', 'victory', 'impact']
+    .every(id => window.__omniEngine.audio.music.isLoaded(id)), null, { timeout: 30000 });
+  const base = await engine(page, e => e.audio.music.decodedBytes);
+  // Room for the defaults plus two of the LARGEST stand-in stems (one sounding, one arriving).
+  const biggest = await engine(page, e => Math.max(...[...(e.audio.music as unknown as { buffers: Map<string, AudioBuffer> }).buffers.values()]
+    .map(b => b.length * b.numberOfChannels * 4)));
+  const budgetMB = (base + 2 * biggest) / (1024 * 1024);
+  await engine(page, (e, mb) => e.audio.music.setDecodeBudgetMB(mb), budgetMB);
+  const peak: number[] = [];
+  for (const [tag, variant] of [['station', 'station'], ['deep-space', 'deep'], ['rare-item', 'treasure'], ['danger', 'danger']]) {
+    await setCtx(page, [tag]);
+    await page.waitForFunction(v => window.__omniEngine.audio.music.activeVariant('atmos') === v, variant,
+      { timeout: 40000, polling: 'raf' });
+    peak.push(await engine(page, e => e.audio.music.decodedBytes));
+  }
+  for (const b of peak) expect(b / (1024 * 1024), 'inside the budget at every step').toBeLessThanOrEqual(budgetMB + 0.01);
+  expect(await engine(page, e => (e.audio.music as unknown as { vcache: Map<string, unknown> }).vcache.size),
+    'four variants were used but not all four stay resident').toBeLessThan(4);
+  expect(await engine(page, e => e.audio.music.decodedBytes)).toBeLessThan(110 * 1024 * 1024);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
+test('layer variants: a song with none declared behaves as before and fetches nothing extra', async ({ page }) => {
+  const asked: string[] = [];
+  page.on('request', r => { if (/score\/[a-z-]+\/(atmos|pulse|groove|heavy|apex|boss)-[a-z0-9-]+\.mp3/.test(r.url())) asked.push(r.url()); });
+  // Omni ships atmos variants now, so the shipped index is no longer a song
+  // with none declared: strip them, and the files on disk must go unasked for.
+  const index = JSON.parse(readFileSync(resolve('public/assets/audio/score/index.json'), 'utf8'));
+  for (const song of index.songs) { delete song.variants; delete song.contextPriority; }
+  await page.addInitScript((i) => { (window as unknown as { __omniScoreIndex: unknown }).__omniScoreIndex = i; }, index);
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.playing && window.__omniEngine.audio.music.isLoaded('atmos'));
+  await engine(page, e => e.audio.music.setForcedContext('station'));
+  await engine(page, e => e.audio.setMusicDebugIntensity(0.9));
+  await page.waitForTimeout(3000);
+  expect(await engine(page, e => e.audio.music.variantMap), 'nothing declared, nothing reported').toEqual({});
+  expect(await variantOf(page, 'atmos')).toBe('default');
+  expect(await engine(page, e => e.audio.music.variantChanges)).toBe(0);
+  expect(asked, 'no variant file was ever requested').toEqual([]);
+  expect(await engine(page, e => e.audio.music.error)).toBeNull();
+  watch.assertClean();
+});
+
+test('layer variants: the engine reports the player at a station, and deep space only after the dwell', async ({ page }) => {
+  const watch = await boot(page);
+  await page.mouse.click(5, 5);
+  await startRun(page);
+  await advanceSim(page, 0.5);
+  // The hub spawns the ship beside the home station.
+  await page.waitForFunction(() => window.__omniEngine.audio.music?.contexts.includes('station'), null, { timeout: 15000 });
+  expect(await engine(page, e => e.audio.music.contexts)).not.toContain('deep-space');
+  // Far from everything: station leaves (wider leave radius), deep-space waits out its dwell.
+  await engine(page, e => {
+    const g = e as unknown as { player: { position: { x: number; y: number } }; stations: { position: { x: number; y: number } }[]; portals: { position: { x: number; y: number } }[] };
+    // Park at the point of the map farthest from every station and portal.
+    let best = { x: 0, y: 0, d: -1 };
+    for (let x = -6000; x <= 6000; x += 600) for (let y = -6000; y <= 6000; y += 600) {
+      let d = Infinity;
+      for (const s of [...g.stations, ...g.portals]) d = Math.min(d, Math.hypot(s.position.x - x, s.position.y - y));
+      if (d > best.d) best = { x, y, d };
+    }
+    g.player.position.x = best.x; g.player.position.y = best.y;
+  });
+  await quietScene(page);       // a roaming dragon is a `danger` context of its own
+  await page.waitForFunction(() => !window.__omniEngine.audio.music.contexts.includes('station'), null, { timeout: 15000 });
+  expect(await engine(page, e => e.audio.music.contexts), 'no deep-space yet').not.toContain('deep-space');
+  await advanceSim(page, 22);   // MUSIC_DEEP_SPACE_DWELL_SEC is 20 sim seconds
+  expect(await engine(page, e => e.audio.music.contexts)).toEqual(['deep-space']);
   watch.assertClean();
 });

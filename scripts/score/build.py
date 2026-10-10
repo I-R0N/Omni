@@ -54,10 +54,20 @@ im *= 0.9 / np.max(np.abs(im))
 sf.write('final/impact.wav', im.T, SR, subtype='FLOAT')
 
 
+# Output layout: public/assets/audio/score/<song id>/<layer>.mp3 (+ riser,
+# victory), and the shared score/impact.mp3 — the same layout
+# `npm run music:import` writes, listed in score/index.json.
+FOLDER = {'score-': 'omni', 'score2-': 'event-horizon', 'score3-': 'critical-mass'}
+
+
 def enc(src, dst, channels, kbps):
+    prefix = next((p for p in sorted(FOLDER, key=len, reverse=True) if dst.startswith(p)), None)
+    rel = os.path.join('score', FOLDER[prefix], dst[len(prefix):] + '.mp3') if prefix and dst != 'score-impact' \
+        else os.path.join('score', 'impact.mp3')
+    os.makedirs(os.path.dirname(os.path.join(OUT, rel)), exist_ok=True)
     subprocess.run(['ffmpeg', '-y', '-v', 'error', '-i', f'final/{src}.wav', '-ar', '32000',
                     '-ac', str(channels), '-c:a', 'libmp3lame', '-b:a', f'{kbps}k',
-                    os.path.join(OUT, f'{dst}.mp3')], check=True)
+                    os.path.join(OUT, rel)], check=True)
 
 
 # (song prefix, file prefix, stems kept mono).  Critical Mass's groove is two

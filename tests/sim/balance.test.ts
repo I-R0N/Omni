@@ -52,8 +52,8 @@ test('an arena run is deterministic and records its waves, deaths and rivals', (
   assert.equal(off.rivalsSeen, 0, 'rivals:false really switches them off');
 });
 
-test('a run at a lower difficulty actually spawns fewer enemies', () => {
+test('a run at a lower level actually spawns fewer enemies', () => {
   const lo = playArena({ map: MapType.POCKET, seed: 1, loadout: 'lean', rivals: false, difficulty: 1, maxSec: 40 });
-  const hi = playArena({ map: MapType.POCKET, seed: 1, loadout: 'lean', rivals: false, difficulty: 3, maxSec: 40 });
+  const hi = playArena({ map: MapType.POCKET, seed: 1, loadout: 'lean', rivals: false, difficulty: 14, maxSec: 40 });
   assert.ok(lo.waves[0].spawned < hi.waves[0].spawned, `spawned ${lo.waves[0].spawned} vs ${hi.waves[0].spawned}`);
 });

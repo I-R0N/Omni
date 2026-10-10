@@ -8,10 +8,11 @@
   Every sound in it is synthesized from scratch by the scripts in
   `scripts/score/` (oscillators, filters, envelopes and generated reverb
   impulse responses), so the score carries no attribution requirement.
-- Three songs, each six synchronised stems plus a riser: **Omni**
-  (`score-atmos/pulse/groove/heavy/apex/boss/riser.mp3`), **Event Horizon**
-  (`score2-*.mp3`) and **Critical Mass** (`score3-*.mp3`), each with a
-  victory stinger (`*-victory.mp3`); `score-impact.mp3` is shared.
+- Songs live in `score/<song>/` (six synchronised stems, a riser and a
+  victory stinger each): **Omni** (`score/omni/`), **Event Horizon**
+  (`score/event-horizon/`) and **Critical Mass** (`score/critical-mass/`);
+  `score/impact.mp3` is shared. Songs added later through
+  `npm run music:import` should be credited here too.
 - Format: 32 kHz MP3 (128 kbps stereo; groove and boss 80 kbps mono). Each stem
   is the song's loop (60 / 48 / 51.2 s) with 0.5 s of lead-in and 1.5 s of run-out, exactly
   periodic — see `engine/systems/AdaptiveMusic.ts` for why.

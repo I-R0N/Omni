@@ -9,7 +9,7 @@ asset architecture.
 - **Effects:** Kenney's [Sci-Fi Sounds](https://kenney.nl/assets/sci-fi-sounds)
   and [Impact Sounds](https://kenney.nl/assets/impact-sounds), both CC0.
 - **Music:** the original adaptive score composed for Omni — six synchronised
-  stems plus two transition one-shots (`score-*.mp3`), synthesized entirely by
+  stems plus two transition one-shots (`score/<song>/*.mp3`), synthesized entirely by
   `scripts/score/`. No third-party material, so no attribution requirement.
 
 Keep a license record for every new asset. Put the source URL, author, license,
@@ -33,6 +33,11 @@ Omni. Keep the license text in `public/assets/audio/licenses/` when it is suppli
 by the source.
 
 ## The adaptive score
+
+**Adding or changing songs: see `docs/MUSIC_PIPELINE.md`** (GarageBand kit →
+`npm run music:import`). Songs and the plan live in
+`public/assets/audio/score/index.json`; this section is how the engine uses
+them.
 
 The music is three SONGS — "Omni" (D minor, 128 BPM, 60 s), "Event Horizon"
 (E minor, 160 BPM, 48 s, thrash) and "Critical Mass" (C minor, 150 BPM with
@@ -98,7 +103,35 @@ chip per `SONGS` entry; the active one is lit).  Adding a song: render it with i
 add it to `build.py`, append a `SONGS` entry, and give it a place in
 `MUSIC_PLAN`.
 
-**Loading and memory.**  The title screen fetches `score-atmos.mp3` only; the
+**Layer variants (which stem fills a slot).**  A song may declare, per slot,
+alternative stems named `<slot>-<variant>.mp3` (`variants`, `phraseBars` and
+`contextPriority` in its index entry; `docs/MUSIC_PIPELINE.md` has the schema,
+the tag list and the enemy families).  They are ordinary sample-locked stems —
+started on the same `t0` by the same `startSource` math, each with its own mix
+gain — so a switch is a crossfade between two sources already in phase, never
+a restart.  Intensity still decides which slots are ON; this decides which
+variant sounds in each slot that is.  ATMOS follows the CONTEXT TAGS
+(`MusicContext.ts`, fed every frame by `GameEngine.reportMusicContext`); a
+combat slot (pulse and up) picks from the dominant ENEMY FAMILY when it enters
+and locks it.  Per slot, the first tag in `contextPriority` that any variant
+claims wins; the first variant in list order claiming it is chosen; otherwise
+`<slot>.mp3`.  Every decision is taken once per PHRASE BOUNDARY (a window of
+~0.6 s before the crossfade begins, which is centred on the bar line: a bar
+long for atmos, a beat for the rest), a slot that changed then holds for
+`MUSIC_VARIANT_DWELL_PHRASES` (2) phrases, and a combat slot re-picks only if
+another family has out-weighed its locked one by `MUSIC_FAMILY_MARGIN` (1.5×)
+continuously for a whole phrase.  A song change resets every slot to its
+appropriate variant at bar 1 if that variant has decoded in time (the first
+start of a song begins on the defaults and switches at a later boundary).  RESIDENCY: default stems are always resident; a variant buffer is kept
+while it is sounding, scheduled, wanted now, or WARM (its context is inside
+`MUSIC_PREFETCH_MULT` × its radius, or its enemy family is in the alert ring);
+over `MUSIC_DECODE_BUDGET_MB` the least recently wanted non-active buffer goes
+first, and a variant that would not fit is not loaded.  A variant not decoded
+when its boundary arrives is simply tried at the next; a missing file is
+remembered, never retried, never an error.  Debug ▸ Adaptive Music shows
+*Music context* and *Variants*, and *Music context force* pins a tag.
+
+**Loading and memory.**  The title screen fetches the current song's `atmos.mp3` only; the
 combat set and one-shots are fetched when a run starts (`setActive(true)`),
 the boss stem on the first boss sighting.  Stems decode at **25 kHz** through an
 OfflineAudioContext (≈ 60 MB decoded for Omni's six, ≈ 48 MB for Event Horizon's, ≈ 57 MB for Critical Mass's) and resample on playback.

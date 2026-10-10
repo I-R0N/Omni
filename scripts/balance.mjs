@@ -110,6 +110,21 @@ async function ladder() {
   return d;
 }
 
+// THE LEVEL LADDER (D-S3-h): the level-driven mixes at levels 1/3/6/10, both loadouts,
+// rivals on, on the two maps the calibration used.  Stored as d.levels.
+async function levelsRun() {
+  const cliPath = await bundle('tests/sim/balance-cli.ts', 'balance-cli');
+  const d = JSON.parse(fs.readFileSync(JSON_OUT, 'utf8'));
+  d.static = await runJob(cliPath, { kind: 'static' });
+  const lv = String(flag('levels', '1,3,6,10')).split(',').map(Number);
+  const jobs = [];
+  for (const difficulty of lv) for (const loadout of ['lean', 'mk3']) for (const map of ['POCKET', 'RING']) for (let seed = 1; seed <= d.seeds; seed++)
+    jobs.push({ kind: 'arena', map, loadout, rivals: true, seed, difficulty, maxSec: d.maxSec });
+  d.levels = await pool(cliPath, jobs, 'levels');
+  fs.writeFileSync(JSON_OUT, JSON.stringify(d) + '\n');
+  return d;
+}
+
 // CALIBRATION: how hard can enemies get (HP and damage x k at level 3) before a loadout
 // stops beating the boss?  mk3 is the "strongest thing wearable today"; lean is the starter gun.
 async function calibrate() {
@@ -172,7 +187,7 @@ function render(d) {
   for (const loadout of ['lean', 'mk3']) {
     P(`### ${loadout}`);
     P();
-    P('| Wave | window s | enemies (budget) | seen spawned | clear time s | salvage units | hull lost | rivals alive (max) |');
+    P('| Wave | window s | points (L3 target) | seen spawned | clear time s | salvage units | hull lost | rivals alive (max) |');
     P('|---|---|---|---|---|---|---|---|');
     for (let w = 1; w <= 6; w++) {
       const rows = d.arenas.filter((r) => r.loadout === loadout && r.rivals).flatMap((r) => r.waves.filter((x) => x.wave === w));
@@ -250,7 +265,7 @@ function render(d) {
   // ── static
   P('## 6. The tables the numbers come from');
   P();
-  P('| Wave | window s | budget | enemy HP × | enemy damage × |');
+  P('| Wave | window s | points (level 3) | enemy HP × (wave) | enemy damage × (wave) |');
   P('|---|---|---|---|---|');
   for (const w of st.waves) P(`| ${w.wave} | ${w.windowSec} | ${w.budget} | ${f(w.hpMult, 2)} | ${f(w.dmgMult, 2)} |`);
   P();
@@ -291,10 +306,36 @@ function render(d) {
     for (const k of [...new Set(d.calibration.map((r) => r.statScale))].sort((a, b) => a - b)) P(rowOf(k, d.calibration.filter((r) => r.statScale === k)));
     P();
   }
+  if (st.levelWaves) {
+    P('## 9. The level-driven enemy mixes (D-S3-h)');
+    P();
+    P('Enemy ratings (points each): ' + Object.entries(st.ratings).sort((a, b) => a[1] - b[1]).map(([k, v]) => `${k} ${v}`).join(' · ') + '. A wave is a point budget; the level sets the roster ceiling (hardest rating allowed) and 2–4 types are drawn with the points split evenly. Samples are three seeded draws (a wave never repeats its predecessor\'s types). HP/damage × is the level scale (levels 1–3 are the old Low/Med/High rows).');
+    P();
+    P('| Level | HP/dmg × | spawn × | Wave | points | ceiling | three sample mixes |');
+    P('|---|---|---|---|---|---|---|');
+    for (const lv of st.levelWaves) for (const w of lv.waves) P(`| ${w.wave === 1 ? lv.level : ''} | ${w.wave === 1 ? lv.hpDmg : ''} | ${w.wave === 1 ? lv.spawn : ''} | ${w.wave} | ${w.points} | ${w.ceiling} | ${w.samples.join(' · ')} |`);
+    P();
+  }
+  if (d.levels) {
+    P('## 10. Played at each level (the level-driven mixes, rivals on)');
+    P();
+    P('POCKET + RING, the bot yardstick, same seeds at each level. `lean` = starter gun; `mk3` = every Mk III.');
+    P();
+    P('| Level | Loadout | Boss dead (of N) | Waves cleared (median) | Run length (median) | Hull lost / run | Salvage / run |');
+    P('|---|---|---|---|---|---|---|');
+    for (const lvl of [...new Set(d.levels.map((r) => r.difficulty))].sort((a, b) => a - b)) for (const loadout of ['lean', 'mk3']) {
+      const rs = d.levels.filter((r) => r.difficulty === lvl && r.loadout === loadout);
+      if (!rs.length) continue;
+      P(`| ${lvl} | ${loadout} | ${rs.filter((r) => r.endedBy === 'boss-dead').length} (of ${rs.length}) | ${f(median(rs.map((r) => r.wavesCleared)), 0)} | ${mins(median(rs.map((r) => r.endSec)))} | ${f(median(rs.map((r) => r.hullLost)), 0)} | ${f(median(rs.map((r) => r.salvageUnits)))} |`);
+    }
+    P();
+  }
   fs.writeFileSync(MD_OUT, L.join('\n') + '\n');
 }
 
-if (has('calibrate')) {
+if (has('levels')) {
+  render(await levelsRun());
+} else if (has('calibrate')) {
   render(await calibrate());
 } else if (has('ladder')) {
   render(await ladder());

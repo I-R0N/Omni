@@ -610,13 +610,20 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         'Erase the saved character: credits, cargo, loadout, hex slots, any wreck and the records — a brand-new start.',
         'Wipes the save file back to a new character: no Salvage, empty cargo, the free Base Hull and Projector, every hex slot as shipped, no wreck, zeroed records. Settings (volume, control scheme, difficulty) are kept. The wiped state is written at once, so it survives a relaunch.'),
       stat('Saved game', c => c.s.savedGame ? (c.s.savedGame.progress ? 'yes' : 'new character') : '—', 'Whether the save holds a character worth continuing.'),
+      stat('Snitch catches', c => String(c.s.savedGame?.snitchCatches ?? '—'), 'Snitches this character has caught, from the save file. Each catch makes the next snitch faster; the TRADE HUB can reset it.'),
       stat('Deaths', c => String(c.s.savedGame?.records.deaths ?? '—'), 'Lifetime deaths, from the save file.'),
       stat('Best score', c => (c.s.savedGame?.records.highScore ?? 0).toLocaleString(), 'Lifetime high score, from the save file.'),
       stat('Best wave', c => String(c.s.savedGame?.records.bestWave ?? '—'), 'The deepest wave ever reached.'),
       stat('Best combo', c => String(c.s.savedGame?.records.bestCombo ?? '—'), 'The best kill combo multiplier ever reached.'),
       stat('Bosses / dragons', c => c.s.savedGame ? `${c.s.savedGame.records.bossesKilled} / ${c.s.savedGame.records.dragonsKilled}` : '—', 'Lifetime bosses and dragons killed.'),
       stat('Wreck', c => c.s.savedGame?.wreck ? `${c.s.savedGame.wreck.modules} in ${c.s.savedGame.wreck.mapName}` : 'none', 'The outstanding death wreck: what is in it and where.'),
-      stat('Held waves', c => (c.s.savedGame?.arenaWaves.length ?? 0) === 0 ? 'none' : c.s.savedGame!.arenaWaves.map(w => `${w.mapName} W${w.wave + 1}+${w.progress} (${Math.round(w.awaySec / 60)}m)`).join(' · '), 'The wave each arena will come back at: held exactly for 5 minutes after you leave, then restarted from the top, one wave earlier per hour away.'),
+      stat('Held waves', c => (c.s.savedGame?.arenaWaves.length ?? 0) === 0 ? 'none' : (
+        <div className="flex flex-col items-end">
+          {c.s.savedGame!.arenaWaves.map(w => (
+            <div key={w.mapName}>{`${w.mapName} W${w.wave + 1}+${w.progress} (${Math.round(w.awaySec / 60)}m)`}</div>
+          ))}
+        </div>
+      ), 'The wave each arena will come back at: held exactly for 5 minutes after you leave, then restarted from the top, one wave earlier per hour away.'),
     ],
   },
   {
@@ -1210,7 +1217,8 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
             act: dbg(e => e.audio.setMusicSong('auto')),
             active: mode === 'auto', on: DEBUG_ON.indigo, hover: 'hover:border-indigo-400',
           },
-          ...SONGS.map((s, i) => ({
+          // The live list from score/index.json; the built-in SONGS only until the index loads.
+          ...(c.s.audio?.music?.songs ?? SONGS).map((s, i) => ({
             key: s.id, label: s.title,
             summary: `Pin ${s.title} (${s.bpm} BPM) until you pick Auto.`,
             detail: 'The pin overrides the plan, through portals and boss fights too. The change lands on the next bar line: the new song loads alongside the old one, then they crossfade.',
@@ -1219,6 +1227,20 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
           })),
         ];
       }),
+      stat('Music context', c => {
+        const m = c.s.audio?.music;
+        return m ? (m.contexts.join(' · ') || '—') : '—';
+      }, 'The situation tags layer variants are picked from: station, portal, rare-item, danger, deep-space, enemy:<family>.'),
+      stat('Variants', c => {
+        const m = c.s.audio?.music;
+        if (!m) return '—';
+        const v = Object.entries(m.variants).map(([k, n]) => `${k}:${n}`).join(' · ');
+        return v ? `${v} · ${m.decodedMB.toFixed(0)} MB` : 'none declared';
+      }, 'The variant sounding in each slot that has any (default = <slot>.mp3), and the score\u2019s decoded MB. Changes land on phrase boundaries.'),
+      ctrl('Music context force', dbg(e => e.audio.cycleMusicContextForce()),
+        c => c.s.audio?.music?.contextForced ?? 'auto',
+        'Pin one context tag to audition its variants.',
+        'AUTO follows the game. Each step pins one tag (station, portal, rare-item, danger, deep-space, enemy:swarm, enemy:heavy, enemy:ranged) in place of the real ones; an enemy tag also pins that family as the only one present.'),
       stat('Music bar', c => c.s.audio?.music?.bar ?? '—', 'Bar 1–32 of the 60-second score loop.'),
       ctrl('Music force', dbg(e => e.audio.cycleMusicDebugIntensity()),
         c => { const f = c.s.audio?.music?.forced; return f === null || f === undefined ? 'game' : f.toFixed(2); },

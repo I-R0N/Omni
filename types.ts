@@ -1808,10 +1808,26 @@ export interface PerfTaskStat {
   manual: number;  // manual override (0 = AUTO)
 }
 
+/** A map's size, name and difficulty, as shown to the player. */
+export interface MapInfo {
+  name: string;
+  kind: 'hub' | 'arena';
+  /** Arena level (1..20); absent on the hub. */
+  level?: number;
+  /** Side length in world units (the maps are square). */
+  span: number;
+  /** 'Small' | 'Medium' | 'Large' | 'Huge'. */
+  sizeLabel: string;
+  /** Enemy-count multiplier the size buys; absent where there are no waves. */
+  crowd?: number;
+}
+
 export interface EngineStats {
   fps: number;
   entityCount: number;
   currentMapName: string;
+  /** What the pause menu and the transit card say about the loaded map. */
+  mapInfo?: MapInfo;
   currentMapType: MapType;
   currentWeapon: string;
   gameState: GameState;
@@ -1829,6 +1845,9 @@ export interface EngineStats {
   /** Enemies left to destroy this wave (unspawned remainder + alive).
    *  Completion model: the wave ends only when this reaches 0. */
   enemiesRemaining?: number;
+  /** The same count split by archetype (first-appearance order) — what the
+   *  HUD's wave strip draws.  Present only while a wave is active. */
+  enemyRoster?: { subtype: EnemySubtype; count: number }[];
   /** Live boss readout ((h)) — present only while a capstone boss is alive,
    *  so the HUD can show a named bar with its phase pips.  `healthFrac` /
    *  `shieldFrac` are 0..1; `phase` is the 0-based BOSS_DEFS phase index. */
@@ -1893,6 +1912,10 @@ export interface EngineStats {
     /** Total SHIP weight (hull + every ACTIVE module) — a ship attribute that
      *  drags acceleration AND scales the player's collision mass. */
     shipWeight: number;
+    /** Snitches this character has caught, and the snitch's resulting headline
+     *  (dart) speed as a fraction of player cruise — the ratchet made legible. */
+    snitchCatches: number;
+    snitchSpeedFrac: number;
     /** Rounded world position, for the pause menu's Condition readout. */
     position: { x: number; y: number };
   };
@@ -1935,6 +1958,9 @@ export interface EngineStats {
     maxSlots: number;
     shipSlotOffer?: { cost: number; available: boolean; affordable: boolean };
     weaponSlotOffer?: { cost: number; available: boolean; affordable: boolean };
+    /** The TRADE HUB's snitch-count reset: absent at zero catches (nothing to
+     *  clear); `available` = the docked station stocks it. */
+    snitchReset?: { cost: number; count: number; available: boolean; affordable: boolean };
     statLines: {
       id: string;
       label: string;
@@ -1969,6 +1995,8 @@ export interface EngineStats {
     progress: boolean;
     credits: number;
     modules: number;
+    /** Snitches the saved character has caught (drives the snitch's speed ramp). */
+    snitchCatches: number;
     wreck: { mapName: string; modules: number } | null;
     /** Waves held per arena: where, which wave (0-based), kills already scored, seconds away. */
     arenaWaves: { mapName: string; wave: number; progress: number; awaySec: number }[];
@@ -2506,8 +2534,16 @@ export interface EngineStats {
       layers: string[]; bar: number;
       /** Resident song's title, and whether it is pinned (vs rotating). */
       song: string; songPinned: boolean; pending: string | null;
+      /** Every song in score/index.json, in index order (the pin uses the index). */
+      songs: { id: string; title: string; bpm: number }[];
       /** 'auto' follows the music plan; a number pins that SONGS index. */
       songMode: 'auto' | number;
+      /** Layer variants: the active context tags (+ `enemy:<family>`), the
+       *  forced one, the variant sounding in each slot that declares any
+       *  ('default' = `<slot>.mp3`), the dominant enemy family, and the score's
+       *  decoded PCM in MB. */
+      contexts: string[]; contextForced: string | null;
+      variants: Record<string, string>; family: string | null; decodedMB: number;
     } | null;
   };
 }

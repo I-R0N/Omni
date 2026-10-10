@@ -1,15 +1,36 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { EngineStats, MapType, GameState, ControlScheme } from '../types';
-import { CONTROL_SCHEMES, controlSchemeDef } from '../constants';
+import { CONTROL_SCHEMES, controlSchemeDef, ENEMY_VARIANTS, SNITCH_CONSTANTS, snitchHeadlineFrac } from '../constants';
+import { drawEnemyIcon } from '../engine/systems/render/enemyShapes';
 import type { GameEngine } from '../engine/GameEngine';
 import DebugMenu, { DebugLauncher } from './DebugMenu';
 import {
-  OVERLAY_SCRIM, PANEL_OPAQUE, OVERLAY_FADE_IN, OVERLAY_KEYFRAMES,
+  OVERLAY_SCRIM, PANEL_GLASS, OVERLAY_FADE_IN, OVERLAY_KEYFRAMES,
   T_MICRO, T_NOTE, T_BODY, T_ROW, PANEL, PANEL_ROW, panelAccent, HEADING,
   SCREEN_TITLE, OUTCOME_TITLE, TAP, BTN_PRIMARY, BTN_SECONDARY, BTN_COMPACT,
   CHIP_BASE, CHIP_OFF, HUD_CHIP, SECTION_TOGGLE, OVERLAY_FAB_CLEARANCE,
 } from './uiClasses';
+
+
+/** One archetype's flat silhouette at HUD size, drawn once per (shape, colour)
+ *  rather than per stats push — the strip re-renders every frame, the icon
+ *  does not change.  The canvas is backed at device resolution. */
+const WaveStripIcon: React.FC<{ shape: string; color: string; px: number }> = ({ shape, color, px }) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    const ctx = c?.getContext('2d');
+    if (!c || !ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    c.width = Math.round(px * dpr);
+    c.height = Math.round(px * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, px * dpr / 2, px * dpr / 2);
+    ctx.clearRect(-px, -px, px * 2, px * 2);
+    drawEnemyIcon(ctx, shape, color, px * 0.42);
+  }, [shape, color, px]);
+  return <canvas ref={ref} style={{ width: px, height: px }} aria-hidden />;
+};
 
 interface UIOverlayProps {
   stats: EngineStats;
@@ -61,6 +82,8 @@ interface UIOverlayProps {
   /** A5 — buy the next hex of one flower.  Station commerce like a module
    *  purchase; the engine gates it on the matching shop. */
   onPurchaseSlot?: (group: 'ship' | 'weapon') => void;
+  /** TRADE HUB — pay to clear the snitch catch count (and so its speed ramp). */
+  onResetSnitch?: () => void;
   // Module resale, INVENTORY tiles only: sell-back (90% of cost) needs a
   // station — any, every station drydocks; scrap (9%) works from anywhere
   // on the map (the pause-menu cargo panel's only cash-out).
@@ -111,6 +134,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
   onMoveModule,
   onPurchaseModule,
   onPurchaseSlot,
+  onResetSnitch,
   onSellModule,
   onScrapModule,
   onUndock,
@@ -1187,6 +1211,23 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                     <span className="text-cyan-300"> · {stats.waveElapsedSec}s</span>
                   )}
                 </span>
+                {/* The wave strip: what is still left to kill, by archetype —
+                    the roster dialogue's information, kept on screen in
+                    miniature.  Counts fall as they die and a type drops off
+                    at zero. */}
+                {stats.enemyRoster && stats.enemyRoster.length > 0 && (
+                  <div data-testid="hud-wave-strip" className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    {stats.enemyRoster.map(r => {
+                      const v = ENEMY_VARIANTS[r.subtype];
+                      return (
+                        <span key={r.subtype} data-subtype={r.subtype} className={`flex items-center gap-0.5 text-slate-200 ${T_MICRO} font-bold`}>
+                          <WaveStripIcon shape={v.shape} color={v.color} px={13} />
+                          {r.count}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
                 {isGrace && (
                   <p className={`text-emerald-400 ${T_NOTE} font-bold mt-0.5 animate-pulse`}>
                     Next in {stats.waveGraceTimer}s · tap to skip
@@ -1391,6 +1432,32 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* ── SHIP: condition + the full derived-stat breakdown ────── */}
             {tab === 'ship' && (
             <>
+            {/* Snitch catch count: only where it can be spent (TRADE HUB) and
+                only while there is a count to clear.  The button disables and
+                says why rather than being offered and refused. */}
+            {out?.snitchReset && (
+            <div className={`${panelAccent('border-amber-500/30')} flex items-center justify-between gap-3 flex-wrap`}>
+              <div className={T_ROW}>
+                <h3 className={`text-amber-300 ${HEADING} mb-1`}>Snitch Debt</h3>
+                <span className="text-slate-400">Catches </span>
+                <span className="text-white font-bold tabular-nums">{out.snitchReset.count}</span>
+                <span className={`text-slate-500 ml-2 ${T_NOTE}`}>
+                  snitch flies at {(snitchHeadlineFrac(out.snitchReset.count)).toFixed(2)}× cruise · {out.snitchReset.available ? 'reset to 0' : 'reset offered at the TRADE HUB only'}
+                </span>
+              </div>
+              <button
+                disabled={!out.snitchReset.available || !out.snitchReset.affordable}
+                onClick={onResetSnitch}
+                className={`${BTN_COMPACT} ${
+                  out.snitchReset.available && out.snitchReset.affordable
+                    ? 'bg-amber-700/60 hover:bg-amber-600/70 text-amber-100'
+                    : 'bg-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                RESET ◈{out.snitchReset.cost.toLocaleString()}
+              </button>
+            </div>
+            )}
             {svc?.repair && (
             <div className={`${panelAccent('border-rose-600/30')} flex items-center justify-between gap-3 flex-wrap`}>
               <div className={T_ROW}>
@@ -1791,6 +1858,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {stats.savedGame.records.highScore > 0 && (
                   <div className={`text-slate-500 ${T_NOTE}`}>Best score {stats.savedGame.records.highScore.toLocaleString()}</div>
                 )}
+                {stats.savedGame.snitchCatches > 0 && (
+                  <div className={`text-slate-400 ${T_NOTE}`} data-testid="menu-saved-snitch">
+                    Snitch catches {stats.savedGame.snitchCatches}
+                  </div>
+                )}
+                {stats.savedGame.arenaWaves.length > 0 && (
+                  <div className={`text-slate-400 ${T_NOTE} mt-0.5`} data-testid="menu-saved-portals">
+                    <div>Portals with saved progress</div>
+                    <ul className="list-none">
+                      {stats.savedGame.arenaWaves.map(w => (
+                        <li key={w.mapName}>{w.mapName} · wave {w.wave + 1}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {stats.savedGame.wreck && (
                   <div className={`text-amber-300 ${T_NOTE} mt-0.5`}>
                     Wreck waiting in {stats.savedGame.wreck.mapName} ({stats.savedGame.wreck.modules} module{stats.savedGame.wreck.modules === 1 ? '' : 's'})
@@ -1864,7 +1946,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 Controls &amp; Basics {collapsed.menuhelp ? '▸' : '▾'}
               </button>
               {!collapsed.menuhelp && (
-                <div className={`mt-2 w-full ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                <div className={`mt-2 w-full ${PANEL_GLASS} border border-sky-500/30 rounded-lg px-3 py-3`}>
                   {renderHelpPanel()}
                 </div>
               )}
@@ -1916,12 +1998,38 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
             {/* Live pools (the two stats that MOVE in flight) — the derived
                 per-module breakdown lives in the shared Ship Status widget
                 right below. */}
+            {/* The MAP: its name, size and difficulty, so a player always
+                knows where they are and how much it asks of them. */}
+            {stats.mapInfo && (
+              <div className={PANEL} data-testid="pause-map-info">
+                <h3 className={`text-violet-300 ${HEADING} mb-2`}>Map</h3>
+                <div className={`flex flex-col gap-1 ${T_ROW}`}>
+                  {statLine('Name', stats.mapInfo.name)}
+                  {statLine('Size', `${stats.mapInfo.sizeLabel} · ${stats.mapInfo.span.toLocaleString('en-US')} × ${stats.mapInfo.span.toLocaleString('en-US')}`)}
+                  {statLine('Difficulty', stats.mapInfo.level !== undefined ? `Level ${stats.mapInfo.level}` : 'Safe zone')}
+                  {stats.mapInfo.crowd !== undefined && statLine('Enemy count', `×${stats.mapInfo.crowd.toFixed(2)} for this size`)}
+                </div>
+              </div>
+            )}
+
             <div className={PANEL}>
               <h3 className={`text-sky-300 ${HEADING} mb-2`}>Condition</h3>
               <div className={`flex flex-col gap-1 ${T_ROW}`}>
                 {statLine('Hull', `${ps?.health ?? 0} / ${ps?.maxHealth ?? 100}`)}
                 {statLine('Shield', `${ps?.shield ?? 0} / ${ps?.maxShield ?? 0}`)}
                 {statLine('Weight', `${(ps?.shipWeight ?? 0).toFixed(1)}`)}
+                {/* The snitch ramp is permanent character state, so the count
+                    sits beside the speed it buys: a bare number would not say
+                    the snitch is now flying at 0.40× cruise. */}
+                {statLine('Snitch catches', (
+                  <>
+                    {ps?.snitchCatches ?? 0}
+                    <span className={`text-slate-500 font-normal ml-1.5 ${T_NOTE}`}>
+                      {`snitch flies at ${(ps?.snitchSpeedFrac ?? 0).toFixed(2)}× cruise${
+                        (ps?.snitchSpeedFrac ?? 0) >= SNITCH_CONSTANTS.WAVE_SPEED_MAX ? ' (max)' : ''}`}
+                    </span>
+                  </>
+                ))}
                 {statLine('Location', (
                   <>
                     {stats.currentMapName}
@@ -2011,7 +2119,7 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 Controls &amp; Basics {collapsed.pausehelp ? '▸' : '▾'}
               </button>
               {!collapsed.pausehelp && (
-                <div className={`mt-2 mx-auto w-full max-w-xs ${PANEL_OPAQUE} border border-sky-500/30 rounded-lg px-3 py-3`}>
+                <div className={`mt-2 mx-auto w-full max-w-xs ${PANEL_GLASS} border border-sky-500/30 rounded-lg px-3 py-3`}>
                   {renderHelpPanel()}
                 </div>
               )}

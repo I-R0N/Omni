@@ -15,7 +15,7 @@ what is currently implemented. File paths are relative to the repo root.
 > release on top of it, and Steam deferred.  It carries the open GAMEPLAY
 > DECISIONS each work session must put to the user, an append-only decision
 > log, and the amendment protocol work sessions follow.  **If you are a
-> work session with a session ID (`S1`–`S4`), read its §0 and your own §4
+> work session with a session ID (`S1`–`S4`, `S6`–`S11`), read its §0 and your own §4
 > section before touching anything.**  It is a PLAN, not a description of
 > what exists — this file stays the source of truth for what is shipped.
 
@@ -523,7 +523,12 @@ engine/
                           docs/SFX_INVENTORY.md, keyed by its stable id
     AdaptiveMusic.ts      The adaptive SCORE: six synchronised stems on the
                           Music bus, faded by intensity (`setMusicThreat`,
-                          `setCombat`); `cueEncounter` returns to bar 1
+                          `setCombat`); `cueEncounter` returns to bar 1.
+                          Also the LAYER-VARIANT director (below)
+    MusicContext.ts       The context TAGS (station / portal / rare-item /
+                          danger / deep-space) the variants are chosen from:
+                          radii in screens with hysteresis, over arrays the
+                          engine already owns
     AudioMix.ts           Bus gains + policy: `busFor`, `survivesPause`,
                           `ducksWorld` (no entity dependencies)
     SfxVoicing.ts         `finishVoice`, the production layer wrapped round
@@ -620,9 +625,10 @@ state on the way).
 
 - `resetAndLoadSelectedMap()` (new run: quit to menu / mid-game map
   switch) adds the RUN-SCOPED reset — score + combo, hull/shield refill,
-  status effects, camera zoom, and the per-run counters (`snitchCatchCount`,
-  `dragonsKilled`, `nextRivalScore`).  It does NOT touch the CHARACTER —
-  credits, cargo, the installed loadout and the purchased hex slots persist
+  status effects, camera zoom, and the per-run counters (`dragonsKilled`,
+  `nextRivalScore`).  It does NOT touch the CHARACTER —
+  credits, cargo, the installed loadout, the purchased hex slots and the
+  snitch catch count (`snitchCatchCount`) persist
   (§8, persistence); `resetCharacter()` is a new character, used by the
   replay entry and DBG ▸ Economy ▸ Erase save.
 - `transitionToMap(descriptorId)` (portal travel) adds NOTHING of the
@@ -1851,7 +1857,17 @@ Config-as-code. Most balance lives here. Existing top-level blocks:
   (dart) speed = 0.05× player cruise × (catchCount + 1) (capped at
   1.2×), with coast drifting at 0.30× of that — so the first snitch is
   nearly stationary and each CATCH makes the next one faster, letting
-  the player defer the catch to keep it slow.  Darts fire on a random
+  the player defer the catch to keep it slow (`snitchHeadlineFrac` is the one
+  definition of that fraction).  THE COUNT IS CHARACTER STATE: it is saved
+  (`CharacterSave.snitchCatches`) and a new run keeps it, so the ramp is a
+  PERMANENT ratchet — at 24 catches it sits at `WAVE_SPEED_MAX` for good.  The
+  only way down is the TRADE HUB's `snitchReset` station service
+  (`GameEngine.resetSnitchCatches`, `SNITCH_CONSTANTS.RESET_COST` through
+  `modulePrice`, a full reset to 0; refused undocked, at any other station,
+  at zero catches or unaffordable), offered on the docked SHIP tab and
+  mirrored as `outfitting.snitchReset`.  The pause menu's Condition block
+  shows the count beside the speed it buys (`playerStats.snitchCatches` /
+  `snitchSpeedFrac`).  Darts fire on a random
   timer or when the player closes
   inside PANIC_RADIUS (panic darts bias away from the player; a
   cooldown guarantees coast windows between them).  The whole ramp is
@@ -2814,7 +2830,24 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     docs/ENGINE_CORE_PLAN.md §5) — immediately after a merge lands — on any
     PR carrying the **`full-tests` label** (the opt-in for pre-merge full
     validation), and on manual dispatch.  Full CI runs took 18–22 minutes
-    in late September 2026.
+    in late September 2026, and 21 minutes in early October.
+    **FULL GREEN ATTACHES TO THE HEAD OF A PUSH BURST, NEVER TO EACH
+    COMMIT IN IT**, and it is easy to misread a run list without knowing
+    why.  `concurrency.group` is
+    `pr-checks-${{ github.event.pull_request.number || github.ref }}`, so a
+    PR push and a long-lived-branch push land in DIFFERENT groups (the PR
+    number against the ref) and the two scopes never cancel each other —
+    but `cancel-in-progress` still means the next push to a full-scope
+    branch kills the full run the previous commit was running, since both
+    share that ref.  Push twice within ~21 minutes and the first commit's
+    full run is cancelled with nothing wrong.  Two consequences: a
+    CANCELLED run is not a failure, and a commit mid-burst simply has no
+    full-scope verdict — so "the full suite passed on this branch" is a
+    claim about ONE commit, which has to be named.  A rolled-up
+    `failure` whose only failing annotation is "The operation was canceled"
+    is the same thing wearing a worse label: GitHub reports an
+    externally-cancelled STEP as a failed run, so read the step list
+    before calling it red.
   A PR's BASE does not pick the scope (user call, 2026-09-29).  PRs whose
   base was `main` used to run FULL — meant for the `plan-completion` →
   `main` promotion — but once PR #93 (2026-09-21) merged that branch every
@@ -3031,8 +3064,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   2.51 → 2.49.
 - **THE SAVE FILE AND THE WRECK** (plan D10, D14, D20–D24; `engine/save.ts`,
   `engine/wreck.ts`).  What persists, through the `Storage` port under one key
-  (`omni.save`): the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
-  hex-slot counts — the outstanding WRECK, lifetime RECORDS (high score, best
+  (`omni.save`, `SAVE_VERSION` 2 — `MIGRATIONS[1]` added the snitch catch count):
+  the CHARACTER — credits, cargo, the INSTALLED loadout, purchased
+  hex-slot counts, the snitch catch count — the outstanding WRECK, lifetime RECORDS (high score, best
   wave / combo, bosses, dragons, deaths) and SETTINGS (audio volumes + mute,
   control scheme, difficulty).  NOT saved: any arena's world (arenas regenerate
   per entry, D8), the hub's terrain (a fixed `HUB_WORLD_SEED` regenerates it
@@ -5549,6 +5583,53 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   the game has no binding (there is no keyboard weapon-cycle key), the panel
   says nothing rather than inventing one.  (Escape IS bound — it pauses —
   and the keyboard group lists it.)
+- **DATA FILES: THE FORMAT FOLLOWS WHO WRITES THE FILE, NOT WHO READS IT**
+  (user call; docs/ENGINE_CORE_PLAN.md D33).  **A file a GENERATOR rewrites
+  is JSON.  A file only HUMANS write is TOML.**  The deciding property is
+  COMMENTS: this repo's hand-authored tables carry the reasoning behind
+  each number — the grain table's "neither is visible in the row", the bank
+  divisor's two factors — and that commentary is a large part of their
+  value, while a comment cannot survive a generator rewriting the file.
+  So the SCORE INDEX (`public/assets/audio/score/index.json`, rewritten by
+  `npm run music:import` on every run) is JSON, and extracted TUNING TABLES
+  are TOML.  Neither is to be "unified" into the other.  Phrasing the rule
+  on the READER instead ("engine data is X") gives the wrong answer for
+  both files, which is why it is phrased on the writer.
+  THE SCORE INDEX LOOKS LIKE A MIXED CASE AND IS NOT, which is the
+  sharpest thing to know about the rule: its `plan` block (which song plays
+  in the hub, a field map, an arena, a boss fight) reads like a
+  HAND-AUTHORED editorial choice sitting in generated output, and
+  `scripts/music-import.mjs` in fact WRITES it — `for (const role of use)
+  index.plan[role] = meta.id`, from each song's own `use` array.  So
+  `index.json` is wholly generator-written and JSON is simply the right
+  answer for it; the `"about"` STRING KEY at the top is the whole cost of
+  that, standing in for the comment the format cannot keep.  **The
+  editorial choice lives UPSTREAM**, in the GarageBand kit's hand-authored
+  `song.json` (id, title, bpm, bars, `use`) — which is where the rule says
+  to look, and which is JSON today even though nothing rewrites it.  `plan`
+  stays hand-EDITABLE, since the importer only ever adds or overwrites the
+  roles a song claims and never clears one, so a role nobody claims keeps
+  whatever is there.
+  THE KIT'S `song.json` IS THE RULE'S ONE STATED EXEMPTION (user call): it
+  is hand-written and would keep comments, so the rule points it at TOML,
+  and it stays JSON anyway.  The boundary that buys is worth having —
+  **a file small enough that its fields need no explanation does not need a
+  format that can explain them.**  It is five live fields, four of them
+  validated by name in `scripts/music-import.mjs`, and not one of them is a
+  judgement that needs defending.  The moment a kit carries reasoning worth
+  a comment — why a song claims `boss`, why a tempo was chosen — that is the
+  moment to split it, which is D33's own "that is the moment" test applied
+  one level up.
+  A TOML table is parsed at BUILD time through a Vite virtual-manifest
+  plugin (the `nebulaManifestPlugin` / `sfxManifestPlugin` precedent, §6),
+  so the parser is a devDependency shipping zero runtime bytes and the
+  single-file standalone keeps working because the data is already in the
+  module.  Three consumers must resolve a new virtual id or a gate breaks,
+  and the second is the one that gets forgotten: `vite.config.ts`,
+  `scripts/sim-test.mjs` (its esbuild shim hardcodes the two existing ids,
+  so `npm run test:sim` fails the moment a table becomes virtual), and
+  `playwright.config.ts`'s webServer, which builds and so is covered by the
+  first.
 - **Sound goes through one id, and the id is the contract.**  Every
   trigger site calls `audio.play('<inventory id>')` (or
   `audio.loop(id, on, …)` for sustained sounds) and nothing else.
@@ -5782,8 +5863,43 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   (`handleBossSpawn`) or a map load (`loadMapFresh`, which first drops the
   linger, stands combat down and zeroes the intensity hold) returns the
   score to bar 1 (`cueEncounter`).  The title screen loads only the bed.
-  Pinned by `tests/audio.spec.ts`; how-to in `docs/AUDIO_AUTHORING.md`;
-  the music itself is generated by `scripts/score/`.
+  Songs and the plan are DATA in `public/assets/audio/score/index.json`
+  (folder per song); `npm run music:import` adds songs from a GarageBand
+  export (`docs/MUSIC_PIPELINE.md`).
+  **LAYER VARIANTS** (optional, per song, data in the index entry): a slot can
+  hold alternative stems `<slot>-<variant>.mp3` — same tempo, length and
+  harmony — each on the same `t0` and sample-locked like any stem, so a switch
+  is a gain crossfade between two sources already in phase.  The intensity
+  model still decides which slots are ON; the director decides which VARIANT
+  fills a slot.  ATMOS follows the CONTEXT TAGS (`station`, `portal`,
+  `rare-item`, `danger`, `deep-space`; `engine/systems/MusicContext.ts`, radii
+  in screens with enter/leave hysteresis in `AUDIO_CONSTANTS.MUSIC_*`, reported
+  every frame by `GameEngine.reportMusicContext` through
+  `audio.setMusicContext`); a COMBAT slot takes the dominant ENEMY FAMILY
+  (`enemy:swarm|heavy|ranged`, summed from the same pressure walk through
+  `MUSIC_ENEMY_FAMILY`) when it ENTERS and LOCKS it, re-picking only when
+  another family has out-weighed it by `MUSIC_FAMILY_MARGIN` for a whole
+  phrase.  Changes commit only on PHRASE boundaries (`phraseBars`, default 8)
+  with a crossfade centred on the bar line (a bar for atmos, a beat for
+  rhythmic slots), and a slot that changed holds for
+  `MUSIC_VARIANT_DWELL_PHRASES`.  Decoded variants live in an LRU cache under
+  `MUSIC_DECODE_BUDGET_MB`: active ones and defaults are never evicted, warm
+  ones (a context inside 1.5× its radius, a family in the alert ring) are
+  pre-decoded, and a variant not decoded by its boundary is tried at the next.
+  A missing variant file falls back to the default and never raises
+  `music.error`; a song with no `variants` takes none of these paths.  The tag
+  and family names are the contract the music is composed against
+  (`docs/MUSIC_PIPELINE.md`).  Pinned by `tests/audio.spec.ts`;
+  how-to in `docs/AUDIO_AUTHORING.md`.  PROVENANCE is now mixed, and the
+  pipeline is proven both ways: "Critical Mass" (the boss song) came
+  through `music:import` from a real GarageBand export, while the other two
+  are still generated by `scripts/score/`.  Critical Mass is itself part
+  authored and part generated — its six loop stems are the export, its
+  `riser` / `victory` one-shots are the older generated pair, because a
+  one-shot absent from an export deliberately keeps the song's existing
+  one.  Each imported song also carries a `song.json` beside its stems as
+  the importer's record; `phraseBars` in it is carried into the index entry
+  and read by the engine (the layer-variant phrase length), `key` by nothing.
 - **iOS needs three things desktop does not.**  (1) The ring/silent switch
   silences WebAudio, because Safari puts it in the "ambient" session by
   default — the game claims the `playback` session instead, via
@@ -6402,6 +6518,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
      and teal on the map is two contacts as far as the player is
      concerned.  Drops stay excluded entirely.
 
+- **MAP SIZE, NAME AND DIFFICULTY ARE SHOWN, AND SIZE BUYS ENEMIES** (user call).  `EngineStats.mapInfo` (`GameEngine.mapInfo()`, cached on map + descriptor + level) carries the name, `MAP_SPANS` size, its class (`mapSizeLabel`: Small < 5k, Medium < 8k, Large < 13k, Huge) and the arena level; the pause menu's MAP panel prints it and the transit warp draws it as a destination card (`renderPortalWarpCard`, fades in and out inside the beat; the shipped warp is 2.0 s, slowed from 1.4).  At the SAME level a larger map carries more enemies: `mapSizeScale(span)` = `(span / 12000)^0.6` clamped to 0.5..1.5 (Pocket 0.52, the 6k showcases 0.66, Ring World / Seven Rings 1.0, Deep Space 1.19) multiplies an ordinary wave's POINT budget (`waveTargetPoints` / `buildLevelWave`'s `sizeScale`, passed through `WaveSpawnContext.mapSizeScale`); a capstone's escort and the enemy STATS are untouched.  `buildLevelWave` also drops trailing types a budget cannot buy one of each of.  PROVISIONAL pending a play-test.
+- **A SHOWN LEVEL IS THE CURVE'S LEVEL + 2** (`[level] shift` in `data/enemy-difficulty.toml`, `curveLevel()` in constants.ts — the ONE place a level is mapped; stats, spawn amount and roster ceiling all read it).  Play-test: the bare starter gun cleared the old level 4, so that challenge is now called level 2 and the old L3 row is level 1; every map keeps its label and so gets harder.  PROVISIONAL.
+- **THE WAVE STRIP**: the wave chip carries a miniature of the roster — `EngineStats.enemyRoster` (`WaveSystem.remainingRoster`: unspawned + live, per archetype, first-appearance order) drawn as a flat silhouette + count (`WaveStripIcon` in UIOverlay, `drawEnemyIcon`).  Counts fall as enemies die; a type drops off at zero.  `tests/wavestrip.spec.ts`.
 - **A wave start is a ROSTER DIALOGUE, not a banner** (`WaveAnnouncement.roster`, set by `WaveSystem.startWave` from the spawn list plus a capstone's boss): ONE panel above centre (`renderWaveRosterDialogue`, `render/hud.ts`, middle at 30% of the height) that leads with the enemies — each subtype that must die as its flat silhouette (`drawEnemyIcon`, `render/enemyShapes.ts`) and a large "xN" — under a small "WAVE n · DESTROY N" heading.  It holds `WAVE_ANNOUNCE_CONSTANTS.ROSTER_HOLD` (3.2 s) rather than the banner's 1 s, so `renderWaveAnnouncements` reads each announcement's own `maxLifetime` for its hold.  Cells shrink to fit the width; a wave resumed from the arena memory shows its full roster.  Announcements without a roster (clears, snitch, boss phases) are still the plain banner.
 - **Wave banners FIT the viewport, they don't assume it.**  Banner text is
   authored content — boss names, phase announcements, reward labels — so its
@@ -6454,8 +6573,9 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   beside it because the band is width-bound: a column costs the chips
   nothing, and costs the arrows only `CONTROL_COLUMN_INSET`.
 - **Every full-screen overlay shares ONE scrim, and it is TRANSLUCENT.**
-  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/55` +
-  `backdrop-blur-[3px]`) is used by all five — main menu, pause, station,
+  `OVERLAY_SCRIM` (`components/uiClasses.ts`; `bg-slate-950/35` + the
+  debug panel's text outline, NO blur — user call: every menu reads like the
+  debug panel) is used by all five — main menu, pause, station,
   death, stage-clear — so the game never has two ideas of how much world
   shows through (user call: menus keep displaying the dynamic map).  Two
   things about it are load-bearing rather than taste: the ALPHA is a
@@ -6501,7 +6621,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
   `pr-preview.yml` (the STANDALONE preview: builds the single-file HTML
   on every push of a same-repo PR and publishes it to the
   `i-r0n/omni-standalone` mirror, linked from a PR comment as a
-  raw.githack URL — the link to play-test a PR on a phone; not Netlify.
+  SHA-pinned rawcdn.githack.com URL — the link to play-test a PR on a
+  phone; not Netlify.  SHA-PINNED because a BRANCH-REF raw.githack link
+  gets HTTP 429 rate-limited, while a commit URL is cached permanently
+  by the CDN.
   A push whose commit message carries `[skip ci]` skips it too, since
   that skips every workflow — so a push meant to refresh the preview
   must not carry it),

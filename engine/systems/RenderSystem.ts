@@ -28,7 +28,7 @@ import { isStaticTileCacheable, eraseStaticTileFromCache, blitStaticTileLayer, t
          buildStaticTileLayer as buildStaticTiles } from './render/staticTileCache';
 import { renderTrails, renderParticles, renderLightningArc, drawPlayerTrail,
          drawTrailStrip } from './render/effects';
-import { renderPortalWarpVeil } from './render/portalWarp';
+import { renderPortalWarpVeil, renderPortalWarpCard } from './render/portalWarp';
 import { renderDamageTexts, renderIndicators, renderPlayerMessages, renderLoadoutHUD,
          renderMinimap, renderWaveAnnouncements, fitFontPx, renderJoystick, renderFireButton,
          buildMinimapStaticLayer as buildMinimapStatic,
@@ -538,6 +538,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
    *  when no transit is in flight.  A number rather than a timer because the
    *  beat is a pure function of progress — see render/portalWarp.ts. */
   portalWarp: number | null = null;
+  portalWarpInfo: { name: string; lines: string[]; color: string } | null = null;
   /** The veil alpha actually painted on the last frame of a transit, 0 when
    *  no transit is in flight.  Published because "the destination is not
    *  visible yet" is a RULE, and the only honest way to check it is to read
@@ -1116,11 +1117,16 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
         //
         // Gnats (diesOnContact, Swarm) stay excluded whatever the scan finds:
         // a cloud of them would crowd the screen and they are not threats the
-        // player needs steering toward.  Bubbles are included (purple,
-        // blinking red once they hunt you) under their own small budget.
+        // player needs steering toward.  Bubbles get one only while
+        // they are hunting the player (purple, blinking red), under their own small budget.
         if ((entity.type === EntityType.ENEMY && entity.diesOnContact !== true)
                 || (entity.type === EntityType.INTERACTABLE && !entity.dropType && !entity.isSnitch)) {
-            const detect = entity.wreckGuide === true ? 1 : this.detectAlpha(entity.detectedAt);
+            // A bubble is ambient fauna and only earns an arrow once it is
+            // HUNTING the player (user call) — a calm one is not a threat
+            // worth steering toward, and a bloom of them cluttered the edge.
+            const calmBubble = entity.enemyShape === 'bubble'
+                && !(entity.provoked === true && entity.aggroTargetId === 'player');
+            const detect = entity.wreckGuide === true ? 1 : calmBubble ? 0 : this.detectAlpha(entity.detectedAt);
             if (detect > 0) {
                 const distSq = dx*dx + dy*dy;
                 // Whether the entity is currently within the true (unpadded)
@@ -1347,6 +1353,7 @@ export class RenderSystem implements Renderer, RendererDiagnostics {
         // draws them).  Above the veil, below the ship.
         this.backgroundManager.renderWarpStars(ctx, this.portalWarp, effectiveDpr());
         ctx.setTransform(effectiveDpr(), 0, 0, effectiveDpr(), 0, 0);
+        if (this.portalWarpInfo) renderPortalWarpCard(ctx, width, height, this.portalWarp, this.portalWarpInfo);
 
         // CONTINUITY: the ship rides ON TOP of the tunnel (user call).  The
         // veil takes the whole world away, and without the hull still in

@@ -104,10 +104,22 @@ const sfxTag = Object.keys(sfxInline).length
 
 const audioDir = resolve(publicAssetsDir, 'audio');
 const audioInline = {};
-if (existsSync(audioDir)) for (const file of readdirSync(audioDir)) {
-  if (/\.mp3$/i.test(file)) audioInline[file] = toDataUri(resolve(audioDir, file));
-}
-const audioTag = `<script>window.__omniAudioInline=${JSON.stringify(audioInline)};</script>`;
+// Keyed by path RELATIVE to public/assets/audio — the SFX banks sit at the
+// root ("world.mp3"), the adaptive score in song folders
+// ("score/omni/atmos.mp3"), exactly the paths the engine fetches.
+const walkAudio = (dir, rel = '') => {
+  for (const name of readdirSync(dir)) {
+    const abs = resolve(dir, name), key = rel ? `${rel}/${name}` : name;
+    if (statSync(abs).isDirectory()) walkAudio(abs, key);
+    else if (/\.mp3$/i.test(name)) audioInline[key] = toDataUri(abs);
+  }
+};
+if (existsSync(audioDir)) walkAudio(audioDir);
+// The score's song list and plan, so the standalone file needs no fetch.
+const scoreIndexPath = resolve(audioDir, 'score', 'index.json');
+const scoreIndex = existsSync(scoreIndexPath) ? readFileSync(scoreIndexPath, 'utf8') : 'null';
+const audioTag = `<script>window.__omniAudioInline=${JSON.stringify(audioInline)};`
+  + `window.__omniScoreIndex=${scoreIndex.replace(/</g, '\\u003c')};</script>`;
 
 const finalHtml = `<!DOCTYPE html>
 <html lang="en">

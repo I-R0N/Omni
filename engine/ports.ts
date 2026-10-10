@@ -42,7 +42,7 @@ import type { RendererDiagnostics } from './systems/RendererDiagnostics';
 
 // ── Clock ───────────────────────────────────────────────────────────────
 
-import type { MusicThreat, MusicLayerId } from './systems/AdaptiveMusic';
+import type { MusicThreat, MusicLayerId, MusicContextSnapshot } from './systems/AdaptiveMusic';
 
 export interface Clock {
   /** Monotonic milliseconds.  Differences are meaningful; the origin is not. */
@@ -168,6 +168,9 @@ export interface AudioPort {
   // adapter's.
   cueEncounter(kind: 'map' | 'portal' | 'boss'): void;
   setMusicThreat(threat: MusicThreat): void;
+  /** Where the player is + which enemy family is near: what the score's layer
+   *  variants are chosen from (AdaptiveMusic). */
+  setMusicContext(context: MusicContextSnapshot): void;
   setMusicArea(id: string, kind: 'hub' | 'arena'): void;
   musicBossDefeated(): void;
   // The score's DEBUG controls, reached from the debug panel (which talks to
@@ -175,6 +178,7 @@ export interface AudioPort {
   cycleMusicSong(): void;
   setMusicSong(mode: 'auto' | number): void;
   cycleMusicDebugIntensity(): void;
+  cycleMusicContextForce(): void;
   setListener(x: number, y: number): void;
   /** Arm the first-gesture unlock (a no-op where there is nothing to unlock). */
   armGestureUnlock(): void;
@@ -209,6 +213,15 @@ export interface AudioPort {
     readonly song: { readonly title: string };
     readonly songMode: 'auto' | number;
     readonly pendingSong: { readonly title: string } | null;
+    /** The song list from score/index.json (index order). */
+    readonly songList: readonly { readonly id: string; readonly title: string; readonly bpm: number }[];
+    /** Layer variants (AdaptiveMusic): context tags, the forced one, the variant
+     *  in each declaring slot, the dominant enemy family, decoded PCM bytes. */
+    readonly contexts: string[];
+    readonly forcedContext: string | null;
+    readonly variantMap: Record<string, string>;
+    readonly dominantFamily: string | null;
+    readonly decodedBytes: number;
   } | null;
 }
 

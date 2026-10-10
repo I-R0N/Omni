@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "about": "The adaptive score. Each song is a folder of six synchronised loop stems (atmos, pulse, groove, heavy, apex, boss) plus optional riser.mp3 / victory.mp3. `npm run music:import` adds or replaces songs here from a GarageBand export; see docs/MUSIC_PIPELINE.md.",
+  "loopLeadIn": 0.5,
+  "impact": "score/impact.mp3",
+  "songs": [
+    {
+      "id": "omni",
+      "title": "Omni",
+      "bpm": 128,
+      "bars": 32,
+      "folder": "score/omni/",
+      "phraseBars": 8,
+      "variants": {
+        "atmos": [
+          {
+            "name": "station",
+            "when": [
+              "station",
+              "portal"
+            ]
+          },
+          {
+            "name": "deep",
+            "when": [
+              "deep-space"
+            ]
+          },
+          {
+            "name": "treasure",
+            "when": [
+              "rare-item"
+            ]
+          },
+          {
+            "name": "danger",
+            "when": [
+              "danger"
+            ]
+          }
+        ]
+      },
+      "contextPriority": [
+        "danger",
+        "rare-item",
+        "station",
+        "portal",
+        "deep-space"
+      ]
+    },
+    {
+      "id": "event-horizon",
+      "title": "Event Horizon",
+      "bpm": 160,
+      "bars": 32,
+      "folder": "score/event-horizon/",
+      "phraseBars": 8
+    },
+    {
+      "id": "critical-mass",
+      "title": "Critical Mass",
+      "bpm": 150,
+      "bars": 32,
+      "folder": "score/critical-mass/",
+      "phraseBars": 8
+    }
+  ],
+  "plan": {
+    "hub": "omni",
+    "field": "omni",
+    "arena": "event-horizon",
+    "boss": "critical-mass"
+  }
+}
