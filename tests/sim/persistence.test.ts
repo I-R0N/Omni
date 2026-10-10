@@ -10,6 +10,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHeadlessEngine } from './harness';
+import { GameEngine } from '../../engine/GameEngine';
+import { createHeadlessPlatform } from '../../platform/headless';
+import { SNITCH_CONSTANTS as C, snitchHeadlineFrac } from '../../constants';
 import { MemoryStorage } from '../../engine/ports';
 import { clearArenaWave, stampArenaWave } from '../../engine/arenaWaves';
 import {
@@ -515,4 +518,112 @@ test('a wave opens with a ROSTER: every subtype it must kill, counted, summing t
   for (const r of ann!.roster!) {
     assert.equal(r.count, w.spawnList.filter((s) => s === r.subtype).length + (w.capstoneWave && r.count > 0 && !w.spawnList.includes(r.subtype) ? 1 : 0));
   }
+});
+
+// ── the snitch catch count (character state) ────────────────────────────
+
+/** Dock at the first station of `kind` on the hub (the state the dock flow
+ *  sets; the commerce methods read only these two fields). */
+function dockAt(g: Any, kind: string) {
+  const st = g.stations.find((s: Any) => s.stationKind === kind);
+  assert.ok(st, `the hub has a ${kind}`);
+  g.dockedStation = st;
+  g.dockedAtStation = true;
+}
+
+test('snitch count: round-trips through a relaunch, survives a new run, a new character zeroes it', () => {
+  const storage = new MemoryStorage();
+  const a = launch(storage);
+  a.g.snitchCatchCount = 7;
+  a.g.saveNow();
+  assert.equal(JSON.parse(storage.get(SAVE_KEY)!).character.snitchCatches, 7);
+  assert.equal(JSON.parse(storage.get(SAVE_KEY)!).version, SAVE_VERSION, 'the writer states the version it writes');
+  const b = launch(storage);
+  assert.equal(b.g.snitchCatchCount, 7, 'the relaunched character remembers its catches');
+  b.g.restartGame();                      // quit to menu = a new RUN
+  b.g.startGame();
+  assert.equal(b.g.snitchCatchCount, 7, 'a new run keeps the character');
+  b.g.resetCharacter();                   // replay entry / DBG Erase save
+  assert.equal(b.g.snitchCatchCount, 0, 'a new character starts at zero');
+});
+
+test('snitch count: a version-1 save migrates and arrives at 0; a bad field costs that field', () => {
+  const v1 = JSON.parse(serializeSave(emptySave()));
+  v1.version = 1;
+  delete v1.character.snitchCatches;
+  v1.character.credits = 55;
+  const p = parseSave(JSON.stringify(v1));
+  assert.equal(p.status, 'migrated');
+  assert.equal(p.save.version, SAVE_VERSION);
+  assert.equal(p.save.character.snitchCatches, 0);
+  assert.equal(p.save.character.credits, 55, 'the rest of the character is untouched');
+  const doc = JSON.parse(serializeSave(emptySave()));
+  doc.character.snitchCatches = 'many';
+  doc.character.credits = 9;
+  const v = validateSave(doc);
+  assert.equal(v.character.snitchCatches, 0);
+  assert.equal(v.character.credits, 9);
+  doc.character.snitchCatches = -4;
+  assert.equal(validateSave(doc).character.snitchCatches, 0);
+  // A launch over a version-1 file in storage reads it without parking it.
+  const storage = new MemoryStorage();
+  storage.set(SAVE_KEY, JSON.stringify({ ...v1, character: { ...v1.character, credits: 321 } }));
+  const { g } = launch(storage);
+  assert.equal(g.credits, 321);
+  assert.equal(g.snitchCatchCount, 0);
+  assert.equal(storage.get(SAVE_BACKUP_KEY), null, 'a migrated save is not "unreadable"');
+});
+
+test('snitch ramp: catch count N spawns the snitch at the speed the formula predicts', () => {
+  assert.equal(snitchHeadlineFrac(0), C.WAVE_SPEED_STEP);
+  assert.equal(snitchHeadlineFrac(500), C.WAVE_SPEED_MAX, 'the ramp saturates at its cap');
+  for (const n of [0, 3, 10]) {
+    const { g } = launch(new MemoryStorage());
+    g.snitchCatchCount = n;
+    g.transitionToMap('arena_pocket');          // a wave map: the snitch spawns with the first wave
+    for (let i = 0; i < 600 && !g.snitch; i++) g.stepSim(1);
+    assert.ok(g.snitch, `catch ${n}: a snitch spawned`);
+    const expect = Math.min(C.WAVE_SPEED_MAX, C.WAVE_SPEED_STEP * (n + 1)) * C.COAST_RATIO;
+    assert.ok(Math.abs(g.snitchSpeedMult - expect) < 1e-6, `catch ${n}: ${g.snitchSpeedMult} vs ${expect}`);
+  }
+});
+
+test('snitch reset: TRADE HUB only, needs credits and a count; clears it, charges modulePrice, plays poi.purchase', () => {
+  const a = launch(new MemoryStorage());
+  const g = a.g;
+  g.snitchCatchCount = 12;
+  g.credits = C.RESET_COST * 2;
+  assert.equal(g.resetSnitchCatches(), false, 'refused undocked');
+  dockAt(g, 'shipwright');
+  assert.equal(g.resetSnitchCatches(), false, 'refused at a station that does not stock it');
+  dockAt(g, 'tradehub');
+  g.credits = C.RESET_COST - 1;
+  assert.equal(g.resetSnitchCatches(), false, 'refused when unaffordable');
+  assert.equal(g.snitchCatchCount, 12);
+  g.credits = C.RESET_COST + 77;
+  const offer = g.outfittingSnapshot().snitchReset;
+  assert.deepEqual(offer, { cost: g.modulePrice(C.RESET_COST), count: 12, available: true, affordable: true });
+  assert.equal(g.resetSnitchCatches(), true);
+  assert.equal(g.snitchCatchCount, 0);
+  assert.equal(g.credits, 77, 'charged through modulePrice');
+  assert.ok(a.platform.audio.played.includes('poi.purchase'), 'the purchase chime played');
+  assert.equal(g.resetSnitchCatches(), false, 'nothing to clear at zero');
+  assert.equal(g.outfittingSnapshot().snitchReset, undefined, 'and no offer is made');
+  // The cleared count is what is saved.
+  g.saveNow();
+  assert.equal(JSON.parse(g.storage.get(SAVE_KEY)!).character.snitchCatches, 0);
+});
+
+test('snitch status: the pause menu\'s stats carry the count and the speed it buys', () => {
+  let last: Any = null;
+  const engine = new GameEngine(createHeadlessPlatform({ storage: new MemoryStorage() }), (st: Any) => { last = st; }, 3) as Any;
+  engine.startGame();
+  engine.snitchCatchCount = 7;
+  engine.pauseGame();
+  engine.isRunning = true;                       // one frame of the real loop, by hand: stats are pushed there
+  engine.loop(17);
+  engine.isRunning = false;
+  assert.ok(last?.playerStats, 'a paused frame publishes playerStats');
+  assert.equal(last.playerStats.snitchCatches, 7);
+  assert.ok(Math.abs(last.playerStats.snitchSpeedFrac - 0.4) < 1e-9);
 });

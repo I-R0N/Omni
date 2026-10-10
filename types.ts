@@ -1912,6 +1912,10 @@ export interface EngineStats {
     /** Total SHIP weight (hull + every ACTIVE module) — a ship attribute that
      *  drags acceleration AND scales the player's collision mass. */
     shipWeight: number;
+    /** Snitches this character has caught, and the snitch's resulting headline
+     *  (dart) speed as a fraction of player cruise — the ratchet made legible. */
+    snitchCatches: number;
+    snitchSpeedFrac: number;
     /** Rounded world position, for the pause menu's Condition readout. */
     position: { x: number; y: number };
   };
@@ -1954,6 +1958,9 @@ export interface EngineStats {
     maxSlots: number;
     shipSlotOffer?: { cost: number; available: boolean; affordable: boolean };
     weaponSlotOffer?: { cost: number; available: boolean; affordable: boolean };
+    /** The TRADE HUB's snitch-count reset: absent at zero catches (nothing to
+     *  clear); `available` = the docked station stocks it. */
+    snitchReset?: { cost: number; count: number; available: boolean; affordable: boolean };
     statLines: {
       id: string;
       label: string;
@@ -1988,6 +1995,8 @@ export interface EngineStats {
     progress: boolean;
     credits: number;
     modules: number;
+    /** Snitches the saved character has caught (drives the snitch's speed ramp). */
+    snitchCatches: number;
     wreck: { mapName: string; modules: number } | null;
     /** Waves held per arena: where, which wave (0-based), kills already scored, seconds away. */
     arenaWaves: { mapName: string; wave: number; progress: number; awaySec: number }[];

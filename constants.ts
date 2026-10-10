@@ -7454,8 +7454,17 @@ export const SNITCH_CONSTANTS = {
   // it to keep it slow.  Coast drifts at COAST_RATIO of the dart speed,
   // preserving the burst/coast catch window.  The DBG SNITCH_SPEED_CYCLE
   // multiplier scales the whole thing on top.
+  //
+  // The catch count is CHARACTER state (saved), so this ramp is permanent: at
+  // WAVE_SPEED_MAX / WAVE_SPEED_STEP = 24 catches the snitch is at its cap for
+  // good.  The only way down is the TRADE HUB's RESET_COST service.
   WAVE_SPEED_STEP: 0.05,
   WAVE_SPEED_MAX: 1.2,
+  /** Catalog price of resetting the catch count to 0 (TRADE HUB only; routed
+   *  through `modulePrice`).  "Very expensive and rare" (user call): above the
+   *  top hex-slot unlock (MODULE_SLOT_UNLOCK.PRICES, 30k..120k).  PROVISIONAL
+   *  pending a play-test. */
+  RESET_COST: 150000,
   COAST_RATIO: 0.30,
   DART_RATIO: 1.0,
   SPEED_EASE_DART: 6.5,  // 1/s ease toward the dart speed — near-instant burst
@@ -7488,6 +7497,13 @@ export const SNITCH_CONSTANTS = {
   SPARKLE_COLORS: ['#fde047', '#fbbf24', '#fff7cc', '#f59e0b'] as string[],
   CATCH_BURST_COUNT: 40, // gold particle burst on catch
 };
+
+/** The snitch's headline (dart) speed as a fraction of player cruise after
+ *  `catchCount` catches — THE one definition the AI (`roamers/snitch.ts`), the
+ *  pause menu's Condition note and the tests share. */
+export function snitchHeadlineFrac(catchCount: number): number {
+  return Math.min(SNITCH_CONSTANTS.WAVE_SPEED_MAX, SNITCH_CONSTANTS.WAVE_SPEED_STEP * (catchCount + 1));
+}
 
 // DBG snitch-speed multiplier on both AI speed states (coast + dart).
 // Cycled live from the DBG panel (Enemies & Bosses ▸ Snitch ▸ "Snitch spd")
@@ -8034,16 +8050,17 @@ export const STATION_CONSTANTS = {
 // service flags.
 export type StationKind = 'home' | 'shipwright' | 'armory' | 'tradehub';
 export interface StationServices {
+  snitchReset: boolean; // resets the snitch catch count (SNITCH_CONSTANTS.RESET_COST) — TRADE HUB only
   drydock: boolean;    // move/install modules (inventory ↔ hex slots) — true everywhere today
   repair: boolean;     // pay-per-HP hull repair (part of drydock work)
   shipShop: boolean;   // sells ship-group modules
   weaponShop: boolean; // sells weapon-group modules
 }
 export const STATION_VARIANTS: Record<StationKind, { name: string; color: string; services: StationServices }> = {
-  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true, repair: true, shipShop: false, weaponShop: false } },
-  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: true, repair: true, shipShop: true,  weaponShop: false } },
-  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true } },
-  tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true } },
+  home:       { name: 'HOME STATION', color: '#38bdf8', services: { drydock: true, repair: true, shipShop: false, weaponShop: false, snitchReset: false } },
+  shipwright: { name: 'SHIPWRIGHT',   color: '#34d399', services: { drydock: true, repair: true, shipShop: true,  weaponShop: false, snitchReset: false } },
+  armory:     { name: 'ARMORY',       color: '#c084fc', services: { drydock: true, repair: true, shipShop: false, weaponShop: true, snitchReset: false } },
+  tradehub:   { name: 'TRADE HUB',    color: '#fbbf24', services: { drydock: true, repair: true, shipShop: true,  weaponShop: true, snitchReset: true } },
 };
 /** THE HUB LAYOUT — where every station and rift sits on the 12k Overworld.
  *
