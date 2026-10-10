@@ -1067,7 +1067,11 @@ impulse solver.
 - **Moment of inertia** per entity (from size/mass; a disc approximation is
   fine) beside `mass`, with `Infinity` for statics mirroring the mass axis.
 - **Off-centre impacts apply torque**: `resolveCollision` /
-  `resolveShardPair` compute the contact point already (MTV); the impulse
+  `resolveShardPair` compute the contact point already (MTV) [CORRECTION,
+  2026-10-10: they do not — `resolveShardPair` treats shards as circles and
+  takes only a centre-delta normal, and the SAT path yields only a minimum
+  translation axis; a contact point must be derived — see ENGINE_CORE_PLAN
+  `S8`]; the impulse
   they apply should also change `rotationSpeed` by `r × J / I` on both
   bodies, and the contact-point VELOCITY (linear + ω×r) should feed the
   restitution instead of the centre velocity.

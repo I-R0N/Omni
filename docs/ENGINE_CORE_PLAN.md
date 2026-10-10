@@ -58,6 +58,10 @@ from a correctly branched session.  That is not hypothetical: it is how
 on the integration branch, is tested there as a whole, and rolls into `main`
 once.
 
+**The follow-up block `S7`–`S11`** (D40) follows this rule unchanged: every session
+branches from, and opens both PRs against, the phase branch.  A sub-integration
+branch was weighed and rejected (D40).
+
 ---
 
 ## 1. The goal, sharpened
@@ -653,12 +657,10 @@ card, enemy point budgets scaled by map size (`mapSizeScale`, larger maps carry
 more at the same level), calm-bubble edge arrows removed, and the level curve
 shifted +2 (`[level] shift` in `data/enemy-difficulty.toml`; the old level 4
 challenge is now called level 2, so every map keeps its label and gets harder).
-`docs/BALANCE_BASELINE.md` is being regenerated against this curve.  Deferred to
-a follow-up after this session is ready to merge: enemy AI (line of sight,
-getting stuck on tiles and shards, packs; and the TURRET (sentry) may MOVE, slowly — `maxSpeed` 0 and the AISystem no-move branch go, it
-crawls toward the player, tank-like, slower still than the Bulwark/Tank class, keeping its rotate-to-aim and homing
-missiles) and new map designs (tile-dense
-maze-like maps; wide-open sparse maps with dense star fields and rivals).
+`docs/BALANCE_BASELINE.md` was regenerated against this curve (1 seed).  What
+S3's play-testing deferred was taken over by the follow-up block, `S7`–`S11`
+(§4, D40 / D41): enemy AI, the mobile Turret and packs are `S9`; trails on
+enemies and rivals are `S10`; the new map designs are `S11`.
 
 **Invariant for the invisible PR.**  **Not one tuned number changes.**
 Extraction is a move, not an edit.  Rebalancing happens in the gameplay PR
@@ -785,6 +787,426 @@ here; stated so the session knows what to ask.
 
 **Must not touch.**  The sim's determinism contract from `S1`.  The ports
 from `S2`.
+
+---
+
+### The follow-up block — S7 to S11  (opened 2026-10-10, D40 / D41)
+
+Five sessions that came out of the user's play-testing of `S3`'s PR #115.  They
+branch from and are merged into the PHASE BRANCH, **`claude/steam-game-publishing-xhnui2`**,
+like every other session (D37; §5, "The follow-up block's sessions").  The handles continue the S-numbering and the block runs
+BEFORE `S4` (§6).  Each brief below is the PM's reading of what the code does
+today, taken from a survey on 2026-10-10 — **the session re-checks it before
+relying on it**, because a survey is a claim and the code is the fact.
+
+| Handle | Name | Touches the sim? | Wave (§6) | Size |
+|---|---|---|---|---|
+| `S7` | Menus and navigation | NO — UI and input only | 1 | medium |
+| `S9` | Enemy AI | YES — `AISystem`, spawn, `enemies.toml` | 1 | large |
+| `S8` | Rotational dynamics | YES — `PhysicsSystem`, the hottest code | 2 | large, the riskiest |
+| `S10` | Enemy and rival trails | NO — render only, but perf-gated | 2 | small to medium |
+| `S11` | Map designs | YES — new maps and a layout seam | 3 | medium to large |
+
+**Rules every block session shares** (the per-session briefs add to these,
+never relax them):
+
+1. **Branch and base.**  Branch from, and open both PRs against,
+   `claude/steam-game-publishing-xhnui2` — never `main` (D37).  The exact
+   commands are in §5 and every prompt carries them verbatim.
+2. **Two PRs, invisible first** (§0).  The invisible PR keeps behaviour
+   byte-identical and says so in its description; the gameplay PR is small and is
+   the one the user judges by playing the preview link.
+3. **A sim-changing session (`S8`, `S9`, `S11`) owes three things.**  (a)
+   `npm run test:sim` green, which includes the guards: no platform globals, no
+   `Math.sin` / `Math.cos` / `Math.pow` / `**` in the sim (use `dmath`), and
+   every random draw on a named stream.  (b) Determinism: the same seed gives
+   the same hashes, and Node and Chromium still agree bit for bit
+   (`tests/headless.spec.ts`).  The only pinned goldens are
+   `tests/sim/fixtures/dmath.bits.json` and `tables.golden.json`; the replay
+   and headless suites assert equality and that a control moves the hash, so a
+   change to shard or enemy motion re-captures nothing — but a deliberate change
+   to a TABLE re-captures its golden in the same commit.  (c) The balance
+   harness: run `node scripts/balance.mjs --quick` before and after and put the
+   delta in the gameplay PR, because enemy behaviour and shard physics both move
+   `docs/BALANCE_BASELINE.md`.
+4. **Every new behaviour ships behind an A/B.**  A DBG cycle whose index 0 is
+   what ships and whose other end is the legacy behaviour, so the first click is
+   always the comparison (the house idiom, CLAUDE.md §8).  Which end ships is
+   the USER's call, made in the session from numbers or from playing.
+5. **Debug rows are identity.**  `tests/debugmenu.spec.ts` pins the row-label
+   multiset, so adding a row is a deliberate edit to that list.  It is the one
+   file every block session edits, therefore the main textual conflict between
+   sessions: merge the phase branch into yours immediately before opening the
+   PR, and rebase nothing.
+6. **The user decides gameplay inside the session.**  Each brief lists OPEN
+   DECISIONS.  Put them to the user with the consequence of each option before
+   building; a session that finds itself guessing has found a missing question.
+7. **Amend the plan as §0 says**: your decisions in §7 (next free `D` number),
+   your own §4 section freely, other sessions' sections never — flag to §8.
+
+---
+
+### S7 — "Menus and navigation"  (UI and input; no sim)
+
+**Near-term payoff.**  The game becomes playable end to end with a gamepad only
+or a keyboard only, and the menus look like they belong to a shipped game.
+
+**What the user reported.**  "The controller method is very difficult because
+there is no indication of what is being selected, no way of scrolling through
+menus, etc.  Similar could be said for the keyboard controls."  And: make the
+menus higher quality.
+
+**What the code does today** (survey, to be re-checked):
+- `components/menuNav.ts` drives DOM focus by geometry over the live
+  `[data-overlay]` panel, fed ONLY by the D-pad.  It does not wrap, takes no
+  stick, scrolls only through `scrollIntoView({block:'nearest'})` on the newly
+  focused control, and the first press silently adopts the top-left control.
+- **There is no focus indicator on the overlays.**  `UIOverlay.tsx` has exactly
+  one focus style (the control-scheme `<select>`); `DEBUG_BTN` in
+  `uiClasses.ts` has a ring, the rest of the menus have none.
+- **The keyboard has no menu navigation at all** — only the browser's Tab order
+  and native button activation.  Arrow keys do nothing in a menu, and they are
+  FLIGHT keys in live play (`InputSystem`), so any keyboard menu nav must be
+  gated to overlay-up states and must never steal a flight key.
+- CONFIRM clicks the focused element; BACK is `GameEngine.menuBack()`, inert on
+  the main menu, death and stage-clear by design (they are decisions, not
+  dismissals).  Escape follows the same rule.
+- The control-scheme picker is a native `<select>` (the OS picker, which the
+  D-pad cannot drive).  Outfitting works by select-then-button; drag is
+  pointer-only and a hex-to-hex move has no non-drag route.  The station tabs
+  (Shop / Outfit / Ship) have no shoulder-button or arrow-key switch.
+- Tests: four pad tests in `tests/input.spec.ts` ("menu navigation — the pad
+  reaches every control") and the debug-panel pad tests.  Nothing covers
+  keyboard menus, focus visibility, scrolling, the scheme picker with a pad, or
+  station flows with a pad.
+
+**Engine payload.**  One navigation model, many sources: keyboard, D-pad, left
+stick, and (decision below) shoulder / trigger / right-stick actions all emit the
+SAME step queue `menuNav` already drains, so no overlay branches on device — the
+principle `InputSystem` already follows for flight.  A visible, device-aware
+focus indicator.  Explicit scrolling for long panels.  A non-pointer route for
+every pointer-only action.  Then the quality pass.
+
+**OPEN DECISIONS — for the user, inside S7.**
+- **D-S7-a — the focus indicator.**  Its look (ring, glow, bracket), and WHEN it
+  shows: always, or only after the last input was pad or keyboard and hidden
+  again on a pointer (the `:focus-visible` idea made input-mode aware).
+- **D-S7-b — which inputs navigate.**  D-pad only today.  Add the left stick?
+  Shoulders for the station tabs?  Triggers or the right stick for page-scroll?
+  Consequence: each is another thing the adaptive-trigger and rumble work must
+  leave alone while a menu is up.
+- **D-S7-c — the keyboard.**  Arrows only, or WASD as well (they already fly the
+  ship, so they are muscle memory)?  Enter / Space to confirm; Escape / Backspace
+  for back; what switches tabs without colliding with E (undock) and Q (scan)?
+- **D-S7-d — focus memory and wrap.**  Wrap at the ends or stop?  Land on a
+  sensible default (START, Resume) instead of the top-left control?  Remember
+  the last focus per screen?
+- **D-S7-e — BACK on the decision screens.**  Keep it inert on main menu, death
+  and stage-clear, or give it a defined meaning on each?  Sub-panels (help,
+  debug) could close first either way.
+- **D-S7-f — the scheme picker.**  Replace the native `<select>` with an in-page
+  list the pad can drive, or keep it native.
+- **D-S7-g — outfitting without a pointer.**  A pick-up-and-place mode for
+  hex-to-hex and inventory-to-hex moves; confirm prompts for sell and scrap.
+- **D-S7-h — how far "higher quality" goes.**  Navigation, focus, consistency
+  and sound cues only; or a visual restyle of panels, type and transitions as
+  well.  This is the scope risk of the session — decide it before building.
+
+**PR shape.**  PR 1 (invisible): the unified step queue and a reachability test
+that WALKS every overlay with each input source and asserts that every control
+is reachable, focus is always on a visible element, and a long panel scrolls to
+show it — behaviour unchanged for the D-pad.  PR 2 (the user judges, on a real
+pad and keyboard — the phone preview cannot show this): the indicator, the new
+sources, the dead-end fixes, the quality pass.
+
+**Acceptance.**  With a pad only, and separately a keyboard only, a player can
+start, pause and resume, dock and undock, buy and sell, install / uninstall /
+swap a module, change the control scheme and audio, open and close the debug
+panel, respawn from death and dismiss stage-clear — always seeing what is
+selected.  The reachability test is green on every overlay.
+
+**Must not touch.**  The sim.  How the ship flies under any control scheme.  The
+debug panel's row labels (pinned).  `S4`'s safe-area and haptics work belongs to
+`S4`; flag it in §8 rather than doing it.
+
+---
+
+### S9 — "Enemy AI"  (sim: perception, unsticking, packs, the mobile Turret)
+
+**Near-term payoff.**  Fights stop feeling like enemies with a radar and a
+stuck-in-the-wall problem.
+
+**What the user reported.**  "Enemies struggle to find the player or get stuck
+easily in tiles or shards, they always know where the player is instead of
+needing line of sight or having any system like that, enemies need to travel in
+packs."  And: the sentry / Turret should be allowed to move, slowly (more so if
+tank-like).
+
+**What the code does today** (survey, to be re-checked):
+- **Omniscience.**  `AISystem.update` hands every strategy the player entity;
+  `updateBasicDogfighter` copies the player's position into a per-enemy lagged
+  target every reaction interval.  There is no perception gate of any kind;
+  `visionRange` is written and never read.
+- **Pathing** is the baked `FlowFieldGrid` pursuit grid plus steering.
+- **"Stuck" handling** is a timer that, if the enemy barely moved in the check
+  interval while chasing, adds a RANDOM impulse (`AISystem`, the STUCK DETECTION
+  block).  That is the symptom the user describes, not a fix for it.
+- **Packs** are one thing: `PACK_SYNC` snaps nearby rammers' idle timers so they
+  charge together.  Gnats flock by boids.  Nothing groups shooters or coordinates
+  roles.
+- **The Turret** is `maxSpeed: 0`, which routes it through `updateSkirmisher`'s
+  no-move branch; it rotates to aim and lobs slow homing missiles.
+- `docs/PARKING_LOT.md` has two relevant entries: "Enemy AI as a difficulty axis"
+  (make smarter AI a per-level dial read at spawn, the same strategies with
+  parameters — reaction lag, aim error, flank bias — not a second AI) and "Turret
+  v2" (a TILE-MOUNTED, armoured turret on designed maps).  The user's new ask is a
+  free-roaming slow Turret, which is a DIFFERENT archetype from Turret v2 and must
+  be reconciled with it, not silently supersede it.
+
+**Engine payload.**  A perception seam: target acquisition behind one function
+that returns a position or nothing, defaulting to today's omniscience.  Line of
+sight by a bounded raycast over the static grid, on a `PerfController` task
+cadence (CLAUDE.md §8: skippable passes route through it).  A real unstick
+behaviour in place of the random nudge.  Pack roles.  `maxSpeed > 0` for the
+Turret in `data/enemies.toml`.
+
+**OPEN DECISIONS — for the user, inside S9.**
+- **D-S9-a — the perception model.**  Line of sight only, or sight plus a hearing
+  / proximity radius; whether enemies REMEMBER the last seen position and search;
+  what an enemy does while it has no target (flow-wander, patrol, hold).
+  **The hazard to design around:** a wave ends only when every counted enemy is
+  dead, so an enemy that never finds the player stalls the wave.  Decide the
+  guarantee — an alert timer, a search that converges, or a reveal.
+- **D-S9-b — unsticking.**  Steer along the surface, back off and re-path, or
+  push through: and whether a movable SHARD is an obstacle to avoid or a thing to
+  shove.  Measure first (below) so the target is a number.
+- **D-S9-c — packs.**  Which archetypes pack; roles (leaders, flankers, shield
+  carriers); cohesion radius; whether one member's sight alerts the pack; whether
+  waves spawn in groups.  Interacts with `PACK_SYNC` and the swarm boids.
+- **D-S9-d — the mobile Turret.**  Its speed against the Bulwark and the Tank
+  ("slower still, tank-like" is the user's direction, the number is open);
+  whether it stops to fire; what happens to `ENEMY_RATING` for the Turret (a
+  mobile one is worth more points); the Bastion's phase-3 Turret escort; and its
+  relation to the parked Turret v2.
+- **D-S9-e — the per-level AI dials** from the parked entry: which, if any, ride
+  the level curve in this session.
+- **D-S9-f — rivals.**  `roamers/rivals.ts` has its own movement.  Do rivals get
+  the same perception and unsticking, or stay as they are?
+
+**PR shape.**  PR 1 (invisible): the perception seam with omniscience as the only
+implementation, plus a STUCK-TIME METRIC in the balance harness — enemy-seconds
+spent pinned — measured on today's build.  That number is what turns "gets stuck
+easily" into an acceptance threshold the user can set.  PR 2 (the user judges):
+perception, unsticking, packs and the Turret, each behind its own A/B; this one
+may split into several small PRs if the user prefers to judge them one at a time.
+
+**Acceptance.**  The stuck-time metric falls by the threshold the user sets from
+the baseline.  A hidden player is always found within a bounded time (a test,
+not a hope).  Determinism and perf hold: the perception pass is cadenced, the
+A/B off position reproduces today's hashes.
+
+**Must not touch.**  Weapon and damage numbers; the boss phase tables apart from
+the Turret escort; the save format.  Trails are `S10`, not this session.
+
+---
+
+### S8 — "Rotational dynamics"  (sim: inertia and torque for shards)
+
+**Near-term payoff.**  Rocks tumble because of how they were hit, not because a
+dice roll said so.
+
+**What the user asked.**  "Use inertia and rotational dynamics for shards
+instead of just basic points / particles with random rotation directions."
+
+**What the code does today** (survey, partly verified by the PM):
+- **Rotation is purely kinematic.**  `GameEntity` has `rotation` and
+  `rotationSpeed`; there is no inertia, torque or angular-velocity field.
+  Initial spin is a uniform random draw at about fifteen sites across
+  `ShardSystem`, `DropSystem`, `MapClasses` and `PhysicsSystem` (on the
+  `sim.shards`, `sim.drops`, `sim.terrain`, `sim.combat` and `sim.engine`
+  streams).  Nebula shards alone get a signed spin from the wake.
+- **TWO integrators.**  Entities with a `linearDamping` field integrate spin in
+  `PhysicsSystem`; everything else is integrated in `GameEngine`'s flow step.  A
+  single integrator is a precondition.
+- **The solver has no contact point.**  The shard-shard fast path
+  (`resolveShardPair`) treats shards as CIRCLES (radius 0.42 of size, 0.25 for
+  metal) and takes its normal from the centre delta.  The SAT path
+  (`checkAndResolveCollision` into `resolveCollision`) yields only a minimum
+  translation axis; polygon vertices are reachable through `fillVertices`.
+  **`docs/PARKING_LOT.md` says the solver "computes the contact point already" —
+  it does not; that entry is corrected by this plan.**
+- **The impulse is mass-bias-compressed** (`MASS_BIAS_EXPONENT` 0.5 on inverse
+  mass), deliberately not physical, and the crash-energy model reads the same
+  impulse.  An angular term needs a matching treatment or energy and momentum
+  stop agreeing with the rest of the model.
+- **Statics** (`mass === Infinity`) never rotate; the shard-into-tile crash
+  branch has its own ad hoc speed loss before the shared tail.
+- **Geometry exists, inertia does not.**  `fracture.ts` has polygon area,
+  centroid and point-in-polygon; there is no second moment anywhere.  Shard
+  outlines are local, unrotated and centred (`recentreFracturedBody`).  The only
+  existing inertia is a point-mass estimate in the metal-composite merge.
+- **Cost and stability.**  The pair solver is the hottest loop in the engine;
+  shard pairs are frame-skipped (`SHARD_PAIR_CONSTANTS.FRAME_INTERVAL`); the sleep
+  gate reads spin (`SHARD_SLEEP_CONSTANTS.SPIN_EPSILON`).  Torque arriving in
+  bursts on skipped frames, and resting piles that never go to sleep, are the
+  classic failures.
+
+**Engine payload.**  A moment of inertia per mobile body, derived from the
+polygon and `IMPACT_DENSITY` (the same derivation mass already uses), torque from
+an off-centre contact, one angular integrator, and conservation across a break:
+a detached grain inherits its parent's angular velocity plus its own lever arm,
+so spin EMERGES from fracture instead of being rolled.
+
+**OPEN DECISIONS — for the user, inside S8.**
+- **D-S8-a — which bodies.**  Shards only, or drops too; and whether a shard that
+  hits an enemy or the player spins the HULL (hull facing is steered by AI and
+  input today, so the default is no).
+- **D-S8-b — the contact model.**  Keep the circle path and take the contact at
+  `position + normal x radius` (cheap, inconsistent with polygons), or derive a
+  real polygon contact (consistent, more cost in the hot loop).  Set a perf budget
+  before choosing.
+- **D-S8-c — the inertia model.**  Exact polygon second moment, or a disc
+  approximation (the parking lot calls it fine).
+- **D-S8-d — compressed or physical.**  Extend the mass-bias compression to the
+  angular terms, or make the angular response physical.  This is a FEEL call and
+  the one most likely to need a second pass.
+- **D-S8-e — random spin.**  Remove it entirely (spin only from fracture and
+  contact) or keep a small seed so a still field is not dead.  Removing draws
+  shifts every later draw on those streams, so every downstream sequence moves.
+- **D-S8-f — the nebula wake.**  Re-derive the swirl as drag torque and retire
+  the "Neb spin" handedness cycle, or keep the signed kick for gas.
+- **D-S8-g — spin-to-translation coupling** (a spinning rock grinding sideways
+  along a wall): include it or leave it as polish.
+- **D-S8-h — resting behaviour.**  The angular damping and sleep thresholds that
+  stop piles from jittering.
+
+**PR shape.**  PR 1 (invisible): one angular integrator and an inertia field that
+is computed and carried but contributes no torque, with initial spin unchanged —
+hashes identical, which is the proof.  PR 2 (the user judges): torque,
+conservation at a break, the spin policy, behind a DBG A/B (`legacy` spin as the
+other end).
+
+**Acceptance.**  An off-centre glancing impact spins a shard and a centred one
+does not; angular momentum is conserved across a break and across a glancing
+two-body collision to a stated tolerance (tests, not a screenshot); a heaped pile
+reaches sleep within a stated time; no energy is gained; Node and Chromium still
+agree; `perf/simbench.mjs` and the shard-heavy scenes are within the budget set
+in D-S8-b; the balance baseline delta is reported.
+
+**Must not touch.**  Static tile behaviour.  The crash-energy calibration
+(`CRASH_ENERGY_COUPLING`, `IMPACT_ENERGY_PER_DAMAGE`) unless the user decides so.
+How the player hull handles.
+
+---
+
+### S10 — "Enemy and rival trails"  (render only; perf-gated)
+
+**Near-term payoff.**  Enemy and rival motion reads at a glance, and the game
+keeps its frame rate.
+
+**What the user asked.**  Give enemies and rivals trails.  Rival trails are
+coloured by aggro status; enemy trails are red; enemies get different trail
+styles by type.  It "definitely needs to be A/B tested for performance".  Use the
+existing systems and trail patterns and styles.  Use VELOCITY-based trails.
+
+**What the code does today** (survey, to be re-checked):
+- `TrailSystem` ticks `TrailPoint` arrays and emits projectile trails
+  (0.25 s); `GameEntity.trail` carries points.  The player's trail is emitted
+  from `PLAYER_TRAIL_CONSTANTS` and drawn by `render/effects.ts` in the
+  DBG-selected `TrailShape` (circle, square, triangle, line, path, dots, none),
+  batched per alpha step with no per-dot allocation.  A seeker draws a dot trail
+  from a fixed ring (`EnergyState`); the kinetic beam draws a line trail.
+- The player's trail is driven by THROTTLE.  Enemies have no throttle input, so
+  "velocity-based" is the right choice and not a preference: emission, length and
+  alpha follow `|velocity|`.
+- Colour sources already exist: the enemy red of the `INDICATORS` legend, and for
+  rivals `RIVAL_CONSTANTS.COLORS` by disposition (hostile, ally, neutral) with
+  `GameEntity.huntingPlayer` / `provoked` carrying the aggro state.
+- `docs/PARKING_LOT.md` has "Trail Gradient Caching".
+- **A trail is presentation.**  The render files may not import `sim`; trail state
+  must never enter `hashSimState`; and any per-enemy state is POOLED (CLAUDE.md
+  §8: a new per-frame bucket is pooled or it is a GC regression).
+
+**OPEN DECISIONS — for the user, inside S10.**
+- **D-S10-a — coverage.**  Every enemy, only those on screen or near, rivals
+  only; and the gnat flocks (`diesOnContact`), which are the cost risk, in or out.
+- **D-S10-b — the style table.**  Which existing shape reads for which archetype
+  (the roster is in `data/enemies.toml`, the shapes are the `TrailShape` set);
+  bosses, bubbles, dragons and the snitch are enemies too, so say what each wears.
+  The mobile Turret from `S9` needs a row.
+- **D-S10-c — length, fade and speed threshold** (how fast before a trail shows).
+- **D-S10-d — rival colour rules:** how a neutral rival changes when provoked, and
+  whether an allied rival's trail is distinguishable from an enemy's at a glance.
+- **D-S10-e — the shipped default**, chosen from the A/B numbers: off, rivals
+  only, or all.
+
+**PR shape.**  PR 1 (invisible): the velocity-based emitter, the renderer and the
+DBG cycle, DEFAULT OFF, with the perf evidence — nothing is drawn by default.  PR 2
+(the user judges by playing): the style table and the default.
+
+**Acceptance.**  A perf scene with dozens of enemies (`perf/scenes.mjs`) shows
+frame time and heap churn with trails off against on, in the PR description, and
+the default is chosen from those numbers.  A test proves the sim hash is identical
+with trails on and off.  Nothing allocates per frame.
+
+**Must not touch.**  The sim.  The player's own trail.  Projectile and beam trails.
+
+---
+
+### S11 — "Map designs"  (sim: new arenas and a layout seam)
+
+**Near-term payoff.**  Arenas stop being interchangeable test terrain.
+
+**What the user asked.**  "Some maps could use a large amount of tiles with
+limited flight paths (maze-like, but not necessarily labyrinth style); some should
+be wide open and have large groups of rivals and enemies spread far apart, lower
+numbers of tiles and a dense background star field."
+
+**What the code does today** (survey, to be re-checked):
+- Five full-game maps and the showcases are classes in `engine/maps/MapClasses.ts`,
+  populated through `MAP_POPULATION` (`data/map-population.toml`); each has a
+  `MAP_DESCRIPTORS` row with an optional `level`, a `MAP_SPANS` entry and a
+  `STAR_DENSITY_BY_MAP` row.  Terrain draws on the `sim.terrain` stream.
+- Waves spawn on a ring around the player's screen; rivals arrive on a SCORE
+  cadence capped at `MAX_RIVALS`.  Neither makes "large groups spread far apart".
+- The hub's layout is pinned by `tests/sim/hublayout.test.ts`.
+- **Overlap with `S6`:** `S6` already names LABYRINTH, DENSE and WAVE ARENAS as
+  arena families and owns the map graph and persistence.  `S11` is the LAYOUT half:
+  it builds the layouts and the seam that makes them data, and `S6` later wires
+  edges and persistence between them.  See §8.
+
+**Engine payload.**  A layout seam — an arena's terrain described by data or a
+seeded generator with parameters (path width, tile density, cluster shape) — with
+the existing maps unchanged behind it.  Two or three new arenas on that seam.  A
+spawn mode for pre-placed, spread-out groups.
+
+**OPEN DECISIONS — for the user, inside S11.**
+- **D-S11-a — the families and their count.**  The user named two shapes; how
+  many maps of each, and their names and levels.
+- **D-S11-b — hand-authored or generated.**  Layouts as data, or a seeded
+  generator with knobs.  A generator must draw from `sim.terrain` so a seed still
+  reproduces the map.
+- **D-S11-c — the spread-out spawn model.**  Pre-placed groups at map load,
+  streamed groups by region, or the existing ring with a larger radius; how the
+  rival cap and cadence change for the open maps; and the interaction with "a wave
+  ends when the counted enemies are dead" when enemies are far apart.
+- **D-S11-d — star density and size** per map, within the existing per-map ranges.
+- **D-S11-e — difficulty:** levels, and how `mapSizeScale` (provisional) treats the
+  new spans.
+- **D-S11-f — hub placement** of the new rifts, which moves the pinned hub layout.
+- **D-S11-g — the balance harness map list**, so the new arenas are measured.
+
+**PR shape.**  PR 1 (invisible): the layout seam with every existing map
+reproducing its current hashes.  PR 2 (the user judges, by flying them): the new
+arenas and their hub rifts.
+
+**Acceptance.**  Existing maps are hash-identical after PR 1.  Each new arena is
+reachable from the hub, completes a wave ladder in the balance harness without a
+stall, and plays as its family's shape.  The maze arenas are traversable by the
+`S9` enemies.
+
+**Must not touch.**  Graph edges, per-node persistence and the descent machinery
+(`S6`).  The balance of the existing arenas.
 
 ---
 
@@ -1048,11 +1470,42 @@ repo means the playable build is public — revisit before a paid release.
 invisible PR is reviewed on its tests; the gameplay PR is reviewed by
 playing the preview link on a phone.
 
----
+### The follow-up block's sessions  (D40, user call 2026-10-10)
+
+`S7`–`S11` (the follow-up block in §4) branch from and merge into the phase branch
+like every other session, per D37.  One branch per session, named for it:
+`claude/s7-menus`, `claude/s8-rotation`, `claude/s9-enemy-ai`, `claude/s10-trails`,
+`claude/s11-maps` (the PM pre-creates them off the phase tip; a session may
+re-create its own with `checkout -B`).
+
+```
+git fetch origin claude/steam-game-publishing-xhnui2
+git checkout -B <my-work-branch> origin/claude/steam-game-publishing-xhnui2
+git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+```
+
+The last line must print `2` or more: it proves the briefs have reached the phase
+branch, which they do when the PM plan PR (#116) merges.  If it prints less, STOP
+and tell the user.  The PR is opened with the base stated, because the default is
+`main`:
+
+```
+gh pr create --base claude/steam-game-publishing-xhnui2 --head <my-work-branch>
+```
+
+(Where `gh` is not installed, the GitHub MCP `create_pull_request` takes the same
+`base` and `head`.)
+
+- **Before opening a PR, merge the phase branch into yours**, so the PR shows only
+  your work and a sibling's merge does not surprise you.
+- **One merge into the phase branch at a time, at least ~30 minutes apart.**  The
+  phase branch is a FULL-suite branch and its concurrency group is the ref, so a
+  second merge inside the first one's ~30 minutes CANCELS the first run (D39's
+  lesson).  Name the merge commit when quoting a green.
 
 ## 6. Session ordering
 
-Current order: **S1 → S2 → S3 → S4 → S6**, S5 (Steam) still deferred
+Current order: **S1 → S2 → S3 → the follow-up block S7–S11 → S4 → S6**, S5 (Steam) still deferred
 (user call D13, 2026-10-03).  `S6` is the world-design session and sits at
 the END, after the mobile release.  The numbering SKIPS 5 on purpose: `S5`
 was already logged as Steam and renumbering a decided plan is churn, so the
@@ -1073,6 +1526,35 @@ and not a gap a store release has to close.  What makes it work is D14 —
 is built against a map model `S6` will replace.  The cost accepted is that
 `S6`'s connected map graph arrives after players already have save files,
 so D-S2-e's save-version policy is load-bearing: see `S2`.
+
+### The follow-up block (D41)
+
+`S7`–`S11` are a block that runs after `S3` and BEFORE `S4`:
+**`S1 → S2 → S3 → [ S9 ‖ S7 → S8 ‖ S10 → S11 ] → S4 → S6`** — a `‖` pair may run
+as two Claude Code sessions at once; an arrow is a wait for the previous wave to
+MERGE into the phase branch.
+
+| Wave | Sessions | Why together | What the wave must not do |
+|---|---|---|---|
+| 1 | `S9` Enemy AI ‖ `S7` Menus | Disjoint files: `AISystem` / spawn / `enemies.toml` against `components/` / `menuNav` / `InputSystem`'s menu path.  `S9` is what the user feels first; `S7` changes no sim. | Both add DBG rows, so `debugmenu.spec.ts` conflicts textually — merge the phase branch in first. |
+| 2 | `S8` Rotation ‖ `S10` Trails | `PhysicsSystem` against render-only files.  `S8` runs after `S9` so AI unsticking is tuned against today's shard motion and then re-checked once, rather than the reverse. | `S8` is the risk: it owns the hot solver, so nothing else touches `PhysicsSystem` in this wave. |
+| 3 | `S11` Maps | Needs `S9` (enemies must traverse a maze), `S8` (shards in tight spaces) and `S7` (new screens join the nav model).  Last because it is content over everything else. | — |
+
+**Merge order inside the block is the wave order, one merge at a time, ≥ ~30
+minutes apart (§5).**  The three sim-changing sessions (`S9`, `S8`, `S11`) merge in
+that order, each after merging the phase branch into itself and re-running
+`npm run test:sim` and the balance `--quick` delta.
+
+**Defaults the user can flip, and what flipping costs.**  (1) `S8` before `S9`:
+cleaner AI tuning, but the user's loudest complaint waits behind the riskiest
+session.  (2) `S10` in wave 1: nothing breaks, but three sessions to review at
+once.  (3) `S4` in parallel with the block: its Capacitor shell and CI half
+touch none of these files and CAN run alongside; its UI half (default scheme,
+safe areas, haptics) should wait for `S7` — see §8.
+
+**What the block does NOT change:** the two measurements D39 put ahead of a
+TestFlight build (the music decode budget; the per-portal-difficulty save
+migration) still precede `S4`'s build, and the block does not own either.
 
 ---
 
@@ -1126,6 +1608,8 @@ who made it, and the consequences for other sessions.
 | D37 | PM | 2026-10-06 | **EVERY FUTURE PR IN THIS PHASE IS BASED ON `claude/steam-game-publishing-xhnui2`, AND THE BASE IS NOW A STATED PART OF EVERY BRIEF** (user call, settling D36's open question).  `S3`'s work was always INTENDED for the integration branch — the merge to `main` was a mistake, not a change of plan — so D15's model stands: the phase branch accumulates every session and workstream, is tested whole, and rolls into `main` once.  What is new is the mechanism that failed. | **WHY IT HAPPENED, because it will recur otherwise:** §5's brief hygiene covered the BRANCH POINT (`git checkout -B <branch> origin/claude/steam-game-publishing-xhnui2`, carried verbatim in every brief after the `S1` near-miss) and said NOTHING about the PR BASE — and `gh pr create` defaults the base to the repository's DEFAULT branch, which is `main`.  So a session that branched correctly still opened its PR at `main` by doing nothing wrong, and PR #113 (62 commits, 155 files) merged there.  A convention that depends on a tool's default being what you want is not a convention; §5 now carries the base as its own hygiene item, with `--base` written out.  **WHAT IS ALREADY TRUE AND NEEDS NO WIRING:** the phase branch sits in `pr-checks.yml`'s `push.branches`, so a merge INTO it runs the FULL suite while each PR push into it runs the cheap smoke — which is exactly the user's "merge these changes to this branch and test before rolling into main".  And the branch is a sound base again: `227afc5` merged `main` into it, so it now CONTAINS every commit `main` has (verified: 0 commits main-ahead, 15 phase-ahead) and a PR based on it carries `S3`'s work as well as the music work.  **WHAT THIS COSTS, stated plainly:** `main` already carries `S1`–`S3`, so the phase no longer promotes as one reviewable diff — D15's original guarantee is spent and D36 records that.  The model from here is the one the user asked for and it is the weaker, workable version: the phase branch stays the integration point and the place the whole net runs, and what eventually reaches `main` is the remainder. |
 | D38 | PM | 2026-10-08 | **D37 GOVERNS A SESSION'S WORK, NOT REPO PLUMBING — AND ONE DIRECT PUSH TO THE INTEGRATION BRANCH HAS ALREADY LANDED UNDER THAT READING** (PM reading of D37's scope, flagged in §8 for the user to correct).  `f1384a1` — an UNNUMBERED tooling session, not `S1`–`S4`/`S6` — pushed straight to `claude/steam-game-publishing-xhnui2`: `pr-preview.yml` now records the mirror commit and the PR comment links a SHA-pinned `rawcdn.githack.com` URL, because the BRANCH-REF `raw.githack.com` link was returning HTTP 429 and a commit URL is cached permanently.  CLAUDE.md §9 and README were updated with it. | **WHY IT IS LET STAND rather than reverted and re-opened as a PR:** the link it fixes is the user's ONLY way to play the game (iPhone, no local checkout), so a rate-limited preview is not a cosmetic defect — it stops the play-testing every gameplay decision in this plan depends on.  It is also self-contained (one workflow, two doc lines), documented in the commit, and `typecheck · build · test` is green on it in BOTH scopes.  **WHY A DIRECT PUSH DOES NOT DEFEAT D37:** the user's stated purpose is “merge all of these changes to this branch and test before rolling into main”, and the phase branch sits in `pr-checks.yml`'s `push.branches` — so a direct push runs the FULL suite on the integration branch exactly as a merge into it does.  What a direct push gives up is the per-change PREVIEW and a reviewable diff.  **THE BOUNDARY, stated so it is usable:** anything touching the SIM, the content tables or this plan goes through a PR based on the phase branch, no exceptions — that is D37 and it is unchanged.  A change to the CI / preview PLUMBING may land directly, and the PM records each one in this log, so the branch never carries a commit nothing accounts for.  **THE COST:** PR #108's diff grows by commits that were never previewed on a phone, and a plumbing change is the kind that fails only once it is on the branch the workflow fires for — which is an argument FOR landing it there and also why it must be watched after landing rather than before. |
 | D39 | PM | 2026-10-09 | **`S3` AND `W2` ARE BOTH LANDED; THE PHASE NOW STANDS AT `S4` WITH ONE MEASUREMENT OWED FIRST** (PM reconciliation of what merged, not a new call).  PR #115 (`S3`'s numbers — the shifted level curve, map-size enemy scaling, the wave-roster strip, the map info card, the regenerated balance baseline) merged as `33c00ff`; PR #114 (`W2`'s layer variants, RE-LANDED after `ae222f4` reverted the first attempt) merged as `a34d0c2`.  Both merges were taken in that order with a gap between them, so each carries its OWN full-suite verdict rather than one shared one — `33c00ff` green (28m 55s) and `a34d0c2` green (30m 16s).  §4's `W2` entry is rewritten accordingly and PR #108 reads `mergeable` / `clean` at 38 commits. | **WHY THE ORDER AND THE GAP MATTERED, since it is the reusable part:** `pr-checks.yml`'s concurrency group is the REF for a branch push, so a second merge inside the full suite's ~29 minutes CANCELS the first merge's run (D38's own note on reading a cancelled run).  Merging both back to back would have bought ONE verdict, on the combination — enough to promote, useless for attribution.  `S3` went first because it is the merge that touches the SIM and the SAVE FILE (`WaveSystem`, `GameEngine`, `constants`, `persistence.test.ts`), so its isolated verdict is the one worth having; `W2` is audio behind the ports and nothing in the sim reads it.  Measured before either merge, both orders merged textually clean and the combined tree typechecked 0 at `test:sim` 86/86, so the order was free to be chosen on these grounds rather than forced by git.  **WHAT THE RE-LANDING CHANGED THAT NOBODY ASKED FOR:** `W2`'s first life was deliberately LATENT — no song declared `variants`, so the director, the LRU cache and the decode budget were live code over absent content.  `omni` now declares four `atmos` variants over four DISTINCT files, which trips the trigger the §8 audio-memory item wrote for itself (“a branch lands AND a song declares variants — both, not either”).  So `MUSIC_DECODE_BUDGET_MB: 110` is load-bearing for the first time and has never been measured against content that exists.  **THE ORDERING CONSEQUENCE FOR `S4`:** that measurement, and the per-portal-difficulty save migration, both want to land BEFORE a TestFlight build — the first because iOS is the platform that kills a tab on peak RSS, the second because D24 makes world/settings state arrive as a migration and a format choice stops being free once real players hold save files.  Neither blocks starting `S4`; both block shipping one. |
+| D40 | PM | 2026-10-10 | **THE FOLLOW-UP BLOCK `S7`–`S11` BRANCHES FROM AND MERGES INTO THE PHASE BRANCH, ONE BRANCH AND ONE PR PAIR PER SESSION, PER D37** (user call, reversing the PM's first design: “let's create a PR branch against the steam game publishing branch for each of these Sessions”).  Options weighed: (a) every session straight into the phase branch; (b) a sub-integration branch `claude/s3-followup-docs` that promotes once.  The PM first built (b) on the user's phrase “against the S3-followup docs branch, which should be based against the steam game publishing branch”; the user then chose (a).  No workflow change: the phase branch is already a FULL-suite branch.  D37 stands unamended. | **Consequences:** each block merge lands on the phase branch and gets a full-suite run, so merges are spaced ≥ ~30 minutes (D39).  The briefs reach the phase branch with the PM plan PR (#116), which must merge FIRST; every prompt checks for them and stops otherwise.  Session branches are `claude/s7-menus`, `s8-rotation`, `s9-enemy-ai`, `s10-trails`, `s11-maps`.  `claude/s3-followup-docs` is unused and can be deleted. |
+| D41 | PM | 2026-10-10 | **THE BLOCK IS FIVE SESSIONS IN THREE WAVES: `S9` AND `S7`, THEN `S8` AND `S10`, THEN `S11`** (PM design, from the user's request for menus, rotational dynamics, enemy AI, map designs and enemy / rival trails; every ordering call below is the PM's and flagged for correction).  Menus (`S7`), rotational dynamics (`S8`), enemy AI incl. the mobile Turret and packs (`S9`), trails (`S10`) and maps (`S11`) are separate sessions, not four, because TRAILS are render-only and independent of the AI's sim work (so they can run beside a sim session), and are perf-gated by the user's own instruction.  **Ordering reasons.**  Wave 1 pairs the user's loudest gameplay complaint (`S9`) with the one session that touches no sim (`S7`), so there is no hot-file contention.  `S8` follows `S9` because it is the riskiest change in the block and owns `PhysicsSystem`, and because AI unsticking is then tuned once against today's shard motion and re-checked after `S8`, instead of the reverse.  `S11` is last because a maze is only a map if `S9`'s enemies can traverse it, shards in a tight corridor are `S8`'s problem, and a new screen must join `S7`'s navigation model.  **Verified before writing the briefs:** the only pinned goldens are `tests/sim/fixtures/dmath.bits.json` and `tables.golden.json`, so shard or enemy motion changes re-capture nothing; the shard-pair solver is circle-based with no contact point, which corrects `PARKING_LOT.md`'s claim and shapes `S8`; overlay buttons have no focus style and arrow keys are flight keys, which shape `S7`. | **Reversible calls:** `S8` before `S9`; `S10` in wave 1; `S4`'s shell half in parallel (§6 states each cost).  **Cross-session consequences are in §8:** `S11` is the layout half of what `S6` names (LABYRINTH, DENSE, WAVE ARENAS), `S7` changes the surface `S4`'s controls and safe-area decisions touch, and the parked “Turret v2” entry must be reconciled by `S9`.  Each sim-changing session owes the determinism, guard and balance-delta obligations in the block's shared rules (§4). |
 
 ---
 
@@ -1135,6 +1619,26 @@ Work sessions append here when a decision changes what a *later* session
 should do.  The PM session reconciles, updates §4, and records the
 reconciliation in §7.  Leave resolved items in place, struck, so the
 history stays readable.
+
+- **PM → `S6` (what `S11` has already built).**  `S6` names three arena
+  families — LABYRINTH, DENSE, WAVE ARENAS — and the user's `S11` ask (a
+  tile-dense, limited-path map; a wide-open sparse one with rivals) lands inside
+  that territory first.  `S11` builds the LAYOUT half: a layout seam (an arena's
+  terrain as data or a seeded generator) and two or three arenas on it.  `S6`
+  keeps the GRAPH, per-node persistence and the descent decision, and must adopt
+  `S11`'s seam rather than build a second one.  When `S11` lands, rewrite `S6`'s
+  “Engine payload” to start from it.  *(PM, 2026-10-10)*
+- **PM → `S4` (what `S7` touches).**  `S4`'s D-S4-a (default control scheme),
+  D-S4-c (safe areas, orientation) and D-S4-b (haptics) all land on the menu and
+  input surface `S7` is reworking.  `S4`'s Capacitor shell and CI half touches
+  none of it and can run beside the block; the UI half should start after `S7`
+  merges, or it decides things `S7` has just decided.  *(PM, 2026-10-10)*
+- **PM → `S9` (a reconciliation owed).**  `docs/PARKING_LOT.md` parks “Turret v2”,
+  a TILE-MOUNTED, armoured turret for designed maps, and the user now asks for the
+  free Turret to MOVE, slowly.  They are different archetypes; `S9` must say which
+  the existing `TURRET` row becomes and whether Turret v2 survives as a separate
+  one, not let one silently supersede the other.  *(PM, 2026-10-10)*
+
 
 - **PM → the user (how wide D37 is).**  D37 says every future PR in this
   phase is based on the integration branch.  It does not say whether a

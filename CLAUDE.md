@@ -15,7 +15,7 @@ what is currently implemented. File paths are relative to the repo root.
 > release on top of it, and Steam deferred.  It carries the open GAMEPLAY
 > DECISIONS each work session must put to the user, an append-only decision
 > log, and the amendment protocol work sessions follow.  **If you are a
-> work session with a session ID (`S1`–`S4`), read its §0 and your own §4
+> work session with a session ID (`S1`–`S4`, `S6`–`S11`), read its §0 and your own §4
 > section before touching anything.**  It is a PLAN, not a description of
 > what exists — this file stays the source of truth for what is shipped.
 
