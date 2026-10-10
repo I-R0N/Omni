@@ -855,20 +855,32 @@ banks (D31), so it composes with them rather than reverting any.
 `S3`'s TOML tables, and D33 says why that is deliberate rather than drift.
 Do not "unify" them.
 
-### W2 — Layer variants  (landed 2026-10-05, `67e8d7c`; BACKED OUT
-`ae222f4`, same day, for a dedicated branch)
+### W2 — Layer variants  (landed 2026-10-05 `67e8d7c`, BACKED OUT
+`ae222f4` the same day; RE-LANDED 2026-10-09 via PR #114, `a34d0c2`)
 
-**THIS DID NOT STAY.**  The whole variants layer was reverted hours after
-it landed — 1,390 deletions, `MusicContext.ts` deleted, every
-`AUDIO_CONSTANTS.MUSIC_*` it added gone, and `engine/ports.ts` +
-`platform/headless.ts` byte-identical to their pre-W2 state (verified).
-W1 is UNTOUCHED by the revert: songs-as-data, `music:import` and the index
-all survive, so the two are cleanly separable and only the variants layer
-went.  The entry is kept rather than deleted because what it ESTABLISHED is
-what a dedicated branch will meet again — and because the one durable
-lesson is the port rule below, which held this time and is the reason the
-revert was clean.  Read the rest as a description of that branch's starting
-point, not of this one's contents.
+**IT IS IN NOW, AND THE DEDICATED BRANCH IS THE ONE THAT LANDED IT.**  The
+first attempt was reverted hours after it landed (1,390 deletions,
+`MusicContext.ts` deleted, every `AUDIO_CONSTANTS.MUSIC_*` gone,
+`engine/ports.ts` + `platform/headless.ts` byte-identical to their pre-W2
+state) so the layer could come back on a branch of its own.  It did:
+`claude/music-layer-variants` merged as `a34d0c2`, and the paragraphs below
+describe THIS branch's contents rather than a future one's starting point.
+Verified on the merged head: `MusicContext.ts` present (6,938 bytes), 30
+`MUSIC_*` lines in `constants.ts`, both port methods on `AudioPort` with
+their `NullAudio` stubs, `test:sim` 86/86, and both CI scopes green
+(`a34d0c2`: smoke 2m 7s, full suite 30m 16s).  W1 was untouched by the
+revert and is untouched by the return — the two are cleanly separable, which
+is what made both moves clean.
+
+**ONE THING IS NO LONGER TRUE, AND IT IS THE IMPORTANT ONE.**  The original
+entry closed by saying the feature was LATENT: no song declared `variants`,
+so the director, the LRU cache and the decode budget were live code over
+content that did not exist.  **`omni` now declares four `atmos` variants** —
+station / portal, deep-space, rare-item, danger — backed by four new files
+beside `atmos.mp3`, and they are FOUR DISTINCT BLOBS, not placeholder
+copies (verified by object hash).  So every path below is now reachable in a
+play-test, and D31's decode budget becomes a real measurement rather than a
+spare ceiling — see the §8 item, which this re-landing takes back off MOOT.
 
 The score gained ALTERNATIVE STEMS per slot.  The intensity model still
 decides which slots are ON; a DIRECTOR now decides which variant fills a
@@ -891,12 +903,14 @@ under a decode budget; a missing file falls back to the default silently.
   clock or a `performance.now` has to earn an allow-list line instead.
 - **`constants.ts` grew ~48 lines of `AUDIO_CONSTANTS.MUSIC_*`.**  That is
   `S3`'s file, so see the §8 hand-up below before rebasing.
-- **THE FEATURE IS LATENT TODAY.**  No shipped song declares `variants`
-  (all three carry the eight default stems and nothing else), and a song
-  without them takes none of these paths — so the director, the cache and
-  the budget are all live code over content that does not exist yet.  That
-  is the right order to build it in, and it is also why none of it is
-  visible in a play-test.
+- ~~**THE FEATURE IS LATENT TODAY.**~~  *(NO LONGER: `omni` declares four
+  `atmos` variants as of `a34d0c2`.)*  It WAS latent for the whole of its
+  first life, and that was the right order to build it in — the director,
+  the cache and the budget all shipped over content that did not exist, so
+  none of it could be judged in a play-test and none of it could regress
+  one.  `event-horizon` and `critical-mass` still declare none, so the
+  single-variant path and the no-variant path are both live today, which is
+  the cheapest possible A/B on whether the director reads at all.
 
 ---
 
@@ -1116,6 +1130,7 @@ who made it, and the consequences for other sessions.
 | D36 | PM | 2026-10-06 | **D15 NO LONGER DESCRIBES THE BRANCH TOPOLOGY: `S3` PROMOTED TO `main` ON ITS OWN** (PM reconciliation of what happened, not a new call).  PR #113 (`claude/s3-numbers` → `main`, merged 2026-10-06) carried 62 commits and 155 files — `dmath`, the TOML content tables, the balance harness, factorial pricing, per-arena difficulty and the hub layout — so `main` is now AHEAD of the phase branch, which D15 said would not happen until the phase ended.  The user reports the merge was PREMATURE and that `S3` still has work in flight, so this is a topology change to absorb, not a phase completion. | **What is true now:** `main` holds `S1` + `S2` + `S3`; the phase branch holds W1 (the music pipeline), the W2 revert, the Critical Mass import and this plan's own commits — 14 commits `main` lacks.  The two diverged at `33ac6f3`.  **What was done:** `main` was merged INTO the phase branch (three conflicts: this doc twice, `package.json`, `package-lock.json`), so PR #108 is mergeable again and carries the music work forward rather than stranding it.  Both devDependencies survive — W1's `ffmpeg-static` and `S3`'s `smol-toml` — and the lockfile was REGENERATED with npm rather than hand-merged.  **What this costs:** D15's guarantee was that the phase lands as one reviewable promotion; that is gone and cannot be recovered by anything written here.  What replaces it is weaker and worth stating plainly — the phase branch is now a FOLLOWER of `main`, so every session on it must merge `main` before pushing, and a second premature promotion is now the likely failure rather than a hypothetical one.  **Not decided here:** whether the phase branch should keep accumulating at all, or whether the remaining work should go to `main` in PRs the way `S3`'s did.  That is the user's, and it is the one question this topology actually raises. |
 | D37 | PM | 2026-10-06 | **EVERY FUTURE PR IN THIS PHASE IS BASED ON `claude/steam-game-publishing-xhnui2`, AND THE BASE IS NOW A STATED PART OF EVERY BRIEF** (user call, settling D36's open question).  `S3`'s work was always INTENDED for the integration branch — the merge to `main` was a mistake, not a change of plan — so D15's model stands: the phase branch accumulates every session and workstream, is tested whole, and rolls into `main` once.  What is new is the mechanism that failed. | **WHY IT HAPPENED, because it will recur otherwise:** §5's brief hygiene covered the BRANCH POINT (`git checkout -B <branch> origin/claude/steam-game-publishing-xhnui2`, carried verbatim in every brief after the `S1` near-miss) and said NOTHING about the PR BASE — and `gh pr create` defaults the base to the repository's DEFAULT branch, which is `main`.  So a session that branched correctly still opened its PR at `main` by doing nothing wrong, and PR #113 (62 commits, 155 files) merged there.  A convention that depends on a tool's default being what you want is not a convention; §5 now carries the base as its own hygiene item, with `--base` written out.  **WHAT IS ALREADY TRUE AND NEEDS NO WIRING:** the phase branch sits in `pr-checks.yml`'s `push.branches`, so a merge INTO it runs the FULL suite while each PR push into it runs the cheap smoke — which is exactly the user's "merge these changes to this branch and test before rolling into main".  And the branch is a sound base again: `227afc5` merged `main` into it, so it now CONTAINS every commit `main` has (verified: 0 commits main-ahead, 15 phase-ahead) and a PR based on it carries `S3`'s work as well as the music work.  **WHAT THIS COSTS, stated plainly:** `main` already carries `S1`–`S3`, so the phase no longer promotes as one reviewable diff — D15's original guarantee is spent and D36 records that.  The model from here is the one the user asked for and it is the weaker, workable version: the phase branch stays the integration point and the place the whole net runs, and what eventually reaches `main` is the remainder. |
 | D38 | PM | 2026-10-08 | **D37 GOVERNS A SESSION'S WORK, NOT REPO PLUMBING — AND ONE DIRECT PUSH TO THE INTEGRATION BRANCH HAS ALREADY LANDED UNDER THAT READING** (PM reading of D37's scope, flagged in §8 for the user to correct).  `f1384a1` — an UNNUMBERED tooling session, not `S1`–`S4`/`S6` — pushed straight to `claude/steam-game-publishing-xhnui2`: `pr-preview.yml` now records the mirror commit and the PR comment links a SHA-pinned `rawcdn.githack.com` URL, because the BRANCH-REF `raw.githack.com` link was returning HTTP 429 and a commit URL is cached permanently.  CLAUDE.md §9 and README were updated with it. | **WHY IT IS LET STAND rather than reverted and re-opened as a PR:** the link it fixes is the user's ONLY way to play the game (iPhone, no local checkout), so a rate-limited preview is not a cosmetic defect — it stops the play-testing every gameplay decision in this plan depends on.  It is also self-contained (one workflow, two doc lines), documented in the commit, and `typecheck · build · test` is green on it in BOTH scopes.  **WHY A DIRECT PUSH DOES NOT DEFEAT D37:** the user's stated purpose is “merge all of these changes to this branch and test before rolling into main”, and the phase branch sits in `pr-checks.yml`'s `push.branches` — so a direct push runs the FULL suite on the integration branch exactly as a merge into it does.  What a direct push gives up is the per-change PREVIEW and a reviewable diff.  **THE BOUNDARY, stated so it is usable:** anything touching the SIM, the content tables or this plan goes through a PR based on the phase branch, no exceptions — that is D37 and it is unchanged.  A change to the CI / preview PLUMBING may land directly, and the PM records each one in this log, so the branch never carries a commit nothing accounts for.  **THE COST:** PR #108's diff grows by commits that were never previewed on a phone, and a plumbing change is the kind that fails only once it is on the branch the workflow fires for — which is an argument FOR landing it there and also why it must be watched after landing rather than before. |
+| D39 | PM | 2026-10-09 | **`S3` AND `W2` ARE BOTH LANDED; THE PHASE NOW STANDS AT `S4` WITH ONE MEASUREMENT OWED FIRST** (PM reconciliation of what merged, not a new call).  PR #115 (`S3`'s numbers — the shifted level curve, map-size enemy scaling, the wave-roster strip, the map info card, the regenerated balance baseline) merged as `33c00ff`; PR #114 (`W2`'s layer variants, RE-LANDED after `ae222f4` reverted the first attempt) merged as `a34d0c2`.  Both merges were taken in that order with a gap between them, so each carries its OWN full-suite verdict rather than one shared one — `33c00ff` green (28m 55s) and `a34d0c2` green (30m 16s).  §4's `W2` entry is rewritten accordingly and PR #108 reads `mergeable` / `clean` at 38 commits. | **WHY THE ORDER AND THE GAP MATTERED, since it is the reusable part:** `pr-checks.yml`'s concurrency group is the REF for a branch push, so a second merge inside the full suite's ~29 minutes CANCELS the first merge's run (D38's own note on reading a cancelled run).  Merging both back to back would have bought ONE verdict, on the combination — enough to promote, useless for attribution.  `S3` went first because it is the merge that touches the SIM and the SAVE FILE (`WaveSystem`, `GameEngine`, `constants`, `persistence.test.ts`), so its isolated verdict is the one worth having; `W2` is audio behind the ports and nothing in the sim reads it.  Measured before either merge, both orders merged textually clean and the combined tree typechecked 0 at `test:sim` 86/86, so the order was free to be chosen on these grounds rather than forced by git.  **WHAT THE RE-LANDING CHANGED THAT NOBODY ASKED FOR:** `W2`'s first life was deliberately LATENT — no song declared `variants`, so the director, the LRU cache and the decode budget were live code over absent content.  `omni` now declares four `atmos` variants over four DISTINCT files, which trips the trigger the §8 audio-memory item wrote for itself (“a branch lands AND a song declares variants — both, not either”).  So `MUSIC_DECODE_BUDGET_MB: 110` is load-bearing for the first time and has never been measured against content that exists.  **THE ORDERING CONSEQUENCE FOR `S4`:** that measurement, and the per-portal-difficulty save migration, both want to land BEFORE a TestFlight build — the first because iOS is the platform that kills a tab on peak RSS, the second because D24 makes world/settings state arrive as a migration and a format choice stops being free once real players hold save files.  Neither blocks starting `S4`; both block shipping one. |
 
 ---
 
@@ -1289,9 +1304,14 @@ history stays readable.
 - **S2 → S3 (knob triage input).**  Persisted settings are only audio volumes
   + mute, control scheme and difficulty (D20).  Every other DBG cycle is
   per-session by construction.  *(S2, 2026-10-03)*
-- ~~**W2 → S3 (`constants.ts` surface).**~~  *(MOOT, `ae222f4`: those ~48
-  lines were reverted with the variants layer, so there is no rebase surface
-  for `S3` here after all.  Live again only if that branch lands.)*    Layer variants added ~48 lines of
+- ~~**W2 → S3 (`constants.ts` surface).**~~  *(STILL MOOT at `a34d0c2`, but
+  for the OPPOSITE reason: the branch landed and the `MUSIC_*` lines are back
+  (30 of them on the merged head) — and `S3` has since finished its
+  extraction, so there is no longer an `S3` rebase to collide with.  The
+  original hand-up was about sequencing two live pieces of work on one file;
+  both are now landed, in the order that made it a non-event.  The judgement
+  in it still holds and is the part to keep: these numbers are NOT extraction
+  candidates.)*    Layer variants added ~48 lines of
   `AUDIO_CONSTANTS.MUSIC_*` to `constants.ts` — tag radii, hysteresis, the
   family margin, the dwell, the decode budget and the family table.  `S3`
   extracts tables from that same file, so this is a REBASE surface, not a
@@ -1299,10 +1319,27 @@ history stays readable.
   tuning for a subsystem whose data already lives in `score/index.json`
   (D33 — the index is generator-written JSON, these are hand-authored
   numbers that belong beside the code that reads them).  *(PM, 2026-10-05)*
-- ~~**W2 → the audio-memory decision (D31).**~~  *(MOOT, `ae222f4`:
-  `MUSIC_DECODE_BUDGET_MB` went with the revert, so D31's measured figures
-  stand unchallenged.  The re-measure below becomes a REAL decision the day a
-  variants branch lands AND a song declares variants — both, not either.)*    `MUSIC_DECODE_BUDGET_MB` is
+- **W2 → the user (the audio-memory decision, D31) — LIVE as of
+  2026-10-09.**
+  This item set its own trigger — *"a REAL decision the day a variants branch
+  lands AND a song declares variants — both, not either"* — and `a34d0c2`
+  met both halves on the same merge: the branch landed, and `omni` declares
+  four `atmos` variants over four distinct files.  **So the number below is
+  now load-bearing and has never been measured against content that exists.**
+  What is owed is one measurement, not a decision in the abstract:
+  `AudioSystem.decodedBankBytes` beside `AdaptiveMusic.decodedBytes`, in a
+  browser at 390x844, with the hub song's variants actually cycling (the DBG
+  context-force row is what makes that reachable on demand).  Three outcomes
+  and what each means: total audio stays near the measured ~105-117 MB →
+  nothing to do, and 110 was simply generous; it lands near the ~170 MB the
+  old note projected → a real iOS decision, since that is the platform that
+  kills a tab on peak RSS and `S4` is the session that ships there; it
+  exceeds 110 → the cache is already evicting in normal play, which is a
+  behaviour question (what a viewer HEARS when a variant is evicted
+  mid-phrase) before it is a memory one.  **This wants doing BEFORE `S4`
+  builds a TestFlight**, because a peak-RSS kill on a real device is the
+  worst place to learn it, and the fix (rate, budget, or fewer variants) is
+  cheap today and a re-master later.  *(PM, 2026-10-09)*    `MUSIC_DECODE_BUDGET_MB` is
   **110**, and it is a ceiling on the score's TOTAL decoded PCM (default
   stems plus the variant cache), not a variant-only allowance.  D31 cut the
   decode rate to 25 kHz on a MEASURED 70.9 → 55.4 MB for the score, with

@@ -9,21 +9,60 @@
       "title": "Omni",
       "bpm": 128,
       "bars": 32,
-      "folder": "score/omni/"
+      "folder": "score/omni/",
+      "phraseBars": 8,
+      "variants": {
+        "atmos": [
+          {
+            "name": "station",
+            "when": [
+              "station",
+              "portal"
+            ]
+          },
+          {
+            "name": "deep",
+            "when": [
+              "deep-space"
+            ]
+          },
+          {
+            "name": "treasure",
+            "when": [
+              "rare-item"
+            ]
+          },
+          {
+            "name": "danger",
+            "when": [
+              "danger"
+            ]
+          }
+        ]
+      },
+      "contextPriority": [
+        "danger",
+        "rare-item",
+        "station",
+        "portal",
+        "deep-space"
+      ]
     },
     {
       "id": "event-horizon",
       "title": "Event Horizon",
       "bpm": 160,
       "bars": 32,
-      "folder": "score/event-horizon/"
+      "folder": "score/event-horizon/",
+      "phraseBars": 8
     },
     {
       "id": "critical-mass",
       "title": "Critical Mass",
       "bpm": 150,
       "bars": 32,
-      "folder": "score/critical-mass/"
+      "folder": "score/critical-mass/",
+      "phraseBars": 8
     }
   ],
   "plan": {

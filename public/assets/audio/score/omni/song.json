@@ -1,0 +1,48 @@
+{
+  "id": "omni",
+  "title": "Omni",
+  "bpm": 128,
+  "bars": 32,
+  "key": "D minor",
+  "use": [
+    "hub",
+    "field"
+  ],
+  "phraseBars": 8,
+  "variants": {
+    "atmos": [
+      {
+        "name": "station",
+        "when": [
+          "station",
+          "portal"
+        ]
+      },
+      {
+        "name": "deep",
+        "when": [
+          "deep-space"
+        ]
+      },
+      {
+        "name": "treasure",
+        "when": [
+          "rare-item"
+        ]
+      },
+      {
+        "name": "danger",
+        "when": [
+          "danger"
+        ]
+      }
+    ]
+  },
+  "contextPriority": [
+    "danger",
+    "rare-item",
+    "station",
+    "portal",
+    "deep-space"
+  ]
+}
