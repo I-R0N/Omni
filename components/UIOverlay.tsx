@@ -1858,6 +1858,21 @@ const UIOverlay: React.FC<UIOverlayProps> = ({
                 {stats.savedGame.records.highScore > 0 && (
                   <div className={`text-slate-500 ${T_NOTE}`}>Best score {stats.savedGame.records.highScore.toLocaleString()}</div>
                 )}
+                {stats.savedGame.snitchCatches > 0 && (
+                  <div className={`text-slate-400 ${T_NOTE}`} data-testid="menu-saved-snitch">
+                    Snitch catches {stats.savedGame.snitchCatches}
+                  </div>
+                )}
+                {stats.savedGame.arenaWaves.length > 0 && (
+                  <div className={`text-slate-400 ${T_NOTE} mt-0.5`} data-testid="menu-saved-portals">
+                    <div>Portals with saved progress</div>
+                    <ul className="list-none">
+                      {stats.savedGame.arenaWaves.map(w => (
+                        <li key={w.mapName}>{w.mapName} · wave {w.wave + 1}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {stats.savedGame.wreck && (
                   <div className={`text-amber-300 ${T_NOTE} mt-0.5`}>
                     Wreck waiting in {stats.savedGame.wreck.mapName} ({stats.savedGame.wreck.modules} module{stats.savedGame.wreck.modules === 1 ? '' : 's'})

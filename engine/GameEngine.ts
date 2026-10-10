@@ -5663,6 +5663,7 @@ export class GameEngine {
       progress: this.hasSavedProgress(),
       credits: this.credits,
       modules,
+      snitchCatches: this.snitchCatchCount,
       wreck: this.wreck ? { mapName: wreckMapName(this.wreck), modules: wreckModuleCount(this.wreck) } : null,
       arenaWaves: Object.entries(this.arenaWaves).map(([id, m]) => ({ mapName: mapDescriptor(id)?.name ?? id, wave: m.wave, progress: m.progress, awaySec: Math.max(0, Math.round((clock().wallMs() - m.leftAt) / 1000)) })),
       records: { ...this.records, highScore: Math.max(this.records.highScore, Math.floor(this.score)) },

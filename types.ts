@@ -1995,6 +1995,8 @@ export interface EngineStats {
     progress: boolean;
     credits: number;
     modules: number;
+    /** Snitches the saved character has caught (drives the snitch's speed ramp). */
+    snitchCatches: number;
     wreck: { mapName: string; modules: number } | null;
     /** Waves held per arena: where, which wave (0-based), kills already scored, seconds away. */
     arenaWaves: { mapName: string; wave: number; progress: number; awaySec: number }[];
