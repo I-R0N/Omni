@@ -34,7 +34,7 @@ import {
     slotUnlockCost,
     HEX_ADJACENCY, PHYSICS_CONSTANTS, PLAYER_MOVEMENT_CONFIG,
     SHIELD_CONSTANTS, scannerRangesFor, scannerMarkRange,
-  massFor, hullDensity, SPRITE_CONSTANTS,
+  massFor, hullDensity, SPRITE_CONSTANTS, SNITCH_CONSTANTS,
 } from '../constants';
 
 /** Adjacency-requirement fixpoint for one hex group: a module is ACTIVE
@@ -499,6 +499,15 @@ export function outfittingSnapshot(g: GameEngine) {
         maxSlots: MODULE_SLOT_COUNT,
         shipSlotOffer: slotOffer('ship'),
         weaponSlotOffer: slotOffer('weapon'),
+        snitchReset: g.snitchCatchCount > 0 ? (() => {
+            const price = modulePrice(SNITCH_CONSTANTS.RESET_COST);
+            return {
+                cost: price,
+                count: g.snitchCatchCount,
+                available: !!svc?.snitchReset,
+                affordable: g.credits >= price,
+            };
+        })() : undefined,
         gunsMounted,
         maxGuns: MAX_INSTALLED_GUNS,
         inventory: g.inventory.map(id => {

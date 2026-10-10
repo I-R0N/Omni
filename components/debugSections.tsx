@@ -610,13 +610,20 @@ export const DEBUG_SECTIONS: readonly DebugSection[] = [
         'Erase the saved character: credits, cargo, loadout, hex slots, any wreck and the records — a brand-new start.',
         'Wipes the save file back to a new character: no Salvage, empty cargo, the free Base Hull and Projector, every hex slot as shipped, no wreck, zeroed records. Settings (volume, control scheme, difficulty) are kept. The wiped state is written at once, so it survives a relaunch.'),
       stat('Saved game', c => c.s.savedGame ? (c.s.savedGame.progress ? 'yes' : 'new character') : '—', 'Whether the save holds a character worth continuing.'),
+      stat('Snitch catches', c => String(c.s.savedGame?.snitchCatches ?? '—'), 'Snitches this character has caught, from the save file. Each catch makes the next snitch faster; the TRADE HUB can reset it.'),
       stat('Deaths', c => String(c.s.savedGame?.records.deaths ?? '—'), 'Lifetime deaths, from the save file.'),
       stat('Best score', c => (c.s.savedGame?.records.highScore ?? 0).toLocaleString(), 'Lifetime high score, from the save file.'),
       stat('Best wave', c => String(c.s.savedGame?.records.bestWave ?? '—'), 'The deepest wave ever reached.'),
       stat('Best combo', c => String(c.s.savedGame?.records.bestCombo ?? '—'), 'The best kill combo multiplier ever reached.'),
       stat('Bosses / dragons', c => c.s.savedGame ? `${c.s.savedGame.records.bossesKilled} / ${c.s.savedGame.records.dragonsKilled}` : '—', 'Lifetime bosses and dragons killed.'),
       stat('Wreck', c => c.s.savedGame?.wreck ? `${c.s.savedGame.wreck.modules} in ${c.s.savedGame.wreck.mapName}` : 'none', 'The outstanding death wreck: what is in it and where.'),
-      stat('Held waves', c => (c.s.savedGame?.arenaWaves.length ?? 0) === 0 ? 'none' : c.s.savedGame!.arenaWaves.map(w => `${w.mapName} W${w.wave + 1}+${w.progress} (${Math.round(w.awaySec / 60)}m)`).join(' · '), 'The wave each arena will come back at: held exactly for 5 minutes after you leave, then restarted from the top, one wave earlier per hour away.'),
+      stat('Held waves', c => (c.s.savedGame?.arenaWaves.length ?? 0) === 0 ? 'none' : (
+        <div className="flex flex-col items-end">
+          {c.s.savedGame!.arenaWaves.map(w => (
+            <div key={w.mapName}>{`${w.mapName} W${w.wave + 1}+${w.progress} (${Math.round(w.awaySec / 60)}m)`}</div>
+          ))}
+        </div>
+      ), 'The wave each arena will come back at: held exactly for 5 minutes after you leave, then restarted from the top, one wave earlier per hour away.'),
     ],
   },
   {

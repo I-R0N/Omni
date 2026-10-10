@@ -1904,3 +1904,20 @@ history stays readable.
   `difficultyLevel`; the portal descriptor (`MAP_DESCRIPTORS`) gains a level;
   the arrival UI needs a level readout (S4 if it owns the mobile HUD).  Not
   built yet — S3 reports today's numbers first.  *(S3, 2026-10-05)*
+
+- **Snitch-counter item → the planning session (the snitch ramp is now permanent).**
+  `snitchCatchCount` is saved character state (`CharacterSave.snitchCatches`,
+  `SAVE_VERSION` 2 — the first migration, `MIGRATIONS[1]`, defaulting it to 0)
+  and a new run no longer zeroes it, so the snitch's per-catch speed ramp
+  (`WAVE_SPEED_STEP` 0.05× cruise a catch, capped at 1.2× at 24 catches) is a
+  permanent pressure carried by the character.  The only release valve is a
+  TRADE HUB station service (user calls: a station service rather than a
+  module item, and a FULL reset to 0 rather than a decrement) costing
+  `SNITCH_CONSTANTS.RESET_COST` (150,000 — above the top hex-slot unlock,
+  provisional).  Consequences for later sessions: S6's world state should
+  expect the character block to carry more than the loadout; any session that
+  touches `SaveFile` writes `MIGRATIONS[2]` onward and bumps `SAVE_VERSION`;
+  S3-style balance passes should treat the catch count as an input.  Noted,
+  NOT changed: a character that defers catches forever keeps a 0.05× snitch
+  (an exploit-shaped incentive now that the count outlives the run), and the
+  cap is reached after only 24 lifetime catches.  *(snitch-counter, 2026-10-10)*
