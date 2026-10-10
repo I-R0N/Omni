@@ -40,15 +40,12 @@ on:
   # `claude/steam-game-publishing-xhnui2` is the integration branch for the
   # engine-core + mobile phase (docs/ENGINE_CORE_PLAN.md §5; it carries the
   # phase's own name badly, and that is a known cosmetic cost of keeping one
-  # branch rather than two).  `claude/s3-followup-docs` is the sub-integration
-  # branch of the follow-up block S7-S11 (docs/ENGINE_CORE_PLAN.md D40): a merge
-  # into it runs the full suite, so each block merge gets its own verdict.
-  # Listing a branch here is the WHOLE mechanism now
+  # branch rather than two).  Listing a branch here is the WHOLE mechanism now
   # that a PR's base no longer picks the scope: the step below sends every
   # non-`pull_request` event to the full suite, so a merge into one runs the
   # whole net while PRs INTO it get the cheap per-push smoke.
   push:
-    branches: [main, claude/plan-completion, claude/steam-game-publishing-xhnui2, claude/s3-followup-docs]
+    branches: [main, claude/plan-completion, claude/steam-game-publishing-xhnui2]
   workflow_dispatch:
 
 concurrency:

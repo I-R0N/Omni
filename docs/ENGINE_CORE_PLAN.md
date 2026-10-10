@@ -58,10 +58,9 @@ from a correctly branched session.  That is not hypothetical: it is how
 on the integration branch, is tested there as a whole, and rolls into `main`
 once.
 
-**ONE EXCEPTION: the follow-up block `S7`–`S11`** (D40) runs on its own
-sub-integration branch, `claude/s3-followup-docs`, and its PRs are based THERE
-(§5).  That branch promotes to the phase branch once, so D37's purpose — nothing
-reaches `main` early — is unchanged.
+**The follow-up block `S7`–`S11`** (D40) follows this rule unchanged: every session
+branches from, and opens both PRs against, the phase branch.  A sub-integration
+branch was weighed and rejected (D40).
 
 ---
 
@@ -794,9 +793,8 @@ from `S2`.
 ### The follow-up block — S7 to S11  (opened 2026-10-10, D40 / D41)
 
 Five sessions that came out of the user's play-testing of `S3`'s PR #115.  They
-run on their OWN sub-integration branch, **`claude/s3-followup-docs`**, which
-promotes to the phase branch once the block is coherent (§5, "The follow-up
-block's branch").  The handles continue the S-numbering and the block runs
+branch from and are merged into the PHASE BRANCH, **`claude/steam-game-publishing-xhnui2`**,
+like every other session (D37; §5, "The follow-up block's sessions").  The handles continue the S-numbering and the block runs
 BEFORE `S4` (§6).  Each brief below is the PM's reading of what the code does
 today, taken from a survey on 2026-10-10 — **the session re-checks it before
 relying on it**, because a survey is a claim and the code is the fact.
@@ -813,9 +811,8 @@ relying on it**, because a survey is a claim and the code is the fact.
 never relax them):
 
 1. **Branch and base.**  Branch from, and open both PRs against,
-   `claude/s3-followup-docs` — never `main`, and NOT the phase branch while the
-   block is open (D40 amends D37 for the block only).  The exact commands are in
-   §5 and every prompt carries them verbatim.
+   `claude/steam-game-publishing-xhnui2` — never `main` (D37).  The exact
+   commands are in §5 and every prompt carries them verbatim.
 2. **Two PRs, invisible first** (§0).  The invisible PR keeps behaviour
    byte-identical and says so in its description; the gameplay PR is small and is
    the one the user judges by playing the preview link.
@@ -839,7 +836,7 @@ never relax them):
 5. **Debug rows are identity.**  `tests/debugmenu.spec.ts` pins the row-label
    multiset, so adding a row is a deliberate edit to that list.  It is the one
    file every block session edits, therefore the main textual conflict between
-   sessions: merge the block branch into yours immediately before opening the
+   sessions: merge the phase branch into yours immediately before opening the
    PR, and rebase nothing.
 6. **The user decides gameplay inside the session.**  Each brief lists OPEN
    DECISIONS.  Put them to the user with the consequence of each option before
@@ -1473,49 +1470,38 @@ repo means the playable build is public — revisit before a paid release.
 invisible PR is reviewed on its tests; the gameplay PR is reviewed by
 playing the preview link on a phone.
 
-### The follow-up block's branch  (D40, user call 2026-10-10)
+### The follow-up block's sessions  (D40, user call 2026-10-10)
 
-`S7`–`S11` (the follow-up block in §4) are based on and merged into
-**`claude/s3-followup-docs`**, not the phase branch.  The name is a misnomer for
-the same reason the phase branch's is — it began as the branch that carried the
-S3 follow-up DOCS — and it is kept rather than renamed for the same reason: two
-branches would cost more than one bad name.  It is one commit off the phase branch
-at the time of writing, and the PM keeps it current by MERGING the phase branch
-into it (never rebasing it).
+`S7`–`S11` (the follow-up block in §4) branch from and merge into the phase branch
+like every other session, per D37.  One branch per session, named for it:
+`claude/s7-menus`, `claude/s8-rotation`, `claude/s9-enemy-ai`, `claude/s10-trails`,
+`claude/s11-maps` (the PM pre-creates them off the phase tip; a session may
+re-create its own with `checkout -B`).
 
 ```
-git fetch origin claude/s3-followup-docs
-git checkout -B <my-work-branch> origin/claude/s3-followup-docs
-git show origin/claude/s3-followup-docs:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+git fetch origin claude/steam-game-publishing-xhnui2
+git checkout -B <my-work-branch> origin/claude/steam-game-publishing-xhnui2
+git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
 ```
 
-The last line must print `2` or more: it proves you are reading the plan that
-contains the block's briefs, which the phase branch's copy does not until the
-block promotes.  The PR is opened with the base stated, because the default is
+The last line must print `2` or more: it proves the briefs have reached the phase
+branch, which they do when the PM plan PR (#116) merges.  If it prints less, STOP
+and tell the user.  The PR is opened with the base stated, because the default is
 `main`:
 
 ```
-gh pr create --base claude/s3-followup-docs --head <my-work-branch>
+gh pr create --base claude/steam-game-publishing-xhnui2 --head <my-work-branch>
 ```
 
 (Where `gh` is not installed, the GitHub MCP `create_pull_request` takes the same
 `base` and `head`.)
 
-- **Before opening a PR, merge the block branch into yours**, so the PR shows
-  only your work and so a sibling session's merge does not surprise you.
-- **One merge into the block branch at a time, at least ~30 minutes apart.**
-  `pr-checks.yml` runs the FULL suite on a push to the block branch (it is in
-  `push.branches`), and its concurrency group is the ref, so a second merge inside
-  the first one's ~30 minutes CANCELS the first run and leaves one verdict for
-  the pair — D39's lesson, restated.  Name the merge commit when quoting a green.
-- **The PM opens the ONE PR from the block branch into the phase branch**, when
-  the block is coherent and the user says so.  Until then the phase branch does
-  not move on account of the block, and a non-block session that edits the plan
-  (`S4`) should wait: the plan then has two live copies, and the block's is the
-  one with `S7`–`S11` in it.
-- A PR already open at the wrong base is retargeted, not reopened (§5 above).
-
----
+- **Before opening a PR, merge the phase branch into yours**, so the PR shows only
+  your work and a sibling's merge does not surprise you.
+- **One merge into the phase branch at a time, at least ~30 minutes apart.**  The
+  phase branch is a FULL-suite branch and its concurrency group is the ref, so a
+  second merge inside the first one's ~30 minutes CANCELS the first run (D39's
+  lesson).  Name the merge commit when quoting a green.
 
 ## 6. Session ordering
 
@@ -1546,17 +1532,17 @@ so D-S2-e's save-version policy is load-bearing: see `S2`.
 `S7`–`S11` are a block that runs after `S3` and BEFORE `S4`:
 **`S1 → S2 → S3 → [ S9 ‖ S7 → S8 ‖ S10 → S11 ] → S4 → S6`** — a `‖` pair may run
 as two Claude Code sessions at once; an arrow is a wait for the previous wave to
-MERGE into the block branch.
+MERGE into the phase branch.
 
 | Wave | Sessions | Why together | What the wave must not do |
 |---|---|---|---|
-| 1 | `S9` Enemy AI ‖ `S7` Menus | Disjoint files: `AISystem` / spawn / `enemies.toml` against `components/` / `menuNav` / `InputSystem`'s menu path.  `S9` is what the user feels first; `S7` changes no sim. | Both add DBG rows, so `debugmenu.spec.ts` conflicts textually — merge the block branch in first. |
+| 1 | `S9` Enemy AI ‖ `S7` Menus | Disjoint files: `AISystem` / spawn / `enemies.toml` against `components/` / `menuNav` / `InputSystem`'s menu path.  `S9` is what the user feels first; `S7` changes no sim. | Both add DBG rows, so `debugmenu.spec.ts` conflicts textually — merge the phase branch in first. |
 | 2 | `S8` Rotation ‖ `S10` Trails | `PhysicsSystem` against render-only files.  `S8` runs after `S9` so AI unsticking is tuned against today's shard motion and then re-checked once, rather than the reverse. | `S8` is the risk: it owns the hot solver, so nothing else touches `PhysicsSystem` in this wave. |
 | 3 | `S11` Maps | Needs `S9` (enemies must traverse a maze), `S8` (shards in tight spaces) and `S7` (new screens join the nav model).  Last because it is content over everything else. | — |
 
 **Merge order inside the block is the wave order, one merge at a time, ≥ ~30
 minutes apart (§5).**  The three sim-changing sessions (`S9`, `S8`, `S11`) merge in
-that order, each after merging the block branch into itself and re-running
+that order, each after merging the phase branch into itself and re-running
 `npm run test:sim` and the balance `--quick` delta.
 
 **Defaults the user can flip, and what flipping costs.**  (1) `S8` before `S9`:
@@ -1622,7 +1608,7 @@ who made it, and the consequences for other sessions.
 | D37 | PM | 2026-10-06 | **EVERY FUTURE PR IN THIS PHASE IS BASED ON `claude/steam-game-publishing-xhnui2`, AND THE BASE IS NOW A STATED PART OF EVERY BRIEF** (user call, settling D36's open question).  `S3`'s work was always INTENDED for the integration branch — the merge to `main` was a mistake, not a change of plan — so D15's model stands: the phase branch accumulates every session and workstream, is tested whole, and rolls into `main` once.  What is new is the mechanism that failed. | **WHY IT HAPPENED, because it will recur otherwise:** §5's brief hygiene covered the BRANCH POINT (`git checkout -B <branch> origin/claude/steam-game-publishing-xhnui2`, carried verbatim in every brief after the `S1` near-miss) and said NOTHING about the PR BASE — and `gh pr create` defaults the base to the repository's DEFAULT branch, which is `main`.  So a session that branched correctly still opened its PR at `main` by doing nothing wrong, and PR #113 (62 commits, 155 files) merged there.  A convention that depends on a tool's default being what you want is not a convention; §5 now carries the base as its own hygiene item, with `--base` written out.  **WHAT IS ALREADY TRUE AND NEEDS NO WIRING:** the phase branch sits in `pr-checks.yml`'s `push.branches`, so a merge INTO it runs the FULL suite while each PR push into it runs the cheap smoke — which is exactly the user's "merge these changes to this branch and test before rolling into main".  And the branch is a sound base again: `227afc5` merged `main` into it, so it now CONTAINS every commit `main` has (verified: 0 commits main-ahead, 15 phase-ahead) and a PR based on it carries `S3`'s work as well as the music work.  **WHAT THIS COSTS, stated plainly:** `main` already carries `S1`–`S3`, so the phase no longer promotes as one reviewable diff — D15's original guarantee is spent and D36 records that.  The model from here is the one the user asked for and it is the weaker, workable version: the phase branch stays the integration point and the place the whole net runs, and what eventually reaches `main` is the remainder. |
 | D38 | PM | 2026-10-08 | **D37 GOVERNS A SESSION'S WORK, NOT REPO PLUMBING — AND ONE DIRECT PUSH TO THE INTEGRATION BRANCH HAS ALREADY LANDED UNDER THAT READING** (PM reading of D37's scope, flagged in §8 for the user to correct).  `f1384a1` — an UNNUMBERED tooling session, not `S1`–`S4`/`S6` — pushed straight to `claude/steam-game-publishing-xhnui2`: `pr-preview.yml` now records the mirror commit and the PR comment links a SHA-pinned `rawcdn.githack.com` URL, because the BRANCH-REF `raw.githack.com` link was returning HTTP 429 and a commit URL is cached permanently.  CLAUDE.md §9 and README were updated with it. | **WHY IT IS LET STAND rather than reverted and re-opened as a PR:** the link it fixes is the user's ONLY way to play the game (iPhone, no local checkout), so a rate-limited preview is not a cosmetic defect — it stops the play-testing every gameplay decision in this plan depends on.  It is also self-contained (one workflow, two doc lines), documented in the commit, and `typecheck · build · test` is green on it in BOTH scopes.  **WHY A DIRECT PUSH DOES NOT DEFEAT D37:** the user's stated purpose is “merge all of these changes to this branch and test before rolling into main”, and the phase branch sits in `pr-checks.yml`'s `push.branches` — so a direct push runs the FULL suite on the integration branch exactly as a merge into it does.  What a direct push gives up is the per-change PREVIEW and a reviewable diff.  **THE BOUNDARY, stated so it is usable:** anything touching the SIM, the content tables or this plan goes through a PR based on the phase branch, no exceptions — that is D37 and it is unchanged.  A change to the CI / preview PLUMBING may land directly, and the PM records each one in this log, so the branch never carries a commit nothing accounts for.  **THE COST:** PR #108's diff grows by commits that were never previewed on a phone, and a plumbing change is the kind that fails only once it is on the branch the workflow fires for — which is an argument FOR landing it there and also why it must be watched after landing rather than before. |
 | D39 | PM | 2026-10-09 | **`S3` AND `W2` ARE BOTH LANDED; THE PHASE NOW STANDS AT `S4` WITH ONE MEASUREMENT OWED FIRST** (PM reconciliation of what merged, not a new call).  PR #115 (`S3`'s numbers — the shifted level curve, map-size enemy scaling, the wave-roster strip, the map info card, the regenerated balance baseline) merged as `33c00ff`; PR #114 (`W2`'s layer variants, RE-LANDED after `ae222f4` reverted the first attempt) merged as `a34d0c2`.  Both merges were taken in that order with a gap between them, so each carries its OWN full-suite verdict rather than one shared one — `33c00ff` green (28m 55s) and `a34d0c2` green (30m 16s).  §4's `W2` entry is rewritten accordingly and PR #108 reads `mergeable` / `clean` at 38 commits. | **WHY THE ORDER AND THE GAP MATTERED, since it is the reusable part:** `pr-checks.yml`'s concurrency group is the REF for a branch push, so a second merge inside the full suite's ~29 minutes CANCELS the first merge's run (D38's own note on reading a cancelled run).  Merging both back to back would have bought ONE verdict, on the combination — enough to promote, useless for attribution.  `S3` went first because it is the merge that touches the SIM and the SAVE FILE (`WaveSystem`, `GameEngine`, `constants`, `persistence.test.ts`), so its isolated verdict is the one worth having; `W2` is audio behind the ports and nothing in the sim reads it.  Measured before either merge, both orders merged textually clean and the combined tree typechecked 0 at `test:sim` 86/86, so the order was free to be chosen on these grounds rather than forced by git.  **WHAT THE RE-LANDING CHANGED THAT NOBODY ASKED FOR:** `W2`'s first life was deliberately LATENT — no song declared `variants`, so the director, the LRU cache and the decode budget were live code over absent content.  `omni` now declares four `atmos` variants over four DISTINCT files, which trips the trigger the §8 audio-memory item wrote for itself (“a branch lands AND a song declares variants — both, not either”).  So `MUSIC_DECODE_BUDGET_MB: 110` is load-bearing for the first time and has never been measured against content that exists.  **THE ORDERING CONSEQUENCE FOR `S4`:** that measurement, and the per-portal-difficulty save migration, both want to land BEFORE a TestFlight build — the first because iOS is the platform that kills a tab on peak RSS, the second because D24 makes world/settings state arrive as a migration and a format choice stops being free once real players hold save files.  Neither blocks starting `S4`; both block shipping one. |
-| D40 | PM | 2026-10-10 | **THE FOLLOW-UP BLOCK `S7`–`S11` RUNS ON ITS OWN SUB-INTEGRATION BRANCH, `claude/s3-followup-docs`, AND ITS PRs ARE BASED THERE** (user call: “address the enemy AI and map upgrade work in two separate sessions against the S3-followup docs branch, which should be based against the steam game publishing branch where it will be merged”).  Options weighed: (a) every block PR straight into the phase branch, per D37; (b) the block accumulates on its own branch and promotes once; (c) one long block PR.  The user chose (b).  This AMENDS D37 for the block only: D37's purpose, that nothing reaches `main` early, is untouched, and the base is still stated as an explicit flag in every brief.  The branch is added to `pr-checks.yml`'s `push.branches` so a merge into it runs the FULL suite, exactly the mechanism §5 describes for the phase branch (PM plumbing change under D38's reading, landed in the PR that records this entry; the user can drop that one line and use the `full-tests` label instead). | **What it buys:** the phase branch stays releasable while five sessions of sim work land, and each block merge gets its own attributed full-suite verdict instead of one verdict for the lot.  **What it costs:** two live copies of this plan until the block promotes (the block's has `S7`–`S11`; the phase branch's does not), so a non-block session that edits the plan — `S4` — should wait, and the PM must merge the phase branch into the block branch regularly or the promotion PR grows conflicts; merging is the rule, rebasing is not.  The branch name says “docs” and carries code; it is kept, as the phase branch's name was (§5).  **A merge into the block branch is spaced ≥ ~30 minutes from the last (D39), or its full run is cancelled by the next.** |
+| D40 | PM | 2026-10-10 | **THE FOLLOW-UP BLOCK `S7`–`S11` BRANCHES FROM AND MERGES INTO THE PHASE BRANCH, ONE BRANCH AND ONE PR PAIR PER SESSION, PER D37** (user call, reversing the PM's first design: “let's create a PR branch against the steam game publishing branch for each of these Sessions”).  Options weighed: (a) every session straight into the phase branch; (b) a sub-integration branch `claude/s3-followup-docs` that promotes once.  The PM first built (b) on the user's phrase “against the S3-followup docs branch, which should be based against the steam game publishing branch”; the user then chose (a).  No workflow change: the phase branch is already a FULL-suite branch.  D37 stands unamended. | **Consequences:** each block merge lands on the phase branch and gets a full-suite run, so merges are spaced ≥ ~30 minutes (D39).  The briefs reach the phase branch with the PM plan PR (#116), which must merge FIRST; every prompt checks for them and stops otherwise.  Session branches are `claude/s7-menus`, `s8-rotation`, `s9-enemy-ai`, `s10-trails`, `s11-maps`.  `claude/s3-followup-docs` is unused and can be deleted. |
 | D41 | PM | 2026-10-10 | **THE BLOCK IS FIVE SESSIONS IN THREE WAVES: `S9` AND `S7`, THEN `S8` AND `S10`, THEN `S11`** (PM design, from the user's request for menus, rotational dynamics, enemy AI, map designs and enemy / rival trails; every ordering call below is the PM's and flagged for correction).  Menus (`S7`), rotational dynamics (`S8`), enemy AI incl. the mobile Turret and packs (`S9`), trails (`S10`) and maps (`S11`) are separate sessions, not four, because TRAILS are render-only and independent of the AI's sim work (so they can run beside a sim session), and are perf-gated by the user's own instruction.  **Ordering reasons.**  Wave 1 pairs the user's loudest gameplay complaint (`S9`) with the one session that touches no sim (`S7`), so there is no hot-file contention.  `S8` follows `S9` because it is the riskiest change in the block and owns `PhysicsSystem`, and because AI unsticking is then tuned once against today's shard motion and re-checked after `S8`, instead of the reverse.  `S11` is last because a maze is only a map if `S9`'s enemies can traverse it, shards in a tight corridor are `S8`'s problem, and a new screen must join `S7`'s navigation model.  **Verified before writing the briefs:** the only pinned goldens are `tests/sim/fixtures/dmath.bits.json` and `tables.golden.json`, so shard or enemy motion changes re-capture nothing; the shard-pair solver is circle-based with no contact point, which corrects `PARKING_LOT.md`'s claim and shapes `S8`; overlay buttons have no focus style and arrow keys are flight keys, which shape `S7`. | **Reversible calls:** `S8` before `S9`; `S10` in wave 1; `S4`'s shell half in parallel (§6 states each cost).  **Cross-session consequences are in §8:** `S11` is the layout half of what `S6` names (LABYRINTH, DENSE, WAVE ARENAS), `S7` changes the surface `S4`'s controls and safe-area decisions touch, and the parked “Turret v2” entry must be reconciled by `S9`.  Each sim-changing session owes the determinism, guard and balance-delta obligations in the block's shared rules (§4). |
 
 ---
@@ -1652,12 +1638,7 @@ history stays readable.
   free Turret to MOVE, slowly.  They are different archetypes; `S9` must say which
   the existing `TURRET` row becomes and whether Turret v2 survives as a separate
   one, not let one silently supersede the other.  *(PM, 2026-10-10)*
-- **PM → the user (the CI line).**  D40 adds `claude/s3-followup-docs` to
-  `pr-checks.yml`'s `push.branches`, as a separate commit in the PR that records
-  it.  It is the whole mechanism for a full-suite verdict per block merge.  If you
-  would rather not carry it, drop that commit and label each block PR
-  `full-tests` instead: the cost is a ~30-minute run per PR before merging rather
-  than after.  *(PM, 2026-10-10)*
+
 
 - **PM → the user (how wide D37 is).**  D37 says every future PR in this
   phase is based on the integration branch.  It does not say whether a

@@ -3,7 +3,7 @@
 Written by the PM session, 2026-10-10.  These are the prompts to paste into
 fresh Claude Code sessions.  The design behind them is in
 `docs/ENGINE_CORE_PLAN.md`: the briefs are §4 ("The follow-up block"), the branch
-rules are §5 ("The follow-up block's branch"), the order is §6, and the decisions
+rules are §5 ("The follow-up block's sessions"), the order is §6, and the decisions
 are D40 and D41.  A prompt is a launcher: it carries the setup commands and the
 user's own words verbatim and points at the plan for everything else, so it
 cannot drift from the briefs.
@@ -12,12 +12,11 @@ cannot drift from the briefs.
 
 ```
  wave 1   S9 Enemy AI      ‖   S7 Menus & navigation
-            │ both merged into claude/s3-followup-docs, one at a time, ≥ 30 min apart
+            │ each session: own branch off the steam branch, own PRs into it
+            │ merged one at a time, ≥ 30 min apart
  wave 2   S8 Rotation      ‖   S10 Trails
             │
  wave 3   S11 Maps
-            │
-          the PM opens ONE PR: claude/s3-followup-docs  →  claude/steam-game-publishing-xhnui2
             │
           S4 (the app) → S6 (the world)
 ```
@@ -27,14 +26,13 @@ previous wave has MERGED, not when its PRs are merely open.
 
 ## Before you launch anything
 
-1. **Merge the PM plan PR into `claude/s3-followup-docs` first.**  The briefs live
+1. **Merge the PM plan PR (#116) into `claude/steam-game-publishing-xhnui2` first.**  The briefs live
    in that PR.  Every prompt below checks for them and stops if they are missing.
 2. **One merge at a time, ≥ ~30 minutes apart.**  The full suite runs on each
-   merge into the block branch (~30 minutes) and a second merge inside that window
+   merge into the steam branch (~30 minutes) and a second merge inside that window
    cancels the first run, which costs the per-merge verdict.
 3. **Bring flags back to the PM session.**  Anything a session writes to §8 is for
-   the PM to reconcile — including merging the phase branch into the block branch,
-   which keeps the final promotion PR clean.
+   the PM to reconcile.
 4. **Judging.**  `S7` is judged on a real gamepad and a real keyboard, which the
    phone preview link cannot show.  `S9`, `S8`, `S10` and `S11` are judged by
    playing the preview link; `S8` and `S10` also come with numbers in the PR.
@@ -47,16 +45,16 @@ previous wave has MERGED, not when its PRs are merely open.
 You are work session S9 ("Enemy AI") of the Omni follow-up block.  I am the
 product owner and I decide gameplay questions with you, inside this session.
 
-SETUP — run this first, verbatim.  The plan lives on the block branch, NOT on main:
-  git fetch origin claude/s3-followup-docs
-  git checkout -B <your-work-branch> origin/claude/s3-followup-docs
-  git show origin/claude/s3-followup-docs:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+SETUP — run this first, verbatim.  The plan lives on the steam branch, NOT on main:
+  git fetch origin claude/steam-game-publishing-xhnui2
+  git checkout -B claude/s9-enemy-ai origin/claude/steam-game-publishing-xhnui2
+  git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
 The last line must print 2 or more.  If it does not, STOP and tell me: the PM plan
 PR has not merged yet.
 
 READ, in this order: CLAUDE.md (§1, §3, §7, §8 — especially the AI-routing,
 periodic-passes/PerfController and determinism notes); docs/ENGINE_CORE_PLAN.md §0,
-§2, §5 ("The follow-up block's branch"), the follow-up block header and your own
+§2, §5 ("The follow-up block's sessions"), the follow-up block header and your own
 section S9 in §4, D40 and D41, and §8; and docs/PARKING_LOT.md "Enemy AI as a
 difficulty axis" and "Tile-mounted turret emplacements (Turret v2)".
 
@@ -80,10 +78,10 @@ HOW TO WORK:
    is today's behaviour.  The gameplay PR may split into small PRs if I prefer to
    judge them one at a time.
 
-PRs: BOTH are based on claude/s3-followup-docs, never main:
-  gh pr create --base claude/s3-followup-docs --head <your-work-branch>
+PRs: BOTH are based on claude/steam-game-publishing-xhnui2, never main:
+  gh pr create --base claude/steam-game-publishing-xhnui2 --head claude/s9-enemy-ai
 (or the GitHub MCP create_pull_request with the same base and head).  Merge
-origin/claude/s3-followup-docs into your branch immediately before opening each PR.
+origin/claude/steam-game-publishing-xhnui2 into your branch immediately before opening each PR.
 State the invariant in the invisible PR's description.
 
 GATES per push: typecheck + build + npm test (smoke) + npm run test:sim + the suites
@@ -107,15 +105,15 @@ reproduces today's hashes; the perception pass runs on a PerfController cadence.
 You are work session S7 ("Menus and navigation") of the Omni follow-up block.  I am
 the product owner and I decide design questions with you, inside this session.
 
-SETUP — run this first, verbatim.  The plan lives on the block branch, NOT on main:
-  git fetch origin claude/s3-followup-docs
-  git checkout -B <your-work-branch> origin/claude/s3-followup-docs
-  git show origin/claude/s3-followup-docs:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+SETUP — run this first, verbatim.  The plan lives on the steam branch, NOT on main:
+  git fetch origin claude/steam-game-publishing-xhnui2
+  git checkout -B claude/s7-menus origin/claude/steam-game-publishing-xhnui2
+  git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
 The last line must print 2 or more.  If it does not, STOP and tell me.
 
 READ, in this order: CLAUDE.md (§1, §7, §8 — the menu-navigation, scrim / overlay,
 class-vocabulary, debug-panel and input-device notes); docs/ENGINE_CORE_PLAN.md §0,
-§2, §5 ("The follow-up block's branch"), the follow-up block header and your own
+§2, §5 ("The follow-up block's sessions"), the follow-up block header and your own
 section S7 in §4, D40 and D41, and §8; docs/PARKING_LOT.md "Controller schemes —
 refinement pass" and "Fully customisable control scheme".
 
@@ -139,10 +137,10 @@ HOW TO WORK:
    the quality pass.  Remember arrow keys are FLIGHT keys in live play: keyboard menu
    navigation is gated to overlay-up states.
 
-PRs: BOTH are based on claude/s3-followup-docs, never main:
-  gh pr create --base claude/s3-followup-docs --head <your-work-branch>
+PRs: BOTH are based on claude/steam-game-publishing-xhnui2, never main:
+  gh pr create --base claude/steam-game-publishing-xhnui2 --head claude/s7-menus
 (or the GitHub MCP create_pull_request with the same base and head).  Merge
-origin/claude/s3-followup-docs into your branch immediately before opening each PR.
+origin/claude/steam-game-publishing-xhnui2 into your branch immediately before opening each PR.
 If you add or relabel a debug row, tests/debugmenu.spec.ts pins the labels: edit that list deliberately.
 
 GATES per push: typecheck + build + npm test (smoke) + the suites you touch
@@ -166,16 +164,16 @@ green on every overlay.
 You are work session S8 ("Rotational dynamics") of the Omni follow-up block.  I am
 the product owner and I decide feel questions with you, inside this session.
 
-SETUP — run this first, verbatim.  The plan lives on the block branch, NOT on main:
-  git fetch origin claude/s3-followup-docs
-  git checkout -B <your-work-branch> origin/claude/s3-followup-docs
-  git show origin/claude/s3-followup-docs:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+SETUP — run this first, verbatim.  The plan lives on the steam branch, NOT on main:
+  git fetch origin claude/steam-game-publishing-xhnui2
+  git checkout -B claude/s8-rotation origin/claude/steam-game-publishing-xhnui2
+  git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
 The last line must print 2 or more.  Also confirm S9's PR has merged into
-origin/claude/s3-followup-docs; if it has not, STOP and tell me.
+origin/claude/steam-game-publishing-xhnui2; if it has not, STOP and tell me.
 
 READ, in this order: CLAUDE.md (§1, §3, §7, §8 — determinism / dmath, mass scale and
 impact physics, the crash model, hot-path and perf rules, shard sleep); docs/ENGINE_
-CORE_PLAN.md §0, §2, §5 ("The follow-up block's branch"), the follow-up block header
+CORE_PLAN.md §0, §2, §5 ("The follow-up block's sessions"), the follow-up block header
 and your own section S8 in §4, D40 and D41, and §8; docs/PARKING_LOT.md "Rotational
 mechanics for shards and asteroids" (its claim that the solver already computes a
 contact point is WRONG — the PM plan corrects it; verify for yourself).
@@ -195,10 +193,10 @@ HOW TO WORK:
    identical, which is the proof; (2) torque, conservation at a break, the spin policy,
    behind a DBG A/B whose other end is today's spin.
 
-PRs: BOTH are based on claude/s3-followup-docs, never main:
-  gh pr create --base claude/s3-followup-docs --head <your-work-branch>
+PRs: BOTH are based on claude/steam-game-publishing-xhnui2, never main:
+  gh pr create --base claude/steam-game-publishing-xhnui2 --head claude/s8-rotation
 (or the GitHub MCP create_pull_request with the same base and head).  Merge
-origin/claude/s3-followup-docs into your branch immediately before opening each PR.
+origin/claude/steam-game-publishing-xhnui2 into your branch immediately before opening each PR.
 
 GATES per push: typecheck + build + npm test (smoke) + npm run test:sim + the suites
 you touch (fracture, knockback, nebulaspin, mass, terrain, headless, replay).  You change
@@ -223,16 +221,16 @@ the budget.
 You are work session S10 ("Enemy and rival trails") of the Omni follow-up block.  I am
 the product owner and I judge how it looks by playing the preview link.
 
-SETUP — run this first, verbatim.  The plan lives on the block branch, NOT on main:
-  git fetch origin claude/s3-followup-docs
-  git checkout -B <your-work-branch> origin/claude/s3-followup-docs
-  git show origin/claude/s3-followup-docs:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+SETUP — run this first, verbatim.  The plan lives on the steam branch, NOT on main:
+  git fetch origin claude/steam-game-publishing-xhnui2
+  git checkout -B claude/s10-trails origin/claude/steam-game-publishing-xhnui2
+  git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
 The last line must print 2 or more.  Also confirm S9's PR has merged (the mobile Turret
 needs a trail style); if it has not, STOP and tell me.
 
 READ, in this order: CLAUDE.md (§1, §8 — the trail / effects notes, the pooled-render-
 bucket rule, the seeker and kinetic trails, the indicator colour legend, rivals); docs/
-ENGINE_CORE_PLAN.md §0, §2, §5 ("The follow-up block's branch"), the follow-up block
+ENGINE_CORE_PLAN.md §0, §2, §5 ("The follow-up block's sessions"), the follow-up block
 header and your own section S10 in §4, D40 and D41, and §8; perf/README.md.
 
 THE ASK, in my words: "Give enemies and rivals trails.  Rival trails shall be coloured
@@ -252,10 +250,10 @@ HOW TO WORK:
 4. Perf is the acceptance: a perf scene with dozens of enemies in perf/scenes.mjs;
    frame time (p99) and heap churn, trails off against on, in the PR description.
 
-PRs: BOTH are based on claude/s3-followup-docs, never main:
-  gh pr create --base claude/s3-followup-docs --head <your-work-branch>
+PRs: BOTH are based on claude/steam-game-publishing-xhnui2, never main:
+  gh pr create --base claude/steam-game-publishing-xhnui2 --head claude/s10-trails
 (or the GitHub MCP create_pull_request with the same base and head).  Merge
-origin/claude/s3-followup-docs into your branch immediately before opening each PR.
+origin/claude/steam-game-publishing-xhnui2 into your branch immediately before opening each PR.
 
 GATES per push: typecheck + build + npm test (smoke) + npm run test:sim + the suites you
 touch (debugmenu pins row labels).  A trail is presentation: render files may not import
@@ -275,12 +273,12 @@ the sim hash is identical with trails on and off; nothing allocates per frame.
 You are work session S11 ("Map designs") of the Omni follow-up block.  I am the product
 owner and I judge a map by flying it.
 
-SETUP — run this first, verbatim.  The plan lives on the block branch, NOT on main:
-  git fetch origin claude/s3-followup-docs
-  git checkout -B <your-work-branch> origin/claude/s3-followup-docs
-  git show origin/claude/s3-followup-docs:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
+SETUP — run this first, verbatim.  The plan lives on the steam branch, NOT on main:
+  git fetch origin claude/steam-game-publishing-xhnui2
+  git checkout -B claude/s11-maps origin/claude/steam-game-publishing-xhnui2
+  git show origin/claude/steam-game-publishing-xhnui2:docs/ENGINE_CORE_PLAN.md | grep -c '^| D4[01] '
 The last line must print 2 or more.  Also confirm S9, S8 and S7 have all merged into
-origin/claude/s3-followup-docs; if any has not, STOP and tell me.
+origin/claude/steam-game-publishing-xhnui2; if any has not, STOP and tell me.
 
 READ, in this order: CLAUDE.md (§1, §6a Maps, §5 MAP_POPULATION / STAR_DENSITY_BY_MAP,
 §8 determinism and the hub layout); docs/ENGINE_CORE_PLAN.md §0, §2, §5 ("The follow-up
@@ -302,10 +300,10 @@ HOW TO WORK:
 3. Two PRs, invisible first: (1) the layout seam, every existing map reproducing its current
    hashes; (2) the new arenas and their hub rifts.
 
-PRs: BOTH are based on claude/s3-followup-docs, never main:
-  gh pr create --base claude/s3-followup-docs --head <your-work-branch>
+PRs: BOTH are based on claude/steam-game-publishing-xhnui2, never main:
+  gh pr create --base claude/steam-game-publishing-xhnui2 --head claude/s11-maps
 (or the GitHub MCP create_pull_request with the same base and head).  Merge
-origin/claude/s3-followup-docs into your branch immediately before opening each PR.
+origin/claude/steam-game-publishing-xhnui2 into your branch immediately before opening each PR.
 
 GATES per push: typecheck + build + npm test (smoke) + npm run test:sim + the suites you touch
 (maps, hublayout).  You change the sim, so the block's shared rule 3 applies, including the
