@@ -15,7 +15,7 @@ what is currently implemented. File paths are relative to the repo root.
 > release on top of it, and Steam deferred.  It carries the open GAMEPLAY
 > DECISIONS each work session must put to the user, an append-only decision
 > log, and the amendment protocol work sessions follow.  **If you are a
-> work session with a session ID (`S1`–`S4`), read its §0 and your own §4
+> work session with a session ID (`S1`–`S4`, `S6`–`S11`), read its §0 and your own §4
 > section before touching anything.**  It is a PLAN, not a description of
 > what exists — this file stays the source of truth for what is shipped.
 
@@ -2814,9 +2814,10 @@ its `init()` with `this.addReturnPortal()`, as every non-hub map does.
     2026-09-22).  A type error, a broken bundle, or a broken core loop
     still blocks every merge.
   - **FULL, at the MAJOR SEAMS**: the entire suite on pushes to `main`,
-    `claude/plan-completion` and `claude/steam-game-publishing-xhnui2` (the
+    `claude/plan-completion`, `claude/steam-game-publishing-xhnui2` (the
     engine-core + mobile phase's integration branch,
-    docs/ENGINE_CORE_PLAN.md §5) — immediately after a merge lands — on any
+    docs/ENGINE_CORE_PLAN.md §5) and `claude/s3-followup-docs` (the
+    follow-up block's sub-integration branch, S7–S11, D40) — immediately after a merge lands — on any
     PR carrying the **`full-tests` label** (the opt-in for pre-merge full
     validation), and on manual dispatch.  Full CI runs took 18–22 minutes
     in late September 2026, and 21 minutes in early October.
